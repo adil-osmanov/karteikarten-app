@@ -118,11 +118,8 @@ function StudyCard({
 
   const playAudio = async (text: string) => {
     setIsAudioLoading(true);
-    try {
-      // Future API fetch placeholder:
-      // await fetch('/api/tts', { method: 'POST', body: JSON.stringify({ text }) });
-      
-      // Fallback: Web Speech API
+
+    const fallbackTTS = () => {
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
@@ -136,8 +133,32 @@ function StudyCard({
       } else {
         setIsAudioLoading(false);
       }
+    };
+
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text })
+      });
+
+      if (!response.ok) {
+        throw new Error("TTS API response not OK");
+      }
+
+      const blob = await response.blob();
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = () => setIsAudioLoading(false);
+      audio.onerror = () => setIsAudioLoading(false);
+      
+      await audio.play();
     } catch (e) {
-      setIsAudioLoading(false);
+      console.warn("TTS API fetch failed, using fallback:", e);
+      fallbackTTS();
     }
   };
 
@@ -247,12 +268,7 @@ function StudyCard({
           title="Vorlesen"
         >
           {isAudioLoading ? (
-            <motion.div
-              animate={{ scale: [1, 1.2, 1] }}
-              transition={{ repeat: Infinity, duration: 1 }}
-            >
-              <Volume2 className="w-6 h-6 fill-current opacity-70" />
-            </motion.div>
+            <Volume2 className="w-6 h-6 fill-current opacity-70 animate-spin" />
           ) : (
             <Volume2 className="w-6 h-6" />
           )}
