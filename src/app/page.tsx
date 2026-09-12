@@ -16,6 +16,59 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// --- AUDIO FEEDBACK ---
+
+let cachedAudioCtx: AudioContext | null = null;
+
+const playFeedbackSound = (isCorrect: boolean) => {
+  if (typeof window === 'undefined') return;
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return;
+  
+  if (!cachedAudioCtx) {
+    cachedAudioCtx = new AudioContextClass();
+  }
+  
+  const ctx = cachedAudioCtx;
+  if (ctx.state === 'suspended') {
+    ctx.resume();
+  }
+  
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  
+  if (isCorrect) {
+    // Success: Soft double chime (C5 -> E5)
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+    osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1); // E5
+    
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.03);
+    gain.gain.linearRampToValueAtTime(0.02, ctx.currentTime + 0.1);
+    gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.13);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
+    
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+  } else {
+    // Error: Short dull thud
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(150, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.15);
+    
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.02);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.15);
+    
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.15);
+  }
+};
+
 // --- STORE & TYPES ---
 
 export interface Flashcard {
@@ -377,6 +430,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
     const correct = option === card.targetWord;
+    playFeedbackSound(correct);
     onAnswer(correct);
     handleReveal();
   };
@@ -398,7 +452,15 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
       }
     }
     setInputText(value);
+    
+    // Play error sound if the latest typed character is wrong
+    const lastCharIndex = value.length - 1;
+    if (value.length > 0 && value[lastCharIndex].toLowerCase() !== card.targetWord[lastCharIndex]?.toLowerCase()) {
+      playFeedbackSound(false);
+    }
+
     if (isValidSoFar && value.toLowerCase() === card.targetWord.toLowerCase()) {
+      playFeedbackSound(true);
       onAnswer(true);
       handleReveal();
     }
@@ -429,15 +491,14 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
   const parts = card.sentence.split("___");
   
   const renderInputChars = () => {
-    return Array.from({ length: card.targetWord.length }).map((_, i) => {
-      const typed = inputText[i];
-      if (!typed) {
-        return <span key={i} className="text-gray-300 opacity-50">_</span>;
-      }
-      const isMatch = typed.toLowerCase() === card.targetWord[i].toLowerCase();
+    if (inputText.length === 0) {
+      return <span className="text-gray-300 tracking-normal">Tippen...</span>;
+    }
+    return Array.from(inputText).map((char, i) => {
+      const isMatch = char.toLowerCase() === card.targetWord[i]?.toLowerCase();
       return (
-        <span key={i} className={cn("font-medium", isMatch ? "text-green-500" : "text-red-500")}>
-          {typed}
+        <span key={i} className={cn("font-medium", isMatch ? "text-gray-900" : "text-red-500")}>
+          {char}
         </span>
       );
     });
@@ -497,8 +558,10 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
                   ________
                 </span>
               ) : (
-                <span className="inline-block relative mx-1 align-bottom pb-0.5 border-b-2 border-gray-200 focus-within:border-blue-600 transition-colors min-w-[80px]">
-                  <span className="flex items-center justify-center tracking-widest">{renderInputChars()}</span>
+                <span className="inline-block relative mx-1 align-bottom pb-0.5 border-b-2 border-gray-200 focus-within:border-blue-600 transition-colors w-32 md:w-40 text-center">
+                  <span className="flex items-center justify-center tracking-widest h-full w-full overflow-hidden whitespace-nowrap">
+                    {renderInputChars()}
+                  </span>
                   <input
                     ref={inputRef}
                     autoFocus
