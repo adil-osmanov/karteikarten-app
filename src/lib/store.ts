@@ -11,6 +11,7 @@ interface UserState {
   progress: Record<string, CardProgress>;
   correctAnswersTotal: number;
   answerCard: (cardId: string, correct: boolean) => void;
+  resetCard: (cardId: string) => void;
   getDeckProgress: (deckId: string) => { total: number; mastered: number };
   getUserStats: () => { level: number; xpInCurrentLevel: number; xpForNextLevel: number; totalXp: number };
 }
@@ -41,6 +42,14 @@ export const useStore = create<UserState>()(
             },
             correctAnswersTotal: newTotal,
           };
+        });
+      },
+
+      resetCard: (cardId) => {
+        set((state) => {
+          const newProgress = { ...state.progress };
+          delete newProgress[cardId];
+          return { progress: newProgress };
         });
       },
 
