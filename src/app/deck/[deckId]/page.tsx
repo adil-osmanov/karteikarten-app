@@ -3,7 +3,7 @@
 import { use, useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useStore, Flashcard } from "@/lib/store";
-import { ArrowLeft, CheckCircle2, Volume2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Volume2, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,6 @@ export default function DeckPage({ params }: { params: { deckId: string } | Prom
   useEffect(() => {
     setIsMounted(true);
     if (deck) {
-      // Load only non-archived cards
       const cardsToStudy = deck.cards.filter((c) => !c.isArchived);
       setActiveCards(cardsToStudy);
     }
@@ -39,12 +38,14 @@ export default function DeckPage({ params }: { params: { deckId: string } | Prom
     return (
       <div className="max-w-2xl mx-auto px-6 py-24 text-center">
         <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-          <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto mb-6" />
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">Großartig!</h1>
+          <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-8">
+            <CheckCircle2 className="w-12 h-12 text-green-500" />
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900 mb-4">Großartig!</h1>
           <p className="text-lg text-gray-500 mb-10">Du hast alle Karten in diesem Deck gemeistert.</p>
           <button
             onClick={() => router.push("/")}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-3xl font-bold text-lg transition-colors shadow-sm active:scale-95"
+            className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-95"
           >
             Zurück zur Bibliothek
           </button>
@@ -59,7 +60,6 @@ export default function DeckPage({ params }: { params: { deckId: string } | Prom
     if (currentIndex < activeCards.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     } else {
-      // Next round: exclude newly archived cards
       const nextRoundCards = deck.cards.filter((c) => !c.isArchived);
       setActiveCards(nextRoundCards);
       setCurrentIndex(0);
@@ -69,18 +69,18 @@ export default function DeckPage({ params }: { params: { deckId: string } | Prom
   return (
     <main className="max-w-3xl mx-auto px-6 py-8 min-h-screen flex flex-col">
       <header className="flex items-center justify-between mb-8">
-        <Link href="/" className="text-gray-400 hover:text-gray-900 transition-colors p-3 -ml-3 bg-white rounded-full shadow-sm border border-gray-100">
-          <ArrowLeft className="w-5 h-5" />
+        <Link href="/" className="text-gray-400 hover:text-gray-900 transition-colors p-3 -ml-3">
+          <ArrowLeft className="w-6 h-6" />
         </Link>
-        <div className="text-sm font-semibold text-gray-400">
+        <div className="text-sm font-medium text-gray-400">
           Karte {currentIndex + 1} von {activeCards.length}
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col justify-center pb-20">
+      <div className="flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
           <StudyCard
-            key={currentCard.id + currentIndex} // force remount on card change
+            key={currentCard.id + currentIndex} 
             card={currentCard}
             onAnswer={(correct) => {
               answerCard(deckId, currentCard.id, correct);
@@ -119,22 +119,6 @@ function StudyCard({
   const playAudio = useCallback(async (text: string) => {
     setIsPlayingAudio(true);
 
-    const fallbackTTS = () => {
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "de-DE";
-        utterance.rate = 0.9;
-        
-        utterance.onend = () => setIsPlayingAudio(false);
-        utterance.onerror = () => setIsPlayingAudio(false);
-        
-        window.speechSynthesis.speak(utterance);
-      } else {
-        setIsPlayingAudio(false);
-      }
-    };
-
     try {
       const response = await fetch('/api/tts', {
         method: 'POST',
@@ -153,8 +137,8 @@ function StudyCard({
       
       await audio.play();
     } catch (e) {
-      console.warn("TTS fetch failed, fallback to browser TTS", e);
-      fallbackTTS();
+      console.warn("TTS fetch failed", e);
+      setIsPlayingAudio(false);
     }
   }, []);
 
@@ -189,7 +173,6 @@ function StudyCard({
 
     setInputText(value);
 
-    // If fully correct
     if (isValidSoFar && value.toLowerCase() === card.targetWord.toLowerCase()) {
       onAnswer(!mistakeMade);
       handleReveal(true);
@@ -210,15 +193,14 @@ function StudyCard({
       return;
     }
 
-    // Mistake detected
     if (e.key.toLowerCase() !== expectedChar.toLowerCase()) {
       if (!mistakeMade) {
         setMistakeMade(true);
-        onAnswer(false); // Immediate penalty to level 0 internally
+        onAnswer(false);
       }
       const currentIsWrong = Array.from(inputText).some((char, i) => char.toLowerCase() !== card.targetWord[i]?.toLowerCase());
       if (currentIsWrong) {
-        e.preventDefault(); // Block further input until they backspace
+        e.preventDefault();
       }
     }
   };
@@ -226,30 +208,27 @@ function StudyCard({
   const parts = card.sentence.split("___");
   
   const renderInputChars = () => {
-    const chars = [];
-    for (let i = 0; i < card.targetWord.length; i++) {
+    return Array.from({ length: card.targetWord.length }).map((_, i) => {
       const typed = inputText[i];
       if (!typed) {
-        chars.push(<span key={i} className="text-gray-300 border-b-2 border-gray-200 mx-[2px] inline-block w-4 md:w-5 text-center">_</span>);
-      } else {
-        const isMatch = typed.toLowerCase() === card.targetWord[i].toLowerCase();
-        chars.push(
-          <span key={i} className={cn("font-semibold mx-[1px]", isMatch ? "text-green-500" : "text-red-500")}>
-            {typed}
-          </span>
-        );
+        return <span key={i} className="text-gray-300 opacity-50">_</span>;
       }
-    }
-    return chars;
+      const isMatch = typed.toLowerCase() === card.targetWord[i].toLowerCase();
+      return (
+        <span key={i} className={cn("font-medium", isMatch ? "text-green-500" : "text-red-500")}>
+          {typed}
+        </span>
+      );
+    });
   };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: -50 }}
+      exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.4, ease: "easeOut" }}
-      className="bg-white rounded-[32px] p-8 md:p-12 shadow-sm relative border border-gray-100 flex flex-col"
+      className="bg-white rounded-[28px] p-8 md:p-12 shadow-[0_4px_20px_rgb(0,0,0,0.03)] flex flex-col min-h-[500px]"
     >
       {/* 4 dots for Mastery Level */}
       <div className="absolute top-8 right-8 flex gap-1.5">
@@ -258,111 +237,111 @@ function StudyCard({
             key={levelIndicator}
             className={cn(
               "w-2 h-2 rounded-full transition-colors duration-500",
-              card.masteryLevel >= levelIndicator ? "bg-blue-600" : "bg-gray-200"
+              card.masteryLevel >= levelIndicator ? "bg-blue-600" : "bg-[#F5F5F7]"
             )}
           />
         ))}
       </div>
 
-      <div className="flex flex-col items-center justify-center min-h-[160px] mb-8 relative">
-        <div className="flex items-start justify-center gap-4 w-full">
-          <button 
-            onClick={() => playAudio(card.sentence.replace("___", card.targetWord))}
-            className="mt-1.5 p-3 rounded-full transition-colors shrink-0"
-            title="Vorlesen"
-          >
-            <Volume2 className={cn(
-              "w-7 h-7 transition-colors duration-150",
-              isPlayingAudio ? "text-blue-600 fill-blue-600" : "text-gray-400 hover:text-blue-600"
-            )} />
-          </button>
+      <div className="flex-1 flex flex-col items-center justify-center text-center">
+        
+        {/* Speaker Icon Centered Above Text */}
+        <button 
+          onClick={() => playAudio(card.sentence.replace("___", card.targetWord))}
+          className={cn(
+            "w-12 h-12 flex items-center justify-center rounded-full transition-colors mb-8 focus:outline-none",
+            isPlayingAudio ? "bg-blue-50 text-blue-600" : "bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          )}
+          title="Vorlesen"
+        >
+          <Volume2 className="w-5 h-5" />
+        </button>
 
-          <div className="text-2xl md:text-3xl font-medium leading-relaxed text-gray-900 w-full">
-            {parts[0]}
-            
-            {phase === "Answer" ? (
-              <span className="text-blue-600 font-bold mx-2">
-                {card.targetWord}
-              </span>
-            ) : (
-              <>
-                {isMultipleChoice ? (
-                  <span className="inline-block px-8 py-2 rounded-2xl mx-2 bg-gray-50 text-transparent border border-gray-100">
-                    ________
-                  </span>
-                ) : (
-                  <span className="inline-block relative mx-2 align-bottom pb-1">
-                    <span className="flex">{renderInputChars()}</span>
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={inputText}
-                      onChange={handleInputChange}
-                      onKeyDown={handleKeyDown}
-                      className="absolute inset-0 opacity-0 cursor-text w-full"
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck="false"
-                    />
-                  </span>
-                )}
-              </>
-            )}
-            
-            {parts[1]}
-          </div>
+        <div className="text-2xl md:text-3xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg">
+          {parts[0]}
+          
+          {phase === "Answer" ? (
+            <span className="text-blue-600 mx-1">
+              {card.targetWord}
+            </span>
+          ) : (
+            <>
+              {isMultipleChoice ? (
+                <span className="inline-block px-8 py-1 rounded-2xl mx-1 bg-gray-50 text-transparent border border-gray-100 align-middle">
+                  ________
+                </span>
+              ) : (
+                <span className="inline-block relative mx-1 align-bottom pb-1 border-b-2 border-gray-200 focus-within:border-blue-600 transition-colors min-w-[80px]">
+                  <span className="flex items-center justify-center tracking-widest">{renderInputChars()}</span>
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={inputText}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    className="absolute inset-0 opacity-0 cursor-text w-full"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck="false"
+                  />
+                </span>
+              )}
+            </>
+          )}
+          
+          {parts[1]}
         </div>
       </div>
 
-      {phase === "Question" && isMultipleChoice && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-auto"
-        >
-          {card.options.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => handleOptionClick(opt)}
-              className="py-5 px-6 rounded-3xl text-lg font-semibold bg-gray-50 text-gray-700 hover:bg-blue-600 hover:text-white transition-all active:scale-95 border border-transparent hover:shadow-md"
-            >
-              {opt}
-            </button>
-          ))}
-        </motion.div>
-      )}
+      <div className="mt-8">
+        {phase === "Question" && isMultipleChoice && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="grid grid-cols-1 md:grid-cols-2 gap-3"
+          >
+            {card.options.map((opt) => (
+              <button
+                key={opt}
+                onClick={() => handleOptionClick(opt)}
+                className="py-4 px-6 rounded-2xl text-[17px] font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-colors active:scale-95"
+              >
+                {opt}
+              </button>
+            ))}
+          </motion.div>
+        )}
 
-      {/* Answer Phase: Translation and Weiter Button */}
-      {phase === "Answer" && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="overflow-hidden mt-auto"
-        >
-          <div className="pt-8 border-t border-gray-100 w-full">
-            <div className="mb-8 px-4 text-center">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Übersetzung</p>
-              <p className="text-xl text-gray-700">{card.translation}</p>
+        {/* Answer Phase: Translation and Weiter Button */}
+        {phase === "Answer" && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col items-center w-full"
+          >
+            <div className="text-center mb-10 w-full">
+              <p className="text-sm font-medium text-gray-400 mb-2">Übersetzung</p>
+              <p className="text-lg text-gray-500">{card.translation}</p>
             </div>
             
             {mistakeMade && (
-              <div className="mb-8 p-5 bg-red-50 rounded-3xl border border-red-100 text-red-800 text-center">
-                <p className="font-bold mb-1">Nicht ganz richtig.</p>
-                <p>Du musst diese Karte nochmal üben.</p>
+              <div className="mb-8 flex items-center justify-center gap-2 text-red-500 text-sm font-medium">
+                <AlertCircle className="w-4 h-4" />
+                <span>Nicht ganz richtig. Du musst diese Karte nochmal üben.</span>
               </div>
             )}
 
             <button
               onClick={onNext}
               autoFocus
-              className="w-full py-5 rounded-3xl text-xl font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all active:scale-95 shadow-sm"
+              className="w-full py-4 rounded-2xl text-[17px] font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors active:scale-95"
             >
               Weiter
             </button>
-          </div>
-        </motion.div>
-      )}
+          </motion.div>
+        )}
+      </div>
     </motion.div>
   );
 }

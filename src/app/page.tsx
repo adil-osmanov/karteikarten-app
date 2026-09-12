@@ -1,6 +1,6 @@
 "use client";
 
-import { useStore, Deck, Flashcard } from "@/lib/store";
+import { useStore, Flashcard } from "@/lib/store";
 import Link from "next/link";
 import { ChevronRight, Trash2, Edit2, Upload, FileUp } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
@@ -93,10 +93,10 @@ export default function Home() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        <header className="flex items-end justify-between mb-16">
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-16">
           <div>
-            <h1 className="text-4xl font-bold tracking-tight text-gray-900 mb-2">Meine Bibliothek</h1>
-            <p className="text-lg text-gray-500">Wähle ein Deck oder importiere ein neues.</p>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-gray-900 mb-2">Meine Bibliothek</h1>
+            <p className="text-base md:text-lg text-gray-500">Wähle ein Deck oder importiere ein neues.</p>
           </div>
           
           <div>
@@ -109,7 +109,7 @@ export default function Home() {
             />
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-2xl font-semibold transition-all shadow-sm active:scale-95"
+              className="flex items-center gap-2 bg-white text-blue-600 border border-gray-200 shadow-sm px-6 py-3 rounded-full font-medium transition-all hover:bg-gray-50 active:scale-95"
             >
               <FileUp className="w-5 h-5" />
               <span>CSV Importieren</span>
@@ -119,10 +119,10 @@ export default function Home() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {decks.length === 0 ? (
-            <div className="col-span-full py-20 text-center bg-white rounded-[32px] border border-gray-100 border-dashed">
+            <div className="col-span-full py-24 text-center bg-white rounded-[28px] shadow-[0_4px_20px_rgb(0,0,0,0.03)]">
               <Upload className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500 font-medium">Noch keine Decks vorhanden.</p>
-              <p className="text-sm text-gray-400 mt-1">Importiere eine CSV-Datei, um zu starten.</p>
+              <p className="text-gray-900 font-semibold mb-1">Noch keine Decks vorhanden.</p>
+              <p className="text-sm text-gray-500">Importiere eine CSV-Datei, um zu starten.</p>
             </div>
           ) : (
             decks.map((deck) => {
@@ -132,20 +132,20 @@ export default function Home() {
 
               return (
                 <Link key={deck.id} href={`/deck/${deck.id}`}>
-                  <div className="group block bg-white rounded-[32px] p-8 shadow-sm shadow-black/5 transition-all hover:shadow-md hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 border border-gray-100 h-full flex flex-col relative">
+                  <div className="group block bg-white rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 h-full flex flex-col relative">
                     
-                    {/* Action Buttons */}
-                    <div className="absolute top-6 right-6 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* Action Buttons - Top Right */}
+                    <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
                         onClick={(e) => handleRename(e, deck.id, deck.name)}
-                        className="p-2 bg-gray-50 text-gray-400 hover:text-blue-600 rounded-full transition-colors"
+                        className="p-2 text-gray-300 hover:text-blue-600 transition-colors"
                         title="Umbenennen"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button 
                         onClick={(e) => handleDelete(e, deck.id)}
-                        className="p-2 bg-red-50 text-red-400 hover:text-red-600 rounded-full transition-colors"
+                        className="p-2 text-gray-300 hover:text-red-500 transition-colors"
                         title="Löschen"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -153,21 +153,21 @@ export default function Home() {
                     </div>
 
                     <div className="mb-10">
-                      <h3 className="text-2xl font-bold text-gray-900 mb-2 pr-20 group-hover:text-blue-600 transition-colors">
+                      <h3 className="text-2xl font-bold tracking-tight text-gray-900 mb-1 pr-16 group-hover:text-blue-600 transition-colors">
                         {deck.name}
                       </h3>
-                      <p className="text-gray-500">{total} Karten</p>
+                      <p className="text-sm text-gray-500">{total} Karten</p>
                     </div>
                     
                     <div className="mt-auto">
-                      <div className="flex items-center justify-between text-sm font-semibold text-gray-500 mb-3">
+                      <div className="flex items-center justify-between text-sm font-medium text-gray-500 mb-3">
                         <span>Fortschritt</span>
                         <span>
                           {mastered} / {total} gemeistert
                         </span>
                       </div>
                       
-                      <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-1.5 w-full bg-[#F5F5F7] rounded-full overflow-hidden">
                         <div
                           className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out"
                           style={{ width: `${progressPercentage}%` }}
