@@ -231,20 +231,30 @@ function LevelProgress() {
 
 // --- STUDY INTERFACE ---
 
-function StudyInterface({ deckId, onBack }: { deckId: string, onBack: () => void }) {
+function StudyInterface({ 
+  deckId, 
+  onBack,
+  reviewCards
+}: { 
+  deckId?: string, 
+  onBack: () => void,
+  reviewCards?: { deckId: string, card: Flashcard }[]
+}) {
   const { decks, answerCard } = useStore();
-  const deck = decks.find((d) => d.id === deckId);
-
-  const [activeCards, setActiveCards] = useState<Flashcard[]>([]);
+  
+  const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
-    if (deck) {
-      setActiveCards(deck.cards.filter((c) => !c.isArchived));
+    if (reviewCards) {
+      setActiveCards(reviewCards);
+    } else if (deckId) {
+      const deck = decks.find((d) => d.id === deckId);
+      if (deck) {
+        setActiveCards(deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c })));
+      }
     }
-  }, [deck]);
-
-  if (!deck) return null;
+  }, [deckId, decks, reviewCards]);
 
   if (activeCards.length === 0) {
     return (
@@ -266,36 +276,44 @@ function StudyInterface({ deckId, onBack }: { deckId: string, onBack: () => void
     );
   }
 
-  const currentCard = activeCards[currentIndex];
+  const { deckId: currentDeckId, card: currentCard } = activeCards[currentIndex];
   
   const handleNext = () => {
     if (currentIndex < activeCards.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     } else {
-      const nextRoundCards = deck.cards.filter((c) => !c.isArchived);
-      setActiveCards(nextRoundCards);
-      setCurrentIndex(0);
+      if (reviewCards) {
+        onBack(); // End of review mode
+      } else {
+        const deck = decks.find((d) => d.id === deckId);
+        if (deck) {
+          setActiveCards(deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c })));
+          setCurrentIndex(0);
+        }
+      }
     }
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <header className="flex items-center justify-between mb-8 px-6">
-        <button onClick={onBack} className="text-gray-400 hover:text-gray-900 transition-colors p-3 -ml-3">
+    <div className="flex flex-col h-full items-center justify-center pt-8">
+      <div className="w-full max-w-2xl mx-auto flex items-center justify-between px-2 mb-4">
+        <button onClick={onBack} className="text-gray-400 hover:text-gray-900 transition-colors p-2 -ml-2 rounded-full hover:bg-white">
           <ArrowLeft className="w-6 h-6" />
         </button>
-        <div className="text-sm font-medium text-gray-400">
+        <div className="text-sm font-semibold text-gray-400">
           Karte {currentIndex + 1} von {activeCards.length}
         </div>
-      </header>
+      </div>
 
-      <div className="flex-1 flex flex-col justify-center pb-12 px-6">
+      <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
           <StudyCard
             key={currentCard.id + currentIndex} 
             card={currentCard}
             onAnswer={(correct, isHilfe) => {
-              answerCard(deckId, currentCard.id, correct, isHilfe);
+              if (!reviewCards) {
+                answerCard(currentDeckId, currentCard.id, correct, isHilfe);
+              }
             }}
             onNext={handleNext}
           />
@@ -436,7 +454,12 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
       {/* Top Header: Speaker Left, Dots Right */}
       <div className="flex items-center justify-between w-full mb-8">
         <button 
-          onClick={() => playAudio(card.sentence.replace("___", card.targetWord))}
+          onClick={() => {
+            const textToPlay = phase === "Answer" 
+              ? card.sentence.replace("___", card.targetWord)
+              : card.sentence.replace("___", "Lücke");
+            playAudio(textToPlay);
+          }}
           className={cn(
             "w-10 h-10 flex items-center justify-center rounded-full transition-colors focus:outline-none shrink-0",
             isPlayingAudio ? "bg-blue-50 text-blue-600" : "bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
@@ -557,6 +580,7 @@ export default function App() {
   const { decks, addDeck, deleteDeck, renameDeck, unarchiveCard } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
+  const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   
   const [uploadCategory, setUploadCategory] = useState<string | null>(null);
@@ -577,6 +601,15 @@ export default function App() {
       <>
         <LevelUpModal />
         <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
+      </>
+    );
+  }
+
+  if (reviewCards) {
+    return (
+      <>
+        <LevelUpModal />
+        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
       </>
     );
   }
@@ -634,10 +667,10 @@ export default function App() {
 
   const categories = ["Grammatik", "Wörter"];
   
-  const archivedCards: { deck: Deck, card: Flashcard }[] = [];
+  const archivedCards: { deckId: string, deckName: string, card: Flashcard }[] = [];
   decks.forEach(deck => {
     deck.cards.forEach(card => {
-      if (card.isArchived) archivedCards.push({ deck, card });
+      if (card.isArchived) archivedCards.push({ deckId: deck.id, deckName: deck.name, card });
     });
   });
 
@@ -712,7 +745,7 @@ export default function App() {
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
       <main className="max-w-4xl mx-auto px-6 py-12 md:py-24">
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
           <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-16">
             <div>
               <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-gray-900 mb-3">Meine Bibliothek</h1>
@@ -804,7 +837,7 @@ export default function App() {
             <section className="pt-12 border-t border-gray-200">
               <button 
                 onClick={() => setShowArchive(!showArchive)}
-                className="flex items-center justify-between w-full py-4 px-2 group"
+                className="flex items-center justify-between w-full py-4 px-2 group mb-2"
               >
                 <div className="flex items-center gap-4">
                   <div className="p-4 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 group-hover:text-blue-600 transition-colors">
@@ -826,11 +859,21 @@ export default function App() {
                     exit={{ opacity: 0, height: 0 }}
                     className="overflow-hidden"
                   >
-                    <div className="mt-6 space-y-4 px-2 pb-10">
+                    <div className="mt-2 mb-6 px-2 flex justify-end">
+                      {archivedCards.length > 0 && (
+                        <button
+                          onClick={() => setReviewCards(archivedCards)}
+                          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-full shadow-sm transition-colors active:scale-95"
+                        >
+                          Alle trainieren
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-4 px-2 pb-10">
                       {archivedCards.length === 0 ? (
                         <p className="text-gray-400 text-center py-10 font-medium">Dein Archiv ist leer. Meistere Karten, um sie hier zu sehen.</p>
                       ) : (
-                        archivedCards.map(({ deck, card }) => (
+                        archivedCards.map(({ deckId, deckName, card }) => (
                           <div key={card.id} className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-[24px] shadow-[0_4px_20px_rgb(0,0,0,0.02)] border border-gray-100">
                             <div>
                               <p className="font-medium text-gray-900 mb-1 text-lg tracking-tight">
@@ -838,11 +881,11 @@ export default function App() {
                               </p>
                               <p className="text-sm text-gray-500 mb-2">{card.translation}</p>
                               <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
-                                {deck.name}
+                                {deckName}
                               </span>
                             </div>
                             <button
-                              onClick={() => unarchiveCard(deck.id, card.id)}
+                              onClick={() => setReviewCards([{ deckId, card }])}
                               className="flex items-center justify-center gap-2 p-3 text-sm font-semibold text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-colors shrink-0"
                               title="Lernen wiederholen"
                             >
