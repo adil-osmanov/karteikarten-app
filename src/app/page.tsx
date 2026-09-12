@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { 
-  ChevronRight, Trash2, Edit2, Upload, FileUp, 
+  Trash2, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy
 } from "lucide-react";
@@ -501,6 +501,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
                   <span className="flex items-center justify-center tracking-widest">{renderInputChars()}</span>
                   <input
                     ref={inputRef}
+                    autoFocus
                     type="text"
                     value={inputText}
                     onChange={handleInputChange}
@@ -521,7 +522,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
         {phase === "Question" && !isMultipleChoice && (
           <button 
             onClick={handleHilfe}
-            className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-blue-600 transition-colors bg-gray-50 hover:bg-blue-50 px-4 py-2 rounded-full mb-2"
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-blue-600 transition-all duration-100 active:scale-[0.98] bg-gray-50 hover:bg-blue-50 px-4 py-2 rounded-full mb-2"
           >
             <LifeBuoy className="w-4 h-4" />
             <span>Hilfe</span>
@@ -541,7 +542,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-colors active:scale-95"
+                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-all duration-100 active:scale-[0.98]"
               >
                 {opt}
               </button>
@@ -563,7 +564,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
             <button
               onClick={onNext}
               autoFocus
-              className="w-full py-4 rounded-xl text-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-all active:scale-95 shadow-sm"
+              className="w-full py-4 rounded-xl text-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-all duration-100 active:scale-[0.98]"
             >
               Weiter
             </button>
@@ -581,7 +582,6 @@ export default function App() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
-  const [showArchive, setShowArchive] = useState(false);
   
   const [uploadCategory, setUploadCategory] = useState<string | null>(null);
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
@@ -764,7 +764,7 @@ export default function App() {
                     <h2 className="text-2xl font-bold tracking-tight text-gray-900">{categoryName}</h2>
                     <button 
                       onClick={() => handlePlusClick(categoryName)}
-                      className="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-500 rounded-full transition-colors"
+                      className="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-500 rounded-full transition-all duration-100 active:scale-[0.98]"
                       title="Deck hinzufügen"
                     >
                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -774,8 +774,8 @@ export default function App() {
                   </div>
                   
                   {categoryDecks.length === 0 ? (
-                    <div className="py-12 text-center bg-white/50 border border-dashed border-gray-200 rounded-[28px]">
-                      <p className="text-gray-400 font-medium">Klicke auf das +, um ein Deck zu importieren.</p>
+                    <div className="py-6 text-center">
+                      <p className="text-gray-400 text-sm font-medium">Noch keine Decks</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -793,13 +793,13 @@ export default function App() {
                             <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button 
                                 onClick={(e) => { e.stopPropagation(); setRenameInput(deck.name); setRenameModal({ id: deck.id, name: deck.name }); }}
-                                className="p-2.5 text-gray-300 hover:text-blue-600 transition-colors rounded-full"
+                                className="p-2.5 text-gray-300 hover:text-blue-600 transition-all duration-100 active:scale-[0.98] rounded-full"
                               >
                                 <Edit2 className="w-4 h-4" />
                               </button>
                               <button 
                                 onClick={(e) => { e.stopPropagation(); setDeleteModal({ id: deck.id, name: deck.name }); }}
-                                className="p-2.5 text-gray-300 hover:text-red-500 transition-colors rounded-full"
+                                className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -835,70 +835,27 @@ export default function App() {
 
             {/* Archive Section */}
             <section className="pt-12 border-t border-gray-200">
-              <button 
-                onClick={() => setShowArchive(!showArchive)}
-                className="flex items-center justify-between w-full py-4 px-2 group mb-2"
-              >
+              <div className="bg-white p-6 rounded-[28px] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-gray-100 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="p-4 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 group-hover:text-blue-600 transition-colors">
+                  <div className="p-4 bg-gray-50 rounded-full text-blue-600">
                     <Archive className="w-6 h-6" />
                   </div>
-                  <div className="text-left">
-                    <h2 className="text-xl font-bold tracking-tight text-gray-900 group-hover:text-blue-600 transition-colors">Mein Archiv ({archivedCards.length})</h2>
-                    <p className="text-sm text-gray-500 font-medium">Gemeisterte Karten ansehen oder wiederholen</p>
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight text-gray-900">Mein Archiv</h2>
+                    <p className="text-sm text-gray-500 font-medium">{archivedCards.length} Wörter gemeistert</p>
                   </div>
                 </div>
-                <ChevronRight className={cn("w-6 h-6 text-gray-300 transition-transform", showArchive && "rotate-90")} />
-              </button>
-
-              <AnimatePresence>
-                {showArchive && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="mt-2 mb-6 px-2 flex justify-end">
-                      {archivedCards.length > 0 && (
-                        <button
-                          onClick={() => setReviewCards(archivedCards)}
-                          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-full shadow-sm transition-colors active:scale-95"
-                        >
-                          Alle trainieren
-                        </button>
-                      )}
-                    </div>
-                    <div className="space-y-4 px-2 pb-10">
-                      {archivedCards.length === 0 ? (
-                        <p className="text-gray-400 text-center py-10 font-medium">Dein Archiv ist leer. Meistere Karten, um sie hier zu sehen.</p>
-                      ) : (
-                        archivedCards.map(({ deckId, deckName, card }) => (
-                          <div key={card.id} className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-[24px] shadow-[0_4px_20px_rgb(0,0,0,0.02)] border border-gray-100">
-                            <div>
-                              <p className="font-medium text-gray-900 mb-1 text-lg tracking-tight">
-                                {card.sentence.replace("___", card.targetWord)}
-                              </p>
-                              <p className="text-sm text-gray-500 mb-2">{card.translation}</p>
-                              <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
-                                {deckName}
-                              </span>
-                            </div>
-                            <button
-                              onClick={() => setReviewCards([{ deckId, card }])}
-                              className="flex items-center justify-center gap-2 p-3 text-sm font-semibold text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-colors shrink-0"
-                              title="Lernen wiederholen"
-                            >
-                              <ArchiveRestore className="w-5 h-5" />
-                              <span>Wiederholen</span>
-                            </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                
+                <button
+                  onClick={() => {
+                    if (archivedCards.length > 0) setReviewCards(archivedCards);
+                  }}
+                  disabled={archivedCards.length === 0}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-full transition-all duration-100 active:scale-[0.98] shadow-sm disabled:opacity-50 disabled:active:scale-100 shrink-0"
+                >
+                  Alle trainieren
+                </button>
+              </div>
             </section>
           </div>
         </motion.div>
