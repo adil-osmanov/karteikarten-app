@@ -12,19 +12,14 @@ interface UserState {
   correctAnswersTotal: number;
   answerCard: (cardId: string, correct: boolean) => void;
   getDeckProgress: (deckId: string) => { total: number; mastered: number };
-  level: number;
+  getUserStats: () => { level: number; xpInCurrentLevel: number; xpForNextLevel: number; totalXp: number };
 }
-
-const calculateLevel = (correctAnswers: number) => {
-  return Math.floor(correctAnswers / 10) + 1;
-};
 
 export const useStore = create<UserState>()(
   persist(
     (set, get) => ({
       progress: {},
       correctAnswersTotal: 0,
-      level: 1,
 
       answerCard: (cardId, correct) => {
         set((state) => {
@@ -45,7 +40,6 @@ export const useStore = create<UserState>()(
               [cardId]: { ...currentProgress, level: newLevel },
             },
             correctAnswersTotal: newTotal,
-            level: calculateLevel(newTotal),
           };
         });
       },
@@ -60,6 +54,31 @@ export const useStore = create<UserState>()(
 
         return { total, mastered };
       },
+
+      getUserStats: () => {
+        const { correctAnswersTotal } = get();
+        const totalXp = correctAnswersTotal * 10;
+        
+        // Simple scaling: Level 1 (0-100), Level 2 (100-300), Level 3 (300-600)
+        let level = 1;
+        let xpRequiredForNext = 100;
+        let xpAccumulated = 0;
+        
+        while (totalXp >= xpAccumulated + xpRequiredForNext) {
+          xpAccumulated += xpRequiredForNext;
+          level++;
+          xpRequiredForNext = level * 100;
+        }
+
+        const xpInCurrentLevel = totalXp - xpAccumulated;
+
+        return {
+          level,
+          xpInCurrentLevel,
+          xpForNextLevel: xpRequiredForNext,
+          totalXp
+        };
+      }
     }),
     {
       name: "karten-storage",
