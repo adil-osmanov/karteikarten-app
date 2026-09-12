@@ -119,22 +119,6 @@ function StudyCard({
   const playAudio = async (text: string) => {
     setIsAudioLoading(true);
 
-    const fallbackTTS = () => {
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "de-DE";
-        utterance.rate = 0.9;
-        
-        utterance.onend = () => setIsAudioLoading(false);
-        utterance.onerror = () => setIsAudioLoading(false);
-        
-        window.speechSynthesis.speak(utterance);
-      } else {
-        setIsAudioLoading(false);
-      }
-    };
-
     try {
       const response = await fetch('/api/tts', {
         method: 'POST',
@@ -157,8 +141,8 @@ function StudyCard({
       
       await audio.play();
     } catch (e) {
-      console.warn("TTS API fetch failed, using fallback:", e);
-      fallbackTTS();
+      console.warn("TTS API fetch failed:", e);
+      setIsAudioLoading(false);
     }
   };
 

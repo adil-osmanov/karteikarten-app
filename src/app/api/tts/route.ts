@@ -1,34 +1,39 @@
-import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { NextRequest, NextResponse } from "next/server";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const { text } = await req.json();
 
-    if (!text) {
-      return new NextResponse('Text is required', { status: 400 });
+    if (!text || typeof text !== "string") {
+      return NextResponse.json({ error: "Text is required" }, { status: 400 });
     }
 
-    const mp3 = await openai.audio.speech.create({
-      model: 'tts-1',
-      voice: 'echo', // Можно поменять на 'alloy' или 'onyx'
-      input: text,
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=de-DE&q=${encodeURIComponent(
+      text
+    )}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        // Optional: Sometimes adding a user agent helps avoid blocks
+        "User-Agent": "Mozilla/5.0",
+      },
     });
 
-    const buffer = Buffer.from(await mp3.arrayBuffer());
+    if (!response.ok) {
+      throw new Error(`Google TTS returned ${response.status}`);
+    }
 
-    return new NextResponse(buffer, {
-      status: 200,
+    const arrayBuffer = await response.arrayBuffer();
+
+    return new NextResponse(arrayBuffer, {
       headers: {
-        'Content-Type': 'audio/mpeg',
+        "Content-Type": "audio/mpeg",
+        "Cache-Control": "public, max-age=31536000, immutable",
       },
     });
   } catch (error) {
-    console.error('TTS Error:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    console.error("TTS Error:", error);
+    return NextResponse.json({ error: "Failed to fetch TTS" }, { status: 500 });
   }
 }
