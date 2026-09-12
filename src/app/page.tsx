@@ -1,31 +1,90 @@
 "use client";
 
-import { useStore } from "@/lib/store";
-import { MOCK_CATEGORIES, ALL_CARDS } from "@/lib/data";
+import { useStore, Deck, Flashcard } from "@/lib/store";
 import Link from "next/link";
-import { ChevronRight, ArchiveRestore, Archive } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import LevelProgress from "@/components/LevelProgress";
-import { useEffect, useState } from "react";
-import { cn } from "@/lib/utils";
+import { ChevronRight, Trash2, Edit2, Upload, FileUp } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { motion } from "framer-motion";
 
 export default function Home() {
-  const getDeckProgress = useStore((state) => state.getDeckProgress);
-  const progress = useStore((state) => state.progress);
-  const resetCard = useStore((state) => state.resetCard);
-
+  const { decks, addDeck, deleteDeck, renameDeck } = useStore();
   const [isMounted, setIsMounted] = useState(false);
-  const [showArchive, setShowArchive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  if (!isMounted) {
-    return <main className="max-w-3xl mx-auto px-6 py-12 md:py-24 animate-pulse opacity-0" />;
-  }
+  if (!isMounted) return null;
 
-  const archivedCards = ALL_CARDS.filter(c => progress[c.id]?.level >= 4);
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const lines = text.split('\n').filter(line => line.trim().length > 0);
+      
+      const cards: Flashcard[] = [];
+      
+      lines.forEach((line) => {
+        const parts = line.split(';').map(p => p.trim());
+        // Expected format: TargetWord; Sentence_with_blank; Translation; Wrong1; Wrong2; Wrong3
+        if (parts.length >= 6) {
+          const targetWord = parts[0];
+          const sentence = parts[1];
+          const translation = parts[2];
+          const wrong1 = parts[3];
+          const wrong2 = parts[4];
+          const wrong3 = parts[5];
+          
+          // Shuffle options
+          const options = [targetWord, wrong1, wrong2, wrong3].sort(() => Math.random() - 0.5);
+
+          cards.push({
+            id: crypto.randomUUID(),
+            targetWord,
+            sentence,
+            translation,
+            options,
+            masteryLevel: 0,
+            isArchived: false
+          });
+        }
+      });
+
+      if (cards.length > 0) {
+        const deckName = file.name.replace('.csv', '');
+        addDeck({
+          id: crypto.randomUUID(),
+          name: deckName,
+          cards
+        });
+      } else {
+        alert("Fehler: Keine gültigen Karten gefunden. Bitte CSV-Format überprüfen.");
+      }
+      
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDelete = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    if (window.confirm("Bist du sicher, dass du dieses Deck löschen möchtest?")) {
+      deleteDeck(id);
+    }
+  };
+
+  const handleRename = (e: React.MouseEvent, id: string, oldName: string) => {
+    e.preventDefault();
+    const newName = window.prompt("Neuer Name für das Deck:", oldName);
+    if (newName && newName.trim().length > 0) {
+      renameDeck(id, newName.trim());
+    }
+  };
 
   return (
     <main className="max-w-3xl mx-auto px-6 py-12 md:py-24">
@@ -34,113 +93,92 @@ export default function Home() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        <header className="flex items-start justify-between mb-16">
+        <header className="flex items-end justify-between mb-16">
           <div>
             <h1 className="text-4xl font-bold tracking-tight text-gray-900 mb-2">Meine Bibliothek</h1>
-            <p className="text-lg text-gray-500">Was möchtest du heute lernen?</p>
+            <p className="text-lg text-gray-500">Wähle ein Deck oder importiere ein neues.</p>
           </div>
-          <LevelProgress />
+          
+          <div>
+            <input 
+              type="file" 
+              accept=".csv" 
+              className="hidden" 
+              ref={fileInputRef} 
+              onChange={handleFileUpload} 
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-2xl font-semibold transition-all shadow-sm active:scale-95"
+            >
+              <FileUp className="w-5 h-5" />
+              <span>CSV Importieren</span>
+            </button>
+          </div>
         </header>
 
-        <div className="space-y-12">
-          {MOCK_CATEGORIES.map((category) => (
-            <section key={category.id}>
-              <h2 className="text-xl font-bold text-gray-900 mb-6 px-1">{category.name}</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {category.decks.map((deck) => {
-                  const { total, mastered } = getDeckProgress(deck.id);
-                  const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {decks.length === 0 ? (
+            <div className="col-span-full py-20 text-center bg-white rounded-[32px] border border-gray-100 border-dashed">
+              <Upload className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500 font-medium">Noch keine Decks vorhanden.</p>
+              <p className="text-sm text-gray-400 mt-1">Importiere eine CSV-Datei, um zu starten.</p>
+            </div>
+          ) : (
+            decks.map((deck) => {
+              const total = deck.cards.length;
+              const mastered = deck.cards.filter(c => c.isArchived).length;
+              const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
 
-                  return (
-                    <Link key={deck.id} href={`/deck/${deck.id}`}>
-                      <div className="group block bg-white rounded-3xl p-6 shadow-sm shadow-black/5 transition-all hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] active:translate-y-0 border border-gray-100 h-full flex flex-col">
-                        <div className="flex items-start justify-between mb-8">
-                          <div>
-                            <h3 className="text-lg font-bold text-gray-900 mb-1 group-hover:text-blue-500 transition-colors">
-                              {deck.name}
-                            </h3>
-                            <p className="text-sm text-gray-500 line-clamp-2">{deck.description}</p>
-                          </div>
-                          <div className="bg-gray-50 p-2 rounded-full group-hover:bg-blue-50 transition-colors shrink-0">
-                            <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors" />
-                          </div>
-                        </div>
-                        
-                        <div className="mt-auto pt-4 border-t border-gray-50">
-                          <div className="flex items-center justify-between text-xs font-semibold text-gray-500 mb-2">
-                            <span>Fortschritt</span>
-                            <span>
-                              {mastered} / {total} gemeistert
-                            </span>
-                          </div>
-                          
-                          {/* Progress bar */}
-                          <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-500 rounded-full transition-all duration-700 ease-out"
-                              style={{ width: `${progressPercentage}%` }}
-                            />
-                          </div>
-                        </div>
+              return (
+                <Link key={deck.id} href={`/deck/${deck.id}`}>
+                  <div className="group block bg-white rounded-[32px] p-8 shadow-sm shadow-black/5 transition-all hover:shadow-md hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 border border-gray-100 h-full flex flex-col relative">
+                    
+                    {/* Action Buttons */}
+                    <div className="absolute top-6 right-6 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => handleRename(e, deck.id, deck.name)}
+                        className="p-2 bg-gray-50 text-gray-400 hover:text-blue-600 rounded-full transition-colors"
+                        title="Umbenennen"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => handleDelete(e, deck.id)}
+                        className="p-2 bg-red-50 text-red-400 hover:text-red-600 rounded-full transition-colors"
+                        title="Löschen"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="mb-10">
+                      <h3 className="text-2xl font-bold text-gray-900 mb-2 pr-20 group-hover:text-blue-600 transition-colors">
+                        {deck.name}
+                      </h3>
+                      <p className="text-gray-500">{total} Karten</p>
+                    </div>
+                    
+                    <div className="mt-auto">
+                      <div className="flex items-center justify-between text-sm font-semibold text-gray-500 mb-3">
+                        <span>Fortschritt</span>
+                        <span>
+                          {mastered} / {total} gemeistert
+                        </span>
                       </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-
-          {/* Archive Section */}
-          <section className="pt-8 border-t border-gray-200">
-            <button 
-              onClick={() => setShowArchive(!showArchive)}
-              className="flex items-center justify-between w-full py-4 px-2 hover:bg-gray-50 rounded-2xl transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-gray-100 rounded-full text-gray-500">
-                  <Archive className="w-5 h-5" />
-                </div>
-                <div className="text-left">
-                  <h2 className="text-lg font-bold text-gray-900">Archiv ({archivedCards.length})</h2>
-                  <p className="text-sm text-gray-500">Gemeisterte Karten ansehen oder zurücksetzen</p>
-                </div>
-              </div>
-              <ChevronRight className={cn("w-5 h-5 text-gray-400 transition-transform", showArchive && "rotate-90")} />
-            </button>
-
-            <AnimatePresence>
-              {showArchive && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="mt-6 space-y-4 px-2">
-                    {archivedCards.length === 0 ? (
-                      <p className="text-gray-500 text-center py-8">Dein Archiv ist leer.</p>
-                    ) : (
-                      archivedCards.map(card => (
-                        <div key={card.id} className="flex items-center justify-between bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-                          <div>
-                            <p className="font-medium text-gray-900 mb-1">{card.sentence.replace("___", card.targetWord)}</p>
-                            <p className="text-sm text-gray-500">{card.translation}</p>
-                          </div>
-                          <button
-                            onClick={() => resetCard(card.id)}
-                            className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors"
-                            title="Zurücksetzen (Lernen wiederholen)"
-                          >
-                            <ArchiveRestore className="w-5 h-5" />
-                          </button>
-                        </div>
-                      ))
-                    )}
+                      
+                      <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out"
+                          style={{ width: `${progressPercentage}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </section>
+                </Link>
+              );
+            })
+          )}
         </div>
       </motion.div>
     </main>

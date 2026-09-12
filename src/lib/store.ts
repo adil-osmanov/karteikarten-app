@@ -1,96 +1,75 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { MasteryLevel, MOCK_DECKS } from "./data";
 
-export interface CardProgress {
-  cardId: string;
-  level: MasteryLevel;
+export interface Flashcard {
+  id: string;
+  sentence: string; 
+  targetWord: string; 
+  translation: string;
+  options: string[]; 
+  masteryLevel: 0 | 1 | 2 | 3 | 4;
+  isArchived: boolean;
 }
 
-interface UserState {
-  progress: Record<string, CardProgress>;
-  correctAnswersTotal: number;
-  answerCard: (cardId: string, correct: boolean) => void;
-  resetCard: (cardId: string) => void;
-  getDeckProgress: (deckId: string) => { total: number; mastered: number };
-  getUserStats: () => { level: number; xpInCurrentLevel: number; xpForNextLevel: number; totalXp: number };
+export interface Deck {
+  id: string;
+  name: string;
+  cards: Flashcard[];
 }
 
-export const useStore = create<UserState>()(
+interface AppState {
+  decks: Deck[];
+  addDeck: (deck: Deck) => void;
+  deleteDeck: (id: string) => void;
+  renameDeck: (id: string, newName: string) => void;
+  answerCard: (deckId: string, cardId: string, correct: boolean) => void;
+}
+
+export const useStore = create<AppState>()(
   persist(
-    (set, get) => ({
-      progress: {},
-      correctAnswersTotal: 0,
+    (set) => ({
+      decks: [],
 
-      answerCard: (cardId, correct) => {
-        set((state) => {
-          const currentProgress = state.progress[cardId] || { cardId, level: 0 };
-          let newLevel: MasteryLevel = 0;
+      addDeck: (deck) => set((state) => ({ decks: [...state.decks, deck] })),
+      
+      deleteDeck: (id) => set((state) => ({ 
+        decks: state.decks.filter(d => d.id !== id) 
+      })),
+      
+      renameDeck: (id, newName) => set((state) => ({
+        decks: state.decks.map(d => d.id === id ? { ...d, name: newName } : d)
+      })),
 
-          if (correct) {
-            newLevel = Math.min(currentProgress.level + 1, 4) as MasteryLevel;
-          } else {
-            newLevel = 0;
-          }
-
-          const newTotal = correct ? state.correctAnswersTotal + 1 : state.correctAnswersTotal;
-
-          return {
-            progress: {
-              ...state.progress,
-              [cardId]: { ...currentProgress, level: newLevel },
-            },
-            correctAnswersTotal: newTotal,
-          };
-        });
-      },
-
-      resetCard: (cardId) => {
-        set((state) => {
-          const newProgress = { ...state.progress };
-          delete newProgress[cardId];
-          return { progress: newProgress };
-        });
-      },
-
-      getDeckProgress: (deckId) => {
-        const deck = MOCK_DECKS.find((d) => d.id === deckId);
-        if (!deck) return { total: 0, mastered: 0 };
-
-        const { progress } = get();
-        const total = deck.cards.length;
-        const mastered = deck.cards.filter((c) => progress[c.id]?.level === 4).length;
-
-        return { total, mastered };
-      },
-
-      getUserStats: () => {
-        const { correctAnswersTotal } = get();
-        const totalXp = correctAnswersTotal * 10;
-        
-        // Simple scaling: Level 1 (0-100), Level 2 (100-300), Level 3 (300-600)
-        let level = 1;
-        let xpRequiredForNext = 100;
-        let xpAccumulated = 0;
-        
-        while (totalXp >= xpAccumulated + xpRequiredForNext) {
-          xpAccumulated += xpRequiredForNext;
-          level++;
-          xpRequiredForNext = level * 100;
-        }
-
-        const xpInCurrentLevel = totalXp - xpAccumulated;
-
+      answerCard: (deckId, cardId, correct) => set((state) => {
         return {
-          level,
-          xpInCurrentLevel,
-          xpForNextLevel: xpRequiredForNext,
-          totalXp
+          decks: state.decks.map(deck => {
+            if (deck.id !== deckId) return deck;
+            
+            return {
+              ...deck,
+              cards: deck.cards.map(card => {
+                if (card.id !== cardId) return card;
+                
+                let newLevel = card.masteryLevel;
+                if (correct) {
+                  newLevel = Math.min(newLevel + 1, 4) as any;
+                } else {
+                  newLevel = 0;
+                }
+                
+                return {
+                  ...card,
+                  masteryLevel: newLevel,
+                  isArchived: newLevel === 4
+                };
+              })
+            };
+          })
         };
-      }
+      })
     }),
     {
-      name: "karten-storage",
+      name: "karten-storage-v2", // New version to avoid conflicts
     }
   )
 );

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import LevelUpModal from "@/components/LevelUpModal";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -19,7 +18,6 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.className} min-h-screen bg-background text-foreground`}>
         {children}
-        <LevelUpModal />
       </body>
     </html>
   );
