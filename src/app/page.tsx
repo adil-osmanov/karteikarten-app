@@ -431,11 +431,22 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.4, ease: "easeOut" }}
-      className="bg-white rounded-[28px] p-6 md:p-10 shadow-[0_4px_20px_rgb(0,0,0,0.03)] flex flex-col border border-gray-100"
+      className="bg-white rounded-[28px] p-6 md:p-10 shadow-[0_4px_20px_rgb(0,0,0,0.03)] flex flex-col border border-gray-100 max-w-2xl mx-auto w-full"
     >
-      <div className="flex flex-col items-center text-center">
-        {/* 4 dots for Mastery Level Centered */}
-        <div className="flex gap-1.5 mb-6">
+      {/* Top Header: Speaker Left, Dots Right */}
+      <div className="flex items-center justify-between w-full mb-8">
+        <button 
+          onClick={() => playAudio(card.sentence.replace("___", card.targetWord))}
+          className={cn(
+            "w-10 h-10 flex items-center justify-center rounded-full transition-colors focus:outline-none shrink-0",
+            isPlayingAudio ? "bg-blue-50 text-blue-600" : "bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          )}
+          title="Vorlesen"
+        >
+          <Volume2 className="w-5 h-5" />
+        </button>
+
+        <div className="flex gap-1.5">
           {[1, 2, 3, 4].map((levelIndicator) => (
             <div 
               key={levelIndicator}
@@ -446,20 +457,10 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
             />
           ))}
         </div>
+      </div>
 
-        {/* Speaker Icon Centered Closer */}
-        <button 
-          onClick={() => playAudio(card.sentence.replace("___", card.targetWord))}
-          className={cn(
-            "w-10 h-10 flex items-center justify-center rounded-full transition-colors mb-4 focus:outline-none shrink-0",
-            isPlayingAudio ? "bg-blue-50 text-blue-600" : "bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-          )}
-          title="Vorlesen"
-        >
-          <Volume2 className="w-5 h-5" />
-        </button>
-
-        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg">
+      <div className="flex flex-col items-center text-center">
+        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg mb-8">
           {parts[0]}
           
           {phase === "Answer" ? (
@@ -497,7 +498,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
         {phase === "Question" && !isMultipleChoice && (
           <button 
             onClick={handleHilfe}
-            className="mt-8 flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-blue-600 transition-colors bg-gray-50 hover:bg-blue-50 px-4 py-2 rounded-full"
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-blue-600 transition-colors bg-gray-50 hover:bg-blue-50 px-4 py-2 rounded-full mb-2"
           >
             <LifeBuoy className="w-4 h-4" />
             <span>Hilfe</span>
@@ -505,13 +506,13 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
         )}
       </div>
 
-      <div className="mt-8">
+      <div className="mt-4 w-full">
         {phase === "Question" && isMultipleChoice && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="grid grid-cols-1 gap-3"
+            className="grid grid-cols-2 gap-4"
           >
             {card.options.map((opt) => (
               <button
