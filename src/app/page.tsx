@@ -431,33 +431,35 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.4, ease: "easeOut" }}
-      className="bg-white rounded-[32px] p-8 md:p-12 shadow-[0_4px_20px_rgb(0,0,0,0.03)] flex flex-col min-h-[500px] border border-gray-100"
+      className="bg-white rounded-[28px] p-6 md:p-10 shadow-[0_4px_20px_rgb(0,0,0,0.03)] flex flex-col border border-gray-100"
     >
-      <div className="absolute top-8 right-8 flex gap-2">
-        {[1, 2, 3, 4].map((levelIndicator) => (
-          <div 
-            key={levelIndicator}
-            className={cn(
-              "w-2 h-2 rounded-full transition-colors duration-500",
-              card.masteryLevel >= levelIndicator ? "bg-blue-600" : "bg-gray-200"
-            )}
-          />
-        ))}
-      </div>
+      <div className="flex flex-col items-center text-center">
+        {/* 4 dots for Mastery Level Centered */}
+        <div className="flex gap-1.5 mb-6">
+          {[1, 2, 3, 4].map((levelIndicator) => (
+            <div 
+              key={levelIndicator}
+              className={cn(
+                "w-2 h-2 rounded-full transition-colors duration-500",
+                card.masteryLevel >= levelIndicator ? "bg-blue-600" : "bg-gray-200"
+              )}
+            />
+          ))}
+        </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center text-center">
+        {/* Speaker Icon Centered Closer */}
         <button 
           onClick={() => playAudio(card.sentence.replace("___", card.targetWord))}
           className={cn(
-            "w-14 h-14 flex items-center justify-center rounded-full transition-colors mb-10 focus:outline-none shrink-0",
+            "w-10 h-10 flex items-center justify-center rounded-full transition-colors mb-4 focus:outline-none shrink-0",
             isPlayingAudio ? "bg-blue-50 text-blue-600" : "bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
           )}
           title="Vorlesen"
         >
-          <Volume2 className="w-6 h-6" />
+          <Volume2 className="w-5 h-5" />
         </button>
 
-        <div className="text-2xl md:text-3xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg">
+        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg">
           {parts[0]}
           
           {phase === "Answer" ? (
@@ -467,11 +469,11 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
           ) : (
             <>
               {isMultipleChoice ? (
-                <span className="inline-block px-8 py-1 rounded-2xl mx-1 bg-gray-50 text-transparent border border-gray-100 align-middle">
+                <span className="inline-block px-6 py-0.5 rounded-xl mx-1 bg-gray-50 text-transparent border border-gray-100 align-middle">
                   ________
                 </span>
               ) : (
-                <span className="inline-block relative mx-1 align-bottom pb-1 border-b-2 border-gray-200 focus-within:border-blue-600 transition-colors min-w-[80px]">
+                <span className="inline-block relative mx-1 align-bottom pb-0.5 border-b-2 border-gray-200 focus-within:border-blue-600 transition-colors min-w-[80px]">
                   <span className="flex items-center justify-center tracking-widest">{renderInputChars()}</span>
                   <input
                     ref={inputRef}
@@ -495,10 +497,10 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
         {phase === "Question" && !isMultipleChoice && (
           <button 
             onClick={handleHilfe}
-            className="mt-12 flex items-center gap-2 text-sm font-medium text-gray-400 hover:text-blue-600 transition-colors bg-gray-50 hover:bg-blue-50 px-5 py-2.5 rounded-full"
+            className="mt-8 flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-blue-600 transition-colors bg-gray-50 hover:bg-blue-50 px-4 py-2 rounded-full"
           >
             <LifeBuoy className="w-4 h-4" />
-            <span>Hilfe (Antwort anzeigen)</span>
+            <span>Hilfe</span>
           </button>
         )}
       </div>
@@ -509,13 +511,13 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="grid grid-cols-1 md:grid-cols-2 gap-4"
+            className="grid grid-cols-1 gap-3"
           >
             {card.options.map((opt) => (
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-5 px-6 rounded-2xl text-[17px] font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-colors active:scale-95"
+                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-colors active:scale-95"
               >
                 {opt}
               </button>
@@ -529,15 +531,15 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
             animate={{ opacity: 1, y: 0 }}
             className="flex flex-col items-center w-full"
           >
-            <div className="text-center mb-10 w-full pt-8 border-t border-gray-100">
-              <p className="text-xs font-bold tracking-widest uppercase text-gray-400 mb-3">Übersetzung</p>
-              <p className="text-xl text-gray-600">{card.translation}</p>
+            <div className="text-center mb-6 w-full pt-6 border-t border-gray-100">
+              <p className="text-[11px] font-bold tracking-widest uppercase text-gray-400 mb-2">Übersetzung</p>
+              <p className="text-base text-gray-600">{card.translation}</p>
             </div>
 
             <button
               onClick={onNext}
               autoFocus
-              className="w-full py-5 rounded-2xl text-lg font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all active:scale-95 shadow-sm shadow-blue-600/20"
+              className="w-full py-4 rounded-xl text-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-all active:scale-95 shadow-sm"
             >
               Weiter
             </button>
@@ -555,6 +557,12 @@ export default function App() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [showArchive, setShowArchive] = useState(false);
+  
+  const [uploadCategory, setUploadCategory] = useState<string | null>(null);
+  const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
+  const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -574,7 +582,7 @@ export default function App() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !uploadCategory) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -601,33 +609,30 @@ export default function App() {
       });
 
       if (cards.length > 0) {
-        let defaultName = file.name.replace('.csv', '');
-        const categoryName = window.prompt("Kategorie für dieses Deck (z.B. Grammatik, Wortschatz):", "Alltag");
-        
+        const defaultName = file.name.replace('.csv', '');
         addDeck({
           id: crypto.randomUUID(),
           name: defaultName,
-          category: categoryName || "Uncategorized",
+          category: uploadCategory,
           cards
         });
       } else {
-        alert("Fehler: Keine gültigen Karten gefunden. Format: Wort; Satz; Übersetzung; Falsch1; Falsch2; Falsch3");
+        alert("Fehler: Keine gültigen Karten gefunden.");
       }
       
       if (fileInputRef.current) fileInputRef.current.value = "";
+      setUploadCategory(null);
     };
     reader.readAsText(file);
   };
 
-  // Group decks by category
-  const categoriesMap = decks.reduce((acc, deck) => {
-    const cat = deck.category || "Uncategorized";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(deck);
-    return acc;
-  }, {} as Record<string, Deck[]>);
+  const handlePlusClick = (category: string) => {
+    setUploadCategory(category);
+    fileInputRef.current?.click();
+  };
 
-  // Get all archived cards globally
+  const categories = ["Grammatik", "Wörter"];
+  
   const archivedCards: { deck: Deck, card: Flashcard }[] = [];
   decks.forEach(deck => {
     deck.cards.forEach(card => {
@@ -638,156 +643,222 @@ export default function App() {
   return (
     <>
       <LevelUpModal />
+
+      {/* RENAME MODAL */}
+      <AnimatePresence>
+        {renameModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setRenameModal(null)} 
+            />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="relative bg-white/90 backdrop-blur-xl rounded-[24px] p-6 w-full max-w-sm shadow-2xl border border-white"
+            >
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-4">Deck umbenennen</h3>
+              <input 
+                type="text"
+                autoFocus
+                value={renameInput}
+                onChange={(e) => setRenameInput(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-gray-900 mb-6 focus:outline-none focus:border-blue-500 transition-colors"
+              />
+              <div className="flex gap-3">
+                <button onClick={() => setRenameModal(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition-colors">Abbrechen</button>
+                <button 
+                  onClick={() => {
+                    if (renameInput.trim()) renameDeck(renameModal.id, renameInput.trim());
+                    setRenameModal(null);
+                  }}
+                  className="flex-1 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors"
+                >Speichern</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* DELETE MODAL */}
+      <AnimatePresence>
+        {deleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteModal(null)} 
+            />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="relative bg-white/90 backdrop-blur-xl rounded-[24px] p-6 w-full max-w-sm shadow-2xl border border-white text-center"
+            >
+              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-2">Deck löschen?</h3>
+              <p className="text-gray-500 mb-6 text-sm">Bist du sicher, dass du "{deleteModal.name}" unwiderruflich löschen möchtest?</p>
+              
+              <div className="flex gap-3">
+                <button onClick={() => setDeleteModal(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition-colors">Abbrechen</button>
+                <button 
+                  onClick={() => {
+                    deleteDeck(deleteModal.id);
+                    setDeleteModal(null);
+                  }}
+                  className="flex-1 py-3 bg-red-500 text-white font-medium rounded-xl hover:bg-red-600 transition-colors"
+                >Löschen</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+
       <main className="max-w-4xl mx-auto px-6 py-12 md:py-24">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-        <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-16">
-          <div>
-            <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-gray-900 mb-3">Meine Bibliothek</h1>
-            <p className="text-base md:text-lg text-gray-500 font-medium">Wähle ein Deck oder importiere ein neues.</p>
-          </div>
-          <div className="flex flex-col items-end gap-6">
-            <LevelProgress />
+          <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-16">
             <div>
-              <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 bg-white text-blue-600 border border-gray-200 shadow-sm px-6 py-3 rounded-full font-semibold transition-all hover:bg-gray-50 active:scale-95"
-              >
-                <FileUp className="w-5 h-5" />
-                <span>CSV Importieren</span>
-              </button>
+              <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-gray-900 mb-3">Meine Bibliothek</h1>
+              <p className="text-base md:text-lg text-gray-500 font-medium">Lerne Grammatik und Vokabeln.</p>
             </div>
-          </div>
-        </header>
+            <LevelProgress />
+          </header>
 
-        <div className="space-y-12">
-          {Object.keys(categoriesMap).length === 0 ? (
-            <div className="py-24 text-center bg-white rounded-[32px] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-gray-100">
-              <Upload className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-900 font-semibold mb-1 text-lg">Noch keine Decks vorhanden.</p>
-              <p className="text-sm text-gray-500">Importiere eine CSV-Datei, um zu starten.</p>
-            </div>
-          ) : (
-            Object.entries(categoriesMap).map(([categoryName, categoryDecks]) => (
-              <section key={categoryName}>
-                <h2 className="text-2xl font-bold tracking-tight text-gray-900 mb-6 px-2">{categoryName}</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {categoryDecks.map((deck) => {
-                    const total = deck.cards.length;
-                    const mastered = deck.cards.filter(c => c.isArchived).length;
-                    const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
+          <div className="space-y-12">
+            {categories.map((categoryName) => {
+              const categoryDecks = decks.filter(d => d.category === categoryName);
 
-                    return (
-                      <div 
-                        key={deck.id}
-                        onClick={() => setActiveDeckId(deck.id)}
-                        className="group cursor-pointer bg-white rounded-[32px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 h-full flex flex-col relative border border-gray-100"
-                      >
-                        <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); const n = window.prompt("Neuer Name:", deck.name); if (n) renameDeck(deck.id, n); }}
-                            className="p-2.5 text-gray-300 hover:text-blue-600 transition-colors bg-gray-50 rounded-full"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); if (window.confirm("Wirklich löschen?")) deleteDeck(deck.id); }}
-                            className="p-2.5 text-gray-300 hover:text-red-500 transition-colors bg-gray-50 rounded-full"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-
-                        <div className="mb-10">
-                          <h3 className="text-2xl font-bold tracking-tight text-gray-900 mb-2 pr-24 group-hover:text-blue-600 transition-colors">
-                            {deck.name}
-                          </h3>
-                          <p className="text-sm font-medium text-gray-400">{total} Karten in diesem Deck</p>
-                        </div>
-                        
-                        <div className="mt-auto">
-                          <div className="flex items-center justify-between text-sm font-semibold text-gray-500 mb-3">
-                            <span>Fortschritt</span>
-                            <span className="text-blue-600">
-                              {mastered} / {total} gemeistert
-                            </span>
-                          </div>
-                          
-                          <div className="h-2 w-full bg-[#F5F5F7] rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out"
-                              style={{ width: `${progressPercentage}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ))
-          )}
-
-          {/* Archive Section */}
-          <section className="pt-12 border-t border-gray-200">
-            <button 
-              onClick={() => setShowArchive(!showArchive)}
-              className="flex items-center justify-between w-full py-4 px-2 group"
-            >
-              <div className="flex items-center gap-4">
-                <div className="p-4 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 group-hover:text-blue-600 transition-colors">
-                  <Archive className="w-6 h-6" />
-                </div>
-                <div className="text-left">
-                  <h2 className="text-xl font-bold tracking-tight text-gray-900 group-hover:text-blue-600 transition-colors">Mein Archiv ({archivedCards.length})</h2>
-                  <p className="text-sm text-gray-500 font-medium">Gemeisterte Karten ansehen oder wiederholen</p>
-                </div>
-              </div>
-              <ChevronRight className={cn("w-6 h-6 text-gray-300 transition-transform", showArchive && "rotate-90")} />
-            </button>
-
-            <AnimatePresence>
-              {showArchive && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="mt-6 space-y-4 px-2 pb-10">
-                    {archivedCards.length === 0 ? (
-                      <p className="text-gray-400 text-center py-10 font-medium">Dein Archiv ist leer. Meistere Karten, um sie hier zu sehen.</p>
-                    ) : (
-                      archivedCards.map(({ deck, card }) => (
-                        <div key={card.id} className="flex items-center justify-between bg-white p-5 rounded-[24px] shadow-[0_4px_20px_rgb(0,0,0,0.02)] border border-gray-100">
-                          <div>
-                            <p className="font-medium text-gray-900 mb-1 text-lg tracking-tight">
-                              {card.sentence.replace("___", card.targetWord)}
-                            </p>
-                            <p className="text-sm text-gray-500 mb-2">{card.translation}</p>
-                            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
-                              {deck.name}
-                            </span>
-                          </div>
-                          <button
-                            onClick={() => unarchiveCard(deck.id, card.id)}
-                            className="flex items-center gap-2 p-3 text-sm font-semibold text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-colors shrink-0"
-                            title="Lernen wiederholen"
-                          >
-                            <ArchiveRestore className="w-5 h-5" />
-                            <span className="hidden md:inline">Wiederholen</span>
-                          </button>
-                        </div>
-                      ))
-                    )}
+              return (
+                <section key={categoryName}>
+                  <div className="flex items-center gap-3 mb-6 px-2">
+                    <h2 className="text-2xl font-bold tracking-tight text-gray-900">{categoryName}</h2>
+                    <button 
+                      onClick={() => handlePlusClick(categoryName)}
+                      className="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-500 rounded-full transition-colors"
+                      title="Deck hinzufügen"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7 1V13M1 7H13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      </svg>
+                    </button>
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </section>
-        </div>
-      </motion.div>
-    </main>
+                  
+                  {categoryDecks.length === 0 ? (
+                    <div className="py-12 text-center bg-white/50 border border-dashed border-gray-200 rounded-[28px]">
+                      <p className="text-gray-400 font-medium">Klicke auf das +, um ein Deck zu importieren.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {categoryDecks.map((deck) => {
+                        const total = deck.cards.length;
+                        const mastered = deck.cards.filter(c => c.isArchived).length;
+                        const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
+
+                        return (
+                          <div 
+                            key={deck.id}
+                            onClick={() => setActiveDeckId(deck.id)}
+                            className="group cursor-pointer bg-white rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 h-full flex flex-col relative border border-gray-100"
+                          >
+                            <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setRenameInput(deck.name); setRenameModal({ id: deck.id, name: deck.name }); }}
+                                className="p-2.5 text-gray-300 hover:text-blue-600 transition-colors rounded-full"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setDeleteModal({ id: deck.id, name: deck.name }); }}
+                                className="p-2.5 text-gray-300 hover:text-red-500 transition-colors rounded-full"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            <div className="mb-10">
+                              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-2 pr-24 group-hover:text-blue-600 transition-colors">
+                                {deck.name}
+                              </h3>
+                              <p className="text-sm font-medium text-gray-400">{total} Karten</p>
+                            </div>
+                            
+                            <div className="mt-auto">
+                              <div className="flex items-center justify-between text-sm font-semibold text-gray-500 mb-3">
+                                <span>Fortschritt</span>
+                                <span className="text-blue-600">{mastered} / {total} gemeistert</span>
+                              </div>
+                              <div className="h-2 w-full bg-[#F5F5F7] rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out"
+                                  style={{ width: `${progressPercentage}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+
+            {/* Archive Section */}
+            <section className="pt-12 border-t border-gray-200">
+              <button 
+                onClick={() => setShowArchive(!showArchive)}
+                className="flex items-center justify-between w-full py-4 px-2 group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="p-4 bg-white shadow-sm border border-gray-100 rounded-full text-gray-400 group-hover:text-blue-600 transition-colors">
+                    <Archive className="w-6 h-6" />
+                  </div>
+                  <div className="text-left">
+                    <h2 className="text-xl font-bold tracking-tight text-gray-900 group-hover:text-blue-600 transition-colors">Mein Archiv ({archivedCards.length})</h2>
+                    <p className="text-sm text-gray-500 font-medium">Gemeisterte Karten ansehen oder wiederholen</p>
+                  </div>
+                </div>
+                <ChevronRight className={cn("w-6 h-6 text-gray-300 transition-transform", showArchive && "rotate-90")} />
+              </button>
+
+              <AnimatePresence>
+                {showArchive && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-6 space-y-4 px-2 pb-10">
+                      {archivedCards.length === 0 ? (
+                        <p className="text-gray-400 text-center py-10 font-medium">Dein Archiv ist leer. Meistere Karten, um sie hier zu sehen.</p>
+                      ) : (
+                        archivedCards.map(({ deck, card }) => (
+                          <div key={card.id} className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-[24px] shadow-[0_4px_20px_rgb(0,0,0,0.02)] border border-gray-100">
+                            <div>
+                              <p className="font-medium text-gray-900 mb-1 text-lg tracking-tight">
+                                {card.sentence.replace("___", card.targetWord)}
+                              </p>
+                              <p className="text-sm text-gray-500 mb-2">{card.translation}</p>
+                              <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
+                                {deck.name}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => unarchiveCard(deck.id, card.id)}
+                              className="flex items-center justify-center gap-2 p-3 text-sm font-semibold text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-2xl transition-colors shrink-0"
+                              title="Lernen wiederholen"
+                            >
+                              <ArchiveRestore className="w-5 h-5" />
+                              <span>Wiederholen</span>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </section>
+          </div>
+        </motion.div>
+      </main>
     </>
   );
 }
