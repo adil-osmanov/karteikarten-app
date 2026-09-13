@@ -1,20 +1,26 @@
 "use client";
 
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { useEffect, useState, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Trash2, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
-  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight
+  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight,
+  Clock
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { createClient } from "@supabase/supabase-js";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder";
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // --- AUDIO FEEDBACK ---
 
@@ -93,155 +99,200 @@ export interface Deck {
 
 interface DeckState {
   decks: Deck[];
-  correctAnswersTotal: number;
+  isLoaded: boolean;
+  setDecks: (decks: Deck[]) => void;
   addDeck: (deck: Deck) => void;
   deleteDeck: (deckId: string) => void;
   renameDeck: (deckId: string, newName: string) => void;
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
-  getUserStats: () => { level: number; xpInCurrentLevel: number; xpForNextLevel: number; totalXp: number };
 }
 
-const useStore = create<DeckState>()(
-  persist(
-    (set, get) => ({
-      decks: [],
-      correctAnswersTotal: 0,
+const useStore = create<DeckState>()((set, get) => ({
+  decks: [],
+  isLoaded: false,
+  
+  setDecks: (decks) => set({ decks, isLoaded: true }),
+  
+  addDeck: (deck) => {
+    // Optimistic Update
+    set((state) => ({ decks: [...state.decks, deck] }));
+    
+    // Background Supabase Insert
+    const insertData = async () => {
+      const { error: deckError } = await supabase.from('decks').insert({
+        id: deck.id,
+        name: deck.name,
+        category: deck.category
+      });
+      if (deckError) console.error("Deck Insert Error:", deckError);
       
-      addDeck: (deck) => set((state) => ({ decks: [...state.decks, deck] })),
+      const cardsToInsert = deck.cards.map(c => ({
+        id: c.id,
+        deck_id: deck.id,
+        targetWord: c.targetWord,
+        sentence: c.sentence,
+        translation: c.translation,
+        options: c.options,
+        masteryLevel: c.masteryLevel,
+        isArchived: c.isArchived,
+        nextReviewDate: c.nextReviewDate,
+        interval: c.interval,
+        repetitions: c.repetitions
+      }));
       
-      deleteDeck: (deckId) => set((state) => ({ 
-        decks: state.decks.filter(d => d.id !== deckId) 
-      })),
-      
-      renameDeck: (deckId, newName) => set((state) => ({
-        decks: state.decks.map(d => d.id === deckId ? { ...d, name: newName } : d)
-      })),
+      const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
+      if (cardsError) console.error("Cards Insert Error:", cardsError);
+    };
+    insertData();
+  },
+  
+  deleteDeck: (deckId) => {
+    set((state) => ({ decks: state.decks.filter(d => d.id !== deckId) }));
+    supabase.from('decks').delete().eq('id', deckId).then(({error}) => {
+      if (error) console.error("Delete Deck Error:", error);
+    });
+  },
+  
+  renameDeck: (deckId, newName) => {
+    set((state) => ({
+      decks: state.decks.map(d => d.id === deckId ? { ...d, name: newName } : d)
+    }));
+    supabase.from('decks').update({ name: newName }).eq('id', deckId).then(({error}) => {
+      if (error) console.error("Rename Deck Error:", error);
+    });
+  },
 
-      answerCard: (deckId, cardId, isCorrect, isHilfe) => {
-        set((state) => {
-          const newDecks = [...state.decks];
-          const deck = newDecks.find((d) => d.id === deckId);
-          if (!deck) return state;
+  answerCard: (deckId, cardId, isCorrect, isHilfe) => {
+    let updatedCard: any = null;
 
-          const cardIndex = deck.cards.findIndex((c) => c.id === cardId);
-          if (cardIndex === -1) return state;
+    set((state) => {
+      const newDecks = [...state.decks];
+      const deck = newDecks.find((d) => d.id === deckId);
+      if (!deck) return state;
 
-          const card = { ...deck.cards[cardIndex] };
+      const cardIndex = deck.cards.findIndex((c) => c.id === cardId);
+      if (cardIndex === -1) return state;
 
-          if (card.isArchived) {
-            // SRS Logic for already mastered cards
-            if (isCorrect && !isHilfe) {
-              card.repetitions = (card.repetitions || 0) + 1;
-              const r = card.repetitions;
-              card.interval = r === 1 ? 1 : r === 2 ? 3 : r === 3 ? 7 : r === 4 ? 14 : 30;
-              card.nextReviewDate = Date.now() + card.interval * 86400000; // ms in a day
-            } else {
-              // Failed review or Hilfe used - send back to normal learning
-              card.repetitions = 0;
-              card.interval = 0;
-              card.nextReviewDate = null;
-              card.isArchived = false;
-              card.masteryLevel = 0;
-            }
-          } else {
-            // Normal learning logic
-            if (isCorrect && !isHilfe) {
-              card.masteryLevel += 1;
-              if (card.masteryLevel > 3) {
-                card.masteryLevel = 3;
-                card.isArchived = true;
-                // Init SRS
-                card.repetitions = 1;
-                card.interval = 1;
-                card.nextReviewDate = Date.now() + 86400000;
-              }
-            } else {
-              if (!isCorrect && !isHilfe) {
-                card.masteryLevel = 0; // wrong option resets completely
-              } else if (isHilfe) {
-                card.masteryLevel = Math.max(0, card.masteryLevel - 1); // Hilfe deducts 1
-              }
-            }
-          }
+      const card = { ...deck.cards[cardIndex] };
 
-          deck.cards[cardIndex] = card;
-          const newTotal = isCorrect && !isHilfe ? state.correctAnswersTotal + 1 : state.correctAnswersTotal;
-
-          return { decks: newDecks, correctAnswersTotal: newTotal };
-        });
-      },
-
-      getUserStats: () => {
-        const totalXp = get().correctAnswersTotal * 10;
-        let currentLvl = 1;
-        let xpAccumulated = 0;
-        let nextLvlReq = 100;
-        
-        while (totalXp >= xpAccumulated + nextLvlReq) {
-          xpAccumulated += nextLvlReq;
-          currentLvl++;
-          nextLvlReq = Math.floor(nextLvlReq * 1.5);
+      if (card.isArchived) {
+        if (isCorrect && !isHilfe) {
+          card.repetitions = (card.repetitions || 0) + 1;
+          const r = card.repetitions;
+          card.interval = r === 1 ? 1 : r === 2 ? 3 : r === 3 ? 7 : r === 4 ? 14 : 30;
+          card.nextReviewDate = Date.now() + card.interval * 86400000;
+        } else {
+          card.repetitions = 0;
+          card.interval = 0;
+          card.nextReviewDate = null;
+          card.isArchived = false;
+          card.masteryLevel = 0;
         }
-        
-        return {
-          level: currentLvl,
-          xpInCurrentLevel: totalXp - xpAccumulated,
-          xpForNextLevel: nextLvlReq,
-          totalXp
-        };
+      } else {
+        if (isCorrect && !isHilfe) {
+          card.masteryLevel += 1;
+          if (card.masteryLevel > 3) {
+            card.masteryLevel = 3;
+            card.isArchived = true;
+            card.repetitions = 1;
+            card.interval = 1;
+            card.nextReviewDate = Date.now() + 86400000;
+          }
+        } else {
+          if (!isCorrect && !isHilfe) {
+            card.masteryLevel = 0; 
+          } else if (isHilfe) {
+            card.masteryLevel = Math.max(0, card.masteryLevel - 1); 
+          }
+        }
       }
-    }),
-    {
-      name: "karten-storage-v3",
+
+      deck.cards[cardIndex] = card;
+      updatedCard = card;
+
+      return { decks: newDecks };
+    });
+
+    if (updatedCard) {
+      supabase.from('cards').update({
+        masteryLevel: updatedCard.masteryLevel,
+        isArchived: updatedCard.isArchived,
+        nextReviewDate: updatedCard.nextReviewDate,
+        interval: updatedCard.interval,
+        repetitions: updatedCard.repetitions
+      }).eq('id', cardId).then(({error}) => {
+         if (error) console.error("Update Card Error:", error);
+      });
     }
-  )
-);
+  }
+}));
+
+const useStats = () => {
+  const decks = useStore(state => state.decks);
+  let totalCorrectAnswers = 0;
+  decks.forEach(deck => {
+    deck.cards.forEach(card => {
+      totalCorrectAnswers += card.masteryLevel;
+      totalCorrectAnswers += card.repetitions;
+    });
+  });
+
+  const totalXp = totalCorrectAnswers * 10;
+  let currentLvl = 1;
+  let xpAccumulated = 0;
+  let nextLvlReq = 100;
+  
+  while (totalXp >= xpAccumulated + nextLvlReq) {
+    xpAccumulated += nextLvlReq;
+    currentLvl++;
+    nextLvlReq = Math.floor(nextLvlReq * 1.5);
+  }
+  
+  return {
+    level: currentLvl,
+    xpInCurrentLevel: totalXp - xpAccumulated,
+    xpForNextLevel: nextLvlReq,
+    totalXp
+  };
+};
 
 // --- LEVEL UP MODAL ---
 
 function LevelUpModal() {
-  const getUserStats = useStore((state) => state.getUserStats);
-  const correctAnswersTotal = useStore((state) => state.correctAnswersTotal);
+  const stats = useStats();
   
   const [showModal, setShowModal] = useState(false);
   const [currentLevel, setCurrentLevel] = useState<number | null>(null);
 
   useEffect(() => {
     if (currentLevel === null) {
-      setCurrentLevel(getUserStats().level);
-      return;
-    }
-
-    const newStats = getUserStats();
-    if (newStats.level > currentLevel) {
-      setCurrentLevel(newStats.level);
+      setCurrentLevel(stats.level);
+    } else if (stats.level > currentLevel) {
       setShowModal(true);
-      const timer = setTimeout(() => setShowModal(false), 3000);
-      return () => clearTimeout(timer);
+      setCurrentLevel(stats.level);
+      playFeedbackSound(true);
     }
-  }, [correctAnswersTotal, getUserStats, currentLevel]);
+  }, [stats.level, currentLevel]);
 
   return (
     <AnimatePresence>
       {showModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/20 backdrop-blur-md"
+            className="absolute inset-0 bg-black/20 backdrop-blur-sm"
             onClick={() => setShowModal(false)}
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="relative bg-white/90 backdrop-blur-xl rounded-3xl p-10 shadow-2xl shadow-black/10 flex flex-col items-center justify-center w-full max-w-sm border border-white/50"
-            onClick={() => setShowModal(false)}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="relative bg-white/90 backdrop-blur-xl rounded-[32px] p-8 md:p-12 w-full max-w-sm shadow-2xl border border-white text-center"
           >
-            <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-6">
-              <span className="text-4xl font-bold text-blue-600">🏆</span>
+            <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
             </div>
             <h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-br from-blue-500 to-blue-700 mb-2 text-center">
               Level Aufstieg!
@@ -259,27 +310,23 @@ function LevelUpModal() {
 // --- LEVEL PROGRESS HEADER ---
 
 function LevelProgress() {
-  const correctAnswersTotal = useStore((state) => state.correctAnswersTotal);
-  const getUserStats = useStore((state) => state.getUserStats);
-  
   const [isMounted, setIsMounted] = useState(false);
+  const stats = useStats();
 
   useEffect(() => setIsMounted(true), []);
   if (!isMounted) return <div className="h-10 w-32" />; 
 
-  const stats = getUserStats();
-  const progressPercentage = (stats.xpInCurrentLevel / stats.xpForNextLevel) * 100;
-
   return (
     <div className="flex flex-col items-end shrink-0">
-      <div className="text-sm font-bold text-gray-900 mb-1.5 tracking-tight">
-        Lvl {stats.level} <span className="text-gray-300 font-normal mx-1.5">•</span> 
-        <span className="text-gray-500 font-semibold">{stats.xpInCurrentLevel} / {stats.xpForNextLevel} XP</span>
+      <div className="text-sm font-bold tracking-tight text-gray-900 mb-2 bg-white px-4 py-1.5 rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-gray-100 flex items-center gap-2">
+        <span className="text-blue-600">Lvl {stats.level}</span>
+        <span className="text-gray-300">•</span>
+        <span className="text-gray-500">{stats.xpInCurrentLevel} / {stats.xpForNextLevel} XP</span>
       </div>
-      <div className="h-1.5 w-32 bg-gray-200 rounded-full overflow-hidden">
+      <div className="w-48 h-2.5 bg-gray-200/60 rounded-full overflow-hidden">
         <div 
           className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out"
-          style={{ width: `${progressPercentage}%` }}
+          style={{ width: `${(stats.xpInCurrentLevel / stats.xpForNextLevel) * 100}%` }}
         />
       </div>
     </div>
@@ -660,7 +707,7 @@ function StudyCard({
 // --- MAIN APP COMPONENT ---
 
 export default function App() {
-  const { decks, addDeck, deleteDeck, renameDeck } = useStore();
+  const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
@@ -676,9 +723,21 @@ export default function App() {
 
   useEffect(() => {
     setIsMounted(true);
-  }, []);
+    const fetchDecks = async () => {
+      const { data, error } = await supabase
+        .from('decks')
+        .select('*, cards(*)');
+        
+      if (error) {
+        console.error("Error fetching decks:", error);
+      } else if (data) {
+        setDecks(data as Deck[]);
+      }
+    };
+    fetchDecks();
+  }, [setDecks]);
 
-  if (!isMounted) return <main className="min-h-screen bg-[#F5F5F7] animate-pulse" />;
+  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#F5F5F7] animate-pulse" />;
 
   if (activeDeckId) {
     return (
