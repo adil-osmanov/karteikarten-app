@@ -1085,6 +1085,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  )}
 
                   {sortedDecks.length > limit && (
                     <button 
