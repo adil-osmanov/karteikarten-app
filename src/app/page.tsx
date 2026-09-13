@@ -6,7 +6,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { 
   Trash2, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
-  Archive, ArchiveRestore, LifeBuoy
+  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -651,6 +651,8 @@ export default function App() {
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -729,6 +731,10 @@ export default function App() {
     fileInputRef.current?.click();
   };
 
+  const toggleCategory = (cat: string) => {
+    setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+  };
+
   const categories = ["Grammatik", "Wörter"];
   
   const archivedCards: { deckId: string, deckName: string, card: Flashcard }[] = [];
@@ -737,6 +743,62 @@ export default function App() {
       if (card.isArchived) archivedCards.push({ deckId: deck.id, deckName: deck.name, card });
     });
   });
+
+  const renderDeckCard = (deck: Deck, isCompleted: boolean) => {
+    const total = deck.cards.length;
+    const mastered = deck.cards.filter(c => c.isArchived).length;
+    const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
+
+    return (
+      <div 
+        key={deck.id}
+        onClick={() => setActiveDeckId(deck.id)}
+        className={cn(
+          "group cursor-pointer bg-white rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 h-full flex flex-col relative border border-gray-100",
+          isCompleted && "opacity-60 hover:opacity-100"
+        )}
+      >
+        <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            onClick={(e) => { e.stopPropagation(); setRenameInput(deck.name); setRenameModal({ id: deck.id, name: deck.name }); }}
+            className="p-2.5 text-gray-300 hover:text-blue-600 transition-all duration-100 active:scale-[0.98] rounded-full"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setDeleteModal({ id: deck.id, name: deck.name }); }}
+            className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="mb-10">
+          <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-2 pr-24 group-hover:text-blue-600 transition-colors flex items-center gap-2">
+            {deck.name}
+            {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />}
+          </h3>
+          <p className="text-sm font-medium text-gray-400">{total} Karten</p>
+        </div>
+        
+        <div className="mt-auto">
+          <div className="flex items-center justify-between text-sm font-semibold text-gray-500 mb-3">
+            <span>Fortschritt</span>
+            <span className={isCompleted ? "text-green-600" : "text-blue-600"}>{mastered} / {total} gemeistert</span>
+          </div>
+          <div className="h-2 w-full bg-[#F5F5F7] rounded-full overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-700 ease-out",
+                isCompleted ? "bg-green-500" : "bg-blue-600"
+              )}
+              style={{ width: `${progressPercentage}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -810,7 +872,7 @@ export default function App() {
 
       <main className="max-w-4xl mx-auto px-6 py-12 md:py-24">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
-          <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-16">
+          <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
             <div>
               <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-gray-900 mb-3">Meine Bibliothek</h1>
               <p className="text-base md:text-lg text-gray-500 font-medium">Lerne Grammatik und Vokabeln.</p>
@@ -818,24 +880,42 @@ export default function App() {
             <LevelProgress />
           </header>
 
+          <div className="relative mb-12">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <Search className="h-5 w-5 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              placeholder="Suchen..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-gray-200/60 hover:bg-gray-200 focus:bg-white text-gray-900 rounded-[20px] pl-11 pr-4 py-3.5 outline-none transition-colors border border-transparent focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 font-medium placeholder:text-gray-500"
+            />
+          </div>
+
           <div className="space-y-12">
             {categories.map((categoryName) => {
-              const categoryDecks = decks.filter(d => d.category === categoryName);
+              const categoryDecks = decks.filter(d => 
+                d.category === categoryName && 
+                d.name.toLowerCase().includes(searchQuery.toLowerCase())
+              );
               
-              // Smart sort: incomplete first, completed last
-              const sortedDecks = [...categoryDecks].sort((a, b) => {
-                const aTotal = a.cards.length;
-                const aMastered = a.cards.filter(c => c.isArchived).length;
-                const aIsCompleted = aTotal > 0 && aTotal === aMastered;
-                
-                const bTotal = b.cards.length;
-                const bMastered = b.cards.filter(c => c.isArchived).length;
-                const bIsCompleted = bTotal > 0 && bTotal === bMastered;
-                
-                if (aIsCompleted && !bIsCompleted) return 1;
-                if (!aIsCompleted && bIsCompleted) return -1;
-                return 0;
+              if (categoryDecks.length === 0 && searchQuery !== "") return null;
+
+              const inProgressDecks: Deck[] = [];
+              const completedDecks: Deck[] = [];
+
+              categoryDecks.forEach(deck => {
+                const total = deck.cards.length;
+                const mastered = deck.cards.filter(c => c.isArchived).length;
+                if (total > 0 && mastered === total) {
+                  completedDecks.push(deck);
+                } else {
+                  inProgressDecks.push(deck);
+                }
               });
+
+              const isExpanded = expandedCategories[categoryName] || false;
 
               return (
                 <section key={categoryName}>
@@ -857,63 +937,39 @@ export default function App() {
                       <p className="text-gray-400 text-sm font-medium">Noch keine Decks</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {sortedDecks.map((deck) => {
-                        const total = deck.cards.length;
-                        const mastered = deck.cards.filter(c => c.isArchived).length;
-                        const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
-                        const isCompleted = total > 0 && mastered === total;
-
-                        return (
-                          <div 
-                            key={deck.id}
-                            onClick={() => setActiveDeckId(deck.id)}
-                            className={cn(
-                              "group cursor-pointer bg-white rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 h-full flex flex-col relative border border-gray-100",
-                              isCompleted && "opacity-60 hover:opacity-100"
-                            )}
+                    <div className="space-y-6">
+                      {inProgressDecks.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {inProgressDecks.map(deck => renderDeckCard(deck, false))}
+                        </div>
+                      )}
+                      
+                      {completedDecks.length > 0 && (
+                        <div className="mt-4">
+                          <button 
+                            onClick={() => toggleCategory(categoryName)}
+                            className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-gray-900 transition-colors mx-2 mb-4 focus:outline-none"
                           >
-                            <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setRenameInput(deck.name); setRenameModal({ id: deck.id, name: deck.name }); }}
-                                className="p-2.5 text-gray-300 hover:text-blue-600 transition-all duration-100 active:scale-[0.98] rounded-full"
+                            <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
+                            <span>{completedDecks.length} erledigte Decks {isExpanded ? "ausblenden" : "anzeigen"}</span>
+                          </button>
+                          
+                          <AnimatePresence>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="overflow-hidden"
                               >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setDeleteModal({ id: deck.id, name: deck.name }); }}
-                                className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-
-                            <div className="mb-10">
-                              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-2 pr-24 group-hover:text-blue-600 transition-colors flex items-center gap-2">
-                                {deck.name}
-                                {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />}
-                              </h3>
-                              <p className="text-sm font-medium text-gray-400">{total} Karten</p>
-                            </div>
-                            
-                            <div className="mt-auto">
-                              <div className="flex items-center justify-between text-sm font-semibold text-gray-500 mb-3">
-                                <span>Fortschritt</span>
-                                <span className={isCompleted ? "text-green-600" : "text-blue-600"}>{mastered} / {total} gemeistert</span>
-                              </div>
-                              <div className="h-2 w-full bg-[#F5F5F7] rounded-full overflow-hidden">
-                                <div
-                                  className={cn(
-                                    "h-full rounded-full transition-all duration-700 ease-out",
-                                    isCompleted ? "bg-green-500" : "bg-blue-600"
-                                  )}
-                                  style={{ width: `${progressPercentage}%` }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+                                  {completedDecks.map(deck => renderDeckCard(deck, true))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      )}
                     </div>
                   )}
                 </section>
