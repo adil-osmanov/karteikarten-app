@@ -297,6 +297,7 @@ function StudyInterface({
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [roundCounter, setRoundCounter] = useState(0);
 
   useEffect(() => {
     if (reviewCards) {
@@ -320,7 +321,7 @@ function StudyInterface({
           <p className="text-lg text-gray-500 mb-10">Du hast alle Karten in diesem Deck gemeistert.</p>
           <button
             onClick={onBack}
-            className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-95"
+            className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]"
           >
             Zurück zur Bibliothek
           </button>
@@ -342,6 +343,7 @@ function StudyInterface({
         if (deck) {
           setActiveCards(deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c })));
           setCurrentIndex(0);
+          setRoundCounter(prev => prev + 1);
         }
       }
     }
@@ -361,7 +363,7 @@ function StudyInterface({
       <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
           <StudyCard
-            key={currentCard.id + currentIndex} 
+            key={`${currentCard.id}-${currentIndex}-${roundCounter}`}
             card={currentCard}
             onAnswer={(correct, isHilfe) => {
               if (!reviewCards) {
@@ -544,7 +546,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
       </div>
 
       <div className="flex flex-col items-center text-center">
-        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg mb-8">
+        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg mb-2">
           {parts[0]}
           
           {phase === "Answer" ? (
@@ -582,6 +584,10 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
           {parts[1]}
         </div>
 
+        <p className="text-lg text-gray-500 w-full max-w-lg mb-6">
+          {card.translation}
+        </p>
+
         {phase === "Question" && !isMultipleChoice && (
           <button 
             onClick={handleHilfe}
@@ -617,13 +623,8 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center w-full"
+            className="flex flex-col items-center w-full mt-4"
           >
-            <div className="text-center mb-6 w-full pt-6 border-t border-gray-100">
-              <p className="text-[11px] font-bold tracking-widest uppercase text-gray-400 mb-2">Übersetzung</p>
-              <p className="text-base text-gray-600">{card.translation}</p>
-            </div>
-
             <button
               onClick={onNext}
               autoFocus
