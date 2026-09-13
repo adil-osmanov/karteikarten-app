@@ -20,10 +20,19 @@ export default function DeckPage({ params }: { params: { deckId: string } | Prom
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
 
+  const shuffle = <T,>(arr: T[]): T[] => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
   useEffect(() => {
     setIsMounted(true);
     if (deck) {
-      const cardsToStudy = deck.cards.filter((c) => !c.isArchived);
+      const cardsToStudy = shuffle(deck.cards.filter((c) => !c.isArchived));
       setActiveCards(cardsToStudy);
     }
   }, [deck]);
@@ -60,7 +69,7 @@ export default function DeckPage({ params }: { params: { deckId: string } | Prom
     if (currentIndex < activeCards.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     } else {
-      const nextRoundCards = deck.cards.filter((c) => !c.isArchived);
+      const nextRoundCards = shuffle(deck.cards.filter((c) => !c.isArchived));
       setActiveCards(nextRoundCards);
       setCurrentIndex(0);
     }
