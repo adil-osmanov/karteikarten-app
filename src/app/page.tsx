@@ -344,7 +344,7 @@ function StudyInterface({
   onBack: () => void,
   reviewCards?: { deckId: string, card: Flashcard }[]
 }) {
-  const { decks, answerCard } = useStore();
+  const answerCard = useStore(state => state.answerCard);
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -354,13 +354,13 @@ function StudyInterface({
     if (reviewCards) {
       setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
     } else if (deckId) {
-      const deck = decks.find((d) => d.id === deckId);
+      const deck = useStore.getState().decks.find((d) => d.id === deckId);
       if (deck) {
         const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
         setActiveCards(active.sort(() => Math.random() - 0.5));
       }
     }
-  }, [deckId, decks, reviewCards]);
+  }, [deckId, reviewCards]);
 
   if (activeCards.length === 0) {
     return (
@@ -393,7 +393,7 @@ function StudyInterface({
       if (reviewCards) {
         onBack(); // End of review mode
       } else {
-        const deck = decks.find((d) => d.id === deckId);
+        const deck = useStore.getState().decks.find((d) => d.id === deckId);
         if (deck) {
           const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c }));
           setActiveCards(active.sort(() => Math.random() - 0.5));
