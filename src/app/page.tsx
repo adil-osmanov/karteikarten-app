@@ -734,6 +734,7 @@ export default function App() {
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
 
@@ -993,6 +994,19 @@ export default function App() {
             <LevelProgress />
           </header>
 
+          <div className="mb-10 relative">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <Search className="h-5 w-5 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              className="w-full bg-white border border-gray-100 text-gray-900 rounded-2xl pl-12 pr-4 py-4 shadow-[0_4px_20px_rgb(0,0,0,0.02)] outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-all"
+              placeholder="Suchen..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
           {dueCards.length > 0 && (
             <div className="mb-12 bg-blue-50 border border-blue-100 rounded-[28px] p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
               <div className="flex items-center gap-4">
@@ -1015,7 +1029,10 @@ export default function App() {
 
           <div className="space-y-12">
             {categories.map((categoryName) => {
-              const categoryDecks = decks.filter(d => d.category === categoryName);
+              const categoryDecks = decks.filter(d => 
+                d.category === categoryName && 
+                d.name.toLowerCase().includes(searchQuery.toLowerCase())
+              );
 
               const sortedDecks = [...categoryDecks].sort((a, b) => {
                 const aTotal = a.cards.length;
