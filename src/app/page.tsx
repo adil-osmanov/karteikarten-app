@@ -998,8 +998,6 @@ export default function App() {
           <div className="space-y-12">
             {categories.map((categoryName) => {
               const categoryDecks = decks.filter(d => d.category === categoryName);
-              
-              if (categoryDecks.length === 0) return null;
 
               const sortedDecks = [...categoryDecks].sort((a, b) => {
                 const aTotal = a.cards.length;
@@ -1048,12 +1046,17 @@ export default function App() {
                     </button>
                   </div>
                   
-                  <div className="space-y-6">
-                    {inProgressDecks.length > 0 && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {inProgressDecks.map(deck => renderDeckCard(deck, false))}
-                      </div>
-                    )}
+                  {categoryDecks.length === 0 ? (
+                    <div className="py-8 text-center bg-white border border-gray-100 rounded-[28px] shadow-[0_4px_20px_rgb(0,0,0,0.02)]">
+                      <p className="text-gray-400 text-sm font-medium">Noch keine Decks in dieser Kategorie.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {inProgressDecks.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {inProgressDecks.map(deck => renderDeckCard(deck, false))}
+                        </div>
+                      )}
                     
                     {completedDecks.length > 0 && (
                       <div className="mt-4">
