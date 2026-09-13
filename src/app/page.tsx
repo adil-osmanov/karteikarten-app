@@ -344,7 +344,7 @@ function StudyInterface({
   onBack: () => void,
   reviewCards?: { deckId: string, card: Flashcard }[]
 }) {
-  const answerCard = useStore(state => state.answerCard);
+  const { answerCard, decks } = useStore();
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -384,7 +384,9 @@ function StudyInterface({
     );
   }
 
-  const { deckId: currentDeckId, card: currentCard } = activeCards[currentIndex];
+  const { deckId: currentDeckId, card: currentCardSnapshot } = activeCards[currentIndex];
+  // Get live card to instantly reflect masteryLevel updates (blue dots)
+  const liveCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
   
   const handleNext = () => {
     if (currentIndex < activeCards.length - 1) {
@@ -418,11 +420,11 @@ function StudyInterface({
       <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
           <StudyCard
-            key={`${currentCard.id}-${currentIndex}-${roundCounter}`}
-            card={currentCard}
+            key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+            card={liveCard}
             forceInputMode={!!reviewCards}
             onAnswer={(correct, isHilfe) => {
-              answerCard(currentDeckId, currentCard.id, correct, isHilfe);
+              answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
             }}
             onNext={handleNext}
           />
