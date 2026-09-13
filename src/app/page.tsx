@@ -129,6 +129,7 @@ const useStore = create<DeckState>()((set, get) => ({
     
     if (deckError) {
       console.error("Supabase Deck Insert Error:", deckError.message);
+      alert(`Fehler beim Speichern des Decks in der Datenbank: ${deckError.message}`);
       set({ decks: previousDecks });
       return;
     }
@@ -150,6 +151,7 @@ const useStore = create<DeckState>()((set, get) => ({
     const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
     if (cardsError) {
       console.error("Supabase Cards Insert Error:", cardsError.message);
+      alert(`Fehler beim Speichern der Karten: ${cardsError.message}`);
       set({ decks: previousDecks });
     }
   },
