@@ -77,6 +77,8 @@ const playFeedbackSound = (isCorrect: boolean) => {
 
 // --- STORE & TYPES ---
 
+export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1-C2';
+
 export interface Flashcard {
   id: string;
   targetWord: string;
@@ -94,6 +96,7 @@ export interface Deck {
   id: string;
   name: string;
   category: string;
+  level?: CEFRLevel;
   cards: Flashcard[];
 }
 
@@ -120,7 +123,8 @@ const useStore = create<DeckState>()((set, get) => ({
     const { error: deckError } = await supabase.from('decks').insert({
       id: deck.id,
       name: deck.name,
-      category: deck.category
+      category: deck.category,
+      level: deck.level || 'A1'
     });
     
     if (deckError) {
@@ -735,7 +739,7 @@ export default function App() {
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   
-  const [uploadCategory, setUploadCategory] = useState<string | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<{ category: string, level: CEFRLevel } | null>(null);
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
@@ -789,7 +793,7 @@ export default function App() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !uploadCategory) return;
+    if (!file || !uploadTarget) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -823,7 +827,8 @@ export default function App() {
         addDeck({
           id: crypto.randomUUID(),
           name: defaultName,
-          category: uploadCategory,
+          category: uploadTarget.category,
+          level: uploadTarget.level,
           cards
         });
       } else {
@@ -831,13 +836,13 @@ export default function App() {
       }
       
       if (fileInputRef.current) fileInputRef.current.value = "";
-      setUploadCategory(null);
+      setUploadTarget(null);
     };
     reader.readAsText(file);
   };
 
-  const handlePlusClick = (category: string) => {
-    setUploadCategory(category);
+  const handlePlusClick = (category: string, level: CEFRLevel) => {
+    setUploadTarget({ category, level });
     fileInputRef.current?.click();
   };
 
@@ -1032,110 +1037,136 @@ export default function App() {
             </div>
           )}
 
-          <div className="space-y-12">
+          <div className="space-y-16">
             {categories.map((categoryName) => {
-              const categoryDecks = decks.filter(d => 
-                d.category === categoryName && 
-                d.name.toLowerCase().includes(searchQuery.toLowerCase())
-              );
-
-              const sortedDecks = [...categoryDecks].sort((a, b) => {
-                const aTotal = a.cards.length;
-                const aMastered = a.cards.filter(c => c.isArchived).length;
-                const aIsCompleted = aTotal > 0 && aTotal === aMastered;
-                
-                const bTotal = b.cards.length;
-                const bMastered = b.cards.filter(c => c.isArchived).length;
-                const bIsCompleted = bTotal > 0 && bTotal === bMastered;
-                
-                if (aIsCompleted && !bIsCompleted) return 1;
-                if (!aIsCompleted && bIsCompleted) return -1;
-                return 0;
-              });
-
-              const limit = visibleLimits[categoryName] || 10;
-              const visibleDecks = sortedDecks.slice(0, limit);
-
-              const inProgressDecks: Deck[] = [];
-              const completedDecks: Deck[] = [];
-
-              visibleDecks.forEach(deck => {
-                const total = deck.cards.length;
-                const mastered = deck.cards.filter(c => c.isArchived).length;
-                if (total > 0 && mastered === total) {
-                  completedDecks.push(deck);
-                } else {
-                  inProgressDecks.push(deck);
-                }
-              });
-
-              const isExpanded = expandedCategories[categoryName] || false;
+              const cefrLevels: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
+              const levelConfig: Record<CEFRLevel, { label: string, badgeClass: string }> = {
+                'A1': { label: 'A1 - Anfänger', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+                'A2': { label: 'A2 - Grundlegende Kenntnisse', badgeClass: 'bg-sky-50 text-sky-700 border-sky-200' },
+                'B1': { label: 'B1 - Fortgeschrittene', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
+                'B2': { label: 'B2 - Selbstständige Sprachverwendung', badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+                'C1-C2': { label: 'C1-C2 - Fachkundige Sprachkenntnisse', badgeClass: 'bg-purple-50 text-purple-700 border-purple-200' }
+              };
 
               return (
-                <section key={categoryName}>
-                  <div className="flex items-center gap-3 mb-6 px-2">
-                    <h2 className="text-2xl font-bold tracking-tight text-gray-900">{categoryName}</h2>
-                    <button 
-                      onClick={() => handlePlusClick(categoryName)}
-                      className="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-500 rounded-full transition-all duration-100 active:scale-[0.98]"
-                      title="Deck hinzufügen"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M7 1V13M1 7H13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                      </svg>
-                    </button>
-                  </div>
+                <div key={categoryName} className="space-y-10">
+                  <h2 className="text-3xl font-extrabold tracking-tight text-gray-900 border-b border-gray-200 pb-4">{categoryName}</h2>
                   
-                  {categoryDecks.length === 0 ? (
-                    <div className="py-8 text-center bg-white border border-gray-100 rounded-[28px] shadow-[0_4px_20px_rgb(0,0,0,0.02)]">
-                      <p className="text-gray-400 text-sm font-medium">Noch keine Decks in dieser Kategorie.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-6">
-                      {inProgressDecks.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {inProgressDecks.map(deck => renderDeckCard(deck, false))}
-                        </div>
-                      )}
-                    
-                    {completedDecks.length > 0 && (
-                      <div className="mt-4">
-                        <button 
-                          onClick={() => toggleCategory(categoryName)}
-                          className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-gray-900 transition-colors mx-2 mb-4 focus:outline-none"
-                        >
-                          <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
-                          <span>{completedDecks.length} erledigte Decks {isExpanded ? "ausblenden" : "anzeigen"}</span>
-                        </button>
-                        
-                        <AnimatePresence>
-                          {isExpanded && (
-                            <motion.div
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
-                                {completedDecks.map(deck => renderDeckCard(deck, true))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    )}
-                  </div>
-                  )}
+                  <div className="space-y-12">
+                    {cefrLevels.map(level => {
+                      const sectionKey = `${categoryName}-${level}`;
+                      const levelDecks = decks.filter(d => 
+                        d.category === categoryName && 
+                        (d.level || 'A1') === level &&
+                        d.name.toLowerCase().includes(searchQuery.toLowerCase())
+                      );
 
-                  {sortedDecks.length > limit && (
-                    <button 
-                      onClick={() => handleLoadMore(categoryName)}
-                      className="mt-8 mx-auto block px-8 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-full transition-all duration-100 active:scale-[0.98]"
-                    >
-                      Weitere {Math.min(10, sortedDecks.length - limit)} Decks laden
-                    </button>
-                  )}
-                </section>
+                      const sortedDecks = [...levelDecks].sort((a, b) => {
+                        const aTotal = a.cards.length;
+                        const aMastered = a.cards.filter(c => c.isArchived).length;
+                        const aIsCompleted = aTotal > 0 && aTotal === aMastered;
+                        
+                        const bTotal = b.cards.length;
+                        const bMastered = b.cards.filter(c => c.isArchived).length;
+                        const bIsCompleted = bTotal > 0 && bTotal === bMastered;
+                        
+                        if (aIsCompleted && !bIsCompleted) return 1;
+                        if (!aIsCompleted && bIsCompleted) return -1;
+                        return 0;
+                      });
+
+                      const limit = visibleLimits[sectionKey] || 10;
+                      const visibleDecks = sortedDecks.slice(0, limit);
+
+                      const inProgressDecks: Deck[] = [];
+                      const completedDecks: Deck[] = [];
+
+                      visibleDecks.forEach(deck => {
+                        const total = deck.cards.length;
+                        const mastered = deck.cards.filter(c => c.isArchived).length;
+                        if (total > 0 && mastered === total) {
+                          completedDecks.push(deck);
+                        } else {
+                          inProgressDecks.push(deck);
+                        }
+                      });
+
+                      const isExpanded = expandedCategories[sectionKey] || false;
+
+                      return (
+                        <section key={sectionKey}>
+                          <div className="flex flex-col md:flex-row md:items-center gap-3 mb-6 px-2">
+                            <div className={cn("px-4 py-1.5 rounded-full border text-sm font-bold shadow-sm tracking-wide", levelConfig[level].badgeClass)}>
+                              {levelConfig[level].label}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-gray-400 font-medium text-sm">{levelDecks.length} Decks</span>
+                              <button 
+                                onClick={() => handlePlusClick(categoryName, level)}
+                                className="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-500 rounded-full transition-all duration-100 active:scale-[0.98]"
+                                title="Deck hinzufügen"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                  <path d="M7 1V13M1 7H13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          
+                          {levelDecks.length === 0 ? (
+                            <div className="py-6 text-center bg-white border border-gray-100 rounded-[24px] shadow-[0_4px_20px_rgb(0,0,0,0.02)]">
+                              <p className="text-gray-400 text-sm font-medium">Noch keine Decks in diesem Level.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-6">
+                              {inProgressDecks.length > 0 && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {inProgressDecks.map(deck => renderDeckCard(deck, false))}
+                                </div>
+                              )}
+                            
+                              {completedDecks.length > 0 && (
+                                <div className="mt-4">
+                                  <button 
+                                    onClick={() => toggleCategory(sectionKey)}
+                                    className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-gray-900 transition-colors mx-2 mb-4 focus:outline-none"
+                                  >
+                                    <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
+                                    <span>{completedDecks.length} erledigte Decks {isExpanded ? "ausblenden" : "anzeigen"}</span>
+                                  </button>
+                                  
+                                  <AnimatePresence>
+                                    {isExpanded && (
+                                      <motion.div
+                                        initial={{ opacity: 0, height: 0 }}
+                                        animate={{ opacity: 1, height: "auto" }}
+                                        exit={{ opacity: 0, height: 0 }}
+                                        className="overflow-hidden"
+                                      >
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+                                          {completedDecks.map(deck => renderDeckCard(deck, true))}
+                                        </div>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {sortedDecks.length > limit && (
+                            <button 
+                              onClick={() => handleLoadMore(sectionKey)}
+                              className="mt-6 mx-auto block px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-full transition-all duration-100 active:scale-[0.98]"
+                            >
+                              Weitere {Math.min(10, sortedDecks.length - limit)} laden
+                            </button>
+                          )}
+                        </section>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
 
