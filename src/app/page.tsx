@@ -1129,26 +1129,6 @@ export default function App() {
               });
             })()}
 
-            <section className="pt-8 border-t border-gray-100">
-              <div className="bg-white/50 p-6 rounded-[28px] border border-gray-100 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-gray-100 rounded-full text-gray-500">
-                    <Archive className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-gray-900">Gesamtes Archiv</h3>
-                    <p className="text-sm text-gray-500 font-medium">{archivedCards.length} gemeistert</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => { if (archivedCards.length > 0) setReviewCards(archivedCards); }}
-                  disabled={archivedCards.length === 0}
-                  className="px-5 py-2.5 bg-gray-100 hover:bg-blue-600 hover:text-white text-gray-600 font-semibold text-sm rounded-xl transition-all disabled:opacity-50"
-                >
-                  Alle trainieren
-                </button>
-              </div>
-            </section>
           </div>
         </motion.div>
       </main>
