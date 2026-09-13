@@ -73,12 +73,15 @@ const playFeedbackSound = (isCorrect: boolean) => {
 
 export interface Flashcard {
   id: string;
-  sentence: string; 
-  targetWord: string; 
+  targetWord: string;
+  sentence: string;
   translation: string;
-  options: string[]; 
-  masteryLevel: number; // 0, 1, 2, 3, 4
+  options: string[];
+  masteryLevel: number; // 0 to 3
   isArchived: boolean;
+  nextReviewDate: number | null;
+  interval: number;
+  repetitions: number;
 }
 
 export interface Deck {
@@ -88,108 +91,109 @@ export interface Deck {
   cards: Flashcard[];
 }
 
-interface AppState {
+interface DeckState {
   decks: Deck[];
   correctAnswersTotal: number;
   addDeck: (deck: Deck) => void;
-  deleteDeck: (id: string) => void;
-  renameDeck: (id: string, newName: string) => void;
-  answerCard: (deckId: string, cardId: string, correct: boolean, isHilfe?: boolean) => void;
-  unarchiveCard: (deckId: string, cardId: string) => void;
+  deleteDeck: (deckId: string) => void;
+  renameDeck: (deckId: string, newName: string) => void;
+  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
   getUserStats: () => { level: number; xpInCurrentLevel: number; xpForNextLevel: number; totalXp: number };
 }
 
-const useStore = create<AppState>()(
+const useStore = create<DeckState>()(
   persist(
     (set, get) => ({
       decks: [],
       correctAnswersTotal: 0,
-
+      
       addDeck: (deck) => set((state) => ({ decks: [...state.decks, deck] })),
       
-      deleteDeck: (id) => set((state) => ({ 
-        decks: state.decks.filter(d => d.id !== id) 
+      deleteDeck: (deckId) => set((state) => ({ 
+        decks: state.decks.filter(d => d.id !== deckId) 
       })),
       
-      renameDeck: (id, newName) => set((state) => ({
-        decks: state.decks.map(d => d.id === id ? { ...d, name: newName } : d)
+      renameDeck: (deckId, newName) => set((state) => ({
+        decks: state.decks.map(d => d.id === deckId ? { ...d, name: newName } : d)
       })),
 
-      unarchiveCard: (deckId, cardId) => set((state) => ({
-        decks: state.decks.map(deck => {
-          if (deck.id !== deckId) return deck;
-          return {
-            ...deck,
-            cards: deck.cards.map(card => {
-              if (card.id !== cardId) return card;
-              // Revert to level 3 so they can practice text input again
-              return { ...card, isArchived: false, masteryLevel: 3 };
-            })
-          };
-        })
-      })),
+      answerCard: (deckId, cardId, isCorrect, isHilfe) => {
+        set((state) => {
+          const newDecks = [...state.decks];
+          const deck = newDecks.find((d) => d.id === deckId);
+          if (!deck) return state;
 
-      answerCard: (deckId, cardId, correct, isHilfe) => set((state) => {
-        let newTotal = state.correctAnswersTotal;
-        if (correct) {
-          newTotal += 1;
-        }
+          const cardIndex = deck.cards.findIndex((c) => c.id === cardId);
+          if (cardIndex === -1) return state;
 
-        return {
-          correctAnswersTotal: newTotal,
-          decks: state.decks.map(deck => {
-            if (deck.id !== deckId) return deck;
-            
-            return {
-              ...deck,
-              cards: deck.cards.map(card => {
-                if (card.id !== cardId) return card;
-                
-                let newLevel = card.masteryLevel;
-                if (correct) {
-                  newLevel = Math.min(newLevel + 1, 4);
-                } else if (isHilfe) {
-                  newLevel = Math.max(newLevel - 1, 0);
-                } else {
-                  newLevel = 0; // Wrong answer in multiple choice resets
-                }
-                
-                return {
-                  ...card,
-                  masteryLevel: newLevel,
-                  isArchived: newLevel === 4
-                };
-              })
-            };
-          })
-        };
-      }),
+          const card = { ...deck.cards[cardIndex] };
+
+          if (card.isArchived) {
+            // SRS Logic for already mastered cards
+            if (isCorrect && !isHilfe) {
+              card.repetitions = (card.repetitions || 0) + 1;
+              const r = card.repetitions;
+              card.interval = r === 1 ? 1 : r === 2 ? 3 : r === 3 ? 7 : r === 4 ? 14 : 30;
+              card.nextReviewDate = Date.now() + card.interval * 86400000; // ms in a day
+            } else {
+              // Failed review or Hilfe used - send back to normal learning
+              card.repetitions = 0;
+              card.interval = 0;
+              card.nextReviewDate = null;
+              card.isArchived = false;
+              card.masteryLevel = 0;
+            }
+          } else {
+            // Normal learning logic
+            if (isCorrect && !isHilfe) {
+              card.masteryLevel += 1;
+              if (card.masteryLevel > 3) {
+                card.masteryLevel = 3;
+                card.isArchived = true;
+                // Init SRS
+                card.repetitions = 1;
+                card.interval = 1;
+                card.nextReviewDate = Date.now() + 86400000;
+              }
+            } else {
+              if (!isCorrect && !isHilfe) {
+                card.masteryLevel = 0; // wrong option resets completely
+              } else if (isHilfe) {
+                card.masteryLevel = Math.max(0, card.masteryLevel - 1); // Hilfe deducts 1
+              }
+            }
+          }
+
+          deck.cards[cardIndex] = card;
+          const newTotal = isCorrect && !isHilfe ? state.correctAnswersTotal + 1 : state.correctAnswersTotal;
+
+          return { decks: newDecks, correctAnswersTotal: newTotal };
+        });
+      },
 
       getUserStats: () => {
-        const { correctAnswersTotal } = get();
-        const totalXp = correctAnswersTotal * 10;
-        
-        let level = 1;
-        let xpRequiredForNext = 100;
+        const totalXp = get().correctAnswersTotal * 10;
+        let currentLvl = 1;
         let xpAccumulated = 0;
+        let nextLvlReq = 100;
         
-        while (totalXp >= xpAccumulated + xpRequiredForNext) {
-          xpAccumulated += xpRequiredForNext;
-          level++;
-          xpRequiredForNext = level * 100;
+        while (totalXp >= xpAccumulated + nextLvlReq) {
+          xpAccumulated += nextLvlReq;
+          currentLvl++;
+          nextLvlReq = Math.floor(nextLvlReq * 1.5);
         }
-
-        const xpInCurrentLevel = totalXp - xpAccumulated;
-
+        
         return {
-          level,
-          xpInCurrentLevel,
-          xpForNextLevel: xpRequiredForNext,
+          level: currentLvl,
+          xpInCurrentLevel: totalXp - xpAccumulated,
+          xpForNextLevel: nextLvlReq,
           totalXp
         };
       }
     }),
-    { name: "karten-storage-v3" }
+    {
+      name: "karten-storage-v3",
+    }
   )
 );
 
@@ -301,11 +305,12 @@ function StudyInterface({
 
   useEffect(() => {
     if (reviewCards) {
-      setActiveCards(reviewCards);
+      setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
     } else if (deckId) {
       const deck = decks.find((d) => d.id === deckId);
       if (deck) {
-        setActiveCards(deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c })));
+        const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
+        setActiveCards(active.sort(() => Math.random() - 0.5));
       }
     }
   }, [deckId, decks, reviewCards]);
@@ -318,7 +323,9 @@ function StudyInterface({
             <CheckCircle2 className="w-12 h-12 text-green-500" />
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900 mb-4">Großartig!</h1>
-          <p className="text-lg text-gray-500 mb-10">Du hast alle Karten in diesem Deck gemeistert.</p>
+          <p className="text-lg text-gray-500 mb-10">
+            {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
+          </p>
           <button
             onClick={onBack}
             className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]"
@@ -341,7 +348,8 @@ function StudyInterface({
       } else {
         const deck = decks.find((d) => d.id === deckId);
         if (deck) {
-          setActiveCards(deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c })));
+          const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c }));
+          setActiveCards(active.sort(() => Math.random() - 0.5));
           setCurrentIndex(0);
           setRoundCounter(prev => prev + 1);
         }
@@ -365,10 +373,9 @@ function StudyInterface({
           <StudyCard
             key={`${currentCard.id}-${currentIndex}-${roundCounter}`}
             card={currentCard}
+            forceInputMode={!!reviewCards}
             onAnswer={(correct, isHilfe) => {
-              if (!reviewCards) {
-                answerCard(currentDeckId, currentCard.id, correct, isHilfe);
-              }
+              answerCard(currentDeckId, currentCard.id, correct, isHilfe);
             }}
             onNext={handleNext}
           />
@@ -378,13 +385,25 @@ function StudyInterface({
   );
 }
 
-function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (correct: boolean, isHilfe?: boolean) => void; onNext: () => void; }) {
-  const isMultipleChoice = card.masteryLevel === 0 || card.masteryLevel === 1;
+// --- STUDY CARD ---
+
+function StudyCard({ 
+  card, 
+  onAnswer, 
+  onNext,
+  forceInputMode = false
+}: { 
+  card: Flashcard, 
+  onAnswer: (correct: boolean, isHilfe: boolean) => void,
+  onNext: () => void,
+  forceInputMode?: boolean
+}) {
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
-  
   const [inputText, setInputText] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2;
 
   useEffect(() => {
     if (phase === "Question" && !isMultipleChoice && inputRef.current) {
@@ -433,7 +452,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
     if (phase !== "Question") return;
     const correct = option === card.targetWord;
     playFeedbackSound(correct);
-    onAnswer(correct);
+    onAnswer(correct, false);
     handleReveal();
   };
 
@@ -463,7 +482,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
 
     if (isValidSoFar && value.toLowerCase() === card.targetWord.toLowerCase()) {
       playFeedbackSound(true);
-      onAnswer(true);
+      onAnswer(true, false);
       handleReveal();
     }
   };
@@ -490,8 +509,6 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
     }
   };
 
-  const parts = card.sentence.split("___");
-  
   const renderInputChars = () => {
     if (inputText.length === 0) {
       return <span className="text-gray-300 tracking-normal">Tippen...</span>;
@@ -506,39 +523,40 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
     });
   };
 
+  const parts = card.sentence.split("___");
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.4, ease: "easeOut" }}
-      className="bg-white rounded-[28px] p-6 md:p-10 shadow-[0_4px_20px_rgb(0,0,0,0.03)] flex flex-col border border-gray-100 max-w-2xl mx-auto w-full"
+    <motion.div 
+      key={card.id + phase}
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.2 }}
+      className="bg-white rounded-[32px] p-6 md:p-12 shadow-[0_4px_30px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col items-center justify-between min-h-[400px]"
+      onClick={() => {
+        if (!isMultipleChoice && phase === "Question" && inputRef.current) {
+          inputRef.current.focus();
+        }
+      }}
     >
-      {/* Top Header: Speaker Left, Dots Right */}
-      <div className="flex items-center justify-between w-full mb-8">
+      <div className="w-full flex items-center justify-between mb-8">
         <button 
           onClick={() => {
-            const textToPlay = phase === "Answer" 
-              ? card.sentence.replace("___", card.targetWord)
-              : card.sentence.replace("___", "Lücke");
-            playAudio(textToPlay);
+            const fullSentence = card.sentence.replace("___", phase === "Answer" ? card.targetWord : "Lücke");
+            playAudio(fullSentence);
           }}
-          className={cn(
-            "w-10 h-10 flex items-center justify-center rounded-full transition-colors focus:outline-none shrink-0",
-            isPlayingAudio ? "bg-blue-50 text-blue-600" : "bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-          )}
-          title="Vorlesen"
+          disabled={isPlayingAudio}
+          className="w-12 h-12 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-500 rounded-full transition-all active:scale-95 disabled:opacity-50"
         >
           <Volume2 className="w-5 h-5" />
         </button>
-
         <div className="flex gap-1.5">
-          {[1, 2, 3, 4].map((levelIndicator) => (
+          {[0, 1, 2, 3].map((step) => (
             <div 
-              key={levelIndicator}
+              key={step} 
               className={cn(
-                "w-2 h-2 rounded-full transition-colors duration-500",
-                card.masteryLevel >= levelIndicator ? "bg-blue-600" : "bg-gray-200"
+                "w-2.5 h-2.5 rounded-full transition-colors",
+                card.masteryLevel > step ? "bg-blue-600" : "bg-gray-200"
               )}
             />
           ))}
@@ -642,7 +660,7 @@ function StudyCard({ card, onAnswer, onNext }: { card: Flashcard; onAnswer: (cor
 // --- MAIN APP COMPONENT ---
 
 export default function App() {
-  const { decks, addDeck, deleteDeck, renameDeck, unarchiveCard } = useStore();
+  const { decks, addDeck, deleteDeck, renameDeck } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
@@ -651,8 +669,8 @@ export default function App() {
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -703,7 +721,10 @@ export default function App() {
             translation: parts[2],
             options,
             masteryLevel: 0,
-            isArchived: false
+            isArchived: false,
+            nextReviewDate: null,
+            interval: 0,
+            repetitions: 0
           });
         }
       });
@@ -735,8 +756,21 @@ export default function App() {
     setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
   };
 
+  const handleLoadMore = (cat: string) => {
+    setVisibleLimits(prev => ({ ...prev, [cat]: (prev[cat] || 10) + 10 }));
+  };
+
   const categories = ["Grammatik", "Wörter"];
   
+  const dueCards: { deckId: string, card: Flashcard }[] = [];
+  decks.forEach(deck => {
+    deck.cards.forEach(card => {
+      if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now()) {
+        dueCards.push({ deckId: deck.id, card });
+      }
+    });
+  });
+
   const archivedCards: { deckId: string, deckName: string, card: Flashcard }[] = [];
   decks.forEach(deck => {
     deck.cards.forEach(card => {
@@ -812,25 +846,24 @@ export default function App() {
               className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setRenameModal(null)} 
             />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="relative bg-white/90 backdrop-blur-xl rounded-[24px] p-6 w-full max-w-sm shadow-2xl border border-white"
+              className="bg-white rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
-              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-4">Deck umbenennen</h3>
-              <input 
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-6">Deck umbenennen</h3>
+              <input
                 type="text"
                 autoFocus
                 value={renameInput}
                 onChange={(e) => setRenameInput(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-gray-900 mb-6 focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full bg-gray-100 text-gray-900 rounded-2xl px-5 py-4 mb-6 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                placeholder="Neuer Name"
               />
               <div className="flex gap-3">
-                <button onClick={() => setRenameModal(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition-colors">Abbrechen</button>
-                <button 
-                  onClick={() => {
-                    if (renameInput.trim()) renameDeck(renameModal.id, renameInput.trim());
-                    setRenameModal(null);
-                  }}
-                  className="flex-1 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 transition-colors"
-                >Speichern</button>
+                <button onClick={() => setRenameModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
+                  Abbrechen
+                </button>
+                <button onClick={() => { if (renameInput.trim()) { renameDeck(renameModal.id, renameInput.trim()); setRenameModal(null); } }} className="flex-1 py-4 font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-2xl transition-colors active:scale-[0.98]">
+                  Speichern
+                </button>
               </div>
             </motion.div>
           </div>
@@ -845,23 +878,20 @@ export default function App() {
               className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteModal(null)} 
             />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="relative bg-white/90 backdrop-blur-xl rounded-[24px] p-6 w-full max-w-sm shadow-2xl border border-white text-center"
+              className="bg-white rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
-              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 className="w-8 h-8" />
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
-              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-2">Deck löschen?</h3>
-              <p className="text-gray-500 mb-6 text-sm">Bist du sicher, dass du "{deleteModal.name}" unwiderruflich löschen möchtest?</p>
-              
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-3">Deck löschen?</h3>
+              <p className="text-sm text-gray-500 font-medium mb-8">Bist du sicher, dass du "{deleteModal.name}" löschen möchtest? Dieser Vorgang kann nicht rückgängig gemacht werden.</p>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteModal(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-medium rounded-xl hover:bg-gray-200 transition-colors">Abbrechen</button>
-                <button 
-                  onClick={() => {
-                    deleteDeck(deleteModal.id);
-                    setDeleteModal(null);
-                  }}
-                  className="flex-1 py-3 bg-red-500 text-white font-medium rounded-xl hover:bg-red-600 transition-colors"
-                >Löschen</button>
+                <button onClick={() => setDeleteModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
+                  Abbrechen
+                </button>
+                <button onClick={() => { deleteDeck(deleteModal.id); setDeleteModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl transition-colors active:scale-[0.98]">
+                  Löschen
+                </button>
               </div>
             </motion.div>
           </div>
@@ -880,32 +910,53 @@ export default function App() {
             <LevelProgress />
           </header>
 
-          <div className="relative mb-12">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Search className="h-5 w-5 text-gray-400" />
+          {dueCards.length > 0 && (
+            <div className="mb-12 bg-blue-50 border border-blue-100 rounded-[28px] p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm text-blue-600 shrink-0">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                </div>
+                <div>
+                  <h2 className="text-xl md:text-2xl font-bold tracking-tight text-gray-900 mb-1">Fällig für heute</h2>
+                  <p className="text-sm md:text-base text-gray-600 font-medium">{dueCards.length} {dueCards.length === 1 ? 'Karte wartet' : 'Karten warten'} auf dich.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setReviewCards(dueCards)}
+                className="w-full md:w-auto px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-full transition-all duration-100 active:scale-[0.98] shadow-sm shrink-0"
+              >
+                Jetzt wiederholen
+              </button>
             </div>
-            <input
-              type="text"
-              placeholder="Suchen..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-gray-200/60 hover:bg-gray-200 focus:bg-white text-gray-900 rounded-[20px] pl-11 pr-4 py-3.5 outline-none transition-colors border border-transparent focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 font-medium placeholder:text-gray-500"
-            />
-          </div>
+          )}
 
           <div className="space-y-12">
             {categories.map((categoryName) => {
-              const categoryDecks = decks.filter(d => 
-                d.category === categoryName && 
-                d.name.toLowerCase().includes(searchQuery.toLowerCase())
-              );
+              const categoryDecks = decks.filter(d => d.category === categoryName);
               
-              if (categoryDecks.length === 0 && searchQuery !== "") return null;
+              if (categoryDecks.length === 0) return null;
+
+              const sortedDecks = [...categoryDecks].sort((a, b) => {
+                const aTotal = a.cards.length;
+                const aMastered = a.cards.filter(c => c.isArchived).length;
+                const aIsCompleted = aTotal > 0 && aTotal === aMastered;
+                
+                const bTotal = b.cards.length;
+                const bMastered = b.cards.filter(c => c.isArchived).length;
+                const bIsCompleted = bTotal > 0 && bTotal === bMastered;
+                
+                if (aIsCompleted && !bIsCompleted) return 1;
+                if (!aIsCompleted && bIsCompleted) return -1;
+                return 0;
+              });
+
+              const limit = visibleLimits[categoryName] || 10;
+              const visibleDecks = sortedDecks.slice(0, limit);
 
               const inProgressDecks: Deck[] = [];
               const completedDecks: Deck[] = [];
 
-              categoryDecks.forEach(deck => {
+              visibleDecks.forEach(deck => {
                 const total = deck.cards.length;
                 const mastered = deck.cards.filter(c => c.isArchived).length;
                 if (total > 0 && mastered === total) {
@@ -932,45 +983,48 @@ export default function App() {
                     </button>
                   </div>
                   
-                  {categoryDecks.length === 0 ? (
-                    <div className="py-6 text-center">
-                      <p className="text-gray-400 text-sm font-medium">Noch keine Decks</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-6">
-                      {inProgressDecks.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {inProgressDecks.map(deck => renderDeckCard(deck, false))}
-                        </div>
-                      )}
-                      
-                      {completedDecks.length > 0 && (
-                        <div className="mt-4">
-                          <button 
-                            onClick={() => toggleCategory(categoryName)}
-                            className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-gray-900 transition-colors mx-2 mb-4 focus:outline-none"
-                          >
-                            <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
-                            <span>{completedDecks.length} erledigte Decks {isExpanded ? "ausblenden" : "anzeigen"}</span>
-                          </button>
-                          
-                          <AnimatePresence>
-                            {isExpanded && (
-                              <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: "auto" }}
-                                exit={{ opacity: 0, height: 0 }}
-                                className="overflow-hidden"
-                              >
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
-                                  {completedDecks.map(deck => renderDeckCard(deck, true))}
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      )}
-                    </div>
+                  <div className="space-y-6">
+                    {inProgressDecks.length > 0 && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {inProgressDecks.map(deck => renderDeckCard(deck, false))}
+                      </div>
+                    )}
+                    
+                    {completedDecks.length > 0 && (
+                      <div className="mt-4">
+                        <button 
+                          onClick={() => toggleCategory(categoryName)}
+                          className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-gray-900 transition-colors mx-2 mb-4 focus:outline-none"
+                        >
+                          <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
+                          <span>{completedDecks.length} erledigte Decks {isExpanded ? "ausblenden" : "anzeigen"}</span>
+                        </button>
+                        
+                        <AnimatePresence>
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+                                {completedDecks.map(deck => renderDeckCard(deck, true))}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
+                  </div>
+
+                  {sortedDecks.length > limit && (
+                    <button 
+                      onClick={() => handleLoadMore(categoryName)}
+                      className="mt-8 mx-auto block px-8 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-full transition-all duration-100 active:scale-[0.98]"
+                    >
+                      Weitere {Math.min(10, sortedDecks.length - limit)} Decks laden
+                    </button>
                   )}
                 </section>
               );
