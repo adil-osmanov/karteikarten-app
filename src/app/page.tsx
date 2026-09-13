@@ -820,6 +820,21 @@ export default function App() {
           <div className="space-y-12">
             {categories.map((categoryName) => {
               const categoryDecks = decks.filter(d => d.category === categoryName);
+              
+              // Smart sort: incomplete first, completed last
+              const sortedDecks = [...categoryDecks].sort((a, b) => {
+                const aTotal = a.cards.length;
+                const aMastered = a.cards.filter(c => c.isArchived).length;
+                const aIsCompleted = aTotal > 0 && aTotal === aMastered;
+                
+                const bTotal = b.cards.length;
+                const bMastered = b.cards.filter(c => c.isArchived).length;
+                const bIsCompleted = bTotal > 0 && bTotal === bMastered;
+                
+                if (aIsCompleted && !bIsCompleted) return 1;
+                if (!aIsCompleted && bIsCompleted) return -1;
+                return 0;
+              });
 
               return (
                 <section key={categoryName}>
@@ -841,17 +856,21 @@ export default function App() {
                       <p className="text-gray-400 text-sm font-medium">Noch keine Decks</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {categoryDecks.map((deck) => {
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {sortedDecks.map((deck) => {
                         const total = deck.cards.length;
                         const mastered = deck.cards.filter(c => c.isArchived).length;
                         const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
+                        const isCompleted = total > 0 && mastered === total;
 
                         return (
                           <div 
                             key={deck.id}
                             onClick={() => setActiveDeckId(deck.id)}
-                            className="group cursor-pointer bg-white rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 h-full flex flex-col relative border border-gray-100"
+                            className={cn(
+                              "group cursor-pointer bg-white rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 h-full flex flex-col relative border border-gray-100",
+                              isCompleted && "opacity-60 hover:opacity-100"
+                            )}
                           >
                             <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button 
@@ -869,8 +888,9 @@ export default function App() {
                             </div>
 
                             <div className="mb-10">
-                              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-2 pr-24 group-hover:text-blue-600 transition-colors">
+                              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-2 pr-24 group-hover:text-blue-600 transition-colors flex items-center gap-2">
                                 {deck.name}
+                                {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />}
                               </h3>
                               <p className="text-sm font-medium text-gray-400">{total} Karten</p>
                             </div>
@@ -878,11 +898,14 @@ export default function App() {
                             <div className="mt-auto">
                               <div className="flex items-center justify-between text-sm font-semibold text-gray-500 mb-3">
                                 <span>Fortschritt</span>
-                                <span className="text-blue-600">{mastered} / {total} gemeistert</span>
+                                <span className={isCompleted ? "text-green-600" : "text-blue-600"}>{mastered} / {total} gemeistert</span>
                               </div>
                               <div className="h-2 w-full bg-[#F5F5F7] rounded-full overflow-hidden">
                                 <div
-                                  className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out"
+                                  className={cn(
+                                    "h-full rounded-full transition-all duration-700 ease-out",
+                                    isCompleted ? "bg-green-500" : "bg-blue-600"
+                                  )}
                                   style={{ width: `${progressPercentage}%` }}
                                 />
                               </div>
