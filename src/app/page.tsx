@@ -673,11 +673,13 @@ function StudyCard({
           {parts[1]}
         </div>
 
-        <div className="mb-6 w-full text-center">
-          <p className="text-base text-gray-400 font-medium w-full max-w-lg mx-auto">
-            {card.translation}
-          </p>
-        </div>
+        {(phase === "Answer" || !isMultipleChoice) && (
+          <div className="mb-6 w-full text-center">
+            <p className="text-base text-gray-400 font-medium w-full max-w-lg mx-auto">
+              {card.translation}
+            </p>
+          </div>
+        )}
 
         {phase === "Question" && !isMultipleChoice && (
           <button 
