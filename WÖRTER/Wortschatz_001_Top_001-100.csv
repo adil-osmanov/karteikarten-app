@@ -1,8 +1,8 @@
 Bescheid;Sag mir bitte morgen ___, ob du Zeit hast.;Дай мне знать (сообщи) завтра, пожалуйста, будет ли у тебя время.;Antwort;Nachricht;Wort
 klappt;Es ___ heute leider nicht, ich habe keine Zeit.;Сегодня, к сожалению, не получится, у меня нет времени.;funktioniert;Macht;geht
-kümmern;Ich muss mich jetzt um das Essen ___.;Мне нужно сейчас заняться (позаботиться о) едой.;Machen;Sorgen;Arbeiten
+kümmern;Ich muss mich jetzt um das Essen ___.;Мне нужно сейчас заняться (позаботиться о) едой.;machen;Sorgen;Arbeiten
 vor;Was hast du heute Abend ___?;Какие у тебя планы на сегодняшний вечер?;planst;machst;denkst
-schaffen;Keine Sorge, wir ___ das schon bis morgen!;Не переживай, мы справимся с этим до завтра!;Machen;tun;können
+Schaffen;Keine Sorge, wir ___ das schon bis morgen!;Не переживай, мы справимся с этим до завтра!;machen;tun;können
 Lust;Hast du heute Abend ___ auf Pizza?;У тебя есть сегодня вечером желание поесть пиццу?;Wunsch;Laune;Freude
 Angst;Du musst keine ___ vor dem Hund haben.;Тебе не нужно бояться собаки.;Sorge;Furcht;Gefahr
 Recht;Du hast vollkommen ___, so machen wir das.;Ты совершенно прав, так мы и сделаем.;Wahrheit;Sinn;Grund
@@ -11,62 +11,62 @@ Feierabend;Um wie viel Uhr machst du heute ___?;Во сколько ты сег�
 abholen;Kannst du mich vom Bahnhof ___?;Можешь забрать меня с вокзала?;holen;bringen;nehmen
 mitbringen;Soll ich dir etwas aus dem Laden ___?;Мне принести (захватить) тебе что-нибудь из магазина?;mitnehmen;holen;geben
 mitkommen;Wir gehen ins Kino, willst du ___?;Мы идем в кино, хочешь пойти за компанию?;mitgehen;kommen;mitmachen
-Aufstehen;Ich muss morgen leider schon um sechs Uhr ___.;Мне завтра, к сожалению, нужно вставать уже в шесть часов.;aufwachen;aufgehen;aufheben
-anrufen;Ich werde dich später noch kurz ___.;Я тебе позже еще ненадолго позвоню.;telefonieren;Sprechen;sagen
+aufstehen;Ich muss morgen leider schon um sechs Uhr ___.;Мне завтра, к сожалению, нужно вставать уже в шесть часов.;aufwachen;aufgehen;Aufheben
+Anrufen;Ich werde dich später noch kurz ___.;Я тебе позже еще ненадолго позвоню.;telefonieren;sprechen;sagen
 anfangen;Wann will der Film heute Abend ___?;Когда сегодня вечером начнется фильм?;starten;losgehen;aufhören
 aufhören;Kannst du bitte mit dem Lärm ___?;Можешь, пожалуйста, прекратить этот шум?;beenden;stoppen;schließen
-Einkaufen;Wir müssen heute noch schnell für das Wochenende ___.;Нам нужно сегодня еще быстро закупиться на выходные.;kaufen;holen;nehmen
-aufräumen;Kannst du bitte dein Zimmer kurz ___?;Можешь, пожалуйста, быстро убрать свою комнату?;putzen;saubermachen;ordnen
+einkaufen;Wir müssen heute noch schnell für das Wochenende ___.;Нам нужно сегодня еще быстро закупиться на выходные.;kaufen;holen;nehmen
+aufräumen;Kannst du bitte dein Zimmer kurz ___?;Можешь, пожалуйста, быстро убрать свою комнату?;Putzen;saubermachen;ordnen
 Aussehen;Die neuen Schuhe werden bestimmt richtig gut ___.;Новые туфли будут наверняка выглядеть действительно хорошо.;wirken;scheinen;passen
-Auf;Ich warte schon seit einer halben Stunde ___ dich.;Я жду тебя уже полчаса.;an;für;nach
-an;Ich denke jeden Tag ___ meine Familie.;Я каждый день думаю о своей семье.;Auf;über;In
-an;Ich glaube fest ___ dich, du schaffst das!;Я твердо верю в тебя, ты справишься!;Auf;In;für
+auf;Ich warte schon seit einer halben Stunde ___ dich.;Я жду тебя уже полчаса.;an;für;nach
+an;Ich denke jeden Tag ___ meine Familie.;Я каждый день думаю о своей семье.;auf;über;in
+an;Ich glaube fest ___ dich, du schaffst das!;Я твердо верю в тебя, ты справишься!;auf;in;für
 um;Darf ich dich ___ einen kleinen Gefallen bitten?;Можно попросить тебя о небольшом одолжении?;für;nach;über
 für;Ich danke dir herzlich ___ deine Hilfe.;Я сердечно благодарю тебя за твою помощь.;über;wegen;an
-Auf;Wir freuen uns schon alle sehr ___ den Urlaub.;Мы все уже очень радуемся предстоящему отпуску.;über;an;für
-über;Ich habe mich sehr ___ dein Geschenk gefreut.;Я очень обрадовался твоему подарку.;Auf;an;für
-für;Interessierst du dich eigentlich ___ Fußball?;Ты вообще интересуешься футболом?;an;über;Auf
-an;Ich kann mich leider nicht mehr ___ seinen Namen erinnern.;Я, к сожалению, больше не могу вспомнить его имя.;Auf;über;für
-Auf;Du kannst dich immer fest ___ mich verlassen.;Ты всегда можешь твердо положиться на меня.;an;für;über
-über;Warum ärgerst du dich schon wieder ___ diese Kleinigkeit?;Почему ты опять так злишься из-за этого пустяка?;Auf;an;für
-mit;Kommst du ___ deinen neuen Nachbarn gut aus?;Ты хорошо ладишь со своими новыми соседями?;von;zu;bei
-nach;Hier in der Küche riecht es so lecker ___ Kuchen.;Здесь на кухне так вкусно пахнет пирогом.;von;an;aus
-vor;Hast du eigentlich Angst ___ Spinnen?;Ты вообще боишься пауков?;von;aus;gegen
+auf;Wir freuen uns schon alle sehr ___ den Urlaub.;Мы все уже очень радуемся предстоящему отпуску.;über;an;für
+über;Ich habe mich sehr ___ dein Geschenk gefreut.;Я очень обрадовался твоему подарку.;auf;an;für
+für;Interessierst du dich eigentlich ___ Fußball?;Ты вообще интересуешься футболом?;an;über;auf
+an;Ich kann mich leider nicht mehr ___ seinen Namen erinnern.;Я, к сожалению, больше не могу вспомнить его имя.;auf;über;für
+auf;Du kannst dich immer fest ___ mich verlassen.;Ты всегда можешь твердо положиться на меня.;an;für;über
+über;Warum ärgerst du dich schon wieder ___ diese Kleinigkeit?;Почему ты опять так злишься из-за этого пустяка?;auf;an;für
+mit;Kommst du ___ deinen neuen Nachbarn gut aus?;Ты хорошо ладишь со своими новыми соседями?;Von;zu;bei
+nach;Hier in der Küche riecht es so lecker ___ Kuchen.;Здесь на кухне так вкусно пахнет пирогом.;Von;an;aus
+vor;Hast du eigentlich Angst ___ Spinnen?;Ты вообще боишься пауков?;Von;aus;gegen
 zu;Das blaue T-Shirt passt wirklich gut ___ deiner Hose.;Синяя футболка действительно хорошо подходит к твоим штанам.;mit;an;für
 gehört;Wem ___ eigentlich dieser rote Rucksack hier?;Кому вообще принадлежит этот красный рюкзак здесь?;besitzt;steht;liegt
 fehlt;In der Suppe ___ noch ein bisschen Salz.;В супе не хватает еще немного соли.;braucht;verliert;verpasst
 gefällt;Wie ___ dir meine neue Jacke?;Как тебе нравится моя новая куртка?;schmeckt;steht;passt
 schmeckt;Das Essen hier im Café ___ wirklich fantastisch.;Еда здесь в кафе действительно фантастическая на вкус.;riecht;kostet;gefällt
 stimmt;Das ___ leider nicht, du hast dich geirrt.;Это, к сожалению, неверно, ты ошибся.;passt;geht;klappt
-aufmachen;Es ist so heiß hier drin, kannst du das Fenster ___?;Здесь внутри так жарко, можешь открыть окно?;anmachen;zumachen;öffnen auf
+aufmachen;Es ist so heiß hier drin, kannst du das Fenster ___?;Здесь внутри так жарко, можешь открыть окно?;anmachen;zumachen;Öffnen auf
 zumachen;Es zieht hier so kalt, kannst du bitte die Tür ___?;Здесь так холодно сквозит, можешь, пожалуйста, закрыть дверь?;aufmachen;abmachen;ausmachen
-anmachen;Es wird dunkel, kannst du bitte das Licht ___?;Темнеет, можешь включить свет, пожалуйста?;aufmachen;ausmachen;einschalten an
+anmachen;Es wird dunkel, kannst du bitte das Licht ___?;Темнеет, можешь включить свет, пожалуйста?;aufmachen;ausmachen;Einschalten an
 auszumachen;Vergiss bitte nicht, den Fernseher vor dem Schlafen ___.;Не забудь, пожалуйста, выключить телевизор перед сном.;anzumachen;aufzumachen;zuzumachen
-stellen;Du kannst die Tasse einfach auf den Tisch ___.;Ты можешь просто поставить чашку на стол.;legen;setzen;stecken
-legen;Kannst du das Buch bitte einfach auf mein Bett ___?;Можешь положить книгу, пожалуйста, просто на мою кровать?;stellen;setzen;stecken
+Stellen;Du kannst die Tasse einfach auf den Tisch ___.;Ты можешь просто поставить чашку на стол.;legen;setzen;stecken
+legen;Kannst du das Buch bitte einfach auf mein Bett ___?;Можешь положить книгу, пожалуйста, просто на мою кровать?;Stellen;setzen;stecken
 steht;Wo ___ dein Auto im Moment?;Где сейчас стоит твоя машина?;liegt;sitzt;stellt
-liegen;Meine Schlüssel ___ noch drüben auf der Kommode.;Мои ключи еще лежат вон там на комоде.;stehen;Sitzen;stellen
+Liegen;Meine Schlüssel ___ noch drüben auf der Kommode.;Мои ключи еще лежат вон там на комоде.;stehen;Sitzen;Stellen
 setz;Komm rein und ___ dich zu uns an den Tisch!;Заходи и садись к нам за стол!;stell;leg;Sitz
-Sitzen;Wir ___ schon den ganzen Tag nur auf dem Sofa.;Мы уже весь день только сидим на диване.;stehen;liegen;setzen
-Fragen;Darf ich dich mal ganz kurz etwas ___?;Можно мне тебя ненадолго кое о чем спросить?;bitten;sagen;antworten
-bitten;Ich möchte dich um etwas Hilfe ___.;Я хотел бы попросить тебя о небольшой помощи.;Fragen;danken;sagen
-erzählen;Kannst du mir mehr von deiner Reise ___?;Можешь рассказать мне больше о своей поездке?;sagen;Sprechen;reden
+Sitzen;Wir ___ schon den ganzen Tag nur auf dem Sofa.;Мы уже весь день только сидим на диване.;stehen;Liegen;setzen
+Fragen;Darf ich dich mal ganz kurz etwas ___?;Можно мне тебя ненадолго кое о чем спросить?;Bitten;sagen;Antworten
+Bitten;Ich möchte dich um etwas Hilfe ___.;Я хотел бы попросить тебя о небольшой помощи.;Fragen;Danken;sagen
+erzählen;Kannst du mir mehr von deiner Reise ___?;Можешь рассказать мне больше о своей поездке?;sagen;sprechen;Reden
 erklären;Kannst du mir kurz ___, wie das hier geht?;Можешь коротко объяснить мне, как это работает (делается)?;sagen;zeigen;erzählen
 verstanden;Entschuldigung, ich habe das akustisch nicht ___.;Извините, я чисто по звуку этого не понял.;gehört;gewusst;gekannt
-wiederholen;Könntest du das bitte noch einmal ___?;Не мог бы ты повторить это еще раз, пожалуйста?;nachsagen;erneuern;sagen wieder
+wiederholen;Könntest du das bitte noch einmal ___?;Не мог бы ты повторить это еще раз, пожалуйста?;nachsagen;erneuern;Sagen wieder
 Besuch;Am Wochenende bekommen wir netten ___ von Freunden.;На выходных к нам придут приятные гости (мы получим визит).;Gäste;Leute;Treffen
-Gefallen;Könntest du mir einen kleinen ___ tun?;Не мог бы ты сделать мне небольшое одолжение?;Dienst;Wunsch;Vorteil
+gefallen;Könntest du mir einen kleinen ___ tun?;Не мог бы ты сделать мне небольшое одолжение?;Dienst;Wunsch;Vorteil
 Pause;Wir arbeiten schon seit vier Stunden, lass uns eine ___ machen!;Мы работаем уже четыре часа, давай сделаем перерыв!;Ruhe;Schluss;Urlaub
 Termin;Ich muss beim Zahnarzt einen neuen ___ ausmachen.;Мне нужно назначить у зубного врача новый прием.;Plan;Tag;Zeit
 verpassen;Beeil dich ein bisschen, sonst ___ wir den Bus!;Поторопись немного, иначе мы упустим автобус!;verlieren;verspäten;vergessen
-Erreichen;Wenn wir schnell gehen, ___ wir den Zug noch ganz locker.;Если мы пойдем быстро, мы еще совершенно спокойно успеем на поезд.;Treffen;kriegen;holen
-einsteigen;Der Zug steht schon da, wir können jetzt ___.;Поезд уже стоит там, мы можем сейчас заходить (садиться).;Aussteigen;umsteigen;aufsteigen
-Aussteigen;Wir müssen an der nächsten Haltestelle ___.;Мы должны выйти на следующей остановке.;einsteigen;umsteigen;absteigen
-umsteigen;In München müssen wir in einen anderen Zug ___.;В Мюнхене нам нужно пересесть на другой поезд.;einsteigen;Aussteigen;wechseln
-Bezahlen;Kann man hier eigentlich auch mit Karte ___?;А здесь вообще можно оплатить картой?;kaufen;ausgeben;Kosten
-Kosten;Wie viel ___ diese Äpfel pro Kilo?;Сколько стоят эти яблоки за килограмм?;Zahlen;lohnen;Machen
-ausgeben;Ich möchte heute nicht so viel Geld beim Einkaufen ___.;Я не хочу сегодня тратить так много денег при покупках.;Bezahlen;Kosten;kaufen
-Sparen;Ich muss ein bisschen Geld für den Sommerurlaub ___.;Мне нужно немного сэкономить (отложить) денег на летний отпуск.;behalten;sammeln;legen
+erreichen;Wenn wir schnell gehen, ___ wir den Zug noch ganz locker.;Если мы пойдем быстро, мы еще совершенно спокойно успеем на поезд.;Treffen;Kriegen;holen
+einsteigen;Der Zug steht schon da, wir können jetzt ___.;Поезд уже стоит там, мы можем сейчас заходить (садиться).;aussteigen;umsteigen;aufsteigen
+aussteigen;Wir müssen an der nächsten Haltestelle ___.;Мы должны выйти на следующей остановке.;einsteigen;umsteigen;absteigen
+umsteigen;In München müssen wir in einen anderen Zug ___.;В Мюнхене нам нужно пересесть на другой поезд.;einsteigen;aussteigen;wechseln
+bezahlen;Kann man hier eigentlich auch mit Karte ___?;А здесь вообще можно оплатить картой?;kaufen;ausgeben;Kosten
+Kosten;Wie viel ___ diese Äpfel pro Kilo?;Сколько стоят эти яблоки за килограмм?;Zahlen;Lohnen;machen
+ausgeben;Ich möchte heute nicht so viel Geld beim Einkaufen ___.;Я не хочу сегодня тратить так много денег при покупках.;bezahlen;Kosten;kaufen
+sparen;Ich muss ein bisschen Geld für den Sommerurlaub ___.;Мне нужно немного сэкономить (отложить) денег на летний отпуск.;behalten;sammeln;legen
 leihen;Kannst du mir bis morgen fünf Euro ___?;Можешь одолжить мне пять евро до завтра?;schenkt;geben;Mieten
 deshalb;Es hat geregnet, ___ bin ich zu Hause geblieben.;Шел дождь, поэтому я остался дома.;weil;denn;obwohl
 weil;Ich bin zu Hause geblieben, ___ es geregnet hat.;Я остался дома, потому что шел дождь.;denn;deshalb;obwohl
@@ -74,27 +74,27 @@ denn;Ich gehe jetzt schlafen, ___ ich bin wirklich sehr müde.;Я иду сей�
 obwohl;Er geht ohne Jacke raus, ___ es draußen ziemlich kalt ist.;Он идет на улицу без куртки, хотя на улице довольно холодно.;trotzdem;weil;deshalb
 trotzdem;Es ist kalt draußen, ___ zieht er keine Jacke an.;На улице холодно, тем не менее он не надевает куртку.;obwohl;weil;deshalb
 damit;Ich schreibe dir die Adresse auf, ___ du sie nicht vergisst.;Я запишу тебе адрес, чтобы ты его не забыл.;um;dass;weil
-falls;Ruf mich einfach an, ___ du früher fertig wirst.;Просто набери меня, если ты освободишься раньше.;ob;wann;wie
+Falls;Ruf mich einfach an, ___ du früher fertig wirst.;Просто набери меня, если ты освободишься раньше.;ob;wann;wie
 schon;Bist du ___ mit dem Essen fertig?;Ты уже закончил с едой?;noch;bald;gleich
 noch;Hast du ___ ein bisschen Wasser für mich?;У тебя есть еще немного воды для меня?;schon;wieder;nur
 gerade;Ich kann jetzt nicht sprechen, ich koche ___.;Я не могу сейчас говорить, я прямо сейчас готовлю.;bald;schon;eben
-weh;Mein Kopf tut heute den ganzen Tag so schrecklich ___.;У меня сегодня весь день так ужасно болит голова.;schlecht;krank;leid
-leid;Es tut mir wirklich sehr ___, ich wollte das nicht.;Мне действительно очень жаль, я этого не хотел.;weh;schade;traurig
-erkältet;Zieh dir eine Mütze an, sonst bist du morgen wieder ___.;Надень шапку, иначе завтра снова простудишься.;krank;schwach;müde
+Weh;Mein Kopf tut heute den ganzen Tag so schrecklich ___.;У меня сегодня весь день так ужасно болит голова.;schlecht;krank;Leid
+Leid;Es tut mir wirklich sehr ___, ich wollte das nicht.;Мне действительно очень жаль, я этого не хотел.;Weh;schade;traurig
+Erkältet;Zieh dir eine Mütze an, sonst bist du morgen wieder ___.;Надень шапку, иначе завтра снова простудишься.;krank;schwach;müde
 ausruhen;Ich bin so kaputt, ich muss mich kurz auf dem Sofa ___.;Я так разбит, мне нужно ненадолго отдохнуть на диване.;Schlafen;erholen;entspannen
-beeilen;Komm, wir müssen uns ___, sonst kommen wir zu spät!;Давай, мы должны поторопиться, иначе мы опоздаем!;Rennen;Laufen;eilen
-passiert;Was ist denn hier schon wieder ___?;Что же здесь опять произошло?;Geschehen;gemacht;getan
+beeilen;Komm, wir müssen uns ___, sonst kommen wir zu spät!;Давай, мы должны поторопиться, иначе мы опоздаем!;rennen;laufen;Eilen
+passiert;Was ist denn hier schon wieder ___?;Что же здесь опять произошло?;geschehen;gemacht;getan
 geklappt;Hat alles mit deiner Prüfung gut ___?;Все хорошо срослось (получилось) с твоим экзаменом?;funktioniert;gegangen;gemacht
 gehört;Hast du schon die Neuigkeiten von Max ___?;Ты уже слышал новости от Макса?;verstanden;gewusst;gesehen
 gesehen;Hast du irgendwo meine Brille ___?;Ты не видел где-нибудь мои очки?;geschaut;geguckt;gesucht
 gefunden;Ich habe meinen Schlüssel endlich in der Jackentasche ___.;Я наконец-то нашел свой ключ в кармане куртки.;gesucht;bekommen;geholt
-mitnehmen;Soll ich einen Regenschirm ___?;Мне взять с собой зонт?;mitbringen;holen;Tragen
-mitbringen;Kannst du mir bitte ein Glas Wasser ___?;Можешь принести мне, пожалуйста, стакан воды?;mitnehmen;holen;Tragen
-behalten;Du kannst das Buch gerne noch ein paar Tage ___.;Можешь спокойно оставить книгу у себя еще на пару дней.;halten;nehmen;Sparen
+mitnehmen;Soll ich einen Regenschirm ___?;Мне взять с собой зонт?;mitbringen;holen;tragen
+mitbringen;Kannst du mir bitte ein Glas Wasser ___?;Можешь принести мне, пожалуйста, стакан воды?;mitnehmen;holen;tragen
+behalten;Du kannst das Buch gerne noch ein paar Tage ___.;Можешь спокойно оставить книгу у себя еще на пару дней.;halten;nehmen;sparen
 vergessen;Ich habe leider total ___, Brot zu kaufen.;Я, к сожалению, совсем забыл купить хлеб.;verloren;verpasst;gelassen
 verlierst;Pass gut auf deine Tasche auf, damit du nichts ___.;Следи внимательно за своей сумкой, чтобы ничего не потерять.;vergisst;verpasst;lässt
-versuchen;Ich werde es morgen einfach noch einmal ___.;Я просто попробую сделать это еще раз завтра.;probieren;testen;Machen
-Warten;Kannst du hier kurz zwei Minuten auf mich ___?;Можешь подождать меня здесь буквально две минуты?;bleiben;stehen;Sitzen
-helfen;Kann ich dir vielleicht bei den Taschen ___?;Могу я помочь тебе с сумками?;Tragen;geben;nehmen
+Versuchen;Ich werde es morgen einfach noch einmal ___.;Я просто попробую сделать это еще раз завтра.;probieren;Testen;machen
+warten;Kannst du hier kurz zwei Minuten auf mich ___?;Можешь подождать меня здесь буквально две минуты?;Bleiben;stehen;Sitzen
+helfen;Kann ich dir vielleicht bei den Taschen ___?;Могу я помочь тебе с сумками?;tragen;geben;nehmen
 brauchen;Wir ___ für den Kuchen noch Mehl und Eier.;Нам для пирога нужны еще мука и яйца.;müssen;wollen;sollen
-Weißt;___ du zufällig, wie spät es ist?;Знаешь случайно, который час?;Kennst;Denkst;Glaubst
+weißt;___ du zufällig, wie spät es ist?;Знаешь случайно, который час?;kennst;denkst;glaubst
