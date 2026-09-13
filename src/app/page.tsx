@@ -634,8 +634,8 @@ function StudyCard({
         </div>
       </div>
 
-      <div className="flex flex-col items-center text-center">
-        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg mb-2">
+      <div className="flex flex-col items-center text-center w-full">
+        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg mb-4">
           {parts[0]}
           
           {phase === "Answer" ? (
@@ -673,6 +673,12 @@ function StudyCard({
           {parts[1]}
         </div>
 
+        <div className="mb-6 w-full text-center">
+          <p className="text-base text-gray-400 font-medium w-full max-w-lg mx-auto">
+            {card.translation}
+          </p>
+        </div>
+
         {phase === "Question" && !isMultipleChoice && (
           <button 
             onClick={handleHilfe}
@@ -684,7 +690,7 @@ function StudyCard({
         )}
       </div>
 
-      <div className="mt-4 w-full">
+      <div className="mt-2 w-full">
         {phase === "Question" && isMultipleChoice && (
           <motion.div 
             initial={{ opacity: 0 }}
@@ -710,15 +716,6 @@ function StudyCard({
             animate={{ opacity: 1, y: 0 }}
             className="flex flex-col items-center w-full mt-4"
           >
-            <div className="mb-10 w-full text-center">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-2">
-                Übersetzung
-              </span>
-              <p className="text-lg text-gray-500 font-medium w-full max-w-lg mx-auto">
-                {card.translation}
-              </p>
-            </div>
-
             <button
               onClick={onNext}
               autoFocus
