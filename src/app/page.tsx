@@ -724,14 +724,20 @@ export default function App() {
   useEffect(() => {
     setIsMounted(true);
     const fetchDecks = async () => {
-      const { data, error } = await supabase
-        .from('decks')
-        .select('*, cards(*)');
-        
-      if (error) {
-        console.error("Error fetching decks:", error);
-      } else if (data) {
-        setDecks(data as Deck[]);
+      try {
+        const { data, error } = await supabase
+          .from('decks')
+          .select('*, cards(*)');
+          
+        if (error) {
+          console.error("Error fetching decks:", error);
+          setDecks([]);
+        } else if (data) {
+          setDecks(data as Deck[]);
+        }
+      } catch (err) {
+        console.error("Network error:", err);
+        setDecks([]);
       }
     };
     fetchDecks();
