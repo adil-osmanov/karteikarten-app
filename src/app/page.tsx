@@ -113,56 +113,69 @@ const useStore = create<DeckState>()((set, get) => ({
   
   setDecks: (decks) => set({ decks, isLoaded: true }),
   
-  addDeck: (deck) => {
-    // Optimistic Update
-    set((state) => ({ decks: [...state.decks, deck] }));
+  addDeck: async (deck) => {
+    const previousDecks = get().decks;
+    set({ decks: [...previousDecks, deck] });
     
-    // Background Supabase Insert
-    const insertData = async () => {
-      const { error: deckError } = await supabase.from('decks').insert({
-        id: deck.id,
-        name: deck.name,
-        category: deck.category
-      });
-      if (deckError) console.error("Deck Insert Error:", deckError);
-      
-      const cardsToInsert = deck.cards.map(c => ({
-        id: c.id,
-        deck_id: deck.id,
-        targetWord: c.targetWord,
-        sentence: c.sentence,
-        translation: c.translation,
-        options: c.options,
-        masteryLevel: c.masteryLevel,
-        isArchived: c.isArchived,
-        nextReviewDate: c.nextReviewDate,
-        interval: c.interval,
-        repetitions: c.repetitions
-      }));
-      
-      const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
-      if (cardsError) console.error("Cards Insert Error:", cardsError);
-    };
-    insertData();
-  },
-  
-  deleteDeck: (deckId) => {
-    set((state) => ({ decks: state.decks.filter(d => d.id !== deckId) }));
-    supabase.from('decks').delete().eq('id', deckId).then(({error}) => {
-      if (error) console.error("Delete Deck Error:", error);
+    const { error: deckError } = await supabase.from('decks').insert({
+      id: deck.id,
+      name: deck.name,
+      category: deck.category
     });
-  },
-  
-  renameDeck: (deckId, newName) => {
-    set((state) => ({
-      decks: state.decks.map(d => d.id === deckId ? { ...d, name: newName } : d)
+    
+    if (deckError) {
+      console.error("Supabase Deck Insert Error:", deckError.message);
+      set({ decks: previousDecks });
+      return;
+    }
+    
+    const cardsToInsert = deck.cards.map(c => ({
+      id: c.id,
+      deck_id: deck.id,
+      targetWord: c.targetWord,
+      sentence: c.sentence,
+      translation: c.translation,
+      options: c.options,
+      masteryLevel: c.masteryLevel,
+      isArchived: c.isArchived,
+      nextReviewDate: c.nextReviewDate,
+      interval: c.interval,
+      repetitions: c.repetitions
     }));
-    supabase.from('decks').update({ name: newName }).eq('id', deckId).then(({error}) => {
-      if (error) console.error("Rename Deck Error:", error);
+    
+    const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
+    if (cardsError) {
+      console.error("Supabase Cards Insert Error:", cardsError.message);
+      set({ decks: previousDecks });
+    }
+  },
+  
+  deleteDeck: async (deckId) => {
+    const previousDecks = get().decks;
+    set({ decks: previousDecks.filter(d => d.id !== deckId) });
+    
+    const { error } = await supabase.from('decks').delete().eq('id', deckId);
+    if (error) {
+      console.error("Supabase Delete Deck Error:", error.message);
+      set({ decks: previousDecks });
+    }
+  },
+  
+  renameDeck: async (deckId, newName) => {
+    const previousDecks = get().decks;
+    set({
+      decks: previousDecks.map(d => d.id === deckId ? { ...d, name: newName } : d)
     });
+    
+    const { error } = await supabase.from('decks').update({ name: newName }).eq('id', deckId);
+    if (error) {
+      console.error("Supabase Rename Deck Error:", error.message);
+      set({ decks: previousDecks });
+    }
   },
 
-  answerCard: (deckId, cardId, isCorrect, isHilfe) => {
+  answerCard: async (deckId, cardId, isCorrect, isHilfe) => {
+    const previousDecks = get().decks;
     let updatedCard: any = null;
 
     set((state) => {
@@ -214,15 +227,18 @@ const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (updatedCard) {
-      supabase.from('cards').update({
+      const { error } = await supabase.from('cards').update({
         masteryLevel: updatedCard.masteryLevel,
         isArchived: updatedCard.isArchived,
         nextReviewDate: updatedCard.nextReviewDate,
         interval: updatedCard.interval,
         repetitions: updatedCard.repetitions
-      }).eq('id', cardId).then(({error}) => {
-         if (error) console.error("Update Card Error:", error);
-      });
+      }).eq('id', cardId);
+      
+      if (error) {
+        console.error("Supabase Update Card Error:", error.message);
+        set({ decks: previousDecks });
+      }
     }
   }
 }));
@@ -732,13 +748,13 @@ export default function App() {
           .select('*, cards(*)');
           
         if (error) {
-          console.error("Error fetching decks:", error);
+          console.error("Supabase Fetch Error:", error.message);
           setDecks([]);
         } else if (data) {
           setDecks(data as Deck[]);
         }
-      } catch (err) {
-        console.error("Network error:", err);
+      } catch (err: any) {
+        console.error("Network Fetch Error:", err.message);
         setDecks([]);
       }
     };
