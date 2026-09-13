@@ -740,12 +740,12 @@ export default function App() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
+  const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   
   const [uploadTarget, setUploadTarget] = useState<{ category: string, level: CEFRLevel } | null>(null);
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
 
@@ -998,49 +998,52 @@ export default function App() {
 
       <main className="max-w-4xl mx-auto px-6 py-12 md:py-24">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
-          <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
-            <div>
-              <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-gray-900 mb-3">Meine Bibliothek</h1>
-              <p className="text-base md:text-lg text-gray-500 font-medium">Lerne Grammatik und Vokabeln.</p>
-            </div>
-            <LevelProgress />
+          <header className="mb-10 text-center md:text-left">
+            <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-gray-900 mb-3">Meine Bibliothek</h1>
+            <p className="text-base md:text-lg text-gray-500 font-medium">Lerne Grammatik und Vokabeln.</p>
           </header>
 
-          <div className="mb-10 relative">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Search className="h-5 w-5 text-gray-400" />
+          <div className="flex justify-center mb-10">
+            <div className="bg-slate-100/80 p-1 rounded-2xl inline-flex max-w-xs mx-auto border border-slate-200/50">
+              {(["Grammatik", "Wörter"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={cn(
+                    "px-6 py-2 transition-all font-medium",
+                    activeTab === tab
+                      ? "bg-white text-slate-900 shadow-sm rounded-xl"
+                      : "text-slate-500 hover:text-slate-700 rounded-xl"
+                  )}
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
-            <input
-              type="text"
-              className="w-full bg-white border border-gray-100 text-gray-900 rounded-2xl pl-12 pr-4 py-4 shadow-[0_4px_20px_rgb(0,0,0,0.02)] outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-all"
-              placeholder="Suchen..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
           </div>
 
           {dueCards.length > 0 && (
-            <div className="mb-12 bg-blue-50 border border-blue-100 rounded-[28px] p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+            <div className="mb-12 bg-blue-50/50 border border-blue-100/50 rounded-3xl p-5 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm text-blue-600 shrink-0">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm text-blue-600 shrink-0">
+                  <Clock className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-xl md:text-2xl font-bold tracking-tight text-gray-900 mb-1">Fällig für heute</h2>
-                  <p className="text-sm md:text-base text-gray-600 font-medium">{dueCards.length} {dueCards.length === 1 ? 'Karte wartet' : 'Karten warten'} auf dich.</p>
+                  <h2 className="text-lg md:text-xl font-bold tracking-tight text-gray-900 mb-0.5">Fällig für heute</h2>
+                  <p className="text-sm text-gray-600 font-medium">{dueCards.length} {dueCards.length === 1 ? 'Karte' : 'Karten'} warten.</p>
                 </div>
               </div>
               <button
                 onClick={() => setReviewCards(dueCards)}
-                className="w-full md:w-auto px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-full transition-all duration-100 active:scale-[0.98] shadow-sm shrink-0"
+                className="w-full md:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all duration-100 active:scale-[0.98] shadow-sm shrink-0"
               >
-                Jetzt wiederholen
+                Starten
               </button>
             </div>
           )}
 
           <div className="space-y-16">
-            {categories.map((categoryName) => {
+            {activeTab === "Grammatik" && (() => {
               const cefrLevels: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
               const levelConfig: Record<CEFRLevel, { label: string, badgeClass: string }> = {
                 'A1': { label: 'A1 - Anfänger', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -1050,147 +1053,190 @@ export default function App() {
                 'C1-C2': { label: 'C1-C2 - Fachkundige Sprachkenntnisse', badgeClass: 'bg-purple-50 text-purple-700 border-purple-200' }
               };
 
-              return (
-                <div key={categoryName} className="space-y-10">
-                  <h2 className="text-3xl font-extrabold tracking-tight text-gray-900 border-b border-gray-200 pb-4">{categoryName}</h2>
-                  
-                  <div className="space-y-12">
-                    {cefrLevels.map(level => {
-                      const sectionKey = `${categoryName}-${level}`;
-                      const levelDecks = decks.filter(d => 
-                        d.category === categoryName && 
-                        (d.level || 'A1') === level &&
-                        d.name.toLowerCase().includes(searchQuery.toLowerCase())
-                      );
+              return cefrLevels.map(level => {
+                const sectionKey = `Grammatik-${level}`;
+                const levelDecks = decks.filter(d => d.category === 'Grammatik' && (d.level || 'A1') === level);
+                const sortedDecks = [...levelDecks].sort((a, b) => {
+                  const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
+                  const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
+                  if (aIsCompleted && !bIsCompleted) return 1;
+                  if (!aIsCompleted && bIsCompleted) return -1;
+                  return 0;
+                });
 
-                      const sortedDecks = [...levelDecks].sort((a, b) => {
-                        const aTotal = a.cards.length;
-                        const aMastered = a.cards.filter(c => c.isArchived).length;
-                        const aIsCompleted = aTotal > 0 && aTotal === aMastered;
-                        
-                        const bTotal = b.cards.length;
-                        const bMastered = b.cards.filter(c => c.isArchived).length;
-                        const bIsCompleted = bTotal > 0 && bTotal === bMastered;
-                        
-                        if (aIsCompleted && !bIsCompleted) return 1;
-                        if (!aIsCompleted && bIsCompleted) return -1;
-                        return 0;
-                      });
+                const limit = visibleLimits[sectionKey] || 10;
+                const visibleDecks = sortedDecks.slice(0, limit);
+                const inProgressDecks = visibleDecks.filter(d => d.cards.length === 0 || d.cards.length !== d.cards.filter(c => c.isArchived).length);
+                const completedDecks = visibleDecks.filter(d => d.cards.length > 0 && d.cards.length === d.cards.filter(c => c.isArchived).length);
+                const isExpanded = expandedCategories[sectionKey] || false;
 
-                      const limit = visibleLimits[sectionKey] || 10;
-                      const visibleDecks = sortedDecks.slice(0, limit);
-
-                      const inProgressDecks: Deck[] = [];
-                      const completedDecks: Deck[] = [];
-
-                      visibleDecks.forEach(deck => {
-                        const total = deck.cards.length;
-                        const mastered = deck.cards.filter(c => c.isArchived).length;
-                        if (total > 0 && mastered === total) {
-                          completedDecks.push(deck);
-                        } else {
-                          inProgressDecks.push(deck);
-                        }
-                      });
-
-                      const isExpanded = expandedCategories[sectionKey] || false;
-
-                      return (
-                        <section key={sectionKey}>
-                          <div className="flex flex-col md:flex-row md:items-center gap-3 mb-6 px-2">
-                            <div className={cn("px-4 py-1.5 rounded-full border text-sm font-bold shadow-sm tracking-wide", levelConfig[level].badgeClass)}>
-                              {levelConfig[level].label}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="text-gray-400 font-medium text-sm">{levelDecks.length} Decks</span>
-                              <button 
-                                onClick={() => handlePlusClick(categoryName, level)}
-                                className="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-500 rounded-full transition-all duration-100 active:scale-[0.98]"
-                                title="Deck hinzufügen"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M7 1V13M1 7H13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                                </svg>
-                              </button>
-                            </div>
+                return (
+                  <section key={sectionKey}>
+                    <div className="flex items-center gap-3 mb-6 px-2">
+                      <div className={cn("px-4 py-1.5 rounded-full border text-sm font-bold shadow-sm tracking-wide", levelConfig[level].badgeClass)}>
+                        {levelConfig[level].label}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-gray-400 font-medium text-sm hidden md:inline">{levelDecks.length} Decks</span>
+                        <button 
+                          onClick={() => handlePlusClick('Grammatik', level)}
+                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-blue-600 hover:text-white text-gray-500 rounded-full transition-all duration-100 active:scale-[0.98]"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                            <path d="M7 1V13M1 7H13" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {levelDecks.length === 0 ? (
+                      <div className="py-6 text-center bg-white border border-gray-100 rounded-[24px] shadow-sm">
+                        <p className="text-gray-400 text-sm font-medium">Noch keine Decks in diesem Level.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {inProgressDecks.length > 0 && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {inProgressDecks.map(deck => renderDeckCard(deck, false))}
                           </div>
-                          
-                          {levelDecks.length === 0 ? (
-                            <div className="py-6 text-center bg-white border border-gray-100 rounded-[24px] shadow-[0_4px_20px_rgb(0,0,0,0.02)]">
-                              <p className="text-gray-400 text-sm font-medium">Noch keine Decks in diesem Level.</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-6">
-                              {inProgressDecks.length > 0 && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                  {inProgressDecks.map(deck => renderDeckCard(deck, false))}
-                                </div>
-                              )}
-                            
-                              {completedDecks.length > 0 && (
-                                <div className="mt-4">
-                                  <button 
-                                    onClick={() => toggleCategory(sectionKey)}
-                                    className="flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-gray-900 transition-colors mx-2 mb-4 focus:outline-none"
-                                  >
-                                    <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
-                                    <span>{completedDecks.length} erledigte Decks {isExpanded ? "ausblenden" : "anzeigen"}</span>
-                                  </button>
-                                  
-                                  <AnimatePresence>
-                                    {isExpanded && (
-                                      <motion.div
-                                        initial={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: "auto" }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                        className="overflow-hidden"
-                                      >
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
-                                          {completedDecks.map(deck => renderDeckCard(deck, true))}
-                                        </div>
-                                      </motion.div>
-                                    )}
-                                  </AnimatePresence>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {sortedDecks.length > limit && (
+                        )}
+                        {completedDecks.length > 0 && (
+                          <div className="mt-4">
                             <button 
-                              onClick={() => handleLoadMore(sectionKey)}
-                              className="mt-6 mx-auto block px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-full transition-all duration-100 active:scale-[0.98]"
+                              onClick={() => toggleCategory(sectionKey)}
+                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900 transition-colors mx-2 mb-4"
                             >
-                              Weitere {Math.min(10, sortedDecks.length - limit)} laden
+                              <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
+                              <span>Archiv anzeigen ({completedDecks.length})</span>
                             </button>
-                          )}
-                        </section>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+                            <AnimatePresence>
+                              {isExpanded && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: "auto" }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+                                    {completedDecks.map(deck => renderDeckCard(deck, true))}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {sortedDecks.length > limit && (
+                      <button 
+                        onClick={() => handleLoadMore(sectionKey)}
+                        className="mt-6 mx-auto block px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-full transition-all"
+                      >
+                        Weitere {Math.min(10, sortedDecks.length - limit)} laden
+                      </button>
+                    )}
+                  </section>
+                );
+              });
+            })()}
 
-            {/* Archive Section */}
-            <section className="pt-12 border-t border-gray-200">
-              <div className="bg-white p-6 rounded-[28px] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-gray-100 flex items-center justify-between">
+            {activeTab === "Wörter" && (() => {
+              const wordDecks = decks.filter(d => d.category === 'Wörter');
+              const sortedDecks = [...wordDecks].sort((a, b) => {
+                const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
+                const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
+                if (aIsCompleted && !bIsCompleted) return 1;
+                if (!aIsCompleted && bIsCompleted) return -1;
+                return 0;
+              });
+
+              const limit = visibleLimits['Wörter'] || 20;
+              const visibleDecks = sortedDecks.slice(0, limit);
+              const inProgressDecks = visibleDecks.filter(d => d.cards.length === 0 || d.cards.length !== d.cards.filter(c => c.isArchived).length);
+              const completedDecks = visibleDecks.filter(d => d.cards.length > 0 && d.cards.length === d.cards.filter(c => c.isArchived).length);
+              const isExpanded = expandedCategories['Wörter'] || false;
+
+              return (
+                <section>
+                  <div className="flex items-center justify-between mb-6 px-2 border-b border-gray-100 pb-4">
+                    <h2 className="text-2xl font-extrabold tracking-tight text-gray-900">Alle Vokabeln</h2>
+                    <button 
+                      onClick={() => handlePlusClick('Wörter', 'A1')}
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-blue-600 hover:text-white text-gray-600 rounded-full transition-all duration-100 active:scale-[0.98] font-semibold text-sm"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <path d="M7 1V13M1 7H13" />
+                      </svg>
+                      <span>Deck</span>
+                    </button>
+                  </div>
+
+                  {wordDecks.length === 0 ? (
+                    <div className="py-8 text-center bg-white border border-gray-100 rounded-[24px] shadow-sm">
+                      <p className="text-gray-400 text-sm font-medium">Noch keine Wörter-Decks.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {inProgressDecks.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {inProgressDecks.map(deck => renderDeckCard(deck, false))}
+                        </div>
+                      )}
+                      
+                      {completedDecks.length > 0 && (
+                        <div className="mt-6 border-t border-gray-100 pt-6">
+                          <button 
+                            onClick={() => toggleCategory('Wörter')}
+                            className="flex items-center justify-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900 transition-colors w-full mb-4"
+                          >
+                            <span>Archiv anzeigen ({completedDecks.length})</span>
+                            <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
+                          </button>
+                          <AnimatePresence>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: "auto" }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+                                  {completedDecks.map(deck => renderDeckCard(deck, true))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {sortedDecks.length > limit && (
+                    <button 
+                      onClick={() => handleLoadMore('Wörter')}
+                      className="mt-6 mx-auto block px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-full transition-all"
+                    >
+                      Weitere laden
+                    </button>
+                  )}
+                </section>
+              );
+            })()}
+
+            <section className="pt-8 border-t border-gray-100">
+              <div className="bg-white/50 p-6 rounded-[28px] border border-gray-100 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="p-4 bg-gray-50 rounded-full text-blue-600">
-                    <Archive className="w-6 h-6" />
+                  <div className="p-3 bg-gray-100 rounded-full text-gray-500">
+                    <Archive className="w-5 h-5" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold tracking-tight text-gray-900">Mein Archiv</h2>
-                    <p className="text-sm text-gray-500 font-medium">{archivedCards.length} Wörter gemeistert</p>
+                    <h3 className="font-bold text-gray-900">Gesamtes Archiv</h3>
+                    <p className="text-sm text-gray-500 font-medium">{archivedCards.length} gemeistert</p>
                   </div>
                 </div>
-                
                 <button
-                  onClick={() => {
-                    if (archivedCards.length > 0) setReviewCards(archivedCards);
-                  }}
+                  onClick={() => { if (archivedCards.length > 0) setReviewCards(archivedCards); }}
                   disabled={archivedCards.length === 0}
-                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-full transition-all duration-100 active:scale-[0.98] shadow-sm disabled:opacity-50 disabled:active:scale-100 shrink-0"
+                  className="px-5 py-2.5 bg-gray-100 hover:bg-blue-600 hover:text-white text-gray-600 font-semibold text-sm rounded-xl transition-all disabled:opacity-50"
                 >
                   Alle trainieren
                 </button>
