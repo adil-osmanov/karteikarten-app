@@ -280,6 +280,27 @@ function StudyInterface({
     }
   }, [deckId, reviewCards]);
 
+  // PRELOAD NEXT AUDIO
+  useEffect(() => {
+    if (activeCards.length > currentIndex + 1) {
+      const nextCard = activeCards[currentIndex + 1].card;
+      const fullSentence = nextCard.sentence.replace("___", nextCard.targetWord);
+      if (!audioCache.has(fullSentence)) {
+        fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: fullSentence })
+        })
+        .then(res => { if (res.ok) return res.blob(); throw new Error(); })
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          audioCache.set(fullSentence, url);
+        })
+        .catch(() => {});
+      }
+    }
+  }, [currentIndex, activeCards]);
+
   if (activeCards.length === 0) {
     return (
       <div className="flex-1 flex flex-col justify-center max-w-2xl mx-auto px-6 py-24 text-center">
@@ -301,27 +322,6 @@ function StudyInterface({
       </div>
     );
   }
-
-  // PRELOAD NEXT AUDIO
-  useEffect(() => {
-    if (activeCards.length > currentIndex + 1) {
-      const nextCard = activeCards[currentIndex + 1].card;
-      const fullSentence = nextCard.sentence.replace("___", nextCard.targetWord);
-      if (!audioCache.has(fullSentence)) {
-        fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: fullSentence })
-        })
-        .then(res => { if (res.ok) return res.blob(); throw new Error(); })
-        .then(blob => {
-          const url = URL.createObjectURL(blob);
-          audioCache.set(fullSentence, url);
-        })
-        .catch(() => {});
-      }
-    }
-  }, [currentIndex, activeCards]);
 
   const { deckId: currentDeckId, card: currentCardSnapshot } = activeCards[currentIndex];
   // Get live card to instantly reflect masteryLevel updates (blue dots)
