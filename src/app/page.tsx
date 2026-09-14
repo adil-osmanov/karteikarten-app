@@ -289,15 +289,21 @@ function StudyInterface({
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [roundCounter, setRoundCounter] = useState(0);
+  const [initialTotal, setInitialTotal] = useState(0);
+  const [masteredInSession, setMasteredInSession] = useState(0);
 
   useEffect(() => {
     if (reviewCards) {
       setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
+      setInitialTotal(reviewCards.length);
+      setMasteredInSession(0);
     } else if (deckId) {
       const deck = useStore.getState().decks.find((d) => d.id === deckId);
       if (deck) {
         const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
         setActiveCards(active.sort(() => Math.random() - 0.5));
+        setInitialTotal(active.length);
+        setMasteredInSession(0);
       }
     }
   }, [deckId, reviewCards]);
@@ -362,6 +368,8 @@ function StudyInterface({
           setActiveCards(active.sort(() => Math.random() - 0.5));
           setCurrentIndex(0);
           setRoundCounter(prev => prev + 1);
+          setInitialTotal(active.length);
+          setMasteredInSession(0);
         }
       }
     }
@@ -379,7 +387,7 @@ function StudyInterface({
         <div className="w-full h-1 bg-gray-200/60 dark:bg-[#2C2C2E] rounded-full overflow-hidden">
           <div 
             className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
-            style={{ width: `${Math.max(5, ((currentIndex + 1) / activeCards.length) * 100)}%` }}
+            style={{ width: `${Math.max(5, initialTotal > 0 ? (masteredInSession / initialTotal) * 100 : 0)}%` }}
           />
         </div>
       </div>
@@ -392,6 +400,11 @@ function StudyInterface({
             forceInputMode={!!reviewCards}
             onAnswer={(correct, isHilfe) => {
               answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
+              if (correct && !isHilfe) {
+                setMasteredInSession(prev => prev + 1);
+              } else {
+                setActiveCards(prev => [...prev, { deckId: currentDeckId, card: currentCardSnapshot }]);
+              }
             }}
             onNext={handleNext}
           />
