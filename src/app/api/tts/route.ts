@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
       voice: "de-DE-ConradNeural",
       lang: "de-DE",
       outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-      rate: "-5%",
+      rate: "-50%",
     });
 
     // Write to a temporary file, read it into buffer, then delete it.
