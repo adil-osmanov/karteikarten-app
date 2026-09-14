@@ -595,7 +595,7 @@ const playAudio = useCallback(async (text: string) => {
 
   const renderInputChars = () => {
     if (inputText.length === 0) {
-      return <span className="text-gray-300/50 dark:text-gray-500 font-light tracking-wide text-lg">Tippen...</span>;
+      return <span className="text-gray-400 dark:text-gray-500 font-light tracking-wide text-lg">Tippen...</span>;
     }
     return Array.from(inputText).map((char, i) => {
       const isMatch = char.toLowerCase() === card.targetWord[i]?.toLowerCase();
@@ -616,7 +616,7 @@ const playAudio = useCallback(async (text: string) => {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] border border-[rgba(0,0,0,0.06)] dark:border-white/[0.08] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-300"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.06] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
       onClick={() => {
         if (!isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
@@ -630,10 +630,10 @@ const playAudio = useCallback(async (text: string) => {
             playAudio(fullSentence);
           }}
           disabled={isPlayingAudio}
-          className="relative w-11 h-11 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-500 rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
         >
           <Volume2 className="w-5 h-5" />
-          <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 bg-white border border-gray-100 rounded-[4px] px-1 shadow-sm pointer-events-none">
+          <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded-[4px] px-1 shadow-sm pointer-events-none">
             R
           </span>
         </button>
@@ -651,11 +651,11 @@ const playAudio = useCallback(async (text: string) => {
       </div>
 
       <div className="flex flex-col items-center text-center w-full">
-        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 w-full max-w-lg mb-4">
+        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 dark:text-\[#F5F5F7\] w-full max-w-lg mb-4">
           {parts[0]}
           
           {phase === "Answer" ? (
-            <span className="text-[#007AFF] mx-1 font-semibold">
+            <span className="text-gray-900 dark:text-[#F5F5F7] mx-1 font-semibold">
               {card.targetWord}
             </span>
           ) : (
@@ -691,7 +691,7 @@ const playAudio = useCallback(async (text: string) => {
 
         {(phase === "Answer" || !isMultipleChoice) && (
           <div className="mb-6 w-full text-center">
-            <p className="text-base text-gray-400 font-medium w-full max-w-lg mx-auto">
+            <p className="text-base text-gray-500 dark:text-\[#8E8E93\] font-medium w-full max-w-lg mx-auto">
               {card.translation}
             </p>
           </div>
@@ -712,9 +712,9 @@ const playAudio = useCallback(async (text: string) => {
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-transform duration-150 ease-out active:scale-[0.98] relative flex items-center justify-center"
+                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900 dark:text-[#F5F5F7] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-transform duration-150 ease-out active:scale-[0.98] relative flex items-center justify-center"
               >
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-400 px-1.5 py-0.5 rounded-md bg-gray-100 border border-gray-200/60 pointer-events-none">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-400 dark:text-gray-400 px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-[#3A3A3C] border border-gray-200/60 dark:border-white/[0.05] pointer-events-none">
                   {idx + 1}
                 </span>
                 {opt}
@@ -756,10 +756,10 @@ function DarkModeToggle() {
     setIsDark(next);
     if (next) {
       document.documentElement.classList.add('dark');
-      localStorage.theme = 'dark';
+      localStorage.setItem('theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.theme = 'light';
+      localStorage.setItem('theme', 'light');
     }
   };
 
@@ -924,7 +924,7 @@ export default function App() {
         key={deck.id}
         onClick={() => setActiveDeckId(deck.id)}
         className={cn(
-          "group cursor-pointer bg-white dark:bg-[#1C1C1E] rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative border border-gray-100 dark:border-white/[0.08]",
+          "group cursor-pointer bg-white dark:bg-[#1C1C1E] rounded-[28px] p-8 border border-black/[0.06] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative",
           isCompleted && "opacity-60 hover:opacity-100"
         )}
       >
@@ -1039,7 +1039,7 @@ export default function App() {
       <main className="max-w-4xl mx-auto px-6 py-12 md:py-24">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
           <div className="flex justify-center mb-10 pt-4">
-            <div className="bg-slate-100/80 dark:bg-[#1C1C1E] p-1.5 rounded-2xl inline-flex w-full max-w-sm mx-auto border border-slate-200/50 shadow-inner">
+            <div className="bg-gray-100 dark:bg-[#1C1C1E] p-1.5 rounded-2xl inline-flex w-full max-w-sm mx-auto border border-black/[0.05] dark:border-white/[0.08]">
               {(["Grammatik", "Wörter"] as const).map((tab) => (
                 <button
                   key={tab}
@@ -1047,8 +1047,8 @@ export default function App() {
                   className={cn(
                     "flex-1 px-8 py-3.5 transition-all text-lg font-bold tracking-wide",
                     activeTab === tab
-                      ? "bg-white text-[#007AFF] shadow-md rounded-xl"
-                      : "text-slate-500 hover:text-slate-700 dark:hover:text-[#F5F5F7] rounded-xl"
+                      ? "bg-white dark:bg-[#2C2C2E] text-gray-900 dark:text-white shadow-sm rounded-xl"
+                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-[#F5F5F7] rounded-xl" 
                   )}
                 >
                   {tab}
