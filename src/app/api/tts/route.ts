@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     // ConradNeural is an excellent, natural sounding German voice.
     // KatjaNeural is a female option. Let's use ConradNeural.
     const tts = new EdgeTTS({
-      voice: "de-DE-ConradNeural",
+      voice: "de-DE-KatjaNeural",
       lang: "de-DE",
       outputFormat: "audio-24khz-48kbitrate-mono-mp3",
     });
