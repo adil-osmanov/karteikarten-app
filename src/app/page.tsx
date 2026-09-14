@@ -347,7 +347,6 @@ function StudyInterface({
 
   return (
     <>
-      <div className="fixed inset-0 bg-gray-900/30 backdrop-blur-[2px] z-40 transition-opacity pointer-events-none" />
       <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
       <div className="w-full max-w-2xl mx-auto flex items-center justify-between px-2 mb-4">
         <button onClick={onBack} className="text-gray-400 hover:text-gray-900 transition-colors p-2 -ml-2 rounded-full hover:bg-white">
@@ -587,7 +586,7 @@ const playAudio = useCallback(async (text: string) => {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="bg-white rounded-[24px] p-6 md:p-12 shadow-[0_10px_30px_-5px_rgba(0,0,0,0.04),0_2px_6px_rgba(0,0,0,0.02)] border border-[rgba(0,0,0,0.06)] flex flex-col items-center justify-between min-h-[400px]"
+      className="bg-white rounded-[24px] p-6 md:p-12 shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[rgba(0,0,0,0.06)] flex flex-col items-center justify-between min-h-[400px]"
       onClick={() => {
         if (!isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
@@ -762,7 +761,7 @@ export default function App() {
     fetchDecks();
   }, [setDecks]);
 
-  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#F5F5F7] animate-pulse" />;
+  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
 
   if (activeDeckId) {
     return (
@@ -903,7 +902,7 @@ export default function App() {
           <div className="flex items-center justify-end text-sm font-bold mb-3">
             <span className={isCompleted ? "text-green-600" : "text-gray-400"}>{mastered} / {total}</span>
           </div>
-          <div className="h-2 w-full bg-[#F5F5F7] rounded-full overflow-hidden">
+          <div className="h-2 w-full bg-[#FBFBFD] rounded-full overflow-hidden">
             <div
               className={cn(
                 "h-full rounded-full transition-all duration-700 ease-out",
