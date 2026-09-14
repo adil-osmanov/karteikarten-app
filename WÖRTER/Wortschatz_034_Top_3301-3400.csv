@@ -5,7 +5,7 @@ Donner;Nach dem Blitz hörten wir einen lauten ___.;После молнии мы
 Schrecken;Der laute Knall hat uns einen großen ___ eingejagt.;Громкий хлопок сильно нас напугал.;Schatten;Kuchen;Rücken
 Stall;Die Pferde stehen nachts sicher im ___.;Лошади ночью безопасно стоят в конюшне.;Flur;Keller;Wald
 saßen;Wir ___ gestern den ganzen Abend im Wohnzimmer.;Вчера мы весь вечер сидели в гостиной.;liefen;standen;flogen
-Quitt;Wenn du mir das Geld zurückgibst, sind wir ___.;Если ты вернешь мне деньги, мы в расчете.;fertig;sicher;bereit
+quitt;Wenn du mir das Geld zurückgibst, sind wir ___.;Если ты вернешь мне деньги, мы в расчете.;fertig;sicher;bereit
 Hotels;Wir haben während unserer Reise in vielen verschiedenen ___ übernachtet.;Во время нашей поездки мы ночевали во многих разных отелях.;Büros;Kinos;Autos
 respektiere;Ich ___ deine Entscheidung, auch wenn ich sie nicht verstehe.;Я уважаю твое решение, даже если не понимаю его.;ignoriere;probiere;verliere
 Kandidaten;Für diese Position gibt es drei sehr gute ___.;На эту должность есть три очень хороших кандидата.;Patienten;Studenten;Kunden
@@ -15,20 +15,20 @@ läutet;Kannst du bitte an die Tür gehen? Es ___.;Можешь, пожалуй�
 lachst;Warum ___ du so laut? Ist etwas lustig?;Почему ты так громко смеешься? Что-то смешное?;weinst;schreist;singst
 Champion;Er hat das Turnier gewonnen und ist der neue ___.;Он выиграл турнир и стал новым чемпионом.;Verlierer;Anfänger;Trainer
 unverständlich;Seine Erklärung war für mich völlig ___.;Его объяснение было для меня совершенно непонятным.;unglaublich;unmöglich;unabhängig
-ermorden;Der Täter plante, sein Opfer im Wald zu ___.;Преступник планировал убить свою жертву в лесу.;Besuchen;Verstecken;bezahlen
-Betracht;Wir müssen diese neue Möglichkeit in ___ ziehen.;Мы должны принять эту новую возможность во внимание.;Gefahr;Sicht;Frage
+ermorden;Der Täter plante, sein Opfer im Wald zu ___.;Преступник планировал убить свою жертву в лесу.;besuchen;verstecken;bezahlen
+betracht;Wir müssen diese neue Möglichkeit in ___ ziehen.;Мы должны принять эту новую возможность во внимание.;Gefahr;Sicht;Frage
 schadet;Zu viel Zucker ___ der Gesundheit.;Слишком много сахара вредит здоровью.;hilft;dient;passt
-Fester;Du musst den Knoten ___ ziehen, sonst löst er sich.;Тебе нужно затянуть узел крепче, иначе он развяжется.;schneller;leichter;besser
+fester;Du musst den Knoten ___ ziehen, sonst löst er sich.;Тебе нужно затянуть узел крепче, иначе он развяжется.;schneller;leichter;besser
 geregelt;Wir haben das Problem gestern endlich ___.;Вчера мы наконец-то уладили эту проблему.;geplant;gekauft;gelernt
 unterbrochen;Das Spiel wurde wegen des starken Regens ___.;Игра была прервана из-за сильного дождя.;vergessen;verloren;verstanden
 Angesicht;Im ___ der Gefahr blieben sie ruhig.;Перед лицом опасности они оставались спокойными.;Licht;Gewicht;Gericht
-kriminellen;Die Polizei hat den ___ nach langer Suche verhaftet.;Полиция арестовала преступника после долгих поисков.;Kunden;Kollegen;Nachbarn
+Kriminellen;Die Polizei hat den ___ nach langer Suche verhaftet.;Полиция арестовала преступника после долгих поисков.;Kunden;Kollegen;Nachbarn
 Einzelheiten;Ich kenne die genauen ___ des Vertrags noch nicht.;Я еще не знаю точных деталей контракта.;Freiheiten;Krankheiten;Wahrheiten
-anlügen;Du darfst deine Eltern nicht ___, sag ihnen die Wahrheit.;Ты не должен лгать своим родителям, скажи им правду.;Anrufen;ansehen;anhören
-beschütze;Ich ___ meine kleine Schwester, wenn sie Angst hat.;Я защищаю свою младшую сестру, когда ей страшно.;begrüße;Besuche;berate
+anlügen;Du darfst deine Eltern nicht ___, sag ihnen die Wahrheit.;Ты не должен лгать своим родителям, скажи им правду.;anrufen;ansehen;anhören
+beschütze;Ich ___ meine kleine Schwester, wenn sie Angst hat.;Я защищаю свою младшую сестру, когда ей страшно.;begrüße;besuche;berate
 stattfinden;Das Konzert wird trotz des Regens ___.;Концерт состоится, несмотря на дождь.;mitkommen;aufstehen;zuhören
 gelingt;Ich hoffe, dass mir der Kuchen diesmal ___.;Я надеюсь, что торт в этот раз у меня получится.;gehört;gefällt;genügt
-Feste;Sie hat jetzt eine ___ Stelle in der Firma.;Теперь у нее постоянная должность в компании.;kalte;kurze;Leere
+feste;Sie hat jetzt eine ___ Stelle in der Firma.;Теперь у нее постоянная должность в компании.;kalte;kurze;leere
 Burger;Zum Mittagessen habe ich einen großen ___ gegessen.;На обед я съел большой бургер.;Salat;Kuchen;Apfel
 spannend;Das Buch ist so ___, dass ich nicht aufhören kann zu lesen.;Эта книга такая увлекательная, что я не могу перестать читать.;langweilig;teuer;müde
 einnehmen;Sie müssen diese Tabletten dreimal täglich ___.;Вы должны принимать эти таблетки три раза в день.;aufstehen;mitbringen;zuhören
@@ -42,12 +42,12 @@ ewige;Ich kann dieses ___ Warten nicht mehr ertragen.;Я больше не мо�
 Emotionen;Sie konnte ihre ___ nicht verbergen und begann zu weinen.;Она не смогла скрыть свои эмоции и начала плакать.;Informationen;Situationen;Traditionen
 Käufer;Das Haus steht zum Verkauf, aber wir haben noch keinen ___ gefunden.;Дом выставлен на продажу, но мы еще не нашли покупателя.;Verkäufer;Fahrer;Mieter
 Stars;Auf dem roten Teppich waren viele berühmte ___.;На красной дорожке было много известных звезд.;Autos;Tiere;Bilder
-erwachsenen;Dieser Film ist nur für ___ geeignet, nicht für Kinder.;Этот фильм подходит только для взрослых, не для детей.;Studenten;jugendlichen;Patienten
+Erwachsenen;Dieser Film ist nur für ___ geeignet, nicht für Kinder.;Этот фильм подходит только для взрослых, не для детей.;Studenten;Jugendlichen;Patienten
 Division;Er arbeitet jetzt in einer anderen ___ der Firma.;Теперь он работает в другом подразделении компании.;Mission;Version;Diskussion
-aufzunehmen;Wir planen, am Wochenende einen neuen Song ___.;Мы планируем записать новую песню на выходных.;anzunehmen;auszugeben;Mitzubringen
+aufzunehmen;Wir planen, am Wochenende einen neuen Song ___.;Мы планируем записать новую песню на выходных.;anzunehmen;auszugeben;mitzubringen
 Werft;Das alte Schiff wird in der ___ repariert.;Старый корабль ремонтируют на верфи.;Stadt;Schule;Küche
 ältere;Meine ___ Schwester studiert Medizin in Berlin.;Моя старшая сестра изучает медицину в Берлине.;jüngere;kleinere;bessere
-Banken;Am Wochenende haben die meisten ___ geschlossen.;На выходных большинство банков закрыто.;kranken;Gedanken;schränken
+Banken;Am Wochenende haben die meisten ___ geschlossen.;На выходных большинство банков закрыто.;Kranken;Gedanken;Schränken
 Kätzchen;Wir haben auf der Straße ein kleines ___ gefunden.;Мы нашли на улице маленького котенка.;Mädchen;Hündchen;Stückchen
 Option;Wir haben keine andere ___, als hier zu warten.;У нас нет другого варианта, кроме как ждать здесь.;Station;Portion;Aktion
 heiratest;Stimmt es, dass du im Sommer ___?;Правда ли, что ты выходишь замуж летом?;arbeitest;wartest;antwortest
@@ -57,8 +57,8 @@ Schublade;Die Gabeln und Messer liegen in der obersten ___.;Вилки и нож
 gestürzt;Der alte Mann ist auf der Treppe ___.;Старый мужчина упал на лестнице.;geschützt;genutzt;geputzt
 ankommt;Ich rufe dich an, sobald der Zug ___.;Я позвоню тебе, как только поезд прибудет.;mitkommt;auskommt;bekommt
 befragt;Der Zeuge wurde von der Polizei stundenlang ___.;Полиция допрашивала свидетеля часами.;gefragt;versagt;geklagt
-Buchstaben;Das deutsche Alphabet hat 26 ___.;В немецком алфавите 26 букв.;Aufgaben;Farben;Fragen
-Spielten;Die Kinder ___ den ganzen Nachmittag im Garten.;Дети играли в саду весь день.;lachten;arbeiteten;schrieben
+Buchstaben;Das deutsche Alphabet hat 26 ___.;В немецком алфавиде 26 букв.;Aufgaben;Farben;Fragen
+spielten;Die Kinder ___ den ganzen Nachmittag im Garten.;Дети играли в саду весь день.;lachten;arbeiteten;schrieben
 gestiegen;Die Preise für Benzin sind im letzten Monat stark ___.;Цены на бензин сильно выросли за последний месяц.;gefallen;geblieben;gelaufen
 abgefahren;Der Zug nach München ist bereits ___.;Поезд на Мюнхен уже уехал.;angekommen;aufgestanden;ausgegangen
 gewaschen;Ich habe meine Hände vor dem Essen ___.;Я помыл руки перед едой.;gesehen;gegessen;getrunken
@@ -68,7 +68,7 @@ Zombies;Wir haben gestern Abend einen gruseligen Film über ___ gesehen.;Вче�
 Anhänger;Er fährt ein Auto mit einem großen ___.;Он водит машину с большим прицепом.;Anfänger;Empfänger;Verkäufer
 gewisser;Es gibt eine Frau, die ein ___ Herr Müller sprechen möchte.;Есть женщина, с которой хочет поговорить некий господин Мюллер.;besserer;sicherer;größerer
 medizinischen;Wir brauchen dringend einen ___ Rat.;Нам срочно нужен медицинский совет.;technischen;praktischen;logischen
-Kern;Der ___ des Apfels ist nicht essbar.;Сердцевина яблока несъедобна.;Stern;lern;fern
+Kern;Der ___ des Apfels ist nicht essbar.;Сердцевина яблока несъедобна.;Stern;Lern;Fern
 offene;Sie ließ die Tür ___ stehen, damit frische Luft hereinkommt.;Она оставила дверь открытой, чтобы зашел свежий воздух.;geschlossene;kaputte;saubere
 gefeiert;Wir haben seinen Geburtstag im kleinen Kreis ___.;Мы отпраздновали его день рождения в узком кругу.;geliefert;geändert;gesichert
 anschließen;Du musst den Drucker an den Computer ___.;Тебе нужно подключить принтер к компьютеру.;abschließen;aufschließen;verschließen
@@ -81,20 +81,20 @@ gesprungen;Die Katze ist über den Zaun ___.;Кошка перепрыгнула
 geopfert;Er hat seine ganze Freizeit für dieses Projekt ___.;Он пожертвовал всем своим свободным временем ради этого проекта.;geändert;geliefert;gefordert
 beiseite;Er legte das Buch ___ und hörte aufmerksam zu.;Он отложил книгу в сторону и внимательно слушал.;zurück;vorbei;voraus
 umgekehrt;Ich dachte, er wäre der Chef, aber es ist genau ___.;Я думал, что он начальник, но всё совсем наоборот.;umgebaut;umgezogen;umgedreht
-geschworenen;Die ___ haben den Angeklagten für schuldig befunden.;Присяжные признали обвиняемого виновным.;verlorenen;geborenen;gefrorenen
+Geschworenen;Die ___ haben den Angeklagten für schuldig befunden.;Присяжные признали обвиняемого виновным.;Verlorenen;Geborenen;Gefrorenen
 Draussen;Es ist kalt ___, zieh dir eine Jacke an.;На улице холодно, надень куртку.;drinnen;oben;unten
 ausgesprochen;Das Essen in diesem Restaurant war ___ lecker.;Еда в этом ресторане была исключительно вкусной.;angesprochen;besprochen;versprochen
-Burg;Auf dem Berg steht eine alte, verfallene ___.;На горе стоит старый, разрушенный замок.;Wand;Stadt;Brücke
+burg;Auf dem Berg steht eine alte, verfallene ___.;На горе стоит старый, разрушенный замок.;wand;stadt;brücke
 ausführen;Der Computer kann diesen Befehl nicht ___.;Компьютер не может выполнить эту команду.;aufhören;anfangen;ausgehen
-gesperrt;Die Straße ist wegen eines Unfalls für Autos ___.;Дорога перекрыта для машин из-за аварии.;gelernt;geplant;gekauft
-irrer;Ein ___ hat gestern versucht, die Bank auszurauben.;Какой-то сумасшедший вчера пытался ограбить банк.;Käufer;Lehrer;Fahrer
+Gesperrt;Die Straße ist wegen eines Unfalls für Autos ___.;Дорога перекрыта для машин из-за аварии.;Gelernt;Geplant;Gekauft
+Irrer;Ein ___ hat gestern versucht, die Bank auszurauben.;Какой-то сумасшедший вчера пытался ограбить банк.;Käufer;Lehrer;Fahrer
 drehte;Er ___ sich um und sah, dass ihm jemand folgte.;Он обернулся и увидел, что за ним кто-то идет.;fehlte;lebte;redete
 ersparen;Du hättest dir diesen Fehler ___ können, wenn du aufgepasst hättest.;Ты мог бы избежать этой ошибки, если бы был внимателен.;erfahren;erklären;erhalten
 frech;Der Junge war sehr ___ zu seiner Lehrerin.;Мальчик был очень дерзок со своей учительницей.;Frisch;froh;frei
 Genehmigung;Ohne offizielle ___ dürfen Sie hier nicht parken.;Без официального разрешения вам нельзя здесь парковаться.;Wohnung;Rechnung;Zeitung
 versteckte;Der Hund ___ seinen Knochen im Garten.;Собака спрятала свою кость в саду.;entdeckte;schmeckte;weckte
 interessanter;Dieser Film war viel ___ als der letzte.;Этот фильм был гораздо интереснее, чем предыдущий.;bekannter;schwerer;kürzer
-Schneider;Der ___ hat mein neues Kleid perfekt genäht.;Портной идеально сшил мое новое платье.;Schreiber;Maler;Bäcker
+schneider;Der ___ hat mein neues Kleid perfekt genäht.;Портной идеально сшил мое новое платье.;schreiber;maler;bäcker
 gefährden;Rauchen kann Ihre Gesundheit ernsthaft ___.;Курение может серьезно угрожать вашему здоровью.;verändern;beenden;überleben
 Handtasche;Sie hat ihre Schlüssel in der ___ gesucht.;Она искала свои ключи в сумочке.;Brieftasche;Reisetasche;Jackentasche
-Urteilen;Man sollte nicht zu schnell über andere Menschen ___.;Не следует слишком быстро судить о других людях.;Teilen;Heilen;Eilen
+urteilen;Man sollte nicht zu schnell über andere Menschen ___.;Не следует слишком быстро судить о других людях.;teilen;heilen;eilen

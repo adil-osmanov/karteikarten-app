@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { EdgeTTS } from "node-edge-tts";
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,25 +12,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
     }
 
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=de-DE&q=${encodeURIComponent(
-      text
-    )}`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        // Optional: Sometimes adding a user agent helps avoid blocks
-        "User-Agent": "Mozilla/5.0",
-      },
+    // ConradNeural is an excellent, natural sounding German voice.
+    // KatjaNeural is a female option. Let's use ConradNeural.
+    const tts = new EdgeTTS({
+      voice: "de-DE-ConradNeural",
+      lang: "de-DE",
+      outputFormat: "audio-24khz-48kbitrate-mono-mp3",
     });
 
-    if (!response.ok) {
-      throw new Error(`Google TTS returned ${response.status}`);
-    }
+    // Write to a temporary file, read it into buffer, then delete it.
+    const tempFilePath = path.join(os.tmpdir(), `tts-${Date.now()}-${Math.random().toString(36).substring(7)}.mp3`);
+    
+    await tts.ttsPromise(text, tempFilePath);
+    
+    const audioBuffer = fs.readFileSync(tempFilePath);
+    fs.unlinkSync(tempFilePath); // Cleanup
 
-    const arrayBuffer = await response.arrayBuffer();
-
-    return new NextResponse(arrayBuffer, {
+    return new NextResponse(audioBuffer, {
       headers: {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "public, max-age=31536000, immutable",

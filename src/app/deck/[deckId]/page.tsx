@@ -129,6 +129,7 @@ function StudyCard({
     setIsPlayingAudio(true);
 
     try {
+      // Primary: Azure Neural Edge TTS
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -142,12 +143,34 @@ function StudyCard({
       const audio = new Audio(audioUrl);
       
       audio.onended = () => setIsPlayingAudio(false);
-      audio.onerror = () => setIsPlayingAudio(false);
+      audio.onerror = () => {
+        setIsPlayingAudio(false);
+      };
       
       await audio.play();
     } catch (e) {
-      console.warn("TTS fetch failed", e);
-      setIsPlayingAudio(false);
+      console.warn("TTS fetch failed, falling back to offline Web Speech API", e);
+      
+      // Fallback: Offline Web Speech API
+      if ("speechSynthesis" in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = "de-DE";
+        utterance.rate = 0.9;
+        
+        // Try to find a premium voice if available (mostly for Apple devices)
+        const voices = window.speechSynthesis.getVoices();
+        const premiumGerman = voices.find(v => v.lang.startsWith("de") && v.name.includes("Premium"));
+        if (premiumGerman) {
+          utterance.voice = premiumGerman;
+        }
+
+        utterance.onend = () => setIsPlayingAudio(false);
+        utterance.onerror = () => setIsPlayingAudio(false);
+        
+        window.speechSynthesis.speak(utterance);
+      } else {
+        setIsPlayingAudio(false);
+      }
     }
   }, []);
 

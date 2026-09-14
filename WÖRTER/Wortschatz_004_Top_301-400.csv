@@ -1,42 +1,42 @@
-kaufen;Ich habe genug Geld und möchte dieses Buch ___.;У меня достаточно денег, и я хочу купить эту книгу.;Schlafen;schwimmen;warten
-verkaufen;Er will sein altes Auto für tausend Euro ___.;Он хочет продать свой старый автомобиль за тысячу евро.;Sitzen;Liegen;fehlen
-trinken;Im Sommer muss man jeden Tag viel Wasser ___.;Летом нужно каждый день пить много воды.;Schlafen;laufen;fahren
-Essen;Wir haben großen Hunger und wollen eine Pizza ___.;Мы очень голодны и хотим съесть пиццу.;trinken;Schreiben;lesen
-Schlafen;Ich bin so müde, ich möchte jetzt einfach nur ___.;Я так устал, я хочу сейчас просто поспать.;kaufen;Fragen;öffnen
+kaufen;Ich habe genug Geld und möchte dieses Buch ___.;У меня достаточно денег, и я хочу купить эту книгу.;schlafen;schwimmen;warten
+verkaufen;Er will sein altes Auto für tausend Euro ___.;Он хочет продать свой старый автомобиль за тысячу евро.;sitzen;liegen;fehlen
+trinken;Im Sommer muss man jeden Tag viel Wasser ___.;Летом нужно каждый день пить много воды.;schlafen;laufen;fahren
+essen;Wir haben großen Hunger und wollen eine Pizza ___.;Мы очень голодны и хотим съесть пиццу.;trinken;schreiben;lesen
+schlafen;Ich bin so müde, ich möchte jetzt einfach nur ___.;Я так устал, я хочу сейчас просто поспать.;kaufen;fragen;öffnen
 aufstehen;Ich muss morgen früh zur Arbeit gehen und um sechs Uhr ___.;Мне нужно завтра рано идти на работу и встать в шесть часов.;aufhören;einkaufen;mitkommen
-Anrufen;Ich habe deine Nummer und werde dich heute Abend ___.;У меня есть твой номер, и я позвоню тебе сегодня вечером.;anfangen;ankommen;aufstehen
+anrufen;Ich habe deine Nummer und werde dich heute Abend ___.;У меня есть твой номер, и я позвоню тебе сегодня вечером.;anfangen;ankommen;aufstehen
 mitbringen;Kommst du zur Party und kannst du bitte eine Flasche Saft ___?;Ты придешь на вечеринку и можешь, пожалуйста, принести с собой бутылку сока?;mitgehen;mitfahren;mitkommen
 vergessen;Ich habe keinen Stift dabei, ich habe ihn zu Hause ___.;У меня нет с собой ручки, я забыл ее дома.;geschlafen;gewohnt;gearbeitet
 einladen;Ich habe bald Geburtstag und möchte dich zu meiner Feier ___.;У меня скоро день рождения, и я хочу пригласить тебя на мой праздник.;einschlafen;einkaufen;einsteigen
-bezahlen;Der Kellner bringt die Rechnung und ich möchte bitte ___.;Официант приносит счет, и я хочу заплатить, пожалуйста.;wohnen;Fragen;schwimmen
-Kosten;Wie viel soll diese Jacke hier im Geschäft ___?;Сколько должна стоить эта куртка здесь в магазине?;bezahlen;kaufen;Mieten
-öffnen;Es ist sehr heiß im Zimmer, kannst du bitte das Fenster ___?;В комнате очень жарко, можешь, пожалуйста, открыть окно?;trinken;kochen;Schreiben
-schließen;Draußen ist es laut, ich muss jetzt die Tür ___.;На улице шумно, я должен сейчас закрыть дверь.;Essen;laufen;sprechen
-Putzen;Das Bad ist schmutzig, ich muss heute die Toilette ___.;В ванной грязно, я должен сегодня помыть (почистить) туалет.;Essen;trinken;lesen
-kochen;Ich habe Tomaten und Fleisch gekauft, heute will ich eine Suppe ___.;Я купил помидоры и мясо, сегодня я хочу сварить суп.;Schlafen;fahren;laufen
-waschen;Mein Hemd hat einen Fleck, ich muss es sofort ___.;На моей рубашке пятно, я должен немедленно постирать ее.;Fragen;Sitzen;wohnen
-Duschen;Nach dem langen Spaziergang im Regen möchte ich warm ___.;После долгой прогулки под дождем я хочу принять теплый душ.;Schreiben;lesen;lernen
-Anziehen;Draußen ist es kalt, du musst dir eine warme Jacke ___.;На улице холодно, тебе нужно надеть теплую куртку.;ausziehen;mitbringen;abholen
-ausziehen;Komm bitte rein in die Wohnung und du kannst hier deine Schuhe ___.;Заходи, пожалуйста, в квартиру, и ты можешь снять здесь обувь.;Anziehen;einpacken;mitnehmen
-abholen;Mein Freund kommt am Bahnhof an und ich muss ihn mit dem Auto ___.;Мой друг приезжает на вокзал, и я должен забрать его на машине.;abfahren;Anreisen;umsteigen
+bezahlen;Der Kellner bringt die Rechnung und ich möchte bitte ___.;Официант приносит счет, и я хочу заплатить, пожалуйста.;wohnen;fragen;schwimmen
+kosten;Wie viel soll diese Jacke hier im Geschäft ___?;Сколько должна стоить эта куртка здесь в магазине?;bezahlen;kaufen;mieten
+öffnen;Es ist sehr heiß im Zimmer, kannst du bitte das Fenster ___?;В комнате очень жарко, можешь, пожалуйста, открыть окно?;trinken;kochen;schreiben
+schließen;Draußen ist es laut, ich muss jetzt die Tür ___.;На улице шумно, я должен сейчас закрыть дверь.;essen;laufen;sprechen
+putzen;Das Bad ist schmutzig, ich muss heute die Toilette ___.;В ванной грязно, я должен сегодня помыть (почистить) туалет.;essen;trinken;lesen
+kochen;Ich habe Tomaten und Fleisch gekauft, heute will ich eine Suppe ___.;Я купил помидоры и мясо, сегодня я хочу сварить суп.;schlafen;fahren;laufen
+waschen;Mein Hemd hat einen Fleck, ich muss es sofort ___.;На моей рубашке пятно, я должен немедленно постирать ее.;fragen;sitzen;wohnen
+duschen;Nach dem langen Spaziergang im Regen möchte ich warm ___.;После долгой прогулки под дождем я хочу принять теплый душ.;schreiben;lesen;lernen
+anziehen;Draußen ist es kalt, du musst dir eine warme Jacke ___.;На улице холодно, тебе нужно надеть теплую куртку.;ausziehen;mitbringen;abholen
+ausziehen;Komm bitte rein in die Wohnung und du kannst hier deine Schuhe ___.;Заходи, пожалуйста, в квартиру, и ты можешь снять здесь обувь.;anziehen;einpacken;mitnehmen
+abholen;Mein Freund kommt am Bahnhof an und ich muss ihn mit dem Auto ___.;Мой друг приезжает на вокзал, и я должен забрать его на машине.;abfahren;anreisen;umsteigen
 einsteigen;Der Zug steht am Gleis und wir müssen jetzt schnell ___.;Поезд стоит на пути, и нам нужно сейчас быстро сесть в поезд.;abfahren;vorbeifahren;mitbringen
 aussteigen;Wir sind an unserer Station angekommen, wir müssen jetzt ___.;Мы прибыли на нашу станцию, мы должны сейчас выйти.;einsteigen;mitfahren;abholen
-umsteigen;Es gibt keinen direkten Zug nach Berlin, wir müssen in Köln ___.;Прямого поезда в Берлин нет, нам нужно сделать пересадку в Кёльне.;einladen;mitnehmen;Anrufen
-Parken;Hier vor der Tür ist ein Parkplatz, du kannst dein Auto hier ___.;Здесь перед дверью парковка, ты можешь припарковать здесь свою машину.;fahren;kaufen;verkaufen
-reparieren;Meine Waschmaschine ist kaputt und ein Handwerker muss sie ___.;Моя стиральная машина сломалась, и мастер должен ее починить.;kaufen;trinken;Schlafen
-bestellen;Wir sitzen im Restaurant und möchten jetzt das Essen ___.;Мы сидим в ресторане и хотим сейчас заказать еду.;kochen;waschen;Putzen
+umsteigen;Es gibt keinen direkten Zug nach Berlin, wir müssen in Köln ___.;Прямого поезда в Берлин нет, нам нужно сделать пересадку в Кёльне.;einladen;mitnehmen;anrufen
+parken;Hier vor der Tür ist ein Parkplatz, du kannst dein Auto hier ___.;Здесь перед дверью парковка, ты можешь припарковать здесь свою машину.;fahren;kaufen;verkaufen
+reparieren;Meine Waschmaschine ist kaputt und ein Handwerker muss sie ___.;Моя стиральная машина сломалась, и мастер должен ее починить.;kaufen;trinken;schlafen
+bestellen;Wir sitzen im Restaurant und möchten jetzt das Essen ___.;Мы сидим в ресторане и хотим сейчас заказать еду.;kochen;waschen;putzen
 gefallen;Das neue Sofa ist sehr schön, es wird meinen Eltern sicher ___.;Новый диван очень красивый, он моим родителям наверняка понравится.;gehören;passen;schmecken
 schmecken;Die Suppe ist wirklich sehr lecker, sie wird dir bestimmt gut ___.;Суп действительно очень вкусный, он тебе точно понравится на вкус.;passen;gehören;stehen
-fehlen;Ich habe nur vier Teller auf dem Tisch, zwei Teller ___ noch.;У меня на столе только четыре тарелки, двух тарелок еще не хватает.;stehen;Liegen;Sitzen
+fehlen;Ich habe nur vier Teller auf dem Tisch, zwei Teller ___ noch.;У меня на столе только четыре тарелки, двух тарелок еще не хватает.;stehen;liegen;sitzen
 passieren;Auf der Straße gab es einen Unfall, was ist denn da genau ___?;На улице произошла авария, что же там точно случилось?;gesagt;gemacht;getan
-Reisen;Ich habe im Sommer vier Wochen Urlaub und möchte nach Italien ___.;Летом у меня четыре недели отпуска, и я хочу поехать в путешествие в Италию.;kochen;Putzen;Schlafen
-Tanzen;Auf der Party läuft tolle Musik und alle Leute wollen ___.;На вечеринке играет отличная музыка, и все люди хотят танцевать.;Schlafen;Schreiben;lesen
-Singen;Sie hat eine wunderbare Stimme und kann sehr schön ein Lied ___.;У нее замечательный голос, и она может очень красиво спеть песню.;Tanzen;kochen;fahren
-lachen;Der Witz war so lustig, wir mussten alle laut ___.;Анекдот был таким смешным, мы все громко смеялись.;Weinen;Schlafen;Schreiben
-Weinen;Das kleine Kind hat sich wehgetan und fängt laut an zu ___.;Маленький ребенок ударился и начинает громко плакать.;lachen;kochen;Reisen
-Mieten;Wir bleiben ein ganzes Jahr in München und wollen eine Wohnung ___.;Мы остаемся на целый год в Мюнхене и хотим снять квартиру.;verkaufen;Putzen;schließen
-Danken;Du hast mir sehr geholfen und ich möchte dir von Herzen ___.;Ты мне очень помог, и я хочу поблагодарить тебя от всего сердца.;Bitten;Fragen;Antworten
-Antworten;Ich habe dir eine Frage gestellt, bitte kannst du mir jetzt ___?;Я задал тебе вопрос, пожалуйста, ты можешь мне сейчас ответить?;Fragen;sagen;Bitten
+reisen;Ich habe im Sommer vier Wochen Urlaub und möchte nach Italien ___.;Летом у меня четыре недели отпуска, и я хочу поехать в путешествие в Италию.;kochen;putzen;schlafen
+tanzen;Auf der Party läuft tolle Musik und alle Leute wollen ___.;На вечеринке играет отличная музыка, и все люди хотят танцевать.;schlafen;schreiben;lesen
+singen;Sie hat eine wunderbare Stimme und kann sehr schön ein Lied ___.;У нее замечательный голос, и она может очень красиво спеть песню.;tanzen;kochen;fahren
+lachen;Der Witz war so lustig, wir mussten alle laut ___.;Анекдот был таким смешным, мы все громко смеялись.;weinen;schlafen;schreiben
+weinen;Das kleine Kind hat sich wehgetan und fängt laut an zu ___.;Маленький ребенок ударился и начинает громко плакать.;lachen;kochen;reisen
+mieten;Wir bleiben ein ganzes Jahr in München und wollen eine Wohnung ___.;Мы остаемся на целый год в Мюнхене и хотим снять квартиру.;verkaufen;putzen;schließen
+danken;Du hast mir sehr geholfen und ich möchte dir von Herzen ___.;Ты мне очень помог, и я хочу поблагодарить тебя от всего сердца.;bitten;fragen;antworten
+antworten;Ich habe dir eine Frage gestellt, bitte kannst du mir jetzt ___?;Я задал тебе вопрос, пожалуйста, ты можешь мне сейчас ответить?;fragen;sagen;bitten
 schenken;Mein Bruder hat morgen Geburtstag und ich will ihm ein Buch ___.;У моего брата завтра день рождения, и я хочу подарить ему книгу.;nehmen;stehlen;leihen
 Bahnhof;Der Zug nach Hamburg fährt gleich ab, wir müssen schnell zum ___.;Поезд в Гамбург сейчас отправляется, нам нужно быстро на вокзал.;Supermarkt;Flughafen;Garten
 Flughafen;Unser Flugzeug fliegt in zwei Stunden ab, wir müssen sofort zum ___.;Наш самолет вылетает через два часа, нам нужно немедленно в аэропорт.;Bahnhof;Parkplatz;Krankenhaus
@@ -84,17 +84,17 @@ Regen;Ohne Regenschirm werde ich nass, denn es fällt starker ___ vom Himmel.;Б
 Sonne;Es ist warm und am blauen Himmel scheint den ganzen Tag die helle ___.;Тепло, и на синем небе целый день светит яркое солнце.;Lampe;Wolke;Nacht
 Schnee;Im kalten Winter bauen die Kinder draußen einen großen Mann aus ___.;Холодной зимой дети строят на улице большого снеговика из снега.;Wasser;Holz;Glas
 Wind;Draußen weht heute ein sehr kalter und starker ___.;На улице дует сегодня очень холодный и сильный ветер.;Regen;Schnee;Nebel
-warm;Die Heizung funktioniert gut, im Wohnzimmer ist es jetzt angenehm ___.;Отопление работает хорошо, в гостиной сейчас приятно тепло.;kalt;Dunkel;traurig
+warm;Die Heizung funktioniert gut, im Wohnzimmer ist es jetzt angenehm ___.;Отопление работает хорошо, в гостиной сейчас приятно тепло.;kalt;dunkel;traurig
 kalt;Im Winter friert der See zu, weil das Wasser draußen so extrem ___ ist.;Зимой озеро замерзает, потому что вода на улице экстремально холодная.;warm;heiß;trocken
 teuer;Ich kann diesen neuen Sportwagen nicht kaufen, er ist mir viel zu ___.;Я не могу купить этот новый спортивный автомобиль, он для меня слишком дорогой.;billig;günstig;einfach
 billig;Dieses alte T-Shirt kostet nur einen Euro, das ist wirklich extrem ___.;Эта старая футболка стоит всего один евро, это действительно крайне дешево.;teuer;schwer;lang
 müde;Ich habe die ganze Nacht nicht geschlafen und bin jetzt furchtbar ___.;Я всю ночь не спал и сейчас ужасно устал.;hungrig;durstig;fröhlich
-krank;Er hat hohes Fieber und bleibt heute im Bett, denn er ist leider sehr ___.;У него высокая температура, и он остается в постели, так как он сильно болен.;gesund;fit;Stark
+krank;Er hat hohes Fieber und bleibt heute im Bett, denn er ist leider sehr ___.;У него высокая температура, и он остается в постели, так как он сильно болен.;gesund;fit;stark
 gesund;Wer viel Sport treibt und frisches Gemüse isst, bleibt lange fit und ___.;Кто много занимается спортом и ест свежие овощи, остается долго в форме и здоровым.;krank;müde;schwach
 hungrig;Ich habe seit zehn Stunden nichts gegessen und bin jetzt wirklich sehr ___.;Я ничего не ел десять часов и сейчас действительно очень голоден.;durstig;satt;müde
 durstig;Ich bin zwanzig Kilometer gelaufen, habe kein Wasser getrunken und bin extrem ___.;Я пробежал двадцать километров, не пил воды и крайне хочу пить.;satt;voll;faul
-Lecker;Das Essen in dieser italienischen Pizzeria ist fantastisch und schmeckt super ___.;Еда в этой итальянской пиццерии фантастическая и на вкус супер аппетитная.;bitter;Sauer;salzig
-sauber;Ich habe den Boden gewischt, die ganze Wohnung ist jetzt wieder blitzblank und ___.;Я вымыл пол, вся квартира теперь снова сверкающая и чистая.;schmutzig;dreckig;Dunkel
-schmutzig;Das Auto ist voller Schlamm und Dreck, es ist wirklich total ___.;Машина вся в грязи, она действительно совершенно грязная.;sauber;Hell;neu
-leise;Das Baby schläft im Nebenzimmer, sprich bitte nicht so laut, sondern ganz ___.;Малыш спит в соседней комнате, говори, пожалуйста, не так громко, а совсем тихо.;schnell;Hell;schwer
-Dunkel;Die Sonne ist untergegangen und ohne Licht ist es im Raum völlig ___.;Солнце зашло, и без света в помещении совершенно темно.;Hell;warm;klar
+lecker;Das Essen in dieser italienischen Pizzeria ist fantastisch und schmeckt super ___.;Еда в этой итальянской пиццерии фантастическая и на вкус супер аппетитная.;bitter;sauer;salzig
+sauber;Ich habe den Boden gewischt, die ganze Wohnung ist jetzt wieder blitzblank und ___.;Я вымыл пол, вся квартира теперь снова сверкающая и чистая.;schmutzig;dreckig;dunkel
+schmutzig;Das Auto ist voller Schlamm und Dreck, es ist wirklich total ___.;Машина вся в грязи, она действительно совершенно грязная.;sauber;hell;neu
+leise;Das Baby schläft im Nebenzimmer, sprich bitte nicht so laut, sondern ganz ___.;Малыш спит в соседней комнате, говори, пожалуйста, не так громко, а совсем тихо.;schnell;hell;schwer
+dunkel;Die Sonne ist untergegangen und ohne Licht ist es im Raum völlig ___.;Солнце зашло, и без света в помещении совершенно темно.;hell;warm;klar

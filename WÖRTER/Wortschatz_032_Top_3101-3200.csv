@@ -1,7 +1,7 @@
 aufbauen;Wir müssen das Zelt noch ___.;Нам нужно еще установить палатку.;abreißen;suchen;kaufen
 Anlass;Zu welchem ___ trägst du dieses Kleid?;По какому поводу ты носишь это платье?;Grund;Ort;Tag
-zählen;Du musst bis zehn ___, bevor du die Augen öffnest.;Ты должен сосчитать до десяти, прежде чем откроешь глаза.;Schlafen;laufen;schreien
-verlieben;Sie wird sich bestimmt in ihn ___.;Она, безусловно, влюбится в него.;Ärgern;Treffen;Verstecken
+zählen;Du musst bis zehn ___, bevor du die Augen öffnest.;Ты должен сосчитать до десяти, прежде чем откроешь глаза.;schlafen;laufen;schreien
+verlieben;Sie wird sich bestimmt in ihn ___.;Она, безусловно, влюбится в него.;ärgern;treffen;verstecken
 Atmosphäre;Im neuen Restaurant herrscht eine tolle ___.;В новом ресторане царит отличная атмосфера.;Musik;Kälte;Gefahr
 Leber;Der Arzt sagt, dass meine ___ gesund ist.;Врач говорит, что моя печень здорова.;Niere;Hand;Nase
 dämlich;Seine Ausrede war wirklich ___.;Его отговорка была действительно глупой.;klug;schnell;leise
@@ -9,16 +9,16 @@ Krawatte;Zum Anzug musst du eine ___ tragen.;К костюму ты должен
 Tarnung;Der Spion nutzte den dunklen Mantel als ___.;Шпион использовал темное пальто в качестве маскировки.;Waffe;Brücke;Decke
 Tablette;Nimm eine ___, wenn du Kopfschmerzen hast.;Прими таблетку, если у тебя болит голова.;Spritze;Flasche;Gabel
 Faust;Er schlug mit der ___ auf den Tisch.;Он ударил кулаком по столу.;Flasche;Schere;Wand
-auftreten;Die Band wird heute Abend auf der Bühne ___.;Группа выступит сегодня вечером на сцене.;Schlafen;kochen;Weinen
+auftreten;Die Band wird heute Abend auf der Bühne ___.;Группа выступит сегодня вечером на сцене.;schlafen;kochen;weinen
 Blatt;Hast du ein ___ Papier für mich?;У тебя есть лист бумаги для меня?;Buch;Stück;Glas
-Löschen;Du musst die alte Datei sofort ___.;Ты должен немедленно удалить старый файл.;Speichern;Drucken;senden
+löschen;Du musst die alte Datei sofort ___.;Ты должен немедленно удалить старый файл.;speichern;drucken;senden
 Dschungel;Die Entdecker haben sich im ___ verlaufen.;Исследователи заблудились в джунглях.;Garten;Keller;Himmel
-niedlich;Das kleine Kätzchen ist wirklich ___.;Маленький котенок действительно милый.;Böse;teuer;schnell
+niedlich;Das kleine Kätzchen ist wirklich ___.;Маленький котенок действительно милый.;böse;teuer;schnell
 Klage;Der Anwalt will eine ___ gegen die Firma einreichen.;Адвокат хочет подать иск против компании.;Frage;Bitte;Rechnung
-akt;Das Stück besteht aus nur einem ___.;Пьеса состоит всего из одного акта.;Teil;Satz;Brief
+Akt;Das Stück besteht aus nur einem ___.;Пьеса состоит всего из одного акта.;Teil;Satz;Brief
 Schießerei;In der Bank gab es gestern eine gefährliche ___.;Вчера в банке была опасная перестрелка.;Feier;Pause;Reise
 Anwältin;Sie arbeitet als ___ für eine große Firma.;Она работает адвокатом в большой компании.;Ärztin;Köchin;Lehrerin
-überlegen;Ich muss mir noch ___, ob ich mitkomme.;Мне нужно еще подумать, пойду ли я с вами.;merken;Wünschen;kaufen
+überlegen;Ich muss mir noch ___, ob ich mitkomme.;Мне нужно еще подумать, пойду ли я с вами.;merken;wünschen;kaufen
 Frisur;Deine neue ___ gefällt mir sehr gut.;Мне очень нравится твоя новая прическа.;Jacke;Brille;Tasche
 Spruch;Das ist ein lustiger ___, den du da gesagt hast.;Это смешное изречение, которое ты произнес.;Lied;Film;Traum
 Moral;Die Geschichte hat eine gute ___.;У истории хорошая мораль.;Länge;Farbe;Musik
@@ -30,7 +30,7 @@ Schachtel;Die Pralinen sind in einer schönen ___.;Шоколадные конф
 Opfer;Wir müssen dem ___ des Unfalls helfen.;Мы должны помочь жертве аварии.;Auto;Arzt;Polizist
 Note;Er hat eine gute ___ in der Prüfung bekommen.;Он получил хорошую оценку на экзамене.;Frage;Aufgabe;Idee
 Eigentum;Dieses Haus ist mein privates ___.;Этот дом - моя частная собственность.;Geheimnis;Problem;Spielzeug
-Spenden;Wir wollen Geld für kranke Kinder ___.;Мы хотим пожертвовать деньги для больных детей.;stehlen;zählen;finden
+spenden;Wir wollen Geld für kranke Kinder ___.;Мы хотим пожертвовать деньги для больных детей.;stehlen;zählen;finden
 Betrieb;Der ___ in der Fabrik läuft gut.;Работа на заводе идет хорошо.;Urlaub;Streit;Schlaf
 gemeinsam;Wir sollten das Problem ___ lösen.;Мы должны решить проблему вместе.;allein;schnell;später
 absurd;Seine Forderung ist völlig ___.;Его требование совершенно абсурдно.;normal;logisch;leise
@@ -38,25 +38,25 @@ Gegensatz;Im ___ zu dir mag ich keinen Kaffee.;В отличие от тебя, 
 Frühling;Im ___ blühen die Bäume wieder.;Весной деревья снова цветут.;Winter;Herbst;Sommer
 Ausland;Viele Menschen verbringen ihren Urlaub im ___.;Многие люди проводят свой отпуск за границей.;Garten;Haus;Keller
 Schulter;Er klopfte mir freundlich auf die ___.;Он дружески похлопал меня по плечу.;Nase;Wand;Tasche
-Vergehen;Die Zeit wird schnell ___.;Время пройдет быстро.;stehen;warten;Bleiben
+vergehen;Die Zeit wird schnell ___.;Время пройдет быстро.;stehen;warten;bleiben
 Herzog;Der ___ lebt in einem alten Schloss.;Герцог живет в старом замке.;Bauer;Kellner;Arzt
 Diskussion;Wir hatten gestern eine lange ___.;Вчера у нас была долгая дискуссия.;Pause;Reise;Feier
 Glocke;Die ___ der Kirche läutet jeden Sonntag.;Колокол церкви звонит каждое воскресенье.;Tür;Uhr;Wand
-Fett;Das Essen in diesem Restaurant ist mir zu ___.;Еда в этом ресторане для меня слишком жирная.;süß;kalt;teuer
+fett;Das Essen in diesem Restaurant ist mir zu ___.;Еда в этом ресторане для меня слишком жирная.;süß;kalt;teuer
 Rechnung;Bitte bringen Sie mir die ___.;Пожалуйста, принесите мне счет.;Karte;Gabel;Zeitung
 tödlich;Der Unfall war leider ___.;К сожалению, авария была смертельной.;lustig;schön;teuer
 Tier;Der Hund ist mein liebstes ___.;Собака - мое любимое животное.;Auto;Essen;Spielzeug
 Oberfläche;Die ___ des Wassers war ganz ruhig.;Поверхность воды была совершенно спокойной.;Farbe;Temperatur;Tiefe
-bedienen;Sie können den neuen Drucker ganz leicht ___.;Вы можете очень легко управлять новым принтером.;kaufen;tragen;Verstecken
-Zwang;Niemand sollte unter ___ arbeiten müssen.;Никто не должен работать по принуждению.;Wasser;Sonne;Musik
+bedienen;Sie können den neuen Drucker ganz leicht ___.;Вы можете очень легко управлять новым принтером.;kaufen;tragen;verstecken
+zwang;Niemand sollte unter ___ arbeiten müssen.;Никто не должен работать по принуждению.;wasser;sonne;musik
 Bär;Der ___ schläft im Winter.;Медведь спит зимой.;Vogel;Fisch;Hund
-Vereinen;Wir müssen unsere Kräfte ___.;Мы должны объединить наши силы.;Teilen;verlieren;suchen
+vereinen;Wir müssen unsere Kräfte ___.;Мы должны объединить наши силы.;teilen;verlieren;suchen
 Besuch;Wir erwarten morgen wichtigen ___.;Мы ожидаем завтра важный визит.;Brief;Anruf;Regen
 schrecklich;Das Wetter heute ist wirklich ___.;Погода сегодня действительно ужасная.;schön;warm;perfekt
 schießen;Der Spieler wird gleich auf das Tor ___.;Игрок сейчас ударит по воротам.;laufen;schauen;warten
 krank;Ich kann heute nicht kommen, ich bin ___.;Я не могу прийти сегодня, я болен.;gesund;müde;schnell
 Neffe;Der Sohn meines Bruders ist mein ___.;Сын моего брата - мой племянник.;Onkel;Vater;Opa
-dauern;Die Fahrt nach Berlin wird drei Stunden ___.;Поездка в Берлин займет три часа.;warten;stehen;Kosten
+dauern;Die Fahrt nach Berlin wird drei Stunden ___.;Поездка в Берлин займет три часа.;warten;stehen;kosten
 lebend;Sie haben den Vermissten glücklicherweise ___ gefunden.;К счастью, они нашли пропавшего живым.;tot;schnell;laut
 durchziehen;Wir müssen den Plan jetzt ___.;Мы должны довести план до конца сейчас.;vergessen;ändern;stoppen
 packen;Ich muss noch meinen Koffer ___.;Мне нужно еще собрать чемодан.;kaufen;suchen;waschen
@@ -65,36 +65,36 @@ Flieger;Der ___ nach Rom hat Verspätung.;Рейс в Рим задержива�
 Vorschrift;Du musst dich an die genaue ___ halten.;Ты должен придерживаться точного правила.;Uhrzeit;Frage;Idee
 Detail;Ich möchte jedes ___ der Geschichte wissen.;Я хочу знать каждую деталь истории.;Wort;Ende;Lied
 auswählen;Du darfst dir ein Geschenk ___.;Ты можешь выбрать себе подарок.;kaufen;öffnen;basteln
-kümmern;Ich werde mich um den Hund ___.;Я позабочусь о собаке.;Ärgern;freuen;Wundern
+kümmern;Ich werde mich um den Hund ___.;Я позабочусь о собаке.;ärgern;freuen;wundern
 Jury;Die ___ entscheidet, wer den Wettbewerb gewinnt.;Жюри решает, кто выиграет конкурс.;Familie;Schule;Polizei
 Box;Das Geschenk liegt in einer großen ___.;Подарок лежит в большой коробке.;Flasche;Tasse;Dose
-ausdenken;Du musst dir eine gute Ausrede ___.;Ты должен придумать хорошую отговорку.;sagen;Schreiben;hören
+ausdenken;Du musst dir eine gute Ausrede ___.;Ты должен придумать хорошую отговорку.;sagen;schreiben;hören
 Party;Wir gehen heute Abend auf eine tolle ___.;Мы идем сегодня вечером на отличную вечеринку.;Reise;Schule;Arbeit
-rausfinden;Ich muss das Geheimnis ___.;Я должен выяснить секрет.;Verstecken;vergessen;erzählen
-Singen;Sie möchte im Chor ___.;Она хочет петь в хоре.;Tanzen;Schlafen;lesen
+rausfinden;Ich muss das Geheimnis ___.;Я должен выяснить секрет.;verstecken;vergessen;erzählen
+singen;Sie möchte im Chor ___.;Она хочет петь в хоре.;tanzen;schlafen;lesen
 Bewährung;Er hat eine Strafe auf ___ bekommen.;Он получил условный срок.;Zeit;Reise;Rechnung
-umgeben;Ein Zaun soll das Grundstück ___.;Забор должен окружать участок.;Teilen;Verstecken;kaufen
-Berater;Der Chef fragt seinen besten ___ um Hilfe.;Босс просит о помощи своего лучшего консультанта.;Feind;Kunden;Nachbarn
+umgeben;Ein Zaun soll das Grundstück ___.;Забор должен окружать участок.;teilen;verstecken;kaufen
+Berater;Der Chef fragt seinen besten ___ um Hilfe.;Босс просит о помощи своего лучшего консультанта.;Feind;Kunde;Nachbar
 Zoo;Die Kinder gehen gerne in den ___.;Дети любят ходить в зоопарк.;Wald;Keller;Garten
 Gedicht;Er hat für sie ein romantisches ___ geschrieben.;Он написал для нее романтическое стихотворение.;Buch;Lied;Bild
-Bellen;Der Nachbarshund wird wieder laut ___.;Соседская собака снова будет громко лаять.;Schlafen;laufen;fressen
-genießen;Wir wollen den freien Tag ___.;Мы хотим насладиться свободным днем.;vergessen;Arbeiten;Schlafen
-locken;Die schönen Blumen ___ viele Bienen an.;Красивые цветы привлекают много пчел.;Schrecken;töten;suchen
+bellen;Der Nachbarshund wird wieder laut ___.;Соседская собака снова будет громко лаять.;schlafen;laufen;fressen
+genießen;Wir wollen den freien Tag ___.;Мы хотим насладиться свободным днем.;vergessen;arbeiten;schlafen
+locken;Die schönen Blumen ___ viele Bienen an.;Красивые цветы привлекают много пчел.;schrecken;töten;suchen
 Lautsprecher;Die Musik aus dem ___ war zu leise.;Музыка из динамика была слишком тихой.;Fernseher;Radio;Telefon
 umwerfend;Dein neues Kleid sieht wirklich ___ aus.;Твое новое платье выглядит действительно сногсшибательно.;schlecht;teuer;alt
 Kanzlei;Die Anwältin hat eine eigene ___ in der Stadt.;У адвоката есть собственная контора в городе.;Wohnung;Schule;Bäckerei
 wahr;Alles, was er gesagt hat, ist leider ___.;Все, что он сказал, к сожалению, правда.;falsch;lustig;neu
 heben;Du musst das schwere Paket ___.;Ты должен поднять тяжелую посылку.;öffnen;werfen;suchen
 Anschlag;Die Polizei konnte den ___ verhindern.;Полиция смогла предотвратить нападение.;Unfall;Streit;Sturm
-Befehlen;Der Offizier wird seinen Männern den Angriff ___.;Офицер прикажет своим людям атаковать.;verbieten;erklären;zeigen
+befehlen;Der Offizier wird seinen Männern den Angriff ___.;Офицер прикажет своим людям атаковать.;verbieten;erklären;zeigen
 Etage;Mein Büro befindet sich in der dritten ___.;Мой офис находится на третьем этаже.;Straße;Reihe;Klasse
 dazwischen;Es gibt zwei Stühle und einen kleinen Tisch ___.;Там два стула и маленький стол между ними.;darunter;darüber;daneben
-heißen;Wie wird dein neues Baby ___?;Как будут звать твоего нового ребенка?;lachen;Weinen;Schlafen
+heißen;Wie wird dein neues Baby ___?;Как будут звать твоего нового ребенка?;lachen;weinen;schlafen
 Objekt;Dieses alte Haus ist ein teures ___.;Этот старый дом - дорогой объект.;Bild;Auto;Buch
-bedauern;Ich muss diese Entscheidung sehr ___.;Мне приходится очень сожалеть об этом решении.;Feiern;Loben;vergessen
-Kokain;Die Polizei fand viel ___ im Auto.;Полиция нашла много кокаина в машине.;Geld;Wasser;Brot
+bedauern;Ich muss diese Entscheidung sehr ___.;Мне приходится очень сожалеть об этом решении.;feiern;loben;vergessen
+Kokain;Die Polizei fand viel ___ im Auto.;Поляция нашла много кокаина в машине.;Geld;Wasser;Brot
 Strategie;Wir brauchen eine neue ___ für unser Projekt.;Нам нужна новая стратегия для нашего проекта.;Kamera;Farbe;Tasche
 Freund;Er ist mein bester ___ seit der Schule.;Он мой лучший друг со школы.;Feind;Lehrer;Arzt
 Wolke;Dort oben ist eine dunkle ___ am Himmel.;Там наверху темное облако на небе.;Sonne;Vogel;Stern
 Gräfin;Die ___ wohnt im Schloss auf dem Berg.;Графиня живет в замке на горе.;Bäuerin;Köchin;Lehrerin
-treten;Du darfst nicht auf den nassen Boden ___.;Тебе нельзя наступать на мокрый пол.;schauen;spucken;Fallen
+treten;Du darfst nicht auf den nassen Boden ___.;Тебе нельзя наступать на мокрый пол.;schauen;spucken;fallen
