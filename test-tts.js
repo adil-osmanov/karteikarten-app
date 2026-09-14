@@ -3,7 +3,7 @@ const fs = require('fs');
 
 async function test() {
   const tts = new EdgeTTS({
-    voice: 'de-DE-ConradNeural', // Awesome German voice
+    voice: 'de-DE-KatjaNeural', // Awesome German voice
     lang: 'de-DE',
   });
   const filepath = '/tmp/test.mp3';
