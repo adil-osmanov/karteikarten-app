@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Trash2, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
-  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle,
+  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw,
   Clock
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -501,7 +501,7 @@ const playAudio = useCallback(async (text: string) => {
         playAudio(fullSentence);
       }
       
-      if (e.code === 'KeyH' && !isMultipleChoice && phase === "Question") {
+      if (e.code === 'KeyH' && phase === "Question") {
         e.preventDefault();
         handleHilfe();
       }
@@ -655,16 +655,29 @@ const playAudio = useCallback(async (text: string) => {
             R
           </span>
         </button>
-        <div className="flex gap-1.5">
-          {[0, 1, 2, 3].map((step) => (
-            <div 
-              key={step} 
-              className={cn(
-                "w-2.5 h-2.5 rounded-full transition-colors",
-                (card.isArchived || card.masteryLevel > step) ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
-              )}
-            />
-          ))}
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={handleHilfe}
+            disabled={phase !== "Question"}
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
+              phase !== "Question" && "opacity-0 pointer-events-none"
+            )}
+            title="Hilfe (H)"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
+          <div className="flex gap-1.5">
+            {[0, 1, 2, 3].map((step) => (
+              <div 
+                key={step} 
+                className={cn(
+                  "w-2.5 h-2.5 rounded-full transition-colors",
+                  (card.isArchived || card.masteryLevel > step) ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
+                )}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
@@ -681,7 +694,7 @@ const playAudio = useCallback(async (text: string) => {
               {isMultipleChoice ? (
                 <span className="inline-block min-w-[6rem] md:min-w-[8rem] h-9 mx-1 rounded-lg align-middle bg-black/[0.05] dark:bg-white/[0.08] border-[1.5px] border-black/[0.12] dark:border-white/20 transition-all duration-200 ease-out" />
               ) : (
-                <span className="inline-block relative min-w-[6rem] md:min-w-[8rem] px-3 py-1 mx-1 rounded-lg align-middle bg-black/[0.05] dark:bg-white/[0.08] border-[1.5px] border-black/[0.12] dark:border-white/20 focus-within:border-blue-600 dark:focus-within:border-blue-400 focus-within:bg-transparent dark:focus-within:bg-transparent transition-all duration-200 ease-out text-center">
+                <span className="inline-block relative min-w-[6rem] md:min-w-[8rem] mx-1 align-bottom pb-0.5 border-b-2 border-gray-300 dark:border-gray-700 focus-within:border-blue-600 dark:focus-within:border-blue-500 bg-transparent transition-colors duration-200 text-center">
                   <span className="flex items-center justify-center tracking-widest h-full w-full overflow-hidden whitespace-nowrap">
                     {renderInputChars()}
                   </span>
@@ -1074,22 +1087,24 @@ export default function App() {
           </div>
 
           {dueCards.length > 0 && (
-            <div className="mb-12 bg-blue-50/50 border border-blue-100/50 rounded-3xl p-5 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm text-[#007AFF] shrink-0">
-                  <Clock className="w-5 h-5" />
+            <div className="mb-10">
+              <div 
+                onClick={() => setReviewCards(dueCards)}
+                className="bg-white dark:bg-[#1C1C1E] border border-black/[0.06] dark:border-white/[0.08] rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-600/40 dark:hover:border-blue-500/40 transition-all shadow-sm active:scale-[0.98]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-600/10 dark:bg-blue-500/10 flex items-center justify-center">
+                    <RotateCw className="w-4 h-4 text-blue-600 dark:text-blue-500" />
+                  </div>
+                  <span className="font-medium text-sm text-gray-900 dark:text-white">Heute wiederholen</span>
                 </div>
-                <div>
-                  <h2 className="text-lg md:text-xl font-bold tracking-tight text-gray-900  mb-0.5">Fällig für heute</h2>
-                  <p className="text-sm text-gray-600 font-medium">{dueCards.length} {dueCards.length === 1 ? 'Karte' : 'Karten'} warten.</p>
+                <div className="flex items-center gap-3">
+                  <div className="px-2.5 py-0.5 rounded-full bg-blue-600/10 dark:bg-blue-500/10 text-blue-600 dark:text-blue-500 text-xs font-semibold tabular-nums">
+                    {dueCards.length}
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-gray-400" />
                 </div>
               </div>
-              <button
-                onClick={() => setReviewCards(dueCards)}
-                className="w-full md:w-auto px-6 py-3 bg-[#007AFF] hover:bg-[#0062CC] text-white font-semibold rounded-xl transition-all duration-100 active:scale-[0.98] shadow-sm shrink-0"
-              >
-                Starten
-              </button>
             </div>
           )}
 
