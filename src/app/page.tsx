@@ -643,7 +643,7 @@ const playAudio = useCallback(async (text: string) => {
               key={step} 
               className={cn(
                 "w-2.5 h-2.5 rounded-full transition-colors",
-                (card.isArchived || card.masteryLevel > step) ? "bg-[#007AFF]" : "bg-gray-200"
+                (card.isArchived || card.masteryLevel > step) ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
               )}
             />
           ))}
@@ -655,17 +655,15 @@ const playAudio = useCallback(async (text: string) => {
           {parts[0]}
           
           {phase === "Answer" ? (
-            <span className="text-gray-900  dark:text-[#F5F5F7] mx-1 font-semibold">
+            <span className="inline-block min-w-[6rem] md:min-w-[8rem] px-3 py-1 mx-1 rounded-lg align-middle bg-blue-600/10 dark:bg-blue-400/15 border-[1.5px] border-blue-600/20 dark:border-blue-400/30 text-blue-700 dark:text-blue-400 font-semibold transition-all duration-200 ease-out text-center">
               {card.targetWord}
             </span>
           ) : (
             <>
               {isMultipleChoice ? (
-                <span className="inline-block px-6 py-0.5 rounded-xl mx-1 bg-gray-50 text-transparent border border-gray-100 align-middle">
-                  ________
-                </span>
+                <span className="inline-block min-w-[6rem] md:min-w-[8rem] h-9 mx-1 rounded-lg align-middle bg-black/[0.05] dark:bg-white/[0.08] border-[1.5px] border-black/[0.12] dark:border-white/20 transition-all duration-200 ease-out" />
               ) : (
-                <span className="inline-block relative mx-1 align-bottom pb-0.5 border-b-2 border-gray-200 focus-within:border-\[#007AFF\] transition-colors w-32 md:w-40 text-center">
+                <span className="inline-block relative min-w-[6rem] md:min-w-[8rem] px-3 py-1 mx-1 rounded-lg align-middle bg-black/[0.05] dark:bg-white/[0.08] border-[1.5px] border-black/[0.12] dark:border-white/20 focus-within:border-blue-600 dark:focus-within:border-blue-400 focus-within:bg-transparent dark:focus-within:bg-transparent transition-all duration-200 ease-out text-center">
                   <span className="flex items-center justify-center tracking-widest h-full w-full overflow-hidden whitespace-nowrap">
                     {renderInputChars()}
                   </span>
@@ -714,7 +712,7 @@ const playAudio = useCallback(async (text: string) => {
                 onClick={() => handleOptionClick(opt)}
                 className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900  dark:text-[#F5F5F7] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-transform duration-150 ease-out active:scale-[0.98] relative flex items-center justify-center"
               >
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-400 dark:text-gray-400 px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-[#3A3A3C] border border-gray-200/60 dark:border-white/[0.05] pointer-events-none">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-400 dark:text-gray-500 px-1.5 py-0.5 rounded-md bg-black/5 dark:bg-white/10 pointer-events-none">
                   {idx + 1}
                 </span>
                 {opt}
@@ -943,10 +941,10 @@ export default function App() {
           </button>
         </div>
 
-        <div className="mb-10">
-          <h3 className="text-xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] pr-24 group-hover:text-[#007AFF] transition-colors flex items-center gap-2">
+        <div className="mb-6 flex items-start min-h-[3em] leading-[1.35]">
+          <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] pr-20 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
             {deck.name}
-            {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />}
+            {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0 inline-block ml-2 align-text-bottom" />}
           </h3>
         </div>
         
@@ -954,11 +952,11 @@ export default function App() {
           <div className="flex items-center justify-end text-sm font-bold mb-3">
             <span className={isCompleted ? "text-green-600" : "text-gray-400"}>{mastered} / {total}</span>
           </div>
-          <div className="h-2 w-full bg-[#FBFBFD] rounded-full overflow-hidden">
+          <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
             <div
               className={cn(
                 "h-full rounded-full transition-all duration-700 ease-out",
-                isCompleted ? "bg-green-500" : "bg-[#007AFF]"
+                isCompleted ? "bg-green-500" : "bg-blue-600 dark:bg-blue-500"
               )}
               style={{ width: `${progressPercentage}%` }}
             />
