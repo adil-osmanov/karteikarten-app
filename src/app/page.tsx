@@ -249,61 +249,6 @@ const useStore = create<DeckState>()((set, get) => ({
   }
 }));
 
-const useStats = () => {
-  const decks = useStore(state => state.decks);
-  let totalCorrectAnswers = 0;
-  decks.forEach(deck => {
-    deck.cards.forEach(card => {
-      totalCorrectAnswers += card.masteryLevel;
-      totalCorrectAnswers += card.repetitions;
-    });
-  });
-
-  const totalXp = totalCorrectAnswers * 10;
-  let currentLvl = 1;
-  let xpAccumulated = 0;
-  let nextLvlReq = 100;
-  
-  while (totalXp >= xpAccumulated + nextLvlReq) {
-    xpAccumulated += nextLvlReq;
-    currentLvl++;
-    nextLvlReq = Math.floor(nextLvlReq * 1.5);
-  }
-  
-  return {
-    level: currentLvl,
-    xpInCurrentLevel: totalXp - xpAccumulated,
-    xpForNextLevel: nextLvlReq,
-    totalXp
-  };
-};
-
-
-// --- LEVEL PROGRESS HEADER ---
-
-function LevelProgress() {
-  const [isMounted, setIsMounted] = useState(false);
-  const stats = useStats();
-
-  useEffect(() => setIsMounted(true), []);
-  if (!isMounted) return <div className="h-10 w-32" />; 
-
-  return (
-    <div className="flex flex-col items-end shrink-0">
-      <div className="text-sm font-bold tracking-tight text-gray-900 mb-2 bg-white px-4 py-1.5 rounded-full shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-gray-100 flex items-center gap-2">
-        <span className="text-blue-600">Lvl {stats.level}</span>
-        <span className="text-gray-300">•</span>
-        <span className="text-gray-500">{stats.xpInCurrentLevel} / {stats.xpForNextLevel} XP</span>
-      </div>
-      <div className="w-48 h-2.5 bg-gray-200/60 rounded-full overflow-hidden">
-        <div 
-          className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out"
-          style={{ width: `${(stats.xpInCurrentLevel / stats.xpForNextLevel) * 100}%` }}
-        />
-      </div>
-    </div>
-  );
-}
 
 // --- STUDY INTERFACE ---
 
