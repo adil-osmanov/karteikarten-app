@@ -370,12 +370,17 @@ function StudyInterface({
   return (
     <>
       <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-2xl mx-auto flex items-center justify-between px-2 mb-4">
-        <button onClick={onBack} className="text-gray-400 hover:text-gray-900  transition-colors p-2 -ml-2 rounded-full hover:bg-white">
-          <ArrowLeft className="w-6 h-6" />
-        </button>
-        <div className="text-sm font-semibold text-gray-400 tabular-nums">
-          Karte {currentIndex + 1} von {activeCards.length}
+      <div className="w-full max-w-2xl mx-auto px-2 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={onBack} className="text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-[#F5F5F7] transition-colors p-2 -ml-2 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
+            <ArrowLeft className="w-6 h-6" />
+          </button>
+        </div>
+        <div className="w-full h-1 bg-gray-200/60 dark:bg-[#2C2C2E] rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
+            style={{ width: `${Math.max(5, ((currentIndex + 1) / activeCards.length) * 100)}%` }}
+          />
         </div>
       </div>
 
