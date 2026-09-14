@@ -21,8 +21,25 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="de">
-      <body className="min-h-screen bg-[#FBFBFD] text-gray-900 font-sans antialiased selection:bg-[#007AFF]/20">
+    
+    <html lang="de" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                  document.documentElement.classList.add('dark')
+                } else {
+                  document.documentElement.classList.remove('dark')
+                }
+              } catch (_) {}
+            `,
+          }}
+        />
+      </head>
+
+      <body className="min-h-screen bg-[#FBFBFD] dark:bg-[#000000] text-gray-900 dark:text-[#F5F5F7] font-sans antialiased selection:bg-[#007AFF]/20 transition-colors duration-300 ease-out">
         {children}
       </body>
     </html>

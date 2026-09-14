@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Trash2, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
-  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight,
+  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle,
   Clock
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -26,6 +26,28 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 let cachedAudioCtx: AudioContext | null = null;
 const audioCache = new Map<string, string>();
+
+const playTockSound = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const ctx = cachedAudioCtx || new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (!cachedAudioCtx) cachedAudioCtx = ctx;
+    if (ctx.state === 'suspended') ctx.resume();
+    
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(120, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.02);
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.05, ctx.currentTime + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.03);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.04);
+  } catch (e) {}
+};
 
 const playFeedbackSound = (isCorrect: boolean) => {
   if (typeof window === 'undefined') return;
@@ -308,7 +330,7 @@ function StudyInterface({
           <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-8">
             <CheckCircle2 className="w-12 h-12 text-green-500" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900 mb-4">Großartig!</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-4">Großartig!</h1>
           <p className="text-lg text-gray-500 mb-10">
             {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
           </p>
@@ -460,6 +482,11 @@ const playAudio = useCallback(async (text: string) => {
         const fullSentence = card.sentence.replace("___", card.targetWord);
         playAudio(fullSentence);
       }
+      
+      if (e.code === 'KeyH' && !isMultipleChoice && phase === "Question") {
+        e.preventDefault();
+        handleHilfe();
+      }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
@@ -497,6 +524,7 @@ const playAudio = useCallback(async (text: string) => {
         break;
       }
     }
+    playTockSound();
     setInputText(value);
     
     // Play error sound if the latest typed character is wrong
@@ -540,7 +568,9 @@ const playAudio = useCallback(async (text: string) => {
       const end = e.currentTarget.selectionEnd || 0;
       const newValue = inputText.slice(0, start) + char + inputText.slice(end);
       
-      setInputText(newValue);
+      playTockSound();
+      playTockSound();
+    setInputText(newValue);
       
       let isValidSoFar = true;
       for (let i = 0; i < newValue.length; i++) {
@@ -565,7 +595,7 @@ const playAudio = useCallback(async (text: string) => {
 
   const renderInputChars = () => {
     if (inputText.length === 0) {
-      return <span className="text-gray-300 tracking-normal">Tippen...</span>;
+      return <span className="text-gray-300/50 dark:text-gray-500 font-light tracking-wide text-lg">Tippen...</span>;
     }
     return Array.from(inputText).map((char, i) => {
       const isMatch = char.toLowerCase() === card.targetWord[i]?.toLowerCase();
@@ -586,7 +616,7 @@ const playAudio = useCallback(async (text: string) => {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="bg-white rounded-[24px] p-6 md:p-12 shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[rgba(0,0,0,0.06)] flex flex-col items-center justify-between min-h-[400px]"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] border border-[rgba(0,0,0,0.06)] dark:border-white/[0.08] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-300"
       onClick={() => {
         if (!isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
@@ -667,15 +697,7 @@ const playAudio = useCallback(async (text: string) => {
           </div>
         )}
 
-        {phase === "Question" && !isMultipleChoice && (
-          <button 
-            onClick={handleHilfe}
-            className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-[#007AFF] transition-all duration-100 active:scale-[0.98] bg-gray-50 hover:bg-blue-50 px-4 py-2 rounded-full mb-2"
-          >
-            <LifeBuoy className="w-4 h-4" />
-            <span>Hilfe</span>
-          </button>
-        )}
+
       </div>
 
       <div className="mt-2 w-full">
@@ -721,7 +743,35 @@ const playAudio = useCallback(async (text: string) => {
   );
 }
 
+
+function DarkModeToggle() {
+  const [isDark, setIsDark] = useState(false);
+  
+  useEffect(() => {
+    setIsDark(document.documentElement.classList.contains('dark'));
+  }, []);
+
+  const toggle = () => {
+    const next = !isDark;
+    setIsDark(next);
+    if (next) {
+      document.documentElement.classList.add('dark');
+      localStorage.theme = 'dark';
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.theme = 'light';
+    }
+  };
+
+  return (
+    <button onClick={toggle} className="absolute top-5 right-6 p-2 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors z-50">
+      {isDark ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+    </button>
+  );
+}
+
 // --- MAIN APP COMPONENT ---
+
 
 export default function App() {
   const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded } = useStore();
@@ -767,6 +817,7 @@ export default function App() {
     return (
       <>
         
+        <DarkModeToggle />
         <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
       </>
     );
@@ -776,6 +827,7 @@ export default function App() {
     return (
       <>
         
+        <DarkModeToggle />
         <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
       </>
     );
@@ -872,7 +924,7 @@ export default function App() {
         key={deck.id}
         onClick={() => setActiveDeckId(deck.id)}
         className={cn(
-          "group cursor-pointer bg-white rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 h-full flex flex-col relative border border-gray-100",
+          "group cursor-pointer bg-white dark:bg-[#1C1C1E] rounded-[28px] p-8 shadow-[0_4px_20px_rgb(0,0,0,0.03)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-all hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative border border-gray-100 dark:border-white/[0.08]",
           isCompleted && "opacity-60 hover:opacity-100"
         )}
       >
@@ -892,7 +944,7 @@ export default function App() {
         </div>
 
         <div className="mb-10">
-          <h3 className="text-xl font-bold tracking-tight text-gray-900 pr-24 group-hover:text-[#007AFF] transition-colors flex items-center gap-2">
+          <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] pr-24 group-hover:text-[#007AFF] transition-colors flex items-center gap-2">
             {deck.name}
             {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />}
           </h3>
@@ -921,6 +973,7 @@ export default function App() {
       
 
       {/* RENAME MODAL */}
+      <DarkModeToggle />
       <AnimatePresence>
         {renameModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -928,15 +981,15 @@ export default function App() {
               className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setRenameModal(null)} 
             />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
+              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
-              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-6">Deck umbenennen</h3>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-6">Deck umbenennen</h3>
               <input
                 type="text"
                 autoFocus
                 value={renameInput}
                 onChange={(e) => setRenameInput(e.target.value)}
-                className="w-full bg-gray-100 text-gray-900 rounded-2xl px-5 py-4 mb-6 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                className="w-full bg-gray-100 dark:bg-[#2C2C2E] text-gray-900 dark:text-[#F5F5F7] rounded-2xl px-5 py-4 mb-6 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                 placeholder="Neuer Name"
               />
               <div className="flex gap-3">
@@ -953,6 +1006,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* DELETE MODAL */}
+      <DarkModeToggle />
       <AnimatePresence>
         {deleteModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -960,7 +1014,7 @@ export default function App() {
               className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteModal(null)} 
             />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
+              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
               <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-red-500" />
@@ -985,7 +1039,7 @@ export default function App() {
       <main className="max-w-4xl mx-auto px-6 py-12 md:py-24">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
           <div className="flex justify-center mb-10 pt-4">
-            <div className="bg-slate-100/80 p-1.5 rounded-2xl inline-flex w-full max-w-sm mx-auto border border-slate-200/50 shadow-inner">
+            <div className="bg-slate-100/80 dark:bg-[#1C1C1E] p-1.5 rounded-2xl inline-flex w-full max-w-sm mx-auto border border-slate-200/50 shadow-inner">
               {(["Grammatik", "Wörter"] as const).map((tab) => (
                 <button
                   key={tab}
@@ -994,7 +1048,7 @@ export default function App() {
                     "flex-1 px-8 py-3.5 transition-all text-lg font-bold tracking-wide",
                     activeTab === tab
                       ? "bg-white text-[#007AFF] shadow-md rounded-xl"
-                      : "text-slate-500 hover:text-slate-700 rounded-xl"
+                      : "text-slate-500 hover:text-slate-700 dark:hover:text-[#F5F5F7] rounded-xl"
                   )}
                 >
                   {tab}
@@ -1089,7 +1143,8 @@ export default function App() {
                               <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
                               <span>Archiv anzeigen ({completedDecks.length})</span>
                             </button>
-                            <AnimatePresence>
+                            <DarkModeToggle />
+      <AnimatePresence>
                               {isExpanded && (
                                 <motion.div
                                   initial={{ opacity: 0, height: 0 }}
