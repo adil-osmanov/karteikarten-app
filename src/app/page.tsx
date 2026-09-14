@@ -25,6 +25,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // --- AUDIO FEEDBACK ---
 
 let cachedAudioCtx: AudioContext | null = null;
+const audioCache = new Map<string, string>();
 
 const playFeedbackSound = (isCorrect: boolean) => {
   if (typeof window === 'undefined') return;
@@ -301,6 +302,27 @@ function StudyInterface({
     );
   }
 
+  // PRELOAD NEXT AUDIO
+  useEffect(() => {
+    if (activeCards.length > currentIndex + 1) {
+      const nextCard = activeCards[currentIndex + 1].card;
+      const fullSentence = nextCard.sentence.replace("___", nextCard.targetWord);
+      if (!audioCache.has(fullSentence)) {
+        fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: fullSentence })
+        })
+        .then(res => { if (res.ok) return res.blob(); throw new Error(); })
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          audioCache.set(fullSentence, url);
+        })
+        .catch(() => {});
+      }
+    }
+  }, [currentIndex, activeCards]);
+
   const { deckId: currentDeckId, card: currentCardSnapshot } = activeCards[currentIndex];
   // Get live card to instantly reflect masteryLevel updates (blue dots)
   const liveCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
@@ -324,7 +346,9 @@ function StudyInterface({
   };
 
   return (
-    <div className="flex flex-col h-full items-center justify-center pt-8">
+    <>
+      <div className="fixed inset-0 bg-gray-900/30 backdrop-blur-[2px] z-40 transition-opacity pointer-events-none" />
+      <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
       <div className="w-full max-w-2xl mx-auto flex items-center justify-between px-2 mb-4">
         <button onClick={onBack} className="text-gray-400 hover:text-gray-900 transition-colors p-2 -ml-2 rounded-full hover:bg-white">
           <ArrowLeft className="w-6 h-6" />
@@ -348,6 +372,7 @@ function StudyInterface({
         </AnimatePresence>
       </div>
     </div>
+    </>
   );
 }
 
@@ -377,17 +402,21 @@ function StudyCard({
     }
   }, [isMultipleChoice, phase]);
 
-  const playAudio = useCallback(async (text: string) => {
+const playAudio = useCallback(async (text: string) => {
     setIsPlayingAudio(true);
     try {
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
-      if (!response.ok) throw new Error("TTS API Error");
-      const blob = await response.blob();
-      const audioUrl = URL.createObjectURL(blob);
+      let audioUrl = audioCache.get(text);
+      if (!audioUrl) {
+        const response = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        if (!response.ok) throw new Error("TTS API Error");
+        const blob = await response.blob();
+        audioUrl = URL.createObjectURL(blob);
+        audioCache.set(text, audioUrl);
+      }
       const audio = new Audio(audioUrl);
       
       audio.onended = () => setIsPlayingAudio(false);
@@ -408,6 +437,37 @@ function StudyCard({
     }
   }, []);
 
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (document.activeElement?.tagName === 'INPUT') return;
+
+      if (phase === "Question" && isMultipleChoice) {
+        if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); handleOptionClick(card.options[0]); }
+        if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); handleOptionClick(card.options[1]); }
+        if (e.code === 'Digit3' || e.code === 'Numpad3') { e.preventDefault(); handleOptionClick(card.options[2]); }
+        if (e.code === 'Digit4' || e.code === 'Numpad4') { e.preventDefault(); handleOptionClick(card.options[3]); }
+      }
+
+      if (phase === "Answer") {
+        if (e.code === 'Space' || e.code === 'Enter') {
+          e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+          onNext();
+        }
+      }
+
+      if (e.code === 'KeyR') {
+        e.preventDefault();
+        const fullSentence = card.sentence.replace("___", card.targetWord);
+        playAudio(fullSentence);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [phase, isMultipleChoice, card, playAudio, onNext]);
+
+  
   const handleReveal = useCallback(() => {
     setPhase("Answer");
     const fullSentence = card.sentence.replace("___", card.targetWord);
@@ -453,24 +513,53 @@ function StudyCard({
     }
   };
 
+  const GERMAN_KEY_MAP: Record<string, { base: string, shift: string }> = {
+    'KeyA': { base: 'a', shift: 'A' }, 'KeyB': { base: 'b', shift: 'B' }, 'KeyC': { base: 'c', shift: 'C' },
+    'KeyD': { base: 'd', shift: 'D' }, 'KeyE': { base: 'e', shift: 'E' }, 'KeyF': { base: 'f', shift: 'F' },
+    'KeyG': { base: 'g', shift: 'G' }, 'KeyH': { base: 'h', shift: 'H' }, 'KeyI': { base: 'i', shift: 'I' },
+    'KeyJ': { base: 'j', shift: 'J' }, 'KeyK': { base: 'k', shift: 'K' }, 'KeyL': { base: 'l', shift: 'L' },
+    'KeyM': { base: 'm', shift: 'M' }, 'KeyN': { base: 'n', shift: 'N' }, 'KeyO': { base: 'o', shift: 'O' },
+    'KeyP': { base: 'p', shift: 'P' }, 'KeyQ': { base: 'q', shift: 'Q' }, 'KeyR': { base: 'r', shift: 'R' },
+    'KeyS': { base: 's', shift: 'S' }, 'KeyT': { base: 't', shift: 'T' }, 'KeyU': { base: 'u', shift: 'U' },
+    'KeyV': { base: 'v', shift: 'V' }, 'KeyW': { base: 'w', shift: 'W' }, 'KeyX': { base: 'x', shift: 'X' },
+    'KeyY': { base: 'z', shift: 'Z' }, 'KeyZ': { base: 'y', shift: 'Y' }, 'Minus': { base: 'ß', shift: '?' },
+    'BracketLeft': { base: 'ü', shift: 'Ü' }, 'Quote': { base: 'ä', shift: 'Ä' }, 'Semicolon': { base: 'ö', shift: 'Ö' },
+    'Space': { base: ' ', shift: ' ' }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (phase !== "Question") return;
-    const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey;
+    
+    const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
     if (isSpecialKey) return;
 
-    const nextCharIndex = inputText.length;
-    const expectedChar = card.targetWord[nextCharIndex];
+    const mapEntry = GERMAN_KEY_MAP[e.code];
+    if (mapEntry) {
+      e.preventDefault();
+      const char = e.shiftKey ? mapEntry.shift : mapEntry.base;
+      const start = e.currentTarget.selectionStart || 0;
+      const end = e.currentTarget.selectionEnd || 0;
+      const newValue = inputText.slice(0, start) + char + inputText.slice(end);
+      
+      setInputText(newValue);
+      
+      let isValidSoFar = true;
+      for (let i = 0; i < newValue.length; i++) {
+        if (newValue[i].toLowerCase() !== card.targetWord[i]?.toLowerCase()) {
+          isValidSoFar = false;
+          break;
+        }
+      }
+      
+      const lastCharIndex = newValue.length - 1;
+      if (newValue.length > 0 && newValue[lastCharIndex].toLowerCase() !== card.targetWord[lastCharIndex]?.toLowerCase()) {
+        playFeedbackSound(false);
+      }
 
-    if (!expectedChar) {
-      e.preventDefault(); 
-      return;
-    }
-
-    if (e.key.toLowerCase() !== expectedChar.toLowerCase()) {
-      // Wrong character typed - Text becomes red, but NO penalty to level
-      const currentIsWrong = Array.from(inputText).some((char, i) => char.toLowerCase() !== card.targetWord[i]?.toLowerCase());
-      if (currentIsWrong) {
-        e.preventDefault();
+      if (isValidSoFar && newValue.toLowerCase() === card.targetWord.toLowerCase()) {
+        playFeedbackSound(true);
+        onAnswer(true, false);
+        handleReveal();
       }
     }
   };
@@ -595,12 +684,15 @@ function StudyCard({
             exit={{ opacity: 0, scale: 0.95 }}
             className="grid grid-cols-2 gap-4"
           >
-            {card.options.map((opt) => (
+            {card.options.map((opt, idx) => (
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-all duration-100 active:scale-[0.98]"
+                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-all duration-100 active:scale-[0.98] relative"
               >
+                <span className="absolute top-1.5 left-2 text-[10px] text-gray-400 bg-white/60 px-1.5 rounded pointer-events-none font-bold">
+                  {idx + 1}
+                </span>
                 {opt}
               </button>
             ))}
