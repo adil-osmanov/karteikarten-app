@@ -330,7 +330,7 @@ function StudyInterface({
           <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-8">
             <CheckCircle2 className="w-12 h-12 text-green-500" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-4">Großartig!</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-4">Großartig!</h1>
           <p className="text-lg text-gray-500 mb-10">
             {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
           </p>
@@ -371,7 +371,7 @@ function StudyInterface({
     <>
       <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
       <div className="w-full max-w-2xl mx-auto flex items-center justify-between px-2 mb-4">
-        <button onClick={onBack} className="text-gray-400 hover:text-gray-900 transition-colors p-2 -ml-2 rounded-full hover:bg-white">
+        <button onClick={onBack} className="text-gray-400 hover:text-gray-900  transition-colors p-2 -ml-2 rounded-full hover:bg-white">
           <ArrowLeft className="w-6 h-6" />
         </button>
         <div className="text-sm font-semibold text-gray-400 tabular-nums">
@@ -600,7 +600,7 @@ const playAudio = useCallback(async (text: string) => {
     return Array.from(inputText).map((char, i) => {
       const isMatch = char.toLowerCase() === card.targetWord[i]?.toLowerCase();
       return (
-        <span key={i} className={cn("font-medium", isMatch ? "text-gray-900" : "text-red-500")}>
+        <span key={i} className={cn("font-medium", isMatch ? "text-gray-900  dark:text-[#F5F5F7] " : "text-red-500")}>
           {char}
         </span>
       );
@@ -651,11 +651,11 @@ const playAudio = useCallback(async (text: string) => {
       </div>
 
       <div className="flex flex-col items-center text-center w-full">
-        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 dark:text-\[#F5F5F7\] w-full max-w-lg mb-4">
+        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900  dark:text-[#F5F5F7] w-full max-w-lg mb-4">
           {parts[0]}
           
           {phase === "Answer" ? (
-            <span className="text-gray-900 dark:text-[#F5F5F7] mx-1 font-semibold">
+            <span className="text-gray-900  dark:text-[#F5F5F7] mx-1 font-semibold">
               {card.targetWord}
             </span>
           ) : (
@@ -691,7 +691,7 @@ const playAudio = useCallback(async (text: string) => {
 
         {(phase === "Answer" || !isMultipleChoice) && (
           <div className="mb-6 w-full text-center">
-            <p className="text-base text-gray-500 dark:text-\[#8E8E93\] font-medium w-full max-w-lg mx-auto">
+            <p className="text-base text-gray-500 dark:text-[#8E8E93] font-medium w-full max-w-lg mx-auto">
               {card.translation}
             </p>
           </div>
@@ -712,7 +712,7 @@ const playAudio = useCallback(async (text: string) => {
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900 dark:text-[#F5F5F7] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-transform duration-150 ease-out active:scale-[0.98] relative flex items-center justify-center"
+                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900  dark:text-[#F5F5F7] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-transform duration-150 ease-out active:scale-[0.98] relative flex items-center justify-center"
               >
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-400 dark:text-gray-400 px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-[#3A3A3C] border border-gray-200/60 dark:border-white/[0.05] pointer-events-none">
                   {idx + 1}
@@ -944,7 +944,7 @@ export default function App() {
         </div>
 
         <div className="mb-10">
-          <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] pr-24 group-hover:text-[#007AFF] transition-colors flex items-center gap-2">
+          <h3 className="text-xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] pr-24 group-hover:text-[#007AFF] transition-colors flex items-center gap-2">
             {deck.name}
             {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />}
           </h3>
@@ -983,13 +983,13 @@ export default function App() {
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
-              <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-6">Deck umbenennen</h3>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-6">Deck umbenennen</h3>
               <input
                 type="text"
                 autoFocus
                 value={renameInput}
                 onChange={(e) => setRenameInput(e.target.value)}
-                className="w-full bg-gray-100 dark:bg-[#2C2C2E] text-gray-900 dark:text-[#F5F5F7] rounded-2xl px-5 py-4 mb-6 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                className="w-full bg-gray-100 dark:bg-[#2C2C2E] text-gray-900  dark:text-[#F5F5F7] rounded-2xl px-5 py-4 mb-6 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                 placeholder="Neuer Name"
               />
               <div className="flex gap-3">
@@ -1019,7 +1019,7 @@ export default function App() {
               <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
-              <h3 className="text-xl font-bold tracking-tight text-gray-900 mb-3">Deck löschen?</h3>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900  mb-3">Deck löschen?</h3>
               <p className="text-sm text-gray-500 font-medium mb-8">Bist du sicher, dass du "{deleteModal.name}" löschen möchtest? Dieser Vorgang kann nicht rückgängig gemacht werden.</p>
               <div className="flex gap-3">
                 <button onClick={() => setDeleteModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
@@ -1047,7 +1047,7 @@ export default function App() {
                   className={cn(
                     "flex-1 px-8 py-3.5 transition-all text-lg font-bold tracking-wide",
                     activeTab === tab
-                      ? "bg-white dark:bg-[#2C2C2E] text-gray-900 dark:text-white shadow-sm rounded-xl"
+                      ? "bg-white dark:bg-[#2C2C2E] text-gray-900  dark:text-white shadow-sm rounded-xl"
                       : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-[#F5F5F7] rounded-xl" 
                   )}
                 >
@@ -1064,7 +1064,7 @@ export default function App() {
                   <Clock className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg md:text-xl font-bold tracking-tight text-gray-900 mb-0.5">Fällig für heute</h2>
+                  <h2 className="text-lg md:text-xl font-bold tracking-tight text-gray-900  mb-0.5">Fällig für heute</h2>
                   <p className="text-sm text-gray-600 font-medium">{dueCards.length} {dueCards.length === 1 ? 'Karte' : 'Karten'} warten.</p>
                 </div>
               </div>
@@ -1081,11 +1081,11 @@ export default function App() {
             {(() => {
               const cefrLevels: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
               const levelConfig: Record<CEFRLevel, { label: string, badgeClass: string }> = {
-                'A1': { label: 'A1', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-                'A2': { label: 'A2', badgeClass: 'bg-sky-50 text-sky-700 border-sky-200' },
-                'B1': { label: 'B1', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
-                'B2': { label: 'B2', badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-                'C1-C2': { label: 'C1-C2', badgeClass: 'bg-purple-50 text-purple-700 border-purple-200' }
+                'A1': { label: 'A1', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
+                'A2': { label: 'A2', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
+                'B1': { label: 'B1', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
+                'B2': { label: 'B2', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
+                'C1-C2': { label: 'C1-C2', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' }
               };
 
               return cefrLevels.map(level => {
@@ -1138,7 +1138,7 @@ export default function App() {
                           <div className="mt-4">
                             <button 
                               onClick={() => toggleCategory(sectionKey)}
-                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900 transition-colors mx-2 mb-4"
+                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900  transition-colors mx-2 mb-4"
                             >
                               <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
                               <span>Archiv anzeigen ({completedDecks.length})</span>
