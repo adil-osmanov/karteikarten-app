@@ -1,12 +1,18 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+export const viewport: Viewport = {
+  themeColor: "#F5F5F7",
+};
 
 export const metadata: Metadata = {
   title: "Karten - Smart Mastery",
   description: "Learn German effortlessly.",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Karten",
+  },
 };
 
 export default function RootLayout({
@@ -15,8 +21,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${inter.className} min-h-screen bg-background text-foreground`}>
+    <html lang="de">
+      <body className="min-h-screen bg-[#F5F5F7] text-gray-900 font-sans antialiased selection:bg-[#007AFF]/20">
         {children}
       </body>
     </html>

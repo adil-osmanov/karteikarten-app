@@ -314,7 +314,7 @@ function StudyInterface({
           </p>
           <button
             onClick={onBack}
-            className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]"
+            className="w-full md:w-auto bg-[#007AFF] hover:bg-[#0062CC] text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]"
           >
             Zurück zur Bibliothek
           </button>
@@ -353,7 +353,7 @@ function StudyInterface({
         <button onClick={onBack} className="text-gray-400 hover:text-gray-900 transition-colors p-2 -ml-2 rounded-full hover:bg-white">
           <ArrowLeft className="w-6 h-6" />
         </button>
-        <div className="text-sm font-semibold text-gray-400">
+        <div className="text-sm font-semibold text-gray-400 tabular-nums">
           Karte {currentIndex + 1} von {activeCards.length}
         </div>
       </div>
@@ -587,7 +587,7 @@ const playAudio = useCallback(async (text: string) => {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="bg-white rounded-[32px] p-6 md:p-12 shadow-[0_4px_30px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col items-center justify-between min-h-[400px]"
+      className="bg-white rounded-[24px] p-6 md:p-12 shadow-[0_10px_30px_-5px_rgba(0,0,0,0.04),0_2px_6px_rgba(0,0,0,0.02)] border border-[rgba(0,0,0,0.06)] flex flex-col items-center justify-between min-h-[400px]"
       onClick={() => {
         if (!isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
@@ -601,9 +601,12 @@ const playAudio = useCallback(async (text: string) => {
             playAudio(fullSentence);
           }}
           disabled={isPlayingAudio}
-          className="w-12 h-12 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-500 rounded-full transition-all active:scale-95 disabled:opacity-50"
+          className="relative w-11 h-11 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-500 rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
         >
           <Volume2 className="w-5 h-5" />
+          <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 bg-white border border-gray-100 rounded-[4px] px-1 shadow-sm pointer-events-none">
+            R
+          </span>
         </button>
         <div className="flex gap-1.5">
           {[0, 1, 2, 3].map((step) => (
@@ -611,7 +614,7 @@ const playAudio = useCallback(async (text: string) => {
               key={step} 
               className={cn(
                 "w-2.5 h-2.5 rounded-full transition-colors",
-                (card.isArchived || card.masteryLevel > step) ? "bg-blue-600" : "bg-gray-200"
+                (card.isArchived || card.masteryLevel > step) ? "bg-[#007AFF]" : "bg-gray-200"
               )}
             />
           ))}
@@ -623,7 +626,7 @@ const playAudio = useCallback(async (text: string) => {
           {parts[0]}
           
           {phase === "Answer" ? (
-            <span className="text-blue-600 mx-1 font-semibold">
+            <span className="text-[#007AFF] mx-1 font-semibold">
               {card.targetWord}
             </span>
           ) : (
@@ -633,7 +636,7 @@ const playAudio = useCallback(async (text: string) => {
                   ________
                 </span>
               ) : (
-                <span className="inline-block relative mx-1 align-bottom pb-0.5 border-b-2 border-gray-200 focus-within:border-blue-600 transition-colors w-32 md:w-40 text-center">
+                <span className="inline-block relative mx-1 align-bottom pb-0.5 border-b-2 border-gray-200 focus-within:border-\[#007AFF\] transition-colors w-32 md:w-40 text-center">
                   <span className="flex items-center justify-center tracking-widest h-full w-full overflow-hidden whitespace-nowrap">
                     {renderInputChars()}
                   </span>
@@ -668,7 +671,7 @@ const playAudio = useCallback(async (text: string) => {
         {phase === "Question" && !isMultipleChoice && (
           <button 
             onClick={handleHilfe}
-            className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-blue-600 transition-all duration-100 active:scale-[0.98] bg-gray-50 hover:bg-blue-50 px-4 py-2 rounded-full mb-2"
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-[#007AFF] transition-all duration-100 active:scale-[0.98] bg-gray-50 hover:bg-blue-50 px-4 py-2 rounded-full mb-2"
           >
             <LifeBuoy className="w-4 h-4" />
             <span>Hilfe</span>
@@ -688,9 +691,9 @@ const playAudio = useCallback(async (text: string) => {
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-all duration-100 active:scale-[0.98] relative"
+                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 text-gray-900 hover:bg-gray-100 transition-transform duration-150 ease-out active:scale-[0.98] relative flex items-center justify-center"
               >
-                <span className="absolute top-1.5 left-2 text-[10px] text-gray-400 bg-white/60 px-1.5 rounded pointer-events-none font-bold">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-400 px-1.5 py-0.5 rounded-md bg-gray-100 border border-gray-200/60 pointer-events-none">
                   {idx + 1}
                 </span>
                 {opt}
@@ -708,7 +711,7 @@ const playAudio = useCallback(async (text: string) => {
             <button
               onClick={onNext}
               autoFocus
-              className="w-full py-4 rounded-xl text-lg font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-all duration-100 active:scale-[0.98]"
+              className="w-full py-4 rounded-[16px] text-lg font-semibold bg-[#007AFF] text-white hover:bg-[#0062CC] shadow-sm transition-transform duration-150 ease-out active:scale-[0.98]"
             >
               Weiter
             </button>
@@ -877,7 +880,7 @@ export default function App() {
         <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button 
             onClick={(e) => { e.stopPropagation(); setRenameInput(deck.name); setRenameModal({ id: deck.id, name: deck.name }); }}
-            className="p-2.5 text-gray-300 hover:text-blue-600 transition-all duration-100 active:scale-[0.98] rounded-full"
+            className="p-2.5 text-gray-300 hover:text-[#007AFF] transition-all duration-100 active:scale-[0.98] rounded-full"
           >
             <Edit2 className="w-4 h-4" />
           </button>
@@ -890,7 +893,7 @@ export default function App() {
         </div>
 
         <div className="mb-10">
-          <h3 className="text-xl font-bold tracking-tight text-gray-900 pr-24 group-hover:text-blue-600 transition-colors flex items-center gap-2">
+          <h3 className="text-xl font-bold tracking-tight text-gray-900 pr-24 group-hover:text-[#007AFF] transition-colors flex items-center gap-2">
             {deck.name}
             {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />}
           </h3>
@@ -904,7 +907,7 @@ export default function App() {
             <div
               className={cn(
                 "h-full rounded-full transition-all duration-700 ease-out",
-                isCompleted ? "bg-green-500" : "bg-blue-600"
+                isCompleted ? "bg-green-500" : "bg-[#007AFF]"
               )}
               style={{ width: `${progressPercentage}%` }}
             />
@@ -941,7 +944,7 @@ export default function App() {
                 <button onClick={() => setRenameModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
                   Abbrechen
                 </button>
-                <button onClick={() => { if (renameInput.trim()) { renameDeck(renameModal.id, renameInput.trim()); setRenameModal(null); } }} className="flex-1 py-4 font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-2xl transition-colors active:scale-[0.98]">
+                <button onClick={() => { if (renameInput.trim()) { renameDeck(renameModal.id, renameInput.trim()); setRenameModal(null); } }} className="flex-1 py-4 font-semibold text-white bg-[#007AFF] hover:bg-[#0062CC] rounded-2xl transition-colors active:scale-[0.98]">
                   Speichern
                 </button>
               </div>
@@ -991,7 +994,7 @@ export default function App() {
                   className={cn(
                     "flex-1 px-8 py-3.5 transition-all text-lg font-bold tracking-wide",
                     activeTab === tab
-                      ? "bg-white text-blue-600 shadow-md rounded-xl"
+                      ? "bg-white text-[#007AFF] shadow-md rounded-xl"
                       : "text-slate-500 hover:text-slate-700 rounded-xl"
                   )}
                 >
@@ -1004,7 +1007,7 @@ export default function App() {
           {dueCards.length > 0 && (
             <div className="mb-12 bg-blue-50/50 border border-blue-100/50 rounded-3xl p-5 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm text-blue-600 shrink-0">
+                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm text-[#007AFF] shrink-0">
                   <Clock className="w-5 h-5" />
                 </div>
                 <div>
@@ -1014,7 +1017,7 @@ export default function App() {
               </div>
               <button
                 onClick={() => setReviewCards(dueCards)}
-                className="w-full md:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all duration-100 active:scale-[0.98] shadow-sm shrink-0"
+                className="w-full md:w-auto px-6 py-3 bg-[#007AFF] hover:bg-[#0062CC] text-white font-semibold rounded-xl transition-all duration-100 active:scale-[0.98] shadow-sm shrink-0"
               >
                 Starten
               </button>
@@ -1058,7 +1061,7 @@ export default function App() {
                       <div className="flex items-center gap-3">
                         <button 
                           onClick={() => handlePlusClick(activeTab, level)}
-                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-blue-600 hover:text-white text-gray-500 rounded-full transition-all duration-100 active:scale-[0.98]"
+                          className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-[#007AFF] hover:text-white text-gray-500 rounded-full transition-all duration-100 active:scale-[0.98]"
                         >
                           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                             <path d="M7 1V13M1 7H13" />
