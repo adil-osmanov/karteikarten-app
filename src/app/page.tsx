@@ -278,56 +278,6 @@ const useStats = () => {
   };
 };
 
-// --- LEVEL UP MODAL ---
-
-function LevelUpModal() {
-  const stats = useStats();
-  
-  const [showModal, setShowModal] = useState(false);
-  const [currentLevel, setCurrentLevel] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (currentLevel === null) {
-      setCurrentLevel(stats.level);
-    } else if (stats.level > currentLevel) {
-      setShowModal(true);
-      setCurrentLevel(stats.level);
-      playFeedbackSound(true);
-    }
-  }, [stats.level, currentLevel]);
-
-  return (
-    <AnimatePresence>
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/20 backdrop-blur-sm"
-            onClick={() => setShowModal(false)}
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="relative bg-white/90 backdrop-blur-xl rounded-[32px] p-8 md:p-12 w-full max-w-sm shadow-2xl border border-white text-center"
-          >
-            <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-            </div>
-            <h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-br from-blue-500 to-blue-700 mb-2 text-center">
-              Level Aufstieg!
-            </h2>
-            <p className="text-gray-500 font-medium text-lg text-center">
-              Du hast Level {currentLevel} erreicht.
-            </p>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-  );
-}
 
 // --- LEVEL PROGRESS HEADER ---
 
@@ -777,7 +727,7 @@ export default function App() {
   if (activeDeckId) {
     return (
       <>
-        <LevelUpModal />
+        
         <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
       </>
     );
@@ -786,7 +736,7 @@ export default function App() {
   if (reviewCards) {
     return (
       <>
-        <LevelUpModal />
+        
         <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
       </>
     );
@@ -929,7 +879,7 @@ export default function App() {
 
   return (
     <>
-      <LevelUpModal />
+      
 
       {/* RENAME MODAL */}
       <AnimatePresence>
