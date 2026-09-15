@@ -390,7 +390,6 @@ function StudyInterface({
 
   return (
       <>
-        <HeaderWidgets />
 <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
       <div className="w-full max-w-xl mx-auto px-2 mb-8">
         <div className="flex items-center justify-between mb-4">
@@ -651,7 +650,7 @@ const playAudio = useCallback(async (text: string) => {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.12] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
       onClick={() => {
         if (!isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
@@ -703,16 +702,18 @@ const playAudio = useCallback(async (text: string) => {
           {parts[0]}
           
           {phase === "Answer" ? (
-            <span className="inline-block min-w-[6rem] md:min-w-[8rem] px-3 py-1 mx-1 rounded-lg align-middle bg-blue-600/10 dark:bg-blue-400/15 border-[1.5px] border-blue-600/20 dark:border-blue-400/30 text-blue-700 dark:text-blue-400 font-semibold transition-all duration-200 ease-out text-center">
+            <span className="inline-block align-baseline mx-1 border-0 border-b-2 border-blue-600/30 dark:border-blue-500/40 text-blue-600 dark:text-[#007AFF] bg-transparent outline-none rounded-none py-0 px-1 transition-colors">
               {card.targetWord}
             </span>
           ) : (
             <>
               {isMultipleChoice ? (
-                <span className="inline-block min-w-[6rem] md:min-w-[8rem] h-9 mx-1 rounded-lg align-middle bg-black/[0.05] dark:bg-white/[0.08] border-[1.5px] border-black/[0.12] dark:border-white/20 transition-all duration-200 ease-out" />
+                <span className="inline-block align-baseline mx-1 min-w-[3rem] border-0 border-b-2 border-black/10 dark:border-white/20 bg-transparent rounded-none py-0 px-1 text-transparent">
+                  {card.targetWord}
+                </span>
               ) : (
-                <span className="inline-block relative min-w-[6rem] md:min-w-[8rem] mx-1 align-baseline border-b-2 border-black/20 dark:border-white/20 focus-within:border-[#007AFF] dark:focus-within:border-[#007AFF] bg-transparent outline-none rounded-none py-0 px-1 transition-colors duration-200 text-center">
-                  <span className="flex items-center justify-center tracking-widest h-full w-full overflow-hidden whitespace-nowrap">
+                <span className="inline-block relative align-baseline mx-1 min-w-[4rem] border-0 border-b-2 border-black/20 dark:border-white/20 focus-within:border-[#007AFF] dark:focus-within:border-[#007AFF] focus-within:ring-0 bg-transparent outline-none rounded-none py-0 px-1 transition-colors">
+                  <span className="inline-block w-full text-center">
                     {renderInputChars()}
                   </span>
                   <input
@@ -722,7 +723,7 @@ const playAudio = useCallback(async (text: string) => {
                     value={inputText}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
-                    className="absolute inset-0 opacity-0 cursor-text w-full"
+                    className="absolute inset-0 opacity-0 cursor-text w-full h-full"
                     autoComplete="off"
                     autoCorrect="off"
                     spellCheck="false"
@@ -810,7 +811,7 @@ function DarkModeToggle() {
   };
 
   return (
-    <button onClick={toggle} className="absolute top-5 right-6 p-2 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors z-50">
+    <button onClick={toggle} className="p-2 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors">
       {isDark ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
     </button>
   );
@@ -869,10 +870,10 @@ function ActivityWidget() {
   }
 
   return (
-    <div className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.12] shadow-sm rounded-xl px-3 py-1.5 flex items-center gap-3 cursor-pointer group" title={`Heute: ${todayCount} von 10 Karten wiederholt`}>
+    <div className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] shadow-sm rounded-xl px-3 py-1.5 flex items-center gap-3 cursor-pointer group" title={`Heute: ${todayCount} von 10 Karten wiederholt`}>
       <div className="flex items-center gap-1.5">
         <Flame className="w-4 h-4 text-orange-500" />
-        <span className="text-xs font-bold tabular-nums text-gray-900 dark:text-[#F5F5F7]">{streak}d</span>
+        <span className="text-xs font-medium tabular-nums text-gray-900 dark:text-white">{streak}d</span>
       </div>
       <div className="h-3 w-[1px] bg-gray-200 dark:bg-white/10" />
       <div className="flex items-center gap-1">
@@ -881,7 +882,7 @@ function ActivityWidget() {
             "h-4 w-1.5 rounded-full transition-all",
             day.isCompleted ? "bg-[#007AFF] dark:bg-[#0A84FF] shadow-[0_0_8px_rgba(0,122,255,0.4)]" :
             day.isToday ? "bg-transparent border border-[#007AFF] animate-pulse" :
-            "bg-gray-200 dark:bg-white/10"
+            "bg-gray-200 dark:bg-white/15"
           )} />
         ))}
       </div>
@@ -889,10 +890,10 @@ function ActivityWidget() {
   );
 }
 
-function HeaderWidgets() {
+function HeaderWidgets({ hideActivity = false }: { hideActivity?: boolean }) {
   return (
-    <div className="absolute top-5 right-6 flex items-center gap-3 z-50">
-      <ActivityWidget />
+    <div className="absolute top-5 right-6 flex items-center gap-2 z-50">
+      {!hideActivity && <ActivityWidget />}
       <DarkModeToggle />
     </div>
   );
@@ -941,7 +942,7 @@ export default function App() {
   if (activeDeckId) {
     return (
       <>
-        <HeaderWidgets />
+        <HeaderWidgets hideActivity={true} />
 <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
       </>
     );
@@ -950,7 +951,7 @@ export default function App() {
   if (reviewCards) {
     return (
       <>
-        <HeaderWidgets />
+        <HeaderWidgets hideActivity={true} />
 <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
       </>
     );
@@ -1047,7 +1048,7 @@ export default function App() {
         key={deck.id}
         onClick={() => setActiveDeckId(deck.id)}
         className={cn(
-          "group cursor-pointer bg-white dark:bg-[#1C1C1E] rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.12] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative",
+          "group cursor-pointer bg-white dark:bg-[#1C1C1E] rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative",
           isCompleted && "opacity-60 hover:opacity-100"
         )}
       >
@@ -1161,7 +1162,7 @@ export default function App() {
       <main className="max-w-4xl mx-auto px-6 py-12 md:py-24">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
           <div className="flex justify-center mb-8 pt-2">
-            <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.12]">
+            <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.08]">
               {(["Grammatik", "Wörter"] as const).map((tab) => (
                 <button
                   key={tab}
@@ -1183,7 +1184,7 @@ export default function App() {
             <div className="mb-10">
               <div 
                 onClick={() => setReviewCards(dueCards)}
-                className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.12] rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-600/40 dark:hover:border-blue-500/40 transition-all shadow-sm active:scale-[0.98]"
+                className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-600/40 dark:hover:border-blue-500/40 transition-all shadow-sm active:scale-[0.98]"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-blue-600/10 dark:bg-blue-500/10 flex items-center justify-center">
@@ -1232,7 +1233,7 @@ export default function App() {
                 return (
                   <section key={sectionKey}>
                     <div className="flex items-center mb-4 px-1">
-                      <div className="inline-flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.12] rounded-full p-0.5 shadow-sm">
+                      <div className="inline-flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] rounded-full p-0.5 shadow-sm">
                         <span className="h-7 px-3 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-[#8E8E93]">
                           {level}
                         </span>
