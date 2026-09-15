@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Trash2, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
-  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Plus,
+  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
   Clock
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -131,11 +131,24 @@ interface DeckState {
   deleteDeck: (deckId: string) => void;
   renameDeck: (deckId: string, newName: string) => void;
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
+  dailyProgress: Record<string, number>;
+  incrementDailyProgress: () => void;
 }
 
 const useStore = create<DeckState>()((set, get) => ({
   decks: [],
   isLoaded: false,
+  dailyProgress: {},
+  
+  incrementDailyProgress: () => set((state) => {
+    const today = new Date().toISOString().split('T')[0];
+    return {
+      dailyProgress: {
+        ...state.dailyProgress,
+        [today]: (state.dailyProgress[today] || 0) + 1
+      }
+    };
+  }),
   
   setDecks: (decks) => set({ decks, isLoaded: true }),
   
@@ -376,17 +389,21 @@ function StudyInterface({
   };
 
   return (
-    <>
-      <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-2xl mx-auto px-2 mb-6">
+      <>
+        <HeaderWidgets />
+<div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
+      <div className="w-full max-w-xl mx-auto px-2 mb-8">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-[#F5F5F7] transition-colors p-2 -ml-2 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
-            <ArrowLeft className="w-6 h-6" />
+          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
+            <ArrowLeft className="w-5 h-5" />
           </button>
+          <div className="text-xs font-semibold text-gray-400 dark:text-gray-500 tabular-nums">
+            {currentIndex + 1} / {activeCards.length}
+          </div>
         </div>
-        <div className="w-full max-w-xl mx-auto h-1.5 bg-gray-200/60 dark:bg-[#2C2C2E] rounded-full overflow-hidden">
+        <div className="w-full h-1 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div 
-            className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
+            className="h-full bg-[#007AFF] transition-all duration-300 ease-out rounded-full"
             style={{ width: `${Math.max(5, initialTotal > 0 ? (masteredInSession / initialTotal) * 100 : 0)}%` }}
           />
         </div>
@@ -694,7 +711,7 @@ const playAudio = useCallback(async (text: string) => {
               {isMultipleChoice ? (
                 <span className="inline-block min-w-[6rem] md:min-w-[8rem] h-9 mx-1 rounded-lg align-middle bg-black/[0.05] dark:bg-white/[0.08] border-[1.5px] border-black/[0.12] dark:border-white/20 transition-all duration-200 ease-out" />
               ) : (
-                <span className="inline-block relative min-w-[6rem] md:min-w-[8rem] mx-1 align-bottom pb-0.5 border-b-2 border-gray-300 dark:border-gray-700 focus-within:border-blue-600 dark:focus-within:border-blue-500 bg-transparent transition-colors duration-200 text-center">
+                <span className="inline-block relative min-w-[6rem] md:min-w-[8rem] mx-1 align-baseline border-b-2 border-black/20 dark:border-white/20 focus-within:border-[#007AFF] dark:focus-within:border-[#007AFF] bg-transparent outline-none rounded-none py-0 px-1 transition-colors duration-200 text-center">
                   <span className="flex items-center justify-center tracking-widest h-full w-full overflow-hidden whitespace-nowrap">
                     {renderInputChars()}
                   </span>
@@ -741,12 +758,12 @@ const playAudio = useCallback(async (text: string) => {
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900  dark:text-[#F5F5F7] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-transform duration-150 ease-out active:scale-[0.98] relative flex items-center justify-center"
+                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-all duration-150 ease-out active:scale-[0.99] border border-black/[0.05] dark:border-white/[0.06] relative flex items-center justify-between gap-3"
               >
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-gray-400 dark:text-gray-500 px-1.5 py-0.5 rounded-md bg-black/5 dark:bg-white/10 pointer-events-none">
+                <span className="flex-1 text-center pr-2">{opt}</span>
+                <span className="w-5 h-5 rounded bg-black/5 dark:bg-white/10 text-gray-500 dark:text-white/50 text-xs font-mono flex items-center justify-center flex-shrink-0 pointer-events-none">
                   {idx + 1}
                 </span>
-                {opt}
               </button>
             ))}
           </motion.div>
@@ -802,6 +819,85 @@ function DarkModeToggle() {
 // --- MAIN APP COMPONENT ---
 
 
+
+function ActivityWidget() {
+  const [daily, setDaily] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const loadProgress = () => {
+      try {
+        const stored = localStorage.getItem('daily_progress');
+        if (stored) setDaily(JSON.parse(stored));
+      } catch (e) {}
+    };
+    loadProgress();
+    window.addEventListener('dailyProgressUpdated', loadProgress);
+    return () => window.removeEventListener('dailyProgressUpdated', loadProgress);
+  }, []);
+
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  
+  let streak = 0;
+  for (let i = 0; i < 365; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    const count = daily[dateStr] || 0;
+    if (count >= 10) {
+      streak++;
+    } else if (i === 0) {
+      continue;
+    } else {
+      break;
+    }
+  }
+
+  const todayStr = today.toISOString().split('T')[0];
+  const todayCount = daily[todayStr] || 0;
+
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    const count = daily[dateStr] || 0;
+    days.push({ 
+      isCompleted: count >= 10, 
+      isToday: i === 0 
+    });
+  }
+
+  return (
+    <div className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.12] shadow-sm rounded-xl px-3 py-1.5 flex items-center gap-3 cursor-pointer group" title={`Heute: ${todayCount} von 10 Karten wiederholt`}>
+      <div className="flex items-center gap-1.5">
+        <Flame className="w-4 h-4 text-orange-500" />
+        <span className="text-xs font-bold tabular-nums text-gray-900 dark:text-[#F5F5F7]">{streak}d</span>
+      </div>
+      <div className="h-3 w-[1px] bg-gray-200 dark:bg-white/10" />
+      <div className="flex items-center gap-1">
+        {days.map((day, idx) => (
+          <div key={idx} className={cn(
+            "h-4 w-1.5 rounded-full transition-all",
+            day.isCompleted ? "bg-[#007AFF] dark:bg-[#0A84FF] shadow-[0_0_8px_rgba(0,122,255,0.4)]" :
+            day.isToday ? "bg-transparent border border-[#007AFF] animate-pulse" :
+            "bg-gray-200 dark:bg-white/10"
+          )} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HeaderWidgets() {
+  return (
+    <div className="absolute top-5 right-6 flex items-center gap-3 z-50">
+      <ActivityWidget />
+      <DarkModeToggle />
+    </div>
+  );
+}
+
 export default function App() {
   const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded } = useStore();
   const [isMounted, setIsMounted] = useState(false);
@@ -845,9 +941,8 @@ export default function App() {
   if (activeDeckId) {
     return (
       <>
-        
-        <DarkModeToggle />
-        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
+        <HeaderWidgets />
+<StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
       </>
     );
   }
@@ -855,9 +950,8 @@ export default function App() {
   if (reviewCards) {
     return (
       <>
-        
-        <DarkModeToggle />
-        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
+        <HeaderWidgets />
+<StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
       </>
     );
   }
@@ -998,11 +1092,10 @@ export default function App() {
   };
 
   return (
-    <>
+      <>
+        <HeaderWidgets />
+{/* RENAME MODAL */}
       
-
-      {/* RENAME MODAL */}
-      <DarkModeToggle />
       <AnimatePresence>
         {renameModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1035,7 +1128,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* DELETE MODAL */}
-      <DarkModeToggle />
+      
       <AnimatePresence>
         {deleteModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1172,7 +1265,7 @@ export default function App() {
                               <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
                               <span>Archiv anzeigen ({completedDecks.length})</span>
                             </button>
-                            <DarkModeToggle />
+                            
       <AnimatePresence>
                               {isExpanded && (
                                 <motion.div
