@@ -225,6 +225,17 @@ const useStore = create<DeckState>()((set, get) => ({
   },
 
   answerCard: async (deckId, cardId, isCorrect, isHilfe) => {
+    // Update daily progress
+    if (typeof window !== 'undefined' && isCorrect) {
+      const { appLanguage } = get();
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const key = `daily_activity_${appLanguage}`;
+      const stored = localStorage.getItem(key);
+      const progress = stored ? JSON.parse(stored) : {};
+      progress[todayStr] = (progress[todayStr] || 0) + 1;
+      localStorage.setItem(key, JSON.stringify(progress));
+      window.dispatchEvent(new Event('storage-update'));
+    }
     const previousDecks = get().decks;
     let updatedCard: any = null;
 
@@ -828,19 +839,21 @@ function DarkModeToggle() {
 
 
 function ActivityWidget() {
+  const { appLanguage } = useStore();
   const [daily, setDaily] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const loadProgress = () => {
       try {
-        const stored = localStorage.getItem('daily_activity');
+        const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
         if (stored) setDaily(JSON.parse(stored));
+        else setDaily({});
       } catch (e) {}
     };
     loadProgress();
     window.addEventListener('storage-update', loadProgress);
     return () => window.removeEventListener('storage-update', loadProgress);
-  }, []);
+  }, [appLanguage]);
 
   const today = new Date();
   const getLocalYMD = (d: Date) => d.toLocaleDateString('en-CA');
@@ -896,7 +909,7 @@ function ActivityWidget() {
           <div key={idx} className={cn(
             "h-4 w-1.5 rounded-full transition-all",
             day.isCompleted ? "bg-[#007AFF] dark:bg-[#0A84FF] shadow-[0_0_8px_rgba(0,122,255,0.4)]" :
-            day.isToday ? "bg-transparent border border-[#007AFF]" :
+            day.isToday ? "bg-transparent border border-[#007AFF] animate-pulse" :
             "bg-gray-200 dark:bg-white/15"
           )} />
         ))}
@@ -1291,8 +1304,10 @@ export default function App() {
                     </div>
                     
                     {levelDecks.length === 0 ? (
-                      <div className="py-6 text-center bg-white border border-gray-100 rounded-[24px] shadow-sm">
-                        <p className="text-gray-400 text-sm font-medium">Noch keine Decks in diesem Level.</p>
+                      <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px] shadow-sm">
+                        <p className="text-gray-400 dark:text-[#8E8E93] text-sm font-medium">
+                          {appLanguage === 'EN' ? "No decks in this level yet." : "Noch keine Decks in diesem Level."}
+                        </p>
                       </div>
                     ) : (
                       <div className="space-y-6">
