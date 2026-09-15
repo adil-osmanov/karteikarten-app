@@ -100,7 +100,32 @@ const playFeedbackSound = (isCorrect: boolean) => {
 
 // --- STORE & TYPES ---
 
-export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1-C2';
+
+
+export type LanguageLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1-C2';
+export type CEFRLevel = LanguageLevel; // Alias for existing code
+
+export interface BookMeta {
+  id: string;
+  language: 'DE' | 'EN';
+  title: string;
+  subtitle?: string;
+  coverType: 'color' | 'image';
+  coverValue: string;
+  accentColor: string;
+  activeLevels: LanguageLevel[];
+}
+
+const useScrollLock = (lock: boolean) => {
+  useEffect(() => {
+    if (lock) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [lock]);
+};
 
 export interface Flashcard {
   id: string;
@@ -122,6 +147,7 @@ export interface Deck {
   level?: CEFRLevel;
   cards: Flashcard[];
   language?: 'DE' | 'EN';
+  bookId?: string;
 }
 
 interface DeckState {
@@ -136,6 +162,11 @@ interface DeckState {
   incrementDailyProgress: () => void;
   appLanguage: 'DE' | 'EN';
   setAppLanguage: (lang: 'DE' | 'EN') => void;
+  books: BookMeta[];
+  setBooks: (books: BookMeta[]) => void;
+  addBook: (book: BookMeta) => void;
+  updateBook: (book: BookMeta) => void;
+  deleteBook: (id: string) => void;
 }
 
 const useStore = create<DeckState>()((set, get) => ({
@@ -148,6 +179,23 @@ const useStore = create<DeckState>()((set, get) => ({
   },
   dailyProgress: {},
   
+  books: [],
+  setBooks: (books) => set({ books }),
+  addBook: (book) => set((state) => {
+    const newBooks = [...state.books, book];
+    if (typeof window !== 'undefined') localStorage.setItem('app_books_meta', JSON.stringify(newBooks));
+    return { books: newBooks };
+  }),
+  updateBook: (book) => set((state) => {
+    const newBooks = state.books.map(b => b.id === book.id ? book : b);
+    if (typeof window !== 'undefined') localStorage.setItem('app_books_meta', JSON.stringify(newBooks));
+    return { books: newBooks };
+  }),
+  deleteBook: (id) => set((state) => {
+    const newBooks = state.books.filter(b => b.id !== id);
+    if (typeof window !== 'undefined') localStorage.setItem('app_books_meta', JSON.stringify(newBooks));
+    return { books: newBooks };
+  }),
   incrementDailyProgress: () => set((state) => {
     const today = new Date().toISOString().split('T')[0];
     return {
@@ -940,15 +988,102 @@ function LanguageSelector() {
   );
 }
 
-function HeaderWidgets() {
+function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, onBack?: () => void }) {
   return (
     <>
-      <LanguageSelector />
+      {activeBook ? (
+        <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50">
+          <button onClick={onBack} className="text-sm font-medium text-gray-500 hover:text-gray-900 dark:text-white/70 dark:hover:text-white transition-colors flex items-center gap-1 cursor-pointer bg-white/50 dark:bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-black/5 dark:border-white/10 shadow-sm hover:shadow-md">
+            <span className="text-lg leading-none">&lsaquo;</span> {activeBook.title}
+          </button>
+        </div>
+      ) : (
+        <LanguageSelector />
+      )}
       <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
         <ActivityWidget />
         <DarkModeToggle />
       </div>
     </>
+  );
+}
+
+
+
+function BookCard({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) {
+  return (
+    <div onClick={onClick} className="group relative cursor-pointer aspect-[1/1.4] rounded-2xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 flex flex-col border border-black/5 dark:border-white/10" style={{ backgroundColor: book.coverValue }}>
+      <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 backdrop-blur-md rounded-full transition-all">
+          <Edit2 className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={onDelete} className="p-2 text-white/70 hover:text-red-400 bg-black/20 hover:bg-black/40 backdrop-blur-md rounded-full transition-all">
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="absolute inset-y-0 left-0 w-4 bg-black/20 mix-blend-overlay border-r border-white/10" />
+      <div className="flex-1 flex flex-col justify-end p-5 bg-gradient-to-t from-black/80 via-black/20 to-transparent">
+        <h3 className="text-xl font-bold text-white leading-tight mb-1">{book.title}</h3>
+        {book.subtitle && <p className="text-xs font-medium text-white/70">{book.subtitle}</p>}
+      </div>
+    </div>
+  );
+}
+
+function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
+  useScrollLock(true);
+  const { appLanguage } = useStore();
+  const [title, setTitle] = useState(book?.title || "");
+  const [subtitle, setSubtitle] = useState(book?.subtitle || "");
+  const [color, setColor] = useState(book?.coverValue || "#1C1C1E");
+  const [accent, setAccent] = useState(book?.accentColor || "#007AFF");
+  
+  const handleSave = () => {
+    if (!title.trim()) return;
+    onSave({
+      id: book?.id || crypto.randomUUID(),
+      language: book?.language || appLanguage,
+      title: title.trim(),
+      subtitle: subtitle.trim(),
+      coverType: 'color',
+      coverValue: color,
+      accentColor: accent,
+      activeLevels: book?.activeLevels || ['A1', 'A2', 'B1', 'B2', 'C1-C2']
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} onClick={e => e.stopPropagation()} className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{book ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
+        
+        <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors" />
+        <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors" />
+        
+        <div>
+          <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Cover Farbe</label>
+          <div className="flex gap-2">
+            {['#1C1C1E', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6'].map(c => (
+              <button key={c} onClick={() => setColor(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${color === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
+            ))}
+          </div>
+        </div>
+        
+        <div>
+          <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Akzent (Glow)</label>
+          <div className="flex gap-2">
+            {['#007AFF', '#FF3B30', '#FF9500', '#34C759', '#5856D6', '#AF52DE'].map(c => (
+              <button key={c} onClick={() => setAccent(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${accent === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-4">
+          <button onClick={onClose} className="flex-1 py-3 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">Abbrechen</button>
+          <button onClick={handleSave} className="flex-1 py-3 font-semibold text-white bg-[#007AFF] hover:bg-[#0066D6] rounded-xl transition-colors">Speichern</button>
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
@@ -977,6 +1112,7 @@ function DeckTheoryIndicator({ deckId, onOpenEdit, onOpenView }: { deckId: strin
 }
 
 function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () => void }) {
+  useScrollLock(true);
   const [text, setText] = useState("");
   useEffect(() => {
     setText(localStorage.getItem(`deck_theory_${deckId}`) || "");
@@ -1008,7 +1144,7 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }} 
         animate={{ opacity: 1, scale: 1 }}
@@ -1049,6 +1185,7 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
 }
 
 function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: string, onClose: () => void, onStartSession: () => void, onEdit: () => void }) {
+  useScrollLock(true);
   const [text, setText] = useState("");
   useEffect(() => {
     setText(localStorage.getItem(`deck_theory_${deckId}`) || "");
@@ -1189,7 +1326,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4 overscroll-contain touch-none" onClick={onClose}>
       <motion.div 
         initial={{ opacity: 0, y: 100 }} 
         animate={{ opacity: 1, y: 0 }}
@@ -1220,16 +1357,28 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 }
 
 export default function App() {
-  const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage } = useStore();
+  const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
+  const [activeBookId, setActiveBookId] = useState<string | null>(null);
+  const [bookModal, setBookModal] = useState<{ id?: string } | null>(null);
   
   const [uploadTarget, setUploadTarget] = useState<{ category: string, level: CEFRLevel } | null>(null);
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
+  useEffect(() => {
+    if (renameModal || deleteModal || bookModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [renameModal, deleteModal, bookModal]);
+
+
   const [theoryEditDeckId, setTheoryEditDeckId] = useState<string | null>(null);
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
 
@@ -1244,6 +1393,19 @@ export default function App() {
     if (savedLang === 'DE' || savedLang === 'EN') {
       setAppLanguage(savedLang);
     }
+    
+    // Init Books
+    const storedBooks = localStorage.getItem('app_books_meta');
+    if (storedBooks) {
+      setBooks(JSON.parse(storedBooks));
+    } else {
+      const defaultBooks: BookMeta[] = [
+        { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', coverType: 'color', coverValue: '#1C1C1E', accentColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
+        { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', coverType: 'color', coverValue: '#1C1C1E', accentColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
+      ];
+      localStorage.setItem('app_books_meta', JSON.stringify(defaultBooks));
+      setBooks(defaultBooks);
+    }
     const fetchDecks = async () => {
       try {
         const { data, error } = await supabase
@@ -1257,7 +1419,8 @@ export default function App() {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
           const enhancedDecks = data.map((d: any) => ({
             ...d,
-            language: langMap[d.id] || 'DE'
+            language: langMap[d.id] || 'DE',
+            bookId: JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || (langMap[d.id] === 'EN' ? 'default-en' : 'default-de')
           }));
           setDecks(enhancedDecks as Deck[]);
         }
@@ -1325,13 +1488,19 @@ export default function App() {
         langMap[newDeckId] = useStore.getState().appLanguage;
         localStorage.setItem('deck_languages', JSON.stringify(langMap));
         
+        const bookMap = JSON.parse(localStorage.getItem('deck_books') || '{}');
+        // If we are currently inside a book, save to that book, else use default book for language
+        bookMap[newDeckId] = activeBookId || (useStore.getState().appLanguage === 'EN' ? 'default-en' : 'default-de');
+        localStorage.setItem('deck_books', JSON.stringify(bookMap));
+        
         addDeck({
           id: newDeckId,
           name: defaultName,
           category: uploadTarget.category,
           level: uploadTarget.level,
           cards,
-          language: useStore.getState().appLanguage
+          language: useStore.getState().appLanguage,
+          bookId: activeBookId || (useStore.getState().appLanguage === 'EN' ? 'default-en' : 'default-de')
         });
       } else {
         alert("Fehler: Keine gültigen Karten gefunden.");
@@ -1435,10 +1604,21 @@ export default function App() {
     );
   };
 
+  const activeBook = books.find(b => b.id === activeBookId);
+  const activeBookColor = activeBook?.accentColor || 'transparent';
+
   return (
       <>
-        <HeaderWidgets />
+        {activeBookId && (
+          <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden transition-colors duration-1000">
+             <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[120px] opacity-[0.15] dark:opacity-20 transition-all duration-1000" style={{ '--ambient': activeBookColor } as any} />
+          </div>
+        )}
+        
+        <HeaderWidgets activeBook={activeBook} onBack={() => setActiveBookId(null)} />
+
       <AnimatePresence>
+        {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
         {theoryEditDeckId && <TheoryEditorModal deckId={theoryEditDeckId} onClose={() => setTheoryEditDeckId(null)} />}
         {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} onEdit={() => { setTheoryEditDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
       </AnimatePresence>
@@ -1447,7 +1627,7 @@ export default function App() {
       
       <AnimatePresence>
         {renameModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setRenameModal(null)} 
             />
@@ -1480,7 +1660,7 @@ export default function App() {
       
       <AnimatePresence>
         {deleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteModal(null)} 
             />
@@ -1507,7 +1687,24 @@ export default function App() {
 
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
-      <main className="max-w-4xl mx-auto px-6 py-12 md:py-24">
+      <main className="max-w-5xl mx-auto px-6 py-12 md:py-24">
+        {!activeBookId ? (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-8">
+            <div className="mb-12 text-center">
+              <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white mb-2 tracking-tight">Bibliothek</h1>
+              <p className="text-gray-500 dark:text-gray-400 font-medium">Wähle ein Buch, um zu lernen</p>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
+              {books.filter(b => b.language === appLanguage).map(book => (
+                <BookCard key={book.id} book={book} onClick={() => setActiveBookId(book.id)} onEdit={(e) => { e.stopPropagation(); setBookModal({ id: book.id }); }} onDelete={(e) => { e.stopPropagation(); if(confirm('Buch wirklich löschen?')) deleteBook(book.id); }} />
+              ))}
+              <div onClick={() => setBookModal({})} className="cursor-pointer aspect-[1/1.4] rounded-[24px] border-2 border-dashed border-gray-300 dark:border-white/20 hover:border-[#007AFF] dark:hover:border-[#007AFF] hover:bg-gray-50 dark:hover:bg-white/5 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-[#007AFF] group shadow-sm">
+                <Plus className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
+                <span className="font-semibold text-sm">+ Buch</span>
+              </div>
+            </div>
+          </div>
+        ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
           <div className="flex justify-center mb-8 pt-2">
             <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.08]">
@@ -1650,6 +1847,7 @@ export default function App() {
 
           </div>
         </motion.div>
+        )}
       </main>
     </>
   );
