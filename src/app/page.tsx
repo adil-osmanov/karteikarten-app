@@ -110,10 +110,12 @@ export interface BookMeta {
   language: 'DE' | 'EN';
   title: string;
   subtitle?: string;
-  coverType: 'color' | 'image';
-  coverValue: string;
-  accentColor: string;
+  tintColor: string;
+  coverImage?: string | null;
   activeLevels: LanguageLevel[];
+  coverType?: 'color' | 'image';
+  coverValue?: string;
+  accentColor?: string;
 }
 
 const useScrollLock = (lock: boolean) => {
@@ -1011,9 +1013,12 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
 
 function BookCard({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) {
-  const isImage = book.coverType === 'image';
+  const actualCoverImage = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
+  const isImage = !!actualCoverImage;
+  const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
+
   return (
-    <div onClick={onClick} className="group relative cursor-pointer aspect-[1/1.4] rounded-[20px] overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 flex flex-col border border-black/5 dark:border-white/10" style={isImage ? { backgroundImage: `url(${book.coverValue})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundColor: book.coverValue }}>
+    <div onClick={onClick} className="group relative cursor-pointer aspect-[1/1.4] rounded-[20px] overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 flex flex-col border border-black/5 dark:border-white/10" style={isImage ? { backgroundImage: `url(${actualCoverImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundColor: tintColor }}>
       <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
         <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
           <Edit2 className="w-3.5 h-3.5" />
@@ -1023,7 +1028,7 @@ function BookCard({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick
         </button>
       </div>
       <div className="absolute inset-y-0 left-0 w-4 bg-black/30 mix-blend-overlay border-r border-white/10 z-10" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent z-0" />
+      {isImage && <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent z-0" />}
       <div className="relative z-10 flex-1 flex flex-col justify-end p-5">
         <h3 className="text-lg md:text-xl font-bold text-white leading-tight mb-1">{book.title}</h3>
         {book.subtitle && <p className="text-xs md:text-sm font-medium text-white/70">{book.subtitle}</p>}
@@ -1037,9 +1042,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const { appLanguage } = useStore();
   const [title, setTitle] = useState(book?.title || "");
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
-  const [coverType, setCoverType] = useState<'color' | 'image'>(book?.coverType || 'color');
-  const [coverValue, setCoverValue] = useState(book?.coverValue || "#1C1C1E");
-  const [accent, setAccent] = useState(book?.accentColor || "#007AFF");
+  const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue || "#1C1C1E");
+  const [coverImage, setCoverImage] = useState<string | null>(book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null));
   const [activeLevels, setActiveLevels] = useState<LanguageLevel[]>(book?.activeLevels || ['A1', 'A2', 'B1', 'B2', 'C1-C2']);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -1050,8 +1054,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        setCoverType('image');
-        setCoverValue(event.target?.result as string);
+        setCoverImage(event.target?.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -1070,10 +1073,9 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
       language: book?.language || appLanguage,
       title: title.trim(),
       subtitle: subtitle.trim(),
-      coverType,
-      coverValue,
-      accentColor: accent,
-      activeLevels: activeLevels.length ? activeLevels : ['A1'] // Ensure at least one
+      tintColor,
+      coverImage,
+      activeLevels: activeLevels.length ? activeLevels : ['A1']
     });
   };
 
@@ -1090,34 +1092,28 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
         <div className="space-y-4">
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cover</label>
+              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cover Foto</label>
               <button onClick={() => fileInputRef.current?.click()} className="text-xs font-medium text-[#007AFF] hover:text-[#0056b3]">
                 + Foto laden
               </button>
               <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
             </div>
             
-            {coverType === 'image' && (
+            {coverImage && (
               <div className="relative h-24 rounded-xl overflow-hidden mb-3 border border-gray-200 dark:border-white/10 group">
-                <img src={coverValue} alt="Cover preview" className="w-full h-full object-cover" />
-                <button onClick={() => { setCoverType('color'); setCoverValue('#1C1C1E'); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="text-xs text-white font-medium bg-black/60 px-2 py-1 rounded-md">Entfernen</span>
+                <img src={coverImage} alt="Cover preview" className="w-full h-full object-cover" />
+                <button onClick={() => setCoverImage(null)} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-xs text-white font-medium bg-black/60 px-3 py-1.5 rounded-full shadow-sm">Entfernen</span>
                 </button>
               </div>
             )}
-
-            <div className="flex gap-2">
-              {['#1C1C1E', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6'].map(c => (
-                <button key={c} onClick={() => { setCoverType('color'); setCoverValue(c); }} className={`w-8 h-8 rounded-full border-2 transition-all ${coverType === 'color' && coverValue === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
-              ))}
-            </div>
           </div>
           
           <div>
-            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Akzent (Glow)</label>
+            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Tint Color (Akzent & Glow)</label>
             <div className="flex gap-2">
-              {['#007AFF', '#FF3B30', '#FF9500', '#34C759', '#5856D6', '#AF52DE'].map(c => (
-                <button key={c} onClick={() => setAccent(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${accent === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
+              {['#1C1C1E', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6', '#AF52DE'].map(c => (
+                <button key={c} onClick={() => setTintColor(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${tintColor === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
               ))}
             </div>
           </div>
@@ -1464,8 +1460,8 @@ export default function App() {
       setBooks(JSON.parse(storedBooks));
     } else {
       const defaultBooks: BookMeta[] = [
-        { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', coverType: 'color', coverValue: '#1C1C1E', accentColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
-        { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', coverType: 'color', coverValue: '#1C1C1E', accentColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
+        { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
+        { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
       ];
       localStorage.setItem('app_books_meta', JSON.stringify(defaultBooks));
       setBooks(defaultBooks);
@@ -1622,7 +1618,7 @@ export default function App() {
         key={deck.id}
         onClick={() => setActiveDeckId(deck.id)}
         className={cn(
-          "group cursor-pointer bg-white dark:bg-[#1C1C1E] rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative",
+          "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative",
           isCompleted && "opacity-60 hover:opacity-100"
         )}
       >
@@ -1650,11 +1646,13 @@ export default function App() {
         
         <div className="mt-auto">
           <div className="flex items-center justify-between text-sm font-bold mb-3">
-            <DeckTheoryIndicator 
-              deckId={deck.id} 
-              onOpenEdit={(e) => { e.stopPropagation(); setTheoryEditDeckId(deck.id); }} 
-              onOpenView={(e) => { e.stopPropagation(); setTheoryViewDeckId(deck.id); }} 
-            />
+            {activeTab === 'Grammatik' && (
+              <DeckTheoryIndicator 
+                deckId={deck.id} 
+                onOpenEdit={(e) => { e.stopPropagation(); setTheoryEditDeckId(deck.id); }} 
+                onOpenView={(e) => { e.stopPropagation(); setTheoryViewDeckId(deck.id); }} 
+              />
+            )}
             <span className={isCompleted ? "text-green-600" : "text-gray-400"}>{mastered} / {total}</span>
           </div>
           <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
@@ -1672,13 +1670,13 @@ export default function App() {
   };
 
   const activeBook = books.find(b => b.id === activeBookId);
-  const activeBookColor = activeBook?.accentColor || 'transparent';
+  const activeBookColor = activeBook?.tintColor || activeBook?.accentColor || activeBook?.coverValue || 'transparent';
 
   return (
       <>
         {activeBookId && (
           <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-1000">
-             <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[120px] opacity-[0.15] dark:opacity-20 transition-all duration-1000" style={{ '--ambient': activeBookColor } as any} />
+             <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[140px] opacity-[0.25] transition-all duration-1000" style={{ '--ambient': activeBookColor } as any} />
           </div>
         )}
         
