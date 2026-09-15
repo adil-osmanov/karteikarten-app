@@ -1018,20 +1018,37 @@ function BookCard({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
 
   return (
-    <div onClick={onClick} className="group relative cursor-pointer aspect-[1/1.4] rounded-[20px] overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 flex flex-col border border-black/5 dark:border-white/10" style={isImage ? { backgroundImage: `url(${actualCoverImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundColor: tintColor }}>
-      <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-        <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
-          <Edit2 className="w-3.5 h-3.5" />
-        </button>
-        <button onClick={onDelete} className="p-2 text-white/70 hover:text-red-400 bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
-      <div className="absolute inset-y-0 left-0 w-4 bg-black/30 mix-blend-overlay border-r border-white/10 z-10" />
-      {isImage && <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent z-0" />}
-      <div className="relative z-10 flex-1 flex flex-col justify-end p-5">
-        <h3 className="text-lg md:text-xl font-bold text-white leading-tight mb-1">{book.title}</h3>
-        {book.subtitle && <p className="text-xs md:text-sm font-medium text-white/70">{book.subtitle}</p>}
+    <div className="relative group w-full h-full">
+      {/* Glow Behind */}
+      <div 
+        className="absolute inset-0 opacity-0 group-hover:opacity-40 transition-opacity duration-500 rounded-2xl blur-xl" 
+        style={{ backgroundColor: tintColor, willChange: 'filter, transform', transform: 'translateZ(0)' }} 
+      />
+      {/* Card */}
+      <div onClick={onClick} className="relative z-10 cursor-pointer aspect-[2/3] rounded-2xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col bg-[#0A0A0C]" style={isImage ? {} : { backgroundColor: tintColor }}>
+        {isImage && (
+          <img src={actualCoverImage} className="absolute inset-0 w-full h-full object-cover" alt="Cover" />
+        )}
+        
+        {/* Inner Ring */}
+        <div className="absolute inset-0 rounded-2xl ring-1 ring-white/10 pointer-events-none z-30" />
+        
+        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-40">
+          <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full transition-all">
+            <Edit2 className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={onDelete} className="p-2 text-white/70 hover:text-red-400 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full transition-all">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        
+        <div className="absolute inset-y-0 left-0 w-4 bg-black/20 mix-blend-overlay border-r border-white/10 z-20 pointer-events-none" />
+        {isImage && <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0C] via-[#0A0A0C]/40 to-transparent z-10 pointer-events-none" />}
+        
+        <div className="relative z-20 flex-1 flex flex-col justify-end p-4 md:p-5">
+          <h3 className="text-lg md:text-xl font-bold text-white leading-tight mb-1">{book.title}</h3>
+          {book.subtitle && <p className="text-xs md:text-sm font-medium text-white/70">{book.subtitle}</p>}
+        </div>
       </div>
     </div>
   );
@@ -1052,11 +1069,28 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setCoverImage(event.target?.result as string);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_HEIGHT = 800;
+        let width = img.width;
+        let height = img.height;
+        
+        if (height > MAX_HEIGHT) {
+          width = width * (MAX_HEIGHT / height);
+          height = MAX_HEIGHT;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          setCoverImage(dataUrl);
+        }
       };
-      reader.readAsDataURL(file);
+      img.src = URL.createObjectURL(file);
     }
   };
 
@@ -1675,9 +1709,9 @@ export default function App() {
   return (
       <>
         {activeBookId && (
-          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-1000">
-             <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[140px] opacity-[0.25] transition-all duration-1000" style={{ '--ambient': activeBookColor } as any} />
-          </div>
+          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-1000" style={{ willChange: 'filter, transform', transform: 'translateZ(0)' }}>
+         <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[140px] opacity-[0.25] transition-all duration-1000" style={{ '--ambient': activeBookColor, willChange: 'filter, transform', transform: 'translateZ(0)' } as any} />
+      </div>
         )}
         
         <HeaderWidgets activeBook={activeBook} onBack={() => setActiveBookId(null)} />
@@ -1792,7 +1826,7 @@ export default function App() {
               {books.filter(b => b.language === appLanguage).map(book => (
                 <BookCard key={book.id} book={book} onClick={() => setActiveBookId(book.id)} onEdit={(e) => { e.stopPropagation(); setBookModal({ id: book.id }); }} onDelete={(e) => { e.stopPropagation(); setDeleteBookModal({ id: book.id, title: book.title }); }} />
               ))}
-              <div onClick={() => setBookModal({})} className="cursor-pointer aspect-[1/1.4] rounded-[24px] border-2 border-dashed border-gray-300 dark:border-white/20 hover:border-[#007AFF] dark:hover:border-[#007AFF] hover:bg-gray-50 dark:hover:bg-white/5 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-[#007AFF] group shadow-sm">
+              <div onClick={() => setBookModal({})} className="cursor-pointer aspect-[2/3] rounded-[24px] border-2 border-dashed border-gray-300 dark:border-white/20 hover:border-[#007AFF] dark:hover:border-[#007AFF] hover:bg-gray-50 dark:hover:bg-white/5 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-[#007AFF] group shadow-sm">
                 <Plus className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
                 <span className="font-semibold text-sm">+ Buch</span>
               </div>
@@ -1843,7 +1877,7 @@ export default function App() {
 
           <div className="space-y-16">
             {(() => {
-              const cefrLevels: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
+              const cefrLevels: CEFRLevel[] = activeBook?.activeLevels?.length ? activeBook.activeLevels : ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
               const levelConfig: Record<CEFRLevel, { label: string, badgeClass: string }> = {
                 'A1': { label: 'A1', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
                 'A2': { label: 'A2', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
