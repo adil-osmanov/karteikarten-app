@@ -1011,20 +1011,22 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
 
 function BookCard({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) {
+  const isImage = book.coverType === 'image';
   return (
-    <div onClick={onClick} className="group relative cursor-pointer aspect-[1/1.4] rounded-2xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 flex flex-col border border-black/5 dark:border-white/10" style={{ backgroundColor: book.coverValue }}>
-      <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-        <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 backdrop-blur-md rounded-full transition-all">
+    <div onClick={onClick} className="group relative cursor-pointer aspect-[1/1.4] rounded-[20px] overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 flex flex-col border border-black/5 dark:border-white/10" style={isImage ? { backgroundImage: `url(${book.coverValue})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundColor: book.coverValue }}>
+      <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+        <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
           <Edit2 className="w-3.5 h-3.5" />
         </button>
-        <button onClick={onDelete} className="p-2 text-white/70 hover:text-red-400 bg-black/20 hover:bg-black/40 backdrop-blur-md rounded-full transition-all">
+        <button onClick={onDelete} className="p-2 text-white/70 hover:text-red-400 bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
-      <div className="absolute inset-y-0 left-0 w-4 bg-black/20 mix-blend-overlay border-r border-white/10" />
-      <div className="flex-1 flex flex-col justify-end p-5 bg-gradient-to-t from-black/80 via-black/20 to-transparent">
-        <h3 className="text-xl font-bold text-white leading-tight mb-1">{book.title}</h3>
-        {book.subtitle && <p className="text-xs font-medium text-white/70">{book.subtitle}</p>}
+      <div className="absolute inset-y-0 left-0 w-4 bg-black/30 mix-blend-overlay border-r border-white/10 z-10" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent z-0" />
+      <div className="relative z-10 flex-1 flex flex-col justify-end p-5">
+        <h3 className="text-lg md:text-xl font-bold text-white leading-tight mb-1">{book.title}</h3>
+        {book.subtitle && <p className="text-xs md:text-sm font-medium text-white/70">{book.subtitle}</p>}
       </div>
     </div>
   );
@@ -1035,8 +1037,31 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const { appLanguage } = useStore();
   const [title, setTitle] = useState(book?.title || "");
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
-  const [color, setColor] = useState(book?.coverValue || "#1C1C1E");
+  const [coverType, setCoverType] = useState<'color' | 'image'>(book?.coverType || 'color');
+  const [coverValue, setCoverValue] = useState(book?.coverValue || "#1C1C1E");
   const [accent, setAccent] = useState(book?.accentColor || "#007AFF");
+  const [activeLevels, setActiveLevels] = useState<LanguageLevel[]>(book?.activeLevels || ['A1', 'A2', 'B1', 'B2', 'C1-C2']);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const allLevels: LanguageLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCoverType('image');
+        setCoverValue(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const toggleLevel = (lvl: LanguageLevel) => {
+    setActiveLevels(prev => 
+      prev.includes(lvl) ? prev.filter(l => l !== lvl) : [...prev, lvl]
+    );
+  };
   
   const handleSave = () => {
     if (!title.trim()) return;
@@ -1045,42 +1070,80 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
       language: book?.language || appLanguage,
       title: title.trim(),
       subtitle: subtitle.trim(),
-      coverType: 'color',
-      coverValue: color,
+      coverType,
+      coverValue,
       accentColor: accent,
-      activeLevels: book?.activeLevels || ['A1', 'A2', 'B1', 'B2', 'C1-C2']
+      activeLevels: activeLevels.length ? activeLevels : ['A1'] // Ensure at least one
     });
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} onClick={e => e.stopPropagation()} className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{book ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} onClick={e => e.stopPropagation()} className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-5 max-h-[85vh] overflow-y-auto custom-scrollbar">
+        <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{book ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
         
-        <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors" />
-        <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors" />
-        
-        <div>
-          <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Cover Farbe</label>
-          <div className="flex gap-2">
-            {['#1C1C1E', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6'].map(c => (
-              <button key={c} onClick={() => setColor(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${color === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
-            ))}
-          </div>
+        <div className="space-y-3">
+          <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors font-medium" />
+          <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors font-medium" />
         </div>
         
-        <div>
-          <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Akzent (Glow)</label>
-          <div className="flex gap-2">
-            {['#007AFF', '#FF3B30', '#FF9500', '#34C759', '#5856D6', '#AF52DE'].map(c => (
-              <button key={c} onClick={() => setAccent(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${accent === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
-            ))}
+        <div className="space-y-4">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cover</label>
+              <button onClick={() => fileInputRef.current?.click()} className="text-xs font-medium text-[#007AFF] hover:text-[#0056b3]">
+                + Foto laden
+              </button>
+              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
+            </div>
+            
+            {coverType === 'image' && (
+              <div className="relative h-24 rounded-xl overflow-hidden mb-3 border border-gray-200 dark:border-white/10 group">
+                <img src={coverValue} alt="Cover preview" className="w-full h-full object-cover" />
+                <button onClick={() => { setCoverType('color'); setCoverValue('#1C1C1E'); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-xs text-white font-medium bg-black/60 px-2 py-1 rounded-md">Entfernen</span>
+                </button>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {['#1C1C1E', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6'].map(c => (
+                <button key={c} onClick={() => { setCoverType('color'); setCoverValue(c); }} className={`w-8 h-8 rounded-full border-2 transition-all ${coverType === 'color' && coverValue === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
+              ))}
+            </div>
+          </div>
+          
+          <div>
+            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Akzent (Glow)</label>
+            <div className="flex gap-2">
+              {['#007AFF', '#FF3B30', '#FF9500', '#34C759', '#5856D6', '#AF52DE'].map(c => (
+                <button key={c} onClick={() => setAccent(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${accent === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
+              ))}
+            </div>
+          </div>
+          
+          <div>
+            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Level</label>
+            <div className="flex flex-wrap gap-2">
+              {allLevels.map(lvl => {
+                const isActive = activeLevels.includes(lvl);
+                return (
+                  <button 
+                    key={lvl} 
+                    onClick={() => toggleLevel(lvl)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${isActive ? 'bg-[#007AFF] border-[#007AFF] text-white' : 'bg-gray-100 dark:bg-white/5 border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/10'}`}
+                  >
+                    {lvl}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        <div className="flex gap-3 mt-4">
-          <button onClick={onClose} className="flex-1 py-3 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">Abbrechen</button>
-          <button onClick={handleSave} className="flex-1 py-3 font-semibold text-white bg-[#007AFF] hover:bg-[#0066D6] rounded-xl transition-colors">Speichern</button>
+        <div className="flex gap-3 mt-2">
+          <button onClick={onClose} className="flex-1 py-3.5 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">Abbrechen</button>
+          <button onClick={handleSave} className="flex-1 py-3.5 font-semibold text-white bg-[#007AFF] hover:bg-[#0066D6] rounded-xl transition-colors shadow-sm">Speichern</button>
         </div>
       </motion.div>
     </div>
@@ -1368,15 +1431,16 @@ export default function App() {
   const [uploadTarget, setUploadTarget] = useState<{ category: string, level: CEFRLevel } | null>(null);
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
+  const [deleteBookModal, setDeleteBookModal] = useState<{ id: string, title: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
   useEffect(() => {
-    if (renameModal || deleteModal || bookModal) {
+    if (renameModal || deleteModal || bookModal || deleteBookModal) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
     }
     return () => { document.body.style.overflow = 'unset'; };
-  }, [renameModal, deleteModal, bookModal]);
+  }, [renameModal, deleteModal, bookModal, deleteBookModal]);
 
 
   const [theoryEditDeckId, setTheoryEditDeckId] = useState<string | null>(null);
@@ -1527,7 +1591,10 @@ export default function App() {
 
   const categories = ["Grammatik", "Wörter"];
   
-  const filteredDecksList = decks.filter(d => (d.language || 'DE') === appLanguage);
+  const filteredDecksList = decks.filter(d => {
+    if (activeBookId) return d.bookId === activeBookId;
+    return (d.language || 'DE') === appLanguage;
+  });
   
   const dueCards: { deckId: string, card: Flashcard }[] = [];
   filteredDecksList.forEach(deck => {
@@ -1610,7 +1677,7 @@ export default function App() {
   return (
       <>
         {activeBookId && (
-          <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden transition-colors duration-1000">
+          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-1000">
              <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[120px] opacity-[0.15] dark:opacity-20 transition-all duration-1000" style={{ '--ambient': activeBookColor } as any} />
           </div>
         )}
@@ -1685,9 +1752,38 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      
+      {/* DELETE BOOK MODAL */}
+      <AnimatePresence>
+        {deleteBookModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteBookModal(null)} 
+            />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
+            >
+              <div className="w-16 h-16 bg-red-50 dark:bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertCircle className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white mb-3">Buch löschen?</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-8">Bist du sicher, dass du "{deleteBookModal.title}" löschen möchtest? Alle zugehörigen Decks bleiben erhalten, aber das Buch wird entfernt.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setDeleteBookModal(null)} className="flex-1 py-4 font-semibold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] rounded-2xl transition-colors active:scale-[0.98]">
+                  Abbrechen
+                </button>
+                <button onClick={() => { deleteBook(deleteBookModal.id); setDeleteBookModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl transition-colors active:scale-[0.98] shadow-sm">
+                  Löschen
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
-      <main className="max-w-5xl mx-auto px-6 py-12 md:py-24">
+      <main className="relative z-10 max-w-5xl mx-auto px-6 py-12 md:py-24">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-8">
             <div className="mb-12 text-center">
@@ -1696,7 +1792,7 @@ export default function App() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
               {books.filter(b => b.language === appLanguage).map(book => (
-                <BookCard key={book.id} book={book} onClick={() => setActiveBookId(book.id)} onEdit={(e) => { e.stopPropagation(); setBookModal({ id: book.id }); }} onDelete={(e) => { e.stopPropagation(); if(confirm('Buch wirklich löschen?')) deleteBook(book.id); }} />
+                <BookCard key={book.id} book={book} onClick={() => setActiveBookId(book.id)} onEdit={(e) => { e.stopPropagation(); setBookModal({ id: book.id }); }} onDelete={(e) => { e.stopPropagation(); setDeleteBookModal({ id: book.id, title: book.title }); }} />
               ))}
               <div onClick={() => setBookModal({})} className="cursor-pointer aspect-[1/1.4] rounded-[24px] border-2 border-dashed border-gray-300 dark:border-white/20 hover:border-[#007AFF] dark:hover:border-[#007AFF] hover:bg-gray-50 dark:hover:bg-white/5 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-[#007AFF] group shadow-sm">
                 <Plus className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
