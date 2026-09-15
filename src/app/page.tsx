@@ -940,7 +940,7 @@ function HeaderWidgets() {
 }
 
 export default function App() {
-  const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded } = useStore();
+  const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
@@ -957,6 +957,10 @@ export default function App() {
 
   useEffect(() => {
     setIsMounted(true);
+    const savedLang = localStorage.getItem('selected_language');
+    if (savedLang === 'DE' || savedLang === 'EN') {
+      setAppLanguage(savedLang);
+    }
     const fetchDecks = async () => {
       try {
         const { data, error } = await supabase
@@ -1060,7 +1064,6 @@ export default function App() {
 
   const categories = ["Grammatik", "Wörter"];
   
-  const { appLanguage } = useStore();
   const filteredDecksList = decks.filter(d => (d.language || 'DE') === appLanguage);
   
   const dueCards: { deckId: string, card: Flashcard }[] = [];
