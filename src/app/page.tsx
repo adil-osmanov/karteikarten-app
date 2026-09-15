@@ -396,7 +396,7 @@ function StudyInterface({
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="text-xs font-semibold text-gray-400 dark:text-gray-500 tabular-nums">
+          <div className="text-xs font-mono tabular-nums text-gray-400 dark:text-gray-500">
             {currentIndex + 1} / {activeCards.length}
           </div>
         </div>
@@ -736,13 +736,11 @@ const playAudio = useCallback(async (text: string) => {
           {parts[1]}
         </div>
 
-        {(phase === "Answer" || !isMultipleChoice) && (
-          <div className="mb-6 w-full text-center">
-            <p className="text-base text-gray-500 dark:text-[#8E8E93] font-medium w-full max-w-lg mx-auto">
-              {card.translation}
-            </p>
-          </div>
-        )}
+        <div className="mt-4 mb-6 w-full text-center">
+          <p className="text-sm font-normal text-gray-500 dark:text-[#8E8E93] max-w-lg mx-auto leading-relaxed">
+            {card.translation}
+          </p>
+        </div>
 
 
       </div>
@@ -890,10 +888,10 @@ function ActivityWidget() {
   );
 }
 
-function HeaderWidgets({ hideActivity = false }: { hideActivity?: boolean }) {
+function HeaderWidgets() {
   return (
-    <div className="absolute top-5 right-5 md:top-6 md:right-8 flex items-center gap-3 md:gap-4 z-50">
-      {!hideActivity && <ActivityWidget />}
+    <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
+      <ActivityWidget />
       <DarkModeToggle />
     </div>
   );
@@ -942,8 +940,7 @@ export default function App() {
   if (activeDeckId) {
     return (
       <>
-        <HeaderWidgets hideActivity={true} />
-<StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
+        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
       </>
     );
   }
@@ -951,8 +948,7 @@ export default function App() {
   if (reviewCards) {
     return (
       <>
-        <HeaderWidgets hideActivity={true} />
-<StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
+        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
       </>
     );
   }
