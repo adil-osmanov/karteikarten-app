@@ -952,6 +952,186 @@ function HeaderWidgets() {
   );
 }
 
+function DeckTheoryIndicator({ deckId, onOpenEdit, onOpenView }: { deckId: string, onOpenEdit: (e:any)=>void, onOpenView: (e:any)=>void }) {
+  const [hasTheory, setHasTheory] = useState(false);
+  useEffect(() => {
+    const check = () => setHasTheory(!!localStorage.getItem(`deck_theory_${deckId}`));
+    check();
+    window.addEventListener('theory-update', check);
+    return () => window.removeEventListener('theory-update', check);
+  }, [deckId]);
+
+  if (hasTheory) {
+    return (
+      <button onClick={onOpenView} className="flex items-center gap-1.5 text-xs font-semibold text-[#007AFF] bg-[#007AFF]/10 border border-[#007AFF]/20 px-2.5 py-1 rounded-lg hover:bg-[#007AFF]/25 transition-all cursor-pointer">
+        📄 Theorie
+      </button>
+    );
+  }
+  return (
+    <button onClick={onOpenEdit} className="text-xs font-medium text-gray-400 dark:text-white/30 hover:text-gray-600 dark:hover:text-white/80 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-white/5 transition-all">
+      + Theorie
+    </button>
+  );
+}
+
+function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () => void }) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    setText(localStorage.getItem(`deck_theory_${deckId}`) || "");
+  }, [deckId]);
+
+  const handleSave = () => {
+    if (text.trim()) {
+      localStorage.setItem(`deck_theory_${deckId}`, text);
+    } else {
+      localStorage.removeItem(`deck_theory_${deckId}`);
+    }
+    window.dispatchEvent(new Event('theory-update'));
+    onClose();
+  };
+
+  const handleDelete = () => {
+    localStorage.removeItem(`deck_theory_${deckId}`);
+    window.dispatchEvent(new Event('theory-update'));
+    onClose();
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setText(ev.target?.result as string);
+      reader.readAsText(file);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }} 
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()}
+        className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-2xl p-5 max-w-lg w-full shadow-2xl flex flex-col"
+      >
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Konzept bearbeiten</h2>
+        <textarea 
+          value={text} 
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Вставьте конспект в формате Markdown (# Правило, > Формула, примеры)..."
+          className="w-full min-h-[150px] p-4 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-[#F5F5F7] placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors resize-y mb-4"
+        />
+        <div className="flex items-center justify-between mb-6">
+          <label className="cursor-pointer flex items-center gap-2 text-sm text-[#007AFF] hover:text-[#0056b3] transition-colors">
+            <Upload className="w-4 h-4" />
+            <span>.md laden</span>
+            <input type="file" accept=".md,.txt" className="hidden" onChange={handleFile} />
+          </label>
+        </div>
+        <div className="flex gap-3 mt-auto">
+          <button onClick={onClose} className="flex-1 py-3 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">
+            Abbrechen
+          </button>
+          {text && (
+            <button onClick={handleDelete} className="flex-1 py-3 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors">
+              Löschen
+            </button>
+          )}
+          <button onClick={handleSave} className="flex-1 py-3 font-semibold text-white bg-[#007AFF] hover:bg-[#0066D6] rounded-xl transition-colors">
+            Speichern
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: string, onClose: () => void, onStartSession: () => void, onEdit: () => void }) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    setText(localStorage.getItem(`deck_theory_${deckId}`) || "");
+  }, [deckId]);
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === ' ' && !e.repeat && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        onStartSession();
+      }
+    };
+    window.addEventListener('keydown', down);
+    return () => window.removeEventListener('keydown', down);
+  }, [onClose, onStartSession]);
+
+  const renderMarkdown = (md: string) => {
+    return md.split('\n').map((line, i) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('# ')) {
+        return <h1 key={i} className="text-xl font-bold text-gray-900 dark:text-white mt-5 mb-3">{trimmed.slice(2)}</h1>;
+      }
+      if (trimmed.startsWith('### ')) {
+        return <h3 key={i} className="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-white/50 mt-4 mb-2">{trimmed.slice(4)}</h3>;
+      }
+      if (trimmed.startsWith('> ')) {
+        return <div key={i} className="bg-blue-50 dark:bg-white/5 border-l-2 border-[#007AFF] p-3 my-3 rounded-r-xl font-mono text-sm text-blue-800 dark:text-blue-200">{trimmed.slice(2)}</div>;
+      }
+      if (trimmed.startsWith('⚠️ ')) {
+        return <div key={i} className="bg-amber-100 dark:bg-amber-500/10 border-l-2 border-amber-500 text-amber-900 dark:text-amber-200 text-xs p-3 rounded-r-lg my-3 flex items-start gap-2">
+          <span className="shrink-0">⚠️</span>
+          <span>{trimmed.slice(2).replace(/^Achtung:?\s*/i, '')}</span>
+        </div>;
+      }
+      if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+        return <li key={i} className="ml-5 list-disc text-gray-700 dark:text-gray-300 my-1.5 leading-relaxed">{trimmed.slice(2)}</li>;
+      }
+      if (trimmed === '') return <div key={i} className="h-3" />;
+      
+      // Bold rendering **bold**
+      const parts = trimmed.split(/\*\*(.*?)\*\*/g);
+      if (parts.length > 1) {
+        return (
+          <p key={i} className="text-gray-800 dark:text-gray-200 my-1.5 leading-relaxed">
+            {parts.map((p, idx) => idx % 2 === 1 ? <strong key={idx} className="font-semibold text-gray-900 dark:text-white">{p}</strong> : p)}
+          </p>
+        );
+      }
+      return <p key={i} className="text-gray-800 dark:text-gray-200 my-1.5 leading-relaxed">{trimmed}</p>;
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-sm p-0 md:p-4" onClick={onClose}>
+      <motion.div 
+        initial={{ opacity: 0, y: 100 }} 
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 100 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-xl mx-auto backdrop-blur-2xl bg-white/95 dark:bg-[#161618]/90 border border-gray-200 dark:border-white/10 rounded-t-3xl md:rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh]"
+      >
+        <div className="w-10 h-1.5 bg-gray-300 dark:bg-white/20 rounded-full mx-auto mb-6 shrink-0" />
+        
+        <div className="overflow-y-auto mb-6 overscroll-contain pr-2 custom-scrollbar">
+          {renderMarkdown(text)}
+        </div>
+        
+        <div className="mt-auto shrink-0 pt-4 border-t border-gray-200 dark:border-white/10">
+          <button 
+            onClick={onStartSession}
+            className="w-full bg-[#007AFF] hover:bg-[#0066D6] text-white font-medium py-3.5 rounded-xl transition-all shadow-[0_4px_20px_rgba(0,122,255,0.3)] active:scale-[0.98] text-lg mb-3"
+          >
+            Starten (Space)
+          </button>
+          <button onClick={onEdit} className="w-full text-center text-xs font-medium text-gray-400 hover:text-gray-600 dark:text-white/30 dark:hover:text-white/80 transition-colors">
+            Konzept bearbeiten
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function App() {
   const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage } = useStore();
   const [isMounted, setIsMounted] = useState(false);
@@ -963,6 +1143,9 @@ export default function App() {
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
+  const [theoryEditDeckId, setTheoryEditDeckId] = useState<string | null>(null);
+  const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
+
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
 
@@ -984,7 +1167,12 @@ export default function App() {
           console.error("Supabase Fetch Error:", error.message);
           setDecks([]);
         } else if (data) {
-          setDecks(data as Deck[]);
+          const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
+          const enhancedDecks = data.map((d: any) => ({
+            ...d,
+            language: langMap[d.id] || 'DE'
+          }));
+          setDecks(enhancedDecks as Deck[]);
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
@@ -1045,12 +1233,18 @@ export default function App() {
 
       if (cards.length > 0) {
         const defaultName = file.name.replace('.csv', '');
+        const newDeckId = crypto.randomUUID();
+        const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
+        langMap[newDeckId] = useStore.getState().appLanguage;
+        localStorage.setItem('deck_languages', JSON.stringify(langMap));
+        
         addDeck({
-          id: crypto.randomUUID(),
+          id: newDeckId,
           name: defaultName,
           category: uploadTarget.category,
           level: uploadTarget.level,
-          cards
+          cards,
+          language: useStore.getState().appLanguage
         });
       } else {
         alert("Fehler: Keine gültigen Karten gefunden.");
@@ -1132,7 +1326,12 @@ export default function App() {
         </div>
         
         <div className="mt-auto">
-          <div className="flex items-center justify-end text-sm font-bold mb-3">
+          <div className="flex items-center justify-between text-sm font-bold mb-3">
+            <DeckTheoryIndicator 
+              deckId={deck.id} 
+              onOpenEdit={(e) => { e.stopPropagation(); setTheoryEditDeckId(deck.id); }} 
+              onOpenView={(e) => { e.stopPropagation(); setTheoryViewDeckId(deck.id); }} 
+            />
             <span className={isCompleted ? "text-green-600" : "text-gray-400"}>{mastered} / {total}</span>
           </div>
           <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
@@ -1152,6 +1351,11 @@ export default function App() {
   return (
       <>
         <HeaderWidgets />
+      <AnimatePresence>
+        {theoryEditDeckId && <TheoryEditorModal deckId={theoryEditDeckId} onClose={() => setTheoryEditDeckId(null)} />}
+        {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} onEdit={() => { setTheoryEditDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
+      </AnimatePresence>
+
 {/* RENAME MODAL */}
       
       <AnimatePresence>
