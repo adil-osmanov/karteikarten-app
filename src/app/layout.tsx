@@ -6,12 +6,12 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Karten - Smart Mastery",
+  title: "Kontext",
   description: "Learn German effortlessly.",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Karten",
+    title: "Kontext",
   },
 };
 
