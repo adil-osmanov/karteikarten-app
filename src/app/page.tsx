@@ -121,6 +121,7 @@ export interface Deck {
   category: string;
   level?: CEFRLevel;
   cards: Flashcard[];
+  language?: 'DE' | 'EN';
 }
 
 interface DeckState {
@@ -133,11 +134,18 @@ interface DeckState {
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: () => void;
+  appLanguage: 'DE' | 'EN';
+  setAppLanguage: (lang: 'DE' | 'EN') => void;
 }
 
 const useStore = create<DeckState>()((set, get) => ({
   decks: [],
   isLoaded: false,
+  appLanguage: 'DE',
+  setAppLanguage: (lang) => {
+    if (typeof window !== 'undefined') localStorage.setItem('selected_language', lang);
+    set({ appLanguage: lang });
+  },
   dailyProgress: {},
   
   incrementDailyProgress: () => set((state) => {
@@ -825,50 +833,59 @@ function ActivityWidget() {
   useEffect(() => {
     const loadProgress = () => {
       try {
-        const stored = localStorage.getItem('daily_progress');
+        const stored = localStorage.getItem('daily_activity');
         if (stored) setDaily(JSON.parse(stored));
       } catch (e) {}
     };
     loadProgress();
-    window.addEventListener('dailyProgressUpdated', loadProgress);
-    return () => window.removeEventListener('dailyProgressUpdated', loadProgress);
+    window.addEventListener('storage-update', loadProgress);
+    return () => window.removeEventListener('storage-update', loadProgress);
   }, []);
 
   const today = new Date();
-  today.setHours(0,0,0,0);
+  const getLocalYMD = (d: Date) => d.toLocaleDateString('en-CA');
   
   let streak = 0;
+  let checkDate = new Date(today);
+  const todayStr = getLocalYMD(checkDate);
+  const todayCount = daily[todayStr] || 0;
+  
+  // If today has 0, check from yesterday. Otherwise check from today.
+  if (todayCount === 0) {
+    checkDate.setDate(checkDate.getDate() - 1);
+  }
+  
   for (let i = 0; i < 365; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = getLocalYMD(checkDate);
     const count = daily[dateStr] || 0;
-    if (count >= 10) {
+    if (count >= 1) {
       streak++;
-    } else if (i === 0) {
-      continue;
+      checkDate.setDate(checkDate.getDate() - 1);
     } else {
       break;
     }
   }
 
-  const todayStr = today.toISOString().split('T')[0];
-  const todayCount = daily[todayStr] || 0;
-
+  // Calculate Monday-Sunday of current week
   const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
+  const dayOfWeek = today.getDay(); // 0 = Sun, 1 = Mon
+  const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - diffToMonday);
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const dateStr = getLocalYMD(d);
     const count = daily[dateStr] || 0;
     days.push({ 
-      isCompleted: count >= 10, 
-      isToday: i === 0 
+      isCompleted: count >= 1, 
+      isToday: dateStr === todayStr 
     });
   }
 
   return (
-    <div className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] shadow-sm rounded-xl px-3 py-1.5 flex items-center gap-3 cursor-pointer group" title={`Heute: ${todayCount} von 10 Karten wiederholt`}>
+    <div className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] shadow-sm rounded-xl px-3 py-1.5 flex items-center gap-3 cursor-pointer group" title={`Heute: ${todayCount} Karten gelernt`}>
       <div className="flex items-center gap-1.5">
         <Flame className="w-4 h-4 text-orange-500" />
         <span className="text-xs font-medium tabular-nums text-gray-900 dark:text-white">{streak}d</span>
@@ -879,7 +896,7 @@ function ActivityWidget() {
           <div key={idx} className={cn(
             "h-4 w-1.5 rounded-full transition-all",
             day.isCompleted ? "bg-[#007AFF] dark:bg-[#0A84FF] shadow-[0_0_8px_rgba(0,122,255,0.4)]" :
-            day.isToday ? "bg-transparent border border-[#007AFF] animate-pulse" :
+            day.isToday ? "bg-transparent border border-[#007AFF]" :
             "bg-gray-200 dark:bg-white/15"
           )} />
         ))}
@@ -888,12 +905,37 @@ function ActivityWidget() {
   );
 }
 
+function LanguageSelector() {
+  const { appLanguage, setAppLanguage } = useStore();
+  return (
+    <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50 flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] p-0.5 rounded-xl shadow-sm">
+      {(['DE', 'EN'] as const).map(lang => (
+        <button
+          key={lang}
+          onClick={() => setAppLanguage(lang)}
+          className={cn(
+            "text-xs font-semibold px-2.5 py-1 rounded-lg transition-colors",
+            appLanguage === lang 
+              ? "bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm" 
+              : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+          )}
+        >
+          {lang}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function HeaderWidgets() {
   return (
-    <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
-      <ActivityWidget />
-      <DarkModeToggle />
-    </div>
+    <>
+      <LanguageSelector />
+      <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
+        <ActivityWidget />
+        <DarkModeToggle />
+      </div>
+    </>
   );
 }
 
@@ -1018,8 +1060,11 @@ export default function App() {
 
   const categories = ["Grammatik", "Wörter"];
   
+  const { appLanguage } = useStore();
+  const filteredDecksList = decks.filter(d => (d.language || 'DE') === appLanguage);
+  
   const dueCards: { deckId: string, card: Flashcard }[] = [];
-  decks.forEach(deck => {
+  filteredDecksList.forEach(deck => {
     deck.cards.forEach(card => {
       if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now()) {
         dueCards.push({ deckId: deck.id, card });
@@ -1028,7 +1073,7 @@ export default function App() {
   });
 
   const archivedCards: { deckId: string, deckName: string, card: Flashcard }[] = [];
-  decks.forEach(deck => {
+  filteredDecksList.forEach(deck => {
     deck.cards.forEach(card => {
       if (card.isArchived) archivedCards.push({ deckId: deck.id, deckName: deck.name, card });
     });
@@ -1211,7 +1256,7 @@ export default function App() {
 
               return cefrLevels.map(level => {
                 const sectionKey = `${activeTab}-${level}`;
-                const levelDecks = decks.filter(d => d.category === activeTab && (d.level || 'A1') === level);
+                const levelDecks = filteredDecksList.filter(d => d.category === activeTab && (d.level || 'A1') === level);
                 const sortedDecks = [...levelDecks].sort((a, b) => {
                   const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
                   const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
