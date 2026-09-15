@@ -892,7 +892,7 @@ function ActivityWidget() {
 
 function HeaderWidgets({ hideActivity = false }: { hideActivity?: boolean }) {
   return (
-    <div className="absolute top-5 right-6 flex items-center gap-2 z-50">
+    <div className="absolute top-5 right-5 md:top-6 md:right-8 flex items-center gap-3 md:gap-4 z-50">
       {!hideActivity && <ActivityWidget />}
       <DarkModeToggle />
     </div>
