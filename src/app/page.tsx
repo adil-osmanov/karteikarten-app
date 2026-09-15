@@ -1066,38 +1066,68 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   }, [onClose, onStartSession]);
 
   const renderMarkdown = (md: string) => {
-    return md.split('\n').map((line, i) => {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('# ')) {
-        return <h1 key={i} className="text-xl font-bold text-gray-900 dark:text-white mt-5 mb-3">{trimmed.slice(2)}</h1>;
-      }
-      if (trimmed.startsWith('### ')) {
-        return <h3 key={i} className="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-white/50 mt-4 mb-2">{trimmed.slice(4)}</h3>;
-      }
-      if (trimmed.startsWith('> ')) {
-        return <div key={i} className="bg-blue-50 dark:bg-white/5 border-l-2 border-[#007AFF] p-3 my-3 rounded-r-xl font-mono text-sm text-blue-800 dark:text-blue-200">{trimmed.slice(2)}</div>;
-      }
-      if (trimmed.startsWith('⚠️ ')) {
-        return <div key={i} className="bg-amber-100 dark:bg-amber-500/10 border-l-2 border-amber-500 text-amber-900 dark:text-amber-200 text-xs p-3 rounded-r-lg my-3 flex items-start gap-2">
-          <span className="shrink-0">⚠️</span>
-          <span>{trimmed.slice(2).replace(/^Achtung:?\s*/i, '')}</span>
-        </div>;
-      }
-      if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
-        return <li key={i} className="ml-5 list-disc text-gray-700 dark:text-gray-300 my-1.5 leading-relaxed">{trimmed.slice(2)}</li>;
-      }
-      if (trimmed === '') return <div key={i} className="h-3" />;
+    const parseInline = (text: string) => {
+      const parts = text.split(/(\*\*.*?\*\*)/g);
+      return parts.map((part, idx) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={idx} className="font-semibold text-gray-900 dark:text-white">{part.slice(2, -2)}</strong>;
+        }
+        return part;
+      });
+    };
+
+    const blocks = md.split(/\n\n+/);
+    return blocks.map((block, i) => {
+      const lines = block.split('\n');
       
-      // Bold rendering **bold**
-      const parts = trimmed.split(/\*\*(.*?)\*\*/g);
-      if (parts.length > 1) {
+      // Quotes / Formulas (> )
+      if (lines.every(l => l.trim().startsWith('>'))) {
+        const content = lines.map(l => l.trim().replace(/^>\s*/, '')).join('\n');
         return (
-          <p key={i} className="text-gray-800 dark:text-gray-200 my-1.5 leading-relaxed">
-            {parts.map((p, idx) => idx % 2 === 1 ? <strong key={idx} className="font-semibold text-gray-900 dark:text-white">{p}</strong> : p)}
-          </p>
+          <div key={i} className="bg-blue-50 dark:bg-white/5 border-l-2 border-[#007AFF] p-3 my-4 rounded-r-xl font-mono text-sm text-blue-800 dark:text-blue-200 whitespace-pre-wrap">
+            {parseInline(content)}
+          </div>
         );
       }
-      return <p key={i} className="text-gray-800 dark:text-gray-200 my-1.5 leading-relaxed">{trimmed}</p>;
+
+      // Achtung Blocks (⚠️ Achtung)
+      if (block.trim().startsWith('⚠️ Achtung') || block.trim().startsWith('⚠️')) {
+         const content = block.trim().replace(/^⚠️\s*(Achtung:?)?\s*/i, '');
+         return (
+           <div key={i} className="bg-amber-100 dark:bg-amber-500/10 border-l-2 border-amber-500 text-amber-900 dark:text-amber-200 text-xs p-3.5 rounded-r-xl my-4 flex items-start gap-3 shadow-sm">
+             <span className="shrink-0 text-base leading-none mt-0.5">⚠️</span>
+             <div className="whitespace-pre-wrap leading-relaxed">{parseInline(content)}</div>
+           </div>
+         );
+      }
+
+      // Unordered Lists (* or -)
+      if (lines.every(l => l.trim().startsWith('* ') || l.trim().startsWith('- '))) {
+        return (
+          <ul key={i} className="ml-5 list-disc my-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500">
+            {lines.map((l, j) => (
+              <li key={j} className="text-gray-700 dark:text-gray-300 leading-relaxed pl-1">
+                {parseInline(l.trim().replace(/^[\*\-]\s*/, ''))}
+              </li>
+            ))}
+          </ul>
+        );
+      }
+
+      // Headers
+      if (block.trim().startsWith('# ')) {
+        return <h1 key={i} className="text-xl font-bold text-gray-900 dark:text-white mt-6 mb-3">{parseInline(block.trim().slice(2))}</h1>;
+      }
+      if (block.trim().startsWith('### ')) {
+        return <h3 key={i} className="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-white/50 mt-5 mb-2">{parseInline(block.trim().slice(4))}</h3>;
+      }
+
+      // Paragraphs
+      return (
+        <p key={i} className="text-gray-800 dark:text-gray-200 my-2.5 leading-relaxed">
+          {parseInline(block)}
+        </p>
+      );
     });
   };
 
@@ -1108,15 +1138,15 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 100 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl mx-auto backdrop-blur-2xl bg-white/95 dark:bg-[#161618]/90 border border-gray-200 dark:border-white/10 rounded-t-3xl md:rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh]"
+        className="w-full max-w-xl mx-auto backdrop-blur-2xl bg-white/95 dark:bg-[#161618]/95 border border-gray-200 dark:border-white/10 rounded-t-3xl md:rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh]"
       >
-        <div className="w-10 h-1.5 bg-gray-300 dark:bg-white/20 rounded-full mx-auto mb-6 shrink-0" />
+        <div className="w-10 h-1.5 bg-gray-300 dark:bg-white/20 rounded-full mx-auto mb-4 shrink-0" />
         
-        <div className="overflow-y-auto mb-6 overscroll-contain pr-2 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto pr-2 pb-6 custom-scrollbar" style={{ maxHeight: '60vh' }}>
           {renderMarkdown(text)}
         </div>
         
-        <div className="mt-auto shrink-0 pt-4 border-t border-gray-200 dark:border-white/10">
+        <div className="shrink-0 pt-5 mt-2 border-t border-gray-200 dark:border-white/10 bg-transparent">
           <button 
             onClick={onStartSession}
             className="w-full bg-[#007AFF] hover:bg-[#0066D6] text-white font-medium py-3.5 rounded-xl transition-all shadow-[0_4px_20px_rgba(0,122,255,0.3)] active:scale-[0.98] text-lg mb-3"
