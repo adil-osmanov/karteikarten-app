@@ -188,9 +188,6 @@ const useStore = create<DeckState>()((set, get) => ({
   books: [],
   setBooks: (books) => set({ books }),
   addBook: async (book) => {
-    const previousBooks = get().books;
-    set({ books: [...previousBooks, book] });
-    
     const payload = {
       id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
@@ -211,14 +208,15 @@ const useStore = create<DeckState>()((set, get) => ({
     }
     
     if (error) {
-      console.error("Supabase Add Book Error:", error.message); get().setSyncError("Add Book Error: " + error.message);
-      set({ books: previousBooks });
+      console.error("SUPABASE ERROR:", error);
+      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
+      return;
     }
+    
+    const previousBooks = get().books;
+    set({ books: [...previousBooks, book] });
   },
   updateBook: async (book) => {
-    const previousBooks = get().books;
-    set({ books: previousBooks.map(b => b.id === book.id ? book : b) });
-    
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
@@ -239,18 +237,24 @@ const useStore = create<DeckState>()((set, get) => ({
     }
     
     if (error) {
-      console.error("Supabase Update Book Error:", error.message); get().setSyncError("Update Book Error: " + error.message);
-      set({ books: previousBooks });
+      console.error("SUPABASE ERROR:", error);
+      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
+      return;
     }
+    
+    const previousBooks = get().books;
+    set({ books: previousBooks.map(b => b.id === book.id ? book : b) });
   },
   deleteBook: async (id) => {
-    const previousBooks = get().books;
-    set({ books: previousBooks.filter(b => b.id !== id) });
     const { error } = await supabase.from('books').delete().eq('id', id);
     if (error) {
-      console.error("Supabase Delete Book Error:", error.message); get().setSyncError("Delete Book Error: " + error.message);
-      set({ books: previousBooks });
+      console.error("SUPABASE ERROR:", error);
+      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
+      return;
     }
+    
+    const previousBooks = get().books;
+    set({ books: previousBooks.filter(b => b.id !== id) });
   },
   incrementDailyProgress: () => set((state) => {
     const today = new Date().toISOString().split('T')[0];
