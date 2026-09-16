@@ -1469,6 +1469,117 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
 
 
+
+const SYNC_USER_ID = "adil-personal-karten-sync";
+const SYNC_TIME_KEY = "karten_last_cloud_sync";
+
+let saveTimeout: NodeJS.Timeout | null = null;
+
+function useBackgroundSync() {
+  const { setDecks, setBooks, setAppLanguage } = useStore();
+
+  // 1. Pull data from Cloud (Polling every 15s + On Mount)
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchCloudData = async () => {
+      try {
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return;
+        
+        const { data, error } = await supabase
+          .from('user_data_sync')
+          .select('payload, updated_at')
+          .eq('user_id', SYNC_USER_ID)
+          .maybeSingle();
+
+        if (error || !data) return;
+
+        const cloudTime = new Date(data.updated_at).getTime();
+        const localTime = parseInt(localStorage.getItem(SYNC_TIME_KEY) || "0", 10);
+
+        if (cloudTime > localTime && isMounted) {
+          console.log("Cloud data is newer. Syncing to local...");
+          const p = data.payload as any;
+          if (p.localStorage) {
+            for (const [k, v] of Object.entries(p.localStorage)) {
+              localStorage.setItem(k, v as string);
+            }
+          }
+          if (p.books) setBooks(p.books);
+          if (p.appLanguage) setAppLanguage(p.appLanguage);
+          if (p.decks) setDecks(p.decks);
+          
+          localStorage.setItem(SYNC_TIME_KEY, cloudTime.toString());
+        }
+      } catch (e) {
+        console.error("Cloud Pull Error:", e);
+      }
+    };
+
+    fetchCloudData();
+    const interval = setInterval(fetchCloudData, 15000); // Check every 15 seconds
+    
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [setDecks, setBooks, setAppLanguage]);
+
+  // 2. Push data to Cloud on changes
+  const pushToCloud = useCallback(() => {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    
+    saveTimeout = setTimeout(async () => {
+      try {
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return;
+        
+        const payload: any = {
+          decks: useStore.getState().decks,
+          books: useStore.getState().books,
+          appLanguage: useStore.getState().appLanguage,
+          localStorage: {}
+        };
+        
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('deck_theory_') || key.startsWith('daily_activity_') || key === 'app_books_meta' || key === 'deck_languages' || key === 'deck_books')) {
+            payload.localStorage[key] = localStorage.getItem(key);
+          }
+        }
+
+        const now = Date.now();
+        localStorage.setItem(SYNC_TIME_KEY, now.toString());
+
+        const { error } = await supabase.from('user_data_sync').upsert({
+          user_id: SYNC_USER_ID,
+          payload,
+          updated_at: new Date(now).toISOString()
+        }, { onConflict: 'user_id' });
+        
+        if (error) console.error("Cloud Push Error:", error.message);
+      } catch (e) {
+        console.error("Cloud Push Exception:", e);
+      }
+    }, 2000);
+  }, []);
+
+  // Listen for local changes to trigger push
+  useEffect(() => {
+    const unsub = useStore.subscribe((state, prevState) => {
+      if (state.decks !== prevState.decks || state.books !== prevState.books || state.appLanguage !== prevState.appLanguage) {
+        pushToCloud();
+      }
+    });
+    return unsub;
+  }, [pushToCloud]);
+
+  useEffect(() => {
+    const handleTheoryUpdate = () => pushToCloud();
+    window.addEventListener('theory-update', handleTheoryUpdate);
+    return () => window.removeEventListener('theory-update', handleTheoryUpdate);
+  }, [pushToCloud]);
+}
+
 export default function App() {
   const [isPending, startTransition] = useTransition();
   const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook } = useStore();
