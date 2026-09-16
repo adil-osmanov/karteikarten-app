@@ -1572,30 +1572,30 @@ export default function App() {
       setAppLanguage(savedLang);
     }
     
-    // Init Books
-    const storedBooks = localStorage.getItem('app_books_meta');
-    if (storedBooks) {
-      setBooks(JSON.parse(storedBooks));
-    } else {
-      const defaultBooks: BookMeta[] = [
-        { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
-        { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
-      ];
-      localStorage.setItem('app_books_meta', JSON.stringify(defaultBooks));
-      setBooks(defaultBooks);
-    }
-    const fetchDecks = async () => {
+    const fetchData = async () => {
       try {
-        const { data, error } = await supabase
-          .from('decks')
-          .select('*, cards(*)');
-          
-        if (error) {
-          console.error("Supabase Fetch Error:", error.message);
+        const [booksRes, decksRes] = await Promise.all([
+          supabase.from('books').select('*'),
+          supabase.from('decks').select('*, cards(*)')
+        ]);
+
+        if (booksRes.data && booksRes.data.length > 0) {
+          setBooks(booksRes.data);
+        } else {
+          const defaultBooks: BookMeta[] = [
+            { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
+            { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
+          ];
+          await supabase.from('books').insert(defaultBooks);
+          setBooks(defaultBooks);
+        }
+
+        if (decksRes.error) {
+          console.error("Supabase Fetch Decks Error:", decksRes.error.message);
           setDecks([]);
-        } else if (data) {
+        } else if (decksRes.data) {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
-          const enhancedDecks = data.map((d: any) => ({
+          const enhancedDecks = decksRes.data.map((d: any) => ({
             ...d,
             language: langMap[d.id] || 'DE',
             bookId: JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || (langMap[d.id] === 'EN' ? 'default-en' : 'default-de')
@@ -1607,7 +1607,7 @@ export default function App() {
         setDecks([]);
       }
     };
-    fetchDecks();
+    fetchData();
   }, [setDecks]);
 
   const filteredDecksList = useMemo(() => {
