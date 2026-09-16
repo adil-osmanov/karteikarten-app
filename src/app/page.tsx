@@ -171,7 +171,7 @@ interface DeckState {
   deleteBook: (id: string) => void;
 }
 
-const useStore = create<DeckState>()((set, get) => ({
+const useStore = create<DeckState>()(persist((set, get) => ({
   decks: [],
   isLoaded: false,
   appLanguage: 'DE',
@@ -213,13 +213,13 @@ const useStore = create<DeckState>()((set, get) => ({
   addDeck: (deck) => {
     const previousDecks = get().decks;
     set({ decks: [...previousDecks, deck] });
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('trigger-cloud-sync'));
+    
   },
   
   deleteDeck: (deckId) => {
     const previousDecks = get().decks;
     set({ decks: previousDecks.filter(d => d.id !== deckId) });
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('trigger-cloud-sync'));
+    
   },
   
   renameDeck: (deckId, newName) => {
@@ -227,7 +227,7 @@ const useStore = create<DeckState>()((set, get) => ({
     set({
       decks: previousDecks.map(d => d.id === deckId ? { ...d, name: newName } : d)
     });
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('trigger-cloud-sync'));
+    
   },
 
   answerCard: async (deckId, cardId, isCorrect, isHilfe) => {
@@ -294,10 +294,10 @@ const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (updatedCard) {
-      if (typeof window !== 'undefined') window.dispatchEvent(new Event('trigger-cloud-sync'));
+      
     }
   }
-}));
+}), { name: 'karten-local-storage' }));
 
 
 // --- STUDY INTERFACE ---
@@ -1232,13 +1232,13 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
     } else {
       localStorage.removeItem(`deck_theory_${deckId}`);
     }
-    window.dispatchEvent(new Event('theory-update')); window.dispatchEvent(new Event('trigger-cloud-sync'));
+    window.dispatchEvent(new Event('theory-update'));
     onClose();
   };
 
   const handleDelete = () => {
     localStorage.removeItem(`deck_theory_${deckId}`);
-    window.dispatchEvent(new Event('theory-update')); window.dispatchEvent(new Event('trigger-cloud-sync'));
+    window.dispatchEvent(new Event('theory-update'));
     onClose();
   };
 
@@ -1467,133 +1467,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 }
 
 
-let saveTimeout: NodeJS.Timeout | null = null;
-export function useCloudSync() {
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
-  const { setDecks, setBooks, setAppLanguage } = useStore();
-  const [userId, setUserId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let uid = localStorage.getItem('sync_user_id');
-    if (!uid) {
-      uid = crypto.randomUUID();
-      localStorage.setItem('sync_user_id', uid);
-    }
-    setUserId(uid);
-  }, []);
-
-  useEffect(() => {
-    if (!userId) return;
-    let isMounted = true;
-    
-    const fetchInitial = async () => {
-      try {
-        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-          console.warn('Supabase env vars missing. Running completely local.');
-          if (isMounted) useStore.getState().setDecks(useStore.getState().decks || []);
-          return;
-        }
-
-        const { data, error, status } = await supabase.from('user_data_sync').select('payload').eq('user_id', userId).maybeSingle();
-        
-        if (error || status === 401 || status === 403) {
-           console.warn('Supabase RLS or fetch error:', error?.message);
-           if (isMounted) {
-             useStore.getState().setDecks(useStore.getState().decks || []);
-             setSyncStatus('error');
-           }
-           return;
-        }
-
-        if (data?.payload && Object.keys(data.payload).length > 0) {
-          const payload = data.payload as any;
-          if (payload.books) setBooks(payload.books);
-          if (payload.appLanguage) setAppLanguage(payload.appLanguage);
-          if (payload.localStorage) {
-            for (const [k, v] of Object.entries(payload.localStorage)) {
-              localStorage.setItem(k, v as string);
-            }
-          }
-          if (isMounted) setDecks(payload.decks || []);
-        } else {
-           if (isMounted) useStore.getState().setDecks(useStore.getState().decks || []);
-        }
-      } catch (err) {
-        console.error('Fatal sync error:', err);
-        if (isMounted) {
-          useStore.getState().setDecks(useStore.getState().decks || []);
-          setSyncStatus('error');
-        }
-      }
-    };
-    fetchInitial();
-    
-    return () => { isMounted = false; };
-  }, [userId]); // Removed setDecks/setBooks from deps to guarantee it only runs once per user
-
-  const triggerSync = useCallback(() => {
-    if (!userId) return;
-    setSyncStatus('syncing');
-    
-    if (saveTimeout) clearTimeout(saveTimeout);
-    
-    saveTimeout = setTimeout(async () => {
-      try {
-        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-          setSyncStatus('error');
-          return;
-        }
-
-        const payload: any = {
-          decks: useStore.getState().decks,
-          books: useStore.getState().books,
-          appLanguage: useStore.getState().appLanguage,
-          localStorage: {}
-        };
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith('deck_theory_') || key.startsWith('daily_activity_') || key === 'app_books_meta' || key === 'deck_languages' || key === 'deck_books')) {
-            payload.localStorage[key] = localStorage.getItem(key);
-          }
-        }
-
-        const { error, status } = await supabase.from('user_data_sync').upsert({
-          user_id: userId,
-          payload,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id' });
-
-        if (error || status === 401 || status === 403) {
-          console.warn('Sync save error or RLS blocked:', error?.message);
-          setSyncStatus('error');
-        } else {
-          setSyncStatus('success');
-          setTimeout(() => setSyncStatus('idle'), 2000);
-        }
-      } catch (err) {
-        console.error('Fatal sync save error:', err);
-        setSyncStatus('error');
-      }
-    }, 1000);
-  }, [userId]);
-
-  useEffect(() => {
-    const unsub = useStore.subscribe((state, prevState) => {
-      if (state.decks !== prevState.decks || state.books !== prevState.books || state.appLanguage !== prevState.appLanguage) {
-        triggerSync();
-      }
-    });
-    return unsub;
-  }, [triggerSync]);
-
-  useEffect(() => {
-    const handleCustomSync = () => triggerSync();
-    window.addEventListener('trigger-cloud-sync', handleCustomSync);
-    return () => window.removeEventListener('trigger-cloud-sync', handleCustomSync);
-  }, [triggerSync]);
-
-  return syncStatus;
-}
 
 export default function App() {
   const [isPending, startTransition] = useTransition();
@@ -1659,6 +1533,7 @@ export default function App() {
       setBooks(defaultBooks);
     }
     
+    useStore.getState().setDecks(useStore.getState().decks || []);
   }, [setDecks]);
 
   const filteredDecksList = useMemo(() => {
