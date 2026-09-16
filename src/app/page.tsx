@@ -210,68 +210,24 @@ const useStore = create<DeckState>()((set, get) => ({
   
   setDecks: (decks) => set({ decks, isLoaded: true }),
   
-  addDeck: async (deck) => {
+  addDeck: (deck) => {
     const previousDecks = get().decks;
     set({ decks: [...previousDecks, deck] });
-    
-    const { error: deckError } = await supabase.from('decks').insert({
-      id: deck.id,
-      name: deck.name,
-      category: deck.category,
-      level: deck.level || 'A1'
-    });
-    
-    if (deckError) {
-      console.error("Supabase Deck Insert Error:", deckError.message);
-      alert(`Fehler beim Speichern des Decks in der Datenbank: ${deckError.message}`);
-      set({ decks: previousDecks });
-      return;
-    }
-    
-    const cardsToInsert = deck.cards.map(c => ({
-      id: c.id,
-      deck_id: deck.id,
-      targetWord: c.targetWord,
-      sentence: c.sentence,
-      translation: c.translation,
-      options: c.options,
-      masteryLevel: c.masteryLevel,
-      isArchived: c.isArchived,
-      nextReviewDate: c.nextReviewDate,
-      interval: c.interval,
-      repetitions: c.repetitions
-    }));
-    
-    const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
-    if (cardsError) {
-      console.error("Supabase Cards Insert Error:", cardsError.message);
-      alert(`Fehler beim Speichern der Karten: ${cardsError.message}`);
-      set({ decks: previousDecks });
-    }
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('trigger-cloud-sync'));
   },
   
-  deleteDeck: async (deckId) => {
+  deleteDeck: (deckId) => {
     const previousDecks = get().decks;
     set({ decks: previousDecks.filter(d => d.id !== deckId) });
-    
-    const { error } = await supabase.from('decks').delete().eq('id', deckId);
-    if (error) {
-      console.error("Supabase Delete Deck Error:", error.message);
-      set({ decks: previousDecks });
-    }
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('trigger-cloud-sync'));
   },
   
-  renameDeck: async (deckId, newName) => {
+  renameDeck: (deckId, newName) => {
     const previousDecks = get().decks;
     set({
       decks: previousDecks.map(d => d.id === deckId ? { ...d, name: newName } : d)
     });
-    
-    const { error } = await supabase.from('decks').update({ name: newName }).eq('id', deckId);
-    if (error) {
-      console.error("Supabase Rename Deck Error:", error.message);
-      set({ decks: previousDecks });
-    }
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('trigger-cloud-sync'));
   },
 
   answerCard: async (deckId, cardId, isCorrect, isHilfe) => {
@@ -338,18 +294,7 @@ const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (updatedCard) {
-      const { error } = await supabase.from('cards').update({
-        masteryLevel: updatedCard.masteryLevel,
-        isArchived: updatedCard.isArchived,
-        nextReviewDate: updatedCard.nextReviewDate,
-        interval: updatedCard.interval,
-        repetitions: updatedCard.repetitions
-      }).eq('id', cardId);
-      
-      if (error) {
-        console.error("Supabase Update Card Error:", error.message);
-        set({ decks: previousDecks });
-      }
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('trigger-cloud-sync'));
     }
   }
 }));
@@ -1287,13 +1232,13 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
     } else {
       localStorage.removeItem(`deck_theory_${deckId}`);
     }
-    window.dispatchEvent(new Event('theory-update'));
+    window.dispatchEvent(new Event('theory-update')); window.dispatchEvent(new Event('trigger-cloud-sync'));
     onClose();
   };
 
   const handleDelete = () => {
     localStorage.removeItem(`deck_theory_${deckId}`);
-    window.dispatchEvent(new Event('theory-update'));
+    window.dispatchEvent(new Event('theory-update')); window.dispatchEvent(new Event('trigger-cloud-sync'));
     onClose();
   };
 
@@ -1521,6 +1466,102 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   );
 }
 
+
+let saveTimeout: NodeJS.Timeout | null = null;
+export function useCloudSync() {
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const { setDecks, setBooks, setAppLanguage } = useStore();
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let uid = localStorage.getItem('sync_user_id');
+    if (!uid) {
+      uid = crypto.randomUUID();
+      localStorage.setItem('sync_user_id', uid);
+    }
+    setUserId(uid);
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    const fetchInitial = async () => {
+      try {
+        const { data, error } = await supabase.from('user_data_sync').select('payload').eq('user_id', userId).maybeSingle();
+        if (data?.payload) {
+          const payload = data.payload as any;
+          if (payload.decks) setDecks(payload.decks);
+          if (payload.books) setBooks(payload.books);
+          if (payload.appLanguage) setAppLanguage(payload.appLanguage);
+          if (payload.localStorage) {
+            for (const [k, v] of Object.entries(payload.localStorage)) {
+              localStorage.setItem(k, v as string);
+            }
+          }
+        } else {
+           // Initial load complete but no data
+           useStore.getState().setDecks([]);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchInitial();
+  }, [userId, setDecks, setBooks, setAppLanguage]);
+
+  const triggerSync = useCallback(() => {
+    if (!userId) return;
+    setSyncStatus('syncing');
+    
+    if (saveTimeout) clearTimeout(saveTimeout);
+    
+    saveTimeout = setTimeout(async () => {
+      const payload: any = {
+        decks: useStore.getState().decks,
+        books: useStore.getState().books,
+        appLanguage: useStore.getState().appLanguage,
+        localStorage: {}
+      };
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('deck_theory_') || key.startsWith('daily_activity_') || key === 'app_books_meta' || key === 'deck_languages' || key === 'deck_books')) {
+          payload.localStorage[key] = localStorage.getItem(key);
+        }
+      }
+
+      const { error } = await supabase.from('user_data_sync').upsert({
+        user_id: userId,
+        payload,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' });
+
+      if (error) {
+        console.error('Sync error:', error);
+        setSyncStatus('error');
+      } else {
+        setSyncStatus('success');
+        setTimeout(() => setSyncStatus('idle'), 2000);
+      }
+    }, 1000);
+  }, [userId]);
+
+  useEffect(() => {
+    const unsub = useStore.subscribe((state, prevState) => {
+      if (state.decks !== prevState.decks || state.books !== prevState.books || state.appLanguage !== prevState.appLanguage) {
+        triggerSync();
+      }
+    });
+    return unsub;
+  }, [triggerSync]);
+
+  useEffect(() => {
+    const handleCustomSync = () => triggerSync();
+    window.addEventListener('trigger-cloud-sync', handleCustomSync);
+    return () => window.removeEventListener('trigger-cloud-sync', handleCustomSync);
+  }, [triggerSync]);
+
+  return syncStatus;
+}
+
 export default function App() {
   const [isPending, startTransition] = useTransition();
   const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook } = useStore();
@@ -1584,30 +1625,7 @@ export default function App() {
       localStorage.setItem('app_books_meta', JSON.stringify(defaultBooks));
       setBooks(defaultBooks);
     }
-    const fetchDecks = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('decks')
-          .select('*, cards(*)');
-          
-        if (error) {
-          console.error("Supabase Fetch Error:", error.message);
-          setDecks([]);
-        } else if (data) {
-          const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
-          const enhancedDecks = data.map((d: any) => ({
-            ...d,
-            language: langMap[d.id] || 'DE',
-            bookId: JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || (langMap[d.id] === 'EN' ? 'default-en' : 'default-de')
-          }));
-          setDecks(enhancedDecks as Deck[]);
-        }
-      } catch (err: any) {
-        console.error("Network Fetch Error:", err.message);
-        setDecks([]);
-      }
-    };
-    fetchDecks();
+    
   }, [setDecks]);
 
   const filteredDecksList = useMemo(() => {
