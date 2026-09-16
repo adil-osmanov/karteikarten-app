@@ -1426,27 +1426,42 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   }, [onClose, onStartSession]);
 
   const MarkdownComponents = {
-    p: ({ children }: any) => <p className="text-[15px] leading-relaxed text-gray-800 dark:text-white/80 my-3">{children}</p>,
-    strong: ({ children }: any) => <strong className="font-semibold text-black dark:text-white">{children}</strong>,
-    em: ({ children }: any) => <em className="italic text-gray-600 dark:text-white/70">{children}</em>,
+    p: ({ children }: any) => <p className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] my-3">{children}</p>,
+    strong: ({ children }: any) => <strong className="font-semibold text-black dark:text-white tracking-tight">{children}</strong>,
+    em: ({ children }: any) => <em className="italic text-gray-600 dark:text-[#EDEDED]/80">{children}</em>,
     h1: ({ children }: any) => <h1 className="text-2xl font-bold tracking-tight text-black dark:text-white mt-8 mb-4">{children}</h1>,
     h2: ({ children }: any) => <h2 className="text-xl font-bold tracking-tight text-black dark:text-white mt-8 mb-4">{children}</h2>,
     h3: ({ children }: any) => <h3 className="text-xs font-semibold tracking-wider text-gray-500 dark:text-white/40 uppercase mt-8 mb-3">{children}</h3>,
-    ul: ({ children }: any) => <ul className="space-y-3 my-4 ml-5 list-disc marker:text-gray-400 dark:marker:text-gray-600">{children}</ul>,
-    ol: ({ children }: any) => <ol className="space-y-3 my-4 ml-5 list-decimal marker:text-gray-400 dark:marker:text-gray-600">{children}</ol>,
-    li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-800 dark:text-white/80 pl-1">{children}</li>,
+    ul: ({ children }: any) => <ul className="space-y-3 my-4 ml-5 list-disc marker:text-gray-400 dark:marker:text-white/40">{children}</ul>,
+    ol: ({ children }: any) => <ol className="space-y-3 my-4 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/60 font-medium">{children}</ol>,
+    li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] pl-1">{children}</li>,
     blockquote: ({ children }: any) => (
       <blockquote className="bg-gray-100 dark:bg-white/5 border-l-[3px] border-[#007AFF] px-4 py-3.5 rounded-r-2xl my-6 shadow-sm">
-        <div className="text-[15px] leading-relaxed text-gray-700 dark:text-white/90 [&>p]:my-0">{children}</div>
+        <div className="text-[15px] leading-relaxed text-gray-700 dark:text-[#EDEDED] [&>p]:my-0">{children}</div>
       </blockquote>
     ),
     code: ({ node, inline, className, children, ...props }: any) => {
       const match = /language-(\w+)/.exec(className || '');
-      return !inline ? (
-        <pre className="bg-gray-100 dark:bg-black/50 p-4 rounded-xl overflow-x-auto font-mono text-[13px] text-gray-800 dark:text-white/80 my-5 border border-gray-200 dark:border-white/10 custom-scrollbar">
-          <code className={className} {...props}>{children}</code>
-        </pre>
-      ) : (
+      const contentStr = String(children).trim();
+      const isAchtung = contentStr.startsWith('⚠️') || contentStr.toLowerCase().startsWith('achtung');
+      
+      if (!inline) {
+        if (isAchtung) {
+           return (
+             <div className="bg-amber-100/50 dark:bg-amber-500/10 border-l-[3px] border-amber-500 p-4 rounded-r-xl my-5 shadow-sm">
+                <div className="text-[15px] leading-relaxed text-amber-900 dark:text-[#EDEDED] font-sans whitespace-pre-wrap">
+                  {children}
+                </div>
+             </div>
+           );
+        }
+        return (
+          <pre className="bg-gray-100 dark:bg-black/50 p-4 rounded-xl overflow-x-auto font-mono text-[13px] text-gray-800 dark:text-gray-300 my-5 border border-gray-200 dark:border-white/10 custom-scrollbar">
+            <code className={className} {...props}>{children}</code>
+          </pre>
+        );
+      }
+      return (
         <code className="bg-gray-100 dark:bg-white/10 text-pink-600 dark:text-pink-400 px-1.5 py-0.5 rounded-md font-mono text-[13px]" {...props}>
           {children}
         </code>
@@ -1454,9 +1469,13 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     }
   };
 
-  const renderedContent = useMemo(() => (
-    <ReactMarkdown components={MarkdownComponents}>{text || ''}</ReactMarkdown>
-  ), [text]);
+  const renderedContent = useMemo(() => {
+    // Pre-process text to separate labels like "**Label:** value" into "**Label:**\n\nvalue" to fix glued hierarchies
+    const preprocessed = (text || '').replace(/\*\*(.*?):\*\*\s+(?=\S)/g, '**$1:**\n\n');
+    return (
+      <ReactMarkdown components={MarkdownComponents}>{preprocessed}</ReactMarkdown>
+    );
+  }, [text]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4 overscroll-contain touch-none" onClick={onClose}>
@@ -1469,8 +1488,17 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       >
         <div className="w-12 h-1.5 bg-gray-300 dark:bg-white/20 rounded-full mx-auto mb-5 shrink-0" />
         
-        <div className="flex-1 overflow-y-auto pr-2 pb-6 custom-scrollbar" style={{ maxHeight: '60vh' }}>
-          {text ? renderedContent : (<div className="flex flex-col items-center justify-center py-20 opacity-50"><BookOpen className="w-12 h-12 mb-4" /><p>Keine Theorie für dieses Deck gefunden.</p></div>)}
+        <div 
+          className="flex-1 overflow-y-auto pr-2 custom-scrollbar relative" 
+          style={{ 
+            maxHeight: '60vh', 
+            WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)', 
+            maskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)' 
+          }}
+        >
+          <div className="pb-16">
+            {text ? renderedContent : (<div className="flex flex-col items-center justify-center py-20 opacity-50"><BookOpen className="w-12 h-12 mb-4" /><p>Keine Theorie für dieses Deck gefunden.</p></div>)}
+          </div>
         </div>
         
         <div className="shrink-0 pt-5 mt-2 border-t border-black/5 dark:border-white/10 bg-transparent">
