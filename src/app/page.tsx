@@ -1012,7 +1012,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
 
 
-function BookCard({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) {
+const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
   const actualCoverImage = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
   const isImage = !!actualCoverImage;
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
@@ -1021,8 +1021,8 @@ function BookCard({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick
     <div className="relative group w-full h-full">
       {/* Glow Behind */}
       <div 
-        className="absolute inset-0 opacity-0 group-hover:opacity-40 transition-opacity duration-500 rounded-2xl blur-xl" 
-        style={{ backgroundColor: tintColor, willChange: 'filter, transform', transform: 'translateZ(0)' }} 
+        className="absolute inset-0 opacity-0 group-hover:opacity-40 transition-opacity duration-500 rounded-2xl blur-xl transform-gpu translate-z-0 will-change-[filter,transform]" 
+        style={{ backgroundColor: tintColor }} 
       />
       {/* Card */}
       <div onClick={onClick} className="relative z-10 cursor-pointer aspect-[2/3] rounded-2xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col bg-[#0A0A0C]" style={isImage ? {} : { backgroundColor: tintColor }}>
@@ -1052,7 +1052,77 @@ function BookCard({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick
       </div>
     </div>
   );
-}
+});
+BookCard.displayName = "BookCard";
+
+
+const DeckCard = React.memo(({ 
+  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onEditTheory, onViewTheory 
+}: { 
+  deck: Deck; isCompleted: boolean; activeTab: string; 
+  onCardClick: (id: string) => void; onRename: (id: string, name: string) => void; 
+  onDelete: (id: string, name: string) => void; 
+  onEditTheory: (id: string) => void; onViewTheory: (id: string) => void; 
+}) => {
+  const total = deck.cards.length;
+  const mastered = deck.cards.filter(c => c.isArchived).length;
+  const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
+
+  return (
+    <div 
+      onClick={() => onCardClick(deck.id)}
+      className={cn(
+        "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative will-change-[filter,transform] transform-gpu translate-z-0",
+        isCompleted && "opacity-60 hover:opacity-100"
+      )}
+    >
+      <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button 
+          onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
+          className="p-2.5 text-gray-300 hover:text-[#007AFF] transition-all duration-100 active:scale-[0.98] rounded-full"
+        >
+          <Edit2 className="w-4 h-4" />
+        </button>
+        <button 
+          onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
+          className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="mb-6 flex items-start min-h-[3em] leading-[1.35]">
+        <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] pr-20 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
+          {deck.name}
+          {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0 inline-block ml-2 align-text-bottom" />}
+        </h3>
+      </div>
+      
+      <div className="mt-auto">
+        <div className="flex items-center justify-between w-full text-sm font-bold mb-3">
+          {activeTab === 'Grammatik' && (
+            <DeckTheoryIndicator 
+              deckId={deck.id} 
+              onOpenEdit={(e) => { e.stopPropagation(); onEditTheory(deck.id); }} 
+              onOpenView={(e) => { e.stopPropagation(); onViewTheory(deck.id); }} 
+            />
+          )}
+          <span className={cn("ml-auto", isCompleted ? "text-green-600" : "text-gray-400")}>{mastered} / {total}</span>
+        </div>
+        <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+          <div
+            className={cn(
+              "h-full rounded-full transition-all duration-700 ease-out",
+              isCompleted ? "bg-green-500" : "bg-[#007AFF]"
+            )}
+            style={{ width: `${progressPercentage}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+});
+DeckCard.displayName = "DeckCard";
 
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
   useScrollLock(true);
@@ -1619,6 +1689,17 @@ export default function App() {
     setVisibleLimits(prev => ({ ...prev, [cat]: (prev[cat] || 10) + 10 }));
   };
 
+  
+  const handleDeckClick = useCallback((id: string) => setActiveDeckId(id), []);
+  const handleRenameClick = useCallback((id: string, name: string) => { setRenameInput(name); setRenameModal({ id, name }); }, []);
+  const handleDeleteClick = useCallback((id: string, name: string) => setDeleteModal({ id, name }), []);
+  const handleEditTheory = useCallback((id: string) => setTheoryEditDeckId(id), []);
+  const handleViewTheory = useCallback((id: string) => setTheoryViewDeckId(id), []);
+  
+  const handleBookClick = useCallback((id: string) => setActiveBookId(id), []);
+  const handleBookEdit = useCallback((id: string) => setBookModal({ id }), []);
+  const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
+
   const categories = ["Grammatik", "Wörter"];
   
   const filteredDecksList = decks.filter(d => {
@@ -1642,66 +1723,7 @@ export default function App() {
     });
   });
 
-  const renderDeckCard = (deck: Deck, isCompleted: boolean) => {
-    const total = deck.cards.length;
-    const mastered = deck.cards.filter(c => c.isArchived).length;
-    const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
-
-    return (
-      <div 
-        key={deck.id}
-        onClick={() => setActiveDeckId(deck.id)}
-        className={cn(
-          "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative",
-          isCompleted && "opacity-60 hover:opacity-100"
-        )}
-      >
-        <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button 
-            onClick={(e) => { e.stopPropagation(); setRenameInput(deck.name); setRenameModal({ id: deck.id, name: deck.name }); }}
-            className="p-2.5 text-gray-300 hover:text-[#007AFF] transition-all duration-100 active:scale-[0.98] rounded-full"
-          >
-            <Edit2 className="w-4 h-4" />
-          </button>
-          <button 
-            onClick={(e) => { e.stopPropagation(); setDeleteModal({ id: deck.id, name: deck.name }); }}
-            className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="mb-6 flex items-start min-h-[3em] leading-[1.35]">
-          <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] pr-20 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
-            {deck.name}
-            {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0 inline-block ml-2 align-text-bottom" />}
-          </h3>
-        </div>
-        
-        <div className="mt-auto">
-          <div className="flex items-center justify-between text-sm font-bold mb-3">
-            {activeTab === 'Grammatik' && (
-              <DeckTheoryIndicator 
-                deckId={deck.id} 
-                onOpenEdit={(e) => { e.stopPropagation(); setTheoryEditDeckId(deck.id); }} 
-                onOpenView={(e) => { e.stopPropagation(); setTheoryViewDeckId(deck.id); }} 
-              />
-            )}
-            <span className={isCompleted ? "text-green-600" : "text-gray-400"}>{mastered} / {total}</span>
-          </div>
-          <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-            <div
-              className={cn(
-                "h-full rounded-full transition-all duration-700 ease-out",
-                isCompleted ? "bg-green-500" : "bg-blue-600 dark:bg-blue-500"
-              )}
-              style={{ width: `${progressPercentage}%` }}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  };
+  
 
   const activeBook = books.find(b => b.id === activeBookId);
   const activeBookColor = activeBook?.tintColor || activeBook?.accentColor || activeBook?.coverValue || 'transparent';
@@ -1709,8 +1731,8 @@ export default function App() {
   return (
       <>
         {activeBookId && (
-          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-1000" style={{ willChange: 'filter, transform', transform: 'translateZ(0)' }}>
-         <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[140px] opacity-[0.25] transition-all duration-1000" style={{ '--ambient': activeBookColor, willChange: 'filter, transform', transform: 'translateZ(0)' } as any} />
+          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-1000 transform-gpu translate-z-0 will-change-[filter,transform]">
+         <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[140px] opacity-[0.25] transition-all duration-1000 transform-gpu translate-z-0 will-change-[filter,transform]" style={{ '--ambient': activeBookColor } as any} />
       </div>
         )}
         
@@ -1824,7 +1846,7 @@ export default function App() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
               {books.filter(b => b.language === appLanguage).map(book => (
-                <BookCard key={book.id} book={book} onClick={() => setActiveBookId(book.id)} onEdit={(e) => { e.stopPropagation(); setBookModal({ id: book.id }); }} onDelete={(e) => { e.stopPropagation(); setDeleteBookModal({ id: book.id, title: book.title }); }} />
+                <BookCard key={book.id} book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
               ))}
               <div onClick={() => setBookModal({})} className="cursor-pointer aspect-[2/3] rounded-[24px] border-2 border-dashed border-gray-300 dark:border-white/20 hover:border-[#007AFF] dark:hover:border-[#007AFF] hover:bg-gray-50 dark:hover:bg-white/5 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-[#007AFF] group shadow-sm">
                 <Plus className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
@@ -1929,7 +1951,9 @@ export default function App() {
                       <div className="space-y-6">
                         {inProgressDecks.length > 0 && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {inProgressDecks.map(deck => renderDeckCard(deck, false))}
+                            {inProgressDecks.map(deck => (
+                              <DeckCard key={deck.id} deck={deck} isCompleted={false} activeTab={activeTab} onCardClick={handleDeckClick} onRename={handleRenameClick} onDelete={handleDeleteClick} onEditTheory={handleEditTheory} onViewTheory={handleViewTheory} />
+                            ))}
                           </div>
                         )}
                         {completedDecks.length > 0 && (
@@ -1951,7 +1975,9 @@ export default function App() {
                                   className="overflow-hidden"
                                 >
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
-                                    {completedDecks.map(deck => renderDeckCard(deck, true))}
+                                    {completedDecks.map(deck => (
+                                      <DeckCard key={deck.id} deck={deck} isCompleted={true} activeTab={activeTab} onCardClick={handleDeckClick} onRename={handleRenameClick} onDelete={handleDeleteClick} onEditTheory={handleEditTheory} onViewTheory={handleViewTheory} />
+                                    ))}
                                   </div>
                                 </motion.div>
                               )}
