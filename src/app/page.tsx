@@ -1,25 +1,25 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback, useTransition, useMemo } from"react";
+import React, { useState, useEffect, useRef, useCallback, useTransition, useMemo } from "react";
 import { 
   Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
   Clock
-} from"lucide-react";
-import { motion, AnimatePresence } from"framer-motion";
-import { clsx, type ClassValue } from"clsx";
-import { twMerge } from"tailwind-merge";
-import { create } from"zustand";
-import { persist } from"zustand/middleware";
-import { createClient } from"@supabase/supabase-js";
+} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import { createClient } from "@supabase/supabase-js";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ||"https://placeholder.supabase.co";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||"placeholder";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // --- AUDIO FEEDBACK ---
@@ -420,11 +420,11 @@ function StudyInterface({
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-4">Großartig!</h1>
           <p className="text-lg text-gray-500 mb-10">
-            {reviewCards ?"Alle fälligen Karten wurden wiederholt." :"Du hast alle Karten in diesem Deck gemeistert."}
+            {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
           </p>
           <button
             onClick={onBack}
-            className="w-full md:w-auto bg-[#007AFF] hover:bg-[#0062CC] text-white px-10 py-4 rounded-2xl font-semibold text-lg"
+            className="w-full md:w-auto bg-[#007AFF] hover:bg-[#0062CC] text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]"
           >
             Zurück zur Bibliothek
           </button>
@@ -462,16 +462,16 @@ function StudyInterface({
 <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
       <div className="w-full max-w-xl mx-auto px-2 mb-8">
         <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white  p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-gray-800">
+          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="text-xs font-mono tabular-nums text-gray-400 dark:text-gray-500">
             {currentIndex + 1} / {activeCards.length}
           </div>
         </div>
-        <div className="w-full h-1 bg-gray-200/60 dark:bg-gray-800 rounded-full overflow-hidden">
+        <div className="w-full h-1 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div 
-            className="h-full bg-[#007AFF]    rounded-full"
+            className="h-full bg-[#007AFF] transition-all duration-300 ease-out rounded-full"
             style={{ width: `${Math.max(5, initialTotal > 0 ? (masteredInSession / initialTotal) * 100 : 0)}%` }}
           />
         </div>
@@ -513,15 +513,15 @@ function StudyCard({
   onNext: () => void,
   forceInputMode?: boolean
 }) {
-  const [phase, setPhase] = useState<"Question" |"Answer">("Question");
+  const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const isMultipleChoice = !forceInputMode && phase ==="Question" && card.masteryLevel < 2;
+  const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2;
 
   useEffect(() => {
-    if (phase ==="Question" && !isMultipleChoice && inputRef.current) {
+    if (phase === "Question" && !isMultipleChoice && inputRef.current) {
       inputRef.current.focus();
     }
   }, [isMultipleChoice, phase]);
@@ -550,7 +550,7 @@ const playAudio = useCallback(async (text: string) => {
       if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang ="de-DE";
+        utterance.lang = "de-DE";
         utterance.rate = 0.9;
         utterance.onend = () => setIsPlayingAudio(false);
         utterance.onerror = () => setIsPlayingAudio(false);
@@ -565,14 +565,14 @@ const playAudio = useCallback(async (text: string) => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
 
-      if (phase ==="Question" && isMultipleChoice) {
+      if (phase === "Question" && isMultipleChoice) {
         if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); handleOptionClick(card.options[0]); }
         if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); handleOptionClick(card.options[1]); }
         if (e.code === 'Digit3' || e.code === 'Numpad3') { e.preventDefault(); handleOptionClick(card.options[2]); }
         if (e.code === 'Digit4' || e.code === 'Numpad4') { e.preventDefault(); handleOptionClick(card.options[3]); }
       }
 
-      if (phase ==="Answer") {
+      if (phase === "Answer") {
         if (e.code === 'Space' || e.code === 'Enter') {
           e.preventDefault();
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
@@ -586,7 +586,7 @@ const playAudio = useCallback(async (text: string) => {
         playAudio(fullSentence);
       }
       
-      if (e.code === 'KeyH' && phase ==="Question") {
+      if (e.code === 'KeyH' && phase === "Question") {
         e.preventDefault();
         handleHilfe();
       }
@@ -604,7 +604,7 @@ const playAudio = useCallback(async (text: string) => {
   }, [card.sentence, card.targetWord, playAudio]);
 
   const handleOptionClick = (option: string) => {
-    if (phase !=="Question") return;
+    if (phase !== "Question") return;
     const correct = option === card.targetWord;
     playFeedbackSound(correct);
     onAnswer(correct, false);
@@ -617,7 +617,7 @@ const playAudio = useCallback(async (text: string) => {
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (phase !=="Question") return;
+    if (phase !== "Question") return;
     const value = e.target.value;
     
     let isValidSoFar = true;
@@ -658,9 +658,9 @@ const playAudio = useCallback(async (text: string) => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (phase !=="Question") return;
+    if (phase !== "Question") return;
     
-    const isSpecialKey = e.key ==="Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
+    const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
     if (isSpecialKey) return;
 
     const mapEntry = GERMAN_KEY_MAP[e.code];
@@ -703,7 +703,7 @@ const playAudio = useCallback(async (text: string) => {
     return Array.from(inputText).map((char, i) => {
       const isMatch = char.toLowerCase() === card.targetWord[i]?.toLowerCase();
       return (
-        <span key={i} className={cn("font-medium", isMatch ?"text-gray-900  dark:text-[#F5F5F7]" :"text-red-500")}>
+        <span key={i} className={cn("font-medium", isMatch ? "text-gray-900  dark:text-[#F5F5F7] " : "text-red-500")}>
           {char}
         </span>
       );
@@ -719,9 +719,9 @@ const playAudio = useCallback(async (text: string) => {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08]  dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px]"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
       onClick={() => {
-        if (!isMultipleChoice && phase ==="Question" && inputRef.current) {
+        if (!isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
         }
       }}
@@ -729,23 +729,24 @@ const playAudio = useCallback(async (text: string) => {
       <div className="w-full flex items-center justify-between mb-8">
         <button 
           onClick={() => {
-            const fullSentence = card.sentence.replace("___", phase ==="Answer" ? card.targetWord :"Lücke");
+            const fullSentence = card.sentence.replace("___", phase === "Answer" ? card.targetWord : "Lücke");
             playAudio(fullSentence);
           }}
           disabled={isPlayingAudio}
-          className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full    active:scale-[0.96] disabled:opacity-50"
+          className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
         >
           <Volume2 className="w-5 h-5" />
-          <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded-[4px] px-1  pointer-events-none">
+          <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded-[4px] px-1 shadow-sm pointer-events-none">
             R
           </span>
         </button>
         <div className="flex items-center gap-4">
           <button 
             onClick={handleHilfe}
-            disabled={phase !=="Question"}
-            className={cn("w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800",
-              phase !=="Question" &&"opacity-0 pointer-events-none"
+            disabled={phase !== "Question"}
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
+              phase !== "Question" && "opacity-0 pointer-events-none"
             )}
             title="Hilfe (H)"
           >
@@ -755,8 +756,9 @@ const playAudio = useCallback(async (text: string) => {
             {[0, 1, 2, 3].map((step) => (
               <div 
                 key={step} 
-                className={cn("w-2.5 h-2.5 rounded-full",
-                  (card.isArchived || card.masteryLevel > step) ?"bg-blue-600 dark:bg-blue-500" :"bg-gray-200 dark:bg-gray-700"
+                className={cn(
+                  "w-2.5 h-2.5 rounded-full transition-colors",
+                  (card.isArchived || card.masteryLevel > step) ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
                 )}
               />
             ))}
@@ -768,8 +770,8 @@ const playAudio = useCallback(async (text: string) => {
         <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900  dark:text-[#F5F5F7] w-full max-w-lg mb-4">
           {parts[0]}
           
-          {phase ==="Answer" ? (
-            <span className="inline-block align-baseline mx-1 border-0 border-b-2 border-blue-600/30 dark:border-blue-500/40 text-blue-600 dark:text-[#007AFF] bg-transparent outline-none rounded-none py-0 px-1">
+          {phase === "Answer" ? (
+            <span className="inline-block align-baseline mx-1 border-0 border-b-2 border-blue-600/30 dark:border-blue-500/40 text-blue-600 dark:text-[#007AFF] bg-transparent outline-none rounded-none py-0 px-1 transition-colors">
               {card.targetWord}
             </span>
           ) : (
@@ -779,7 +781,7 @@ const playAudio = useCallback(async (text: string) => {
                   {card.targetWord}
                 </span>
               ) : (
-                <span className="inline-block relative align-baseline mx-1 min-w-[4rem] border-0 border-b-2 border-black/20 dark:border-white/20 focus-within:border-[#007AFF] dark:focus-within:border-[#007AFF] focus-within:ring-0 bg-transparent outline-none rounded-none py-0 px-1">
+                <span className="inline-block relative align-baseline mx-1 min-w-[4rem] border-0 border-b-2 border-black/20 dark:border-white/20 focus-within:border-[#007AFF] dark:focus-within:border-[#007AFF] focus-within:ring-0 bg-transparent outline-none rounded-none py-0 px-1 transition-colors">
                   <span className="inline-block w-full text-center">
                     {renderInputChars()}
                   </span>
@@ -813,7 +815,7 @@ const playAudio = useCallback(async (text: string) => {
       </div>
 
       <div className="mt-2 w-full">
-        {phase ==="Question" && isMultipleChoice && (
+        {phase === "Question" && isMultipleChoice && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -824,10 +826,10 @@ const playAudio = useCallback(async (text: string) => {
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-[#3A3A3C]     border border-black/[0.05] dark:border-white/[0.06] relative flex items-center justify-between gap-3"
+                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-all duration-150 ease-out active:scale-[0.99] border border-black/[0.05] dark:border-white/[0.06] relative flex items-center justify-between gap-3"
               >
                 <span className="flex-1 text-center pr-2">{opt}</span>
-                <span className="w-5 h-5 rounded bg-black/5 dark:bg-gray-800 text-gray-500 dark:text-white/50 text-xs font-mono flex items-center justify-center flex-shrink-0 pointer-events-none">
+                <span className="w-5 h-5 rounded bg-black/5 dark:bg-white/10 text-gray-500 dark:text-white/50 text-xs font-mono flex items-center justify-center flex-shrink-0 pointer-events-none">
                   {idx + 1}
                 </span>
               </button>
@@ -835,7 +837,7 @@ const playAudio = useCallback(async (text: string) => {
           </motion.div>
         )}
 
-        {phase ==="Answer" && (
+        {phase === "Answer" && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -844,7 +846,7 @@ const playAudio = useCallback(async (text: string) => {
             <button
               onClick={onNext}
               autoFocus
-              className="w-full py-4 rounded-[16px] text-lg font-semibold bg-[#007AFF] text-white hover:bg-[#0062CC]"
+              className="w-full py-4 rounded-[16px] text-lg font-semibold bg-[#007AFF] text-white hover:bg-[#0062CC] shadow-sm transition-transform duration-150 ease-out active:scale-[0.98]"
             >
               Weiter
             </button>
@@ -876,7 +878,7 @@ function DarkModeToggle() {
   };
 
   return (
-    <button onClick={toggle} className="p-2 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
+    <button onClick={toggle} className="p-2 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors">
       {isDark ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
     </button>
   );
@@ -946,17 +948,19 @@ function ActivityWidget() {
   }
 
   return (
-    <div className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08]  rounded-xl px-3 py-1.5 flex items-center gap-3 cursor-pointer group" title={`Heute: ${todayCount} Karten gelernt`}>
+    <div className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] shadow-sm rounded-xl px-3 py-1.5 flex items-center gap-3 cursor-pointer group" title={`Heute: ${todayCount} Karten gelernt`}>
       <div className="flex items-center gap-1.5">
         <Flame className="w-4 h-4 text-orange-500" />
         <span className="text-xs font-medium tabular-nums text-gray-900 dark:text-white">{streak}d</span>
       </div>
-      <div className="h-3 w-[1px] bg-gray-200 dark:bg-gray-800" />
+      <div className="h-3 w-[1px] bg-gray-200 dark:bg-white/10" />
       <div className="flex items-center gap-1">
         {days.map((day, idx) => (
-          <div key={idx} className={cn("h-4 w-1.5 rounded-full",
-            day.isCompleted ?"bg-[#007AFF] dark:bg-[#0A84FF] shadow-[0_0_8px_rgba(0,122,255,0.4)]" :
-            day.isToday ?"bg-transparent border border-[#007AFF]" :"bg-gray-200 dark:bg-white/15"
+          <div key={idx} className={cn(
+            "h-4 w-1.5 rounded-full transition-all",
+            day.isCompleted ? "bg-[#007AFF] dark:bg-[#0A84FF] shadow-[0_0_8px_rgba(0,122,255,0.4)]" :
+            day.isToday ? "bg-transparent border border-[#007AFF] animate-pulse" :
+            "bg-gray-200 dark:bg-white/15"
           )} />
         ))}
       </div>
@@ -967,15 +971,16 @@ function ActivityWidget() {
 function LanguageSelector() {
   const { appLanguage, setAppLanguage } = useStore();
   return (
-    <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50 flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] p-0.5 rounded-xl">
+    <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50 flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] p-0.5 rounded-xl shadow-sm">
       {(['DE', 'EN'] as const).map(lang => (
         <button
           key={lang}
           onClick={() => setAppLanguage(lang)}
-          className={cn("text-xs font-semibold px-2.5 py-1 rounded-lg",
+          className={cn(
+            "text-xs font-semibold px-2.5 py-1 rounded-lg transition-colors",
             appLanguage === lang 
-              ?"bg-white dark:bg-white/15 text-gray-900 dark:text-white" 
-              :"text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              ? "bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm" 
+              : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
           )}
         >
           {lang}
@@ -990,7 +995,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
     <>
       {activeBook ? (
         <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50">
-          <button onClick={onBack} className="text-sm font-medium text-gray-500 hover:text-gray-900 dark:text-white/70 dark:hover:text-white  flex items-center gap-1 cursor-pointer bg-gray-9000 dark:bg-black  px-3 py-1.5 rounded-full border border-black/5 dark:border-white/10  hover:shadow-md">
+          <button onClick={onBack} className="text-sm font-medium text-gray-500 hover:text-gray-900 dark:text-white/70 dark:hover:text-white transition-colors flex items-center gap-1 cursor-pointer bg-white/50 dark:bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-black/5 dark:border-white/10 shadow-sm hover:shadow-md">
             <span className="text-lg leading-none">&lsaquo;</span> {activeBook.title}
           </button>
         </div>
@@ -1014,9 +1019,13 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
 
   return (
     <div className="relative group w-full h-full">
-      
+      {/* Glow Behind */}
+      <div 
+        className="absolute inset-0 opacity-0 group-hover:opacity-40 transition-opacity duration-500 rounded-2xl blur-xl transform-gpu translate-z-0 will-change-[filter,transform]" 
+        style={{ backgroundColor: tintColor }} 
+      />
       {/* Card */}
-      <div onClick={onClick} className="relative z-10 cursor-pointer aspect-[2/3] rounded-2xl overflow-hidden  hover:shadow-2xl    flex flex-col bg-[#0A0A0C]" style={isImage ? {} : { backgroundColor: tintColor }}>
+      <div onClick={onClick} className="relative z-10 cursor-pointer aspect-[2/3] rounded-2xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col bg-[#0A0A0C]" style={isImage ? {} : { backgroundColor: tintColor }}>
         {isImage && (
           <img src={actualCoverImage} className="absolute inset-0 w-full h-full object-cover" alt="Cover" />
         )}
@@ -1024,17 +1033,17 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
         {/* Inner Ring */}
         <div className="absolute inset-0 rounded-2xl ring-1 ring-white/10 pointer-events-none z-30" />
         
-        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100  z-40">
-          <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black hover:bg-black  rounded-full">
+        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-40">
+          <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full transition-all">
             <Edit2 className="w-3.5 h-3.5" />
           </button>
-          <button onClick={onDelete} className="p-2 text-white/70 hover:text-red-400 bg-black hover:bg-black  rounded-full">
+          <button onClick={onDelete} className="p-2 text-white/70 hover:text-red-400 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full transition-all">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
         
-        <div className="absolute inset-y-0 left-0 w-4 bg-black  border-r border-white/10 z-20 pointer-events-none" />
-        {isImage && <div className="absolute inset-0     z-10 pointer-events-none" />}
+        <div className="absolute inset-y-0 left-0 w-4 bg-black/20 mix-blend-overlay border-r border-white/10 z-20 pointer-events-none" />
+        {isImage && <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0C] via-[#0A0A0C]/40 to-transparent z-10 pointer-events-none" />}
         
         <div className="relative z-20 flex-1 flex flex-col justify-end p-4 md:p-5">
           <h3 className="text-lg md:text-xl font-bold text-white leading-tight mb-1">{book.title}</h3>
@@ -1044,7 +1053,7 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
     </div>
   );
 });
-BookCard.displayName ="BookCard";
+BookCard.displayName = "BookCard";
 
 
 const DeckCard = React.memo(({ 
@@ -1062,27 +1071,28 @@ const DeckCard = React.memo(({
   return (
     <div 
       onClick={() => onCardClick(deck.id)}
-      className={cn("group cursor-pointer bg-white dark:bg-[#1C1C1E]  rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08]  dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)]      min-h-[160px] flex flex-col relative",
-        isCompleted &&"opacity-60 hover:opacity-100"
+      className={cn(
+        "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative will-change-[filter,transform] transform-gpu translate-z-0",
+        isCompleted && "opacity-60 hover:opacity-100"
       )}
     >
-      <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100">
+      <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button 
           onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-          className="p-2.5 text-gray-300 hover:text-[#007AFF]    rounded-full"
+          className="p-2.5 text-gray-300 hover:text-[#007AFF] transition-all duration-100 active:scale-[0.98] rounded-full"
         >
           <Edit2 className="w-4 h-4" />
         </button>
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
-          className="p-2.5 text-gray-300 hover:text-red-500    rounded-full"
+          className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
         >
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
 
       <div className="mb-6 flex items-start min-h-[3em] leading-[1.35]">
-        <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] pr-20 group-hover:text-blue-600 dark:group-hover:text-blue-400  line-clamp-2">
+        <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] pr-20 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
           {deck.name}
           {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0 inline-block ml-2 align-text-bottom" />}
         </h3>
@@ -1097,12 +1107,13 @@ const DeckCard = React.memo(({
               onOpenView={(e) => { e.stopPropagation(); onViewTheory(deck.id); }} 
             />
           )}
-          <span className={cn("ml-auto", isCompleted ?"text-green-600" :"text-gray-400")}>{mastered} / {total}</span>
+          <span className={cn("ml-auto", isCompleted ? "text-green-600" : "text-gray-400")}>{mastered} / {total}</span>
         </div>
         <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
           <div
-            className={cn("h-full rounded-full",
-              isCompleted ?"bg-green-500" :"bg-[#007AFF]"
+            className={cn(
+              "h-full rounded-full transition-all duration-700 ease-out",
+              isCompleted ? "bg-green-500" : "bg-[#007AFF]"
             )}
             style={{ width: `${progressPercentage}%` }}
           />
@@ -1111,14 +1122,14 @@ const DeckCard = React.memo(({
     </div>
   );
 });
-DeckCard.displayName ="DeckCard";
+DeckCard.displayName = "DeckCard";
 
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
   useScrollLock(true);
   const { appLanguage } = useStore();
-  const [title, setTitle] = useState(book?.title ||"");
-  const [subtitle, setSubtitle] = useState(book?.subtitle ||"");
-  const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue ||"#1C1C1E");
+  const [title, setTitle] = useState(book?.title || "");
+  const [subtitle, setSubtitle] = useState(book?.subtitle || "");
+  const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue || "#1C1C1E");
   const [coverImage, setCoverImage] = useState<string | null>(book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null));
   const [activeLevels, setActiveLevels] = useState<LanguageLevel[]>(book?.activeLevels || ['A1', 'A2', 'B1', 'B2', 'C1-C2']);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1173,13 +1184,13 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black  overscroll-contain touch-none" onClick={onClose}>
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} onClick={e => e.stopPropagation()} className="bg-white dark:bg-[#1C1C1E] border border-gray-200 dark:border-white/10 rounded-3xl p-6 max-w-sm w-full  flex flex-col gap-5 max-h-[85vh] overflow-y-auto custom-scrollbar">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} onClick={e => e.stopPropagation()} className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-5 max-h-[85vh] overflow-y-auto custom-scrollbar">
         <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{book ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
         
         <div className="space-y-3">
-          <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF]  font-medium" />
-          <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF]  font-medium" />
+          <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors font-medium" />
+          <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors font-medium" />
         </div>
         
         <div className="space-y-4">
@@ -1195,8 +1206,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
             {coverImage && (
               <div className="relative h-24 rounded-xl overflow-hidden mb-3 border border-gray-200 dark:border-white/10 group">
                 <img src={coverImage} alt="Cover preview" className="w-full h-full object-cover" />
-                <button onClick={() => setCoverImage(null)} className="absolute inset-0 bg-black flex items-center justify-center opacity-0 group-hover:opacity-100">
-                  <span className="text-xs text-white font-medium bg-black px-3 py-1.5 rounded-full">Entfernen</span>
+                <button onClick={() => setCoverImage(null)} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-xs text-white font-medium bg-black/60 px-3 py-1.5 rounded-full shadow-sm">Entfernen</span>
                 </button>
               </div>
             )}
@@ -1206,7 +1217,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
             <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Tint Color (Akzent & Glow)</label>
             <div className="flex gap-2">
               {['#1C1C1E', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6', '#AF52DE'].map(c => (
-                <button key={c} onClick={() => setTintColor(c)} className={`w-8 h-8 rounded-full border-2  ${tintColor === c ? 'border-white scale-110 ' : 'border-transparent '}`} style={{ backgroundColor: c }} />
+                <button key={c} onClick={() => setTintColor(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${tintColor === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
               ))}
             </div>
           </div>
@@ -1220,7 +1231,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
                   <button 
                     key={lvl} 
                     onClick={() => toggleLevel(lvl)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border  ${isActive ? 'bg-[#007AFF] border-[#007AFF] text-white' : 'bg-gray-100 dark:bg-gray-900 border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${isActive ? 'bg-[#007AFF] border-[#007AFF] text-white' : 'bg-gray-100 dark:bg-white/5 border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/10'}`}
                   >
                     {lvl}
                   </button>
@@ -1231,8 +1242,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
         </div>
 
         <div className="flex gap-3 mt-2">
-          <button onClick={onClose} className="flex-1 py-3.5 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-900 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-xl">Abbrechen</button>
-          <button onClick={handleSave} className="flex-1 py-3.5 font-semibold text-white bg-[#007AFF] hover:bg-[#0066D6] rounded-xl">Speichern</button>
+          <button onClick={onClose} className="flex-1 py-3.5 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">Abbrechen</button>
+          <button onClick={handleSave} className="flex-1 py-3.5 font-semibold text-white bg-[#007AFF] hover:bg-[#0066D6] rounded-xl transition-colors shadow-sm">Speichern</button>
         </div>
       </motion.div>
     </div>
@@ -1250,14 +1261,14 @@ function DeckTheoryIndicator({ deckId, onOpenEdit, onOpenView }: { deckId: strin
 
   if (hasTheory) {
     return (
-      <button onClick={onOpenView} className="flex items-center gap-1.5 text-[11px] font-medium text-gray-700 dark:text-gray-300 bg-gray-100/80 dark:bg-gray-800 border border-black/5 dark:border-white/[0.05] px-2.5 py-1 rounded-full hover:bg-gray-200 dark:hover:bg-white/15  cursor-pointer">
+      <button onClick={onOpenView} className="flex items-center gap-1.5 text-[11px] font-medium text-gray-700 dark:text-gray-300 bg-gray-100/80 dark:bg-white/10 border border-black/5 dark:border-white/[0.05] px-2.5 py-1 rounded-full hover:bg-gray-200 dark:hover:bg-white/15 transition-all cursor-pointer backdrop-blur-md">
         <BookOpen className="w-3.5 h-3.5 opacity-70" />
         Theorie
       </button>
     );
   }
   return (
-    <button onClick={onOpenEdit} className="text-xs font-medium text-gray-400 dark:text-white/30 hover:text-gray-600 dark:hover:text-white/80 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-900">
+    <button onClick={onOpenEdit} className="text-xs font-medium text-gray-400 dark:text-white/30 hover:text-gray-600 dark:hover:text-white/80 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-white/5 transition-all">
       + Theorie
     </button>
   );
@@ -1267,7 +1278,7 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
   useScrollLock(true);
   const [text, setText] = useState("");
   useEffect(() => {
-    setText(localStorage.getItem(`deck_theory_${deckId}`) ||"");
+    setText(localStorage.getItem(`deck_theory_${deckId}`) || "");
   }, [deckId]);
 
   const handleSave = () => {
@@ -1296,38 +1307,38 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black  overscroll-contain touch-none" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }} 
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white dark:bg-[#1C1C1E] border border-gray-200 dark:border-white/10 rounded-2xl p-5 max-w-lg w-full  flex flex-col"
+        className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-2xl p-5 max-w-lg w-full shadow-2xl flex flex-col"
       >
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Konzept bearbeiten</h2>
         <textarea 
           value={text} 
           onChange={(e) => setText(e.target.value)}
           placeholder="Вставьте конспект в формате Markdown (# Правило, > Формула, примеры)..."
-          className="w-full min-h-[150px] p-4 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-[#F5F5F7] placeholder-gray-400 focus:outline-none focus:border-[#007AFF]  resize-y mb-4"
+          className="w-full min-h-[150px] p-4 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-[#F5F5F7] placeholder-gray-400 focus:outline-none focus:border-[#007AFF] transition-colors resize-y mb-4"
         />
         <div className="flex items-center justify-between mb-6">
-          <label className="cursor-pointer flex items-center gap-2 text-sm text-[#007AFF] hover:text-[#0056b3]">
+          <label className="cursor-pointer flex items-center gap-2 text-sm text-[#007AFF] hover:text-[#0056b3] transition-colors">
             <Upload className="w-4 h-4" />
             <span>.md laden</span>
             <input type="file" accept=".md,.txt" className="hidden" onChange={handleFile} />
           </label>
         </div>
         <div className="flex gap-3 mt-auto">
-          <button onClick={onClose} className="flex-1 py-3 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-900 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-xl">
+          <button onClick={onClose} className="flex-1 py-3 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">
             Abbrechen
           </button>
           {text && (
-            <button onClick={handleDelete} className="flex-1 py-3 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-xl">
+            <button onClick={handleDelete} className="flex-1 py-3 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors">
               Löschen
             </button>
           )}
-          <button onClick={handleSave} className="flex-1 py-3 font-semibold text-white bg-[#007AFF] hover:bg-[#0066D6] rounded-xl">
+          <button onClick={handleSave} className="flex-1 py-3 font-semibold text-white bg-[#007AFF] hover:bg-[#0066D6] rounded-xl transition-colors">
             Speichern
           </button>
         </div>
@@ -1340,7 +1351,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   useScrollLock(true);
   const [text, setText] = useState("");
   useEffect(() => {
-    setText(localStorage.getItem(`deck_theory_${deckId}`) ||"");
+    setText(localStorage.getItem(`deck_theory_${deckId}`) || "");
   }, [deckId]);
 
   useEffect(() => {
@@ -1442,14 +1453,14 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       }
       if (block.type === 'quote') {
         return (
-          <div key={i} className="bg-blue-50 dark:bg-gray-900 border-l-2 border-[#007AFF] p-4 my-4 rounded-r-xl font-mono text-sm text-blue-800 dark:text-blue-200 whitespace-pre-wrap">
+          <div key={i} className="bg-blue-50 dark:bg-white/5 border-l-2 border-[#007AFF] p-4 my-4 rounded-r-xl font-mono text-sm text-blue-800 dark:text-blue-200 whitespace-pre-wrap">
             {parseInline(block.lines.join('\n'))}
           </div>
         );
       }
       if (block.type === 'achtung') {
         return (
-          <div key={i} className="bg-amber-100 dark:bg-amber-500/10 border-l-2 border-amber-500 text-amber-900 dark:text-amber-200 text-xs p-4 rounded-r-xl my-4 flex items-start gap-3">
+          <div key={i} className="bg-amber-100 dark:bg-amber-500/10 border-l-2 border-amber-500 text-amber-900 dark:text-amber-200 text-xs p-4 rounded-r-xl my-4 flex items-start gap-3 shadow-sm">
             <span className="shrink-0 text-base leading-none mt-0.5">⚠️</span>
             <div className="whitespace-pre-wrap leading-relaxed">{parseInline(block.lines.join('\n'))}</div>
           </div>
@@ -1480,13 +1491,13 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   const renderedContent = useMemo(() => renderMarkdown(text || ''), [text]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black dark:bg-black  p-0 md:p-4 overscroll-contain touch-none" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4 overscroll-contain touch-none" onClick={onClose}>
       <motion.div 
         initial={{ opacity: 0, y: 100 }} 
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 100 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl mx-auto  bg-white dark:bg-[#1C1C1E] border border-black/5 dark:border-white/[0.08] rounded-t-[32px] md:rounded-[32px] p-6  flex flex-col max-h-[85vh]" 
+        className="w-full max-w-xl mx-auto backdrop-blur-3xl bg-white/95 dark:bg-[#1C1C1E]/90 border border-black/5 dark:border-white/[0.08] rounded-t-[32px] md:rounded-[32px] p-6 shadow-2xl flex flex-col max-h-[85vh] transform-gpu will-change-[transform,opacity]" 
       >
         <div className="w-12 h-1.5 bg-gray-300 dark:bg-white/20 rounded-full mx-auto mb-5 shrink-0" />
         
@@ -1497,11 +1508,11 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         <div className="shrink-0 pt-5 mt-2 border-t border-black/5 dark:border-white/10 bg-transparent">
           <button 
             onClick={onStartSession}
-            className="w-full bg-[#007AFF] hover:bg-[#0066D6] text-white font-medium py-3.5 rounded-xl  shadow-[0_4px_20px_rgba(0,122,255,0.3)]  text-lg mb-3"
+            className="w-full bg-[#007AFF] hover:bg-[#0066D6] text-white font-medium py-3.5 rounded-xl transition-all shadow-[0_4px_20px_rgba(0,122,255,0.3)] active:scale-[0.98] text-lg mb-3"
           >
             Starten (Space)
           </button>
-          <button onClick={onEdit} className="w-full text-center text-xs font-medium text-gray-400 hover:text-gray-600 dark:text-white/30 dark:hover:text-white/80">
+          <button onClick={onEdit} className="w-full text-center text-xs font-medium text-gray-400 hover:text-gray-600 dark:text-white/30 dark:hover:text-white/80 transition-colors">
             Konzept bearbeiten
           </button>
         </div>
@@ -1516,7 +1527,7 @@ export default function App() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
-  const [activeTab, setActiveTab] = useState<"Grammatik" |"Wörter">("Grammatik");
+  const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [bookModal, setBookModal] = useState<{ id?: string } | null>(null);
   
@@ -1626,7 +1637,7 @@ export default function App() {
     return map;
   }, [filteredDecksList]);
 
-  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD]" />;
+  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
 
   if (activeDeckId) {
     return (
@@ -1700,7 +1711,7 @@ export default function App() {
         alert("Fehler: Keine gültigen Karten gefunden.");
       }
       
-      if (fileInputRef.current) fileInputRef.current.value ="";
+      if (fileInputRef.current) fileInputRef.current.value = "";
       setUploadTarget(null);
     };
     reader.readAsText(file);
@@ -1721,7 +1732,7 @@ export default function App() {
 
   
 
-  const categories = ["Grammatik","Wörter"];
+  const categories = ["Grammatik", "Wörter"];
   
 
   
@@ -1748,7 +1759,11 @@ export default function App() {
 
   return (
       <>
-        
+        {activeBookId && (
+          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-1000 transform-gpu translate-z-0 will-change-[filter,transform]">
+         <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[140px] opacity-[0.25] transition-all duration-1000 transform-gpu translate-z-0 will-change-[filter,transform]" style={{ '--ambient': activeBookColor } as any} />
+      </div>
+        )}
         
         <HeaderWidgets activeBook={activeBook} onBack={() => startTransition(() => setActiveBookId(null))} />
 
@@ -1764,10 +1779,10 @@ export default function App() {
         {renameModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black" onClick={() => setRenameModal(null)} 
+              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setRenameModal(null)} 
             />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm  relative z-10 text-center"
+              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
               <h3 className="text-xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-6">Deck umbenennen</h3>
               <input
@@ -1779,10 +1794,10 @@ export default function App() {
                 placeholder="Neuer Name"
               />
               <div className="flex gap-3">
-                <button onClick={() => setRenameModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl">
+                <button onClick={() => setRenameModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
                   Abbrechen
                 </button>
-                <button onClick={() => { if (renameInput.trim()) { renameDeck(renameModal.id, renameInput.trim()); setRenameModal(null); } }} className="flex-1 py-4 font-semibold text-white bg-[#007AFF] hover:bg-[#0062CC] rounded-2xl">
+                <button onClick={() => { if (renameInput.trim()) { renameDeck(renameModal.id, renameInput.trim()); setRenameModal(null); } }} className="flex-1 py-4 font-semibold text-white bg-[#007AFF] hover:bg-[#0062CC] rounded-2xl transition-colors active:scale-[0.98]">
                   Speichern
                 </button>
               </div>
@@ -1797,21 +1812,21 @@ export default function App() {
         {deleteModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black" onClick={() => setDeleteModal(null)} 
+              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteModal(null)} 
             />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm  relative z-10 text-center"
+              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
               <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
               <h3 className="text-xl font-bold tracking-tight text-gray-900  mb-3">Deck löschen?</h3>
-              <p className="text-sm text-gray-500 font-medium mb-8">Bist du sicher, dass du"{deleteModal.name}" löschen möchtest? Dieser Vorgang kann nicht rückgängig gemacht werden.</p>
+              <p className="text-sm text-gray-500 font-medium mb-8">Bist du sicher, dass du "{deleteModal.name}" löschen möchtest? Dieser Vorgang kann nicht rückgängig gemacht werden.</p>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl">
+                <button onClick={() => setDeleteModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
                   Abbrechen
                 </button>
-                <button onClick={() => { deleteDeck(deleteModal.id); setDeleteModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl">
+                <button onClick={() => { deleteDeck(deleteModal.id); setDeleteModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl transition-colors active:scale-[0.98]">
                   Löschen
                 </button>
               </div>
@@ -1826,21 +1841,21 @@ export default function App() {
         {deleteBookModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black" onClick={() => setDeleteBookModal(null)} 
+              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteBookModal(null)} 
             />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm  relative z-10 text-center"
+              className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
               <div className="w-16 h-16 bg-red-50 dark:bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
               <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white mb-3">Buch löschen?</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-8">Bist du sicher, dass du"{deleteBookModal.title}" löschen möchtest? Alle zugehörigen Decks bleiben erhalten, aber das Buch wird entfernt.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-8">Bist du sicher, dass du "{deleteBookModal.title}" löschen möchtest? Alle zugehörigen Decks bleiben erhalten, aber das Buch wird entfernt.</p>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteBookModal(null)} className="flex-1 py-4 font-semibold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] rounded-2xl">
+                <button onClick={() => setDeleteBookModal(null)} className="flex-1 py-4 font-semibold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] rounded-2xl transition-colors active:scale-[0.98]">
                   Abbrechen
                 </button>
-                <button onClick={() => { deleteBook(deleteBookModal.id); setDeleteBookModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl">
+                <button onClick={() => { deleteBook(deleteBookModal.id); setDeleteBookModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl transition-colors active:scale-[0.98] shadow-sm">
                   Löschen
                 </button>
               </div>
@@ -1853,7 +1868,7 @@ export default function App() {
 
       <main className="relative z-10 max-w-5xl mx-auto px-6 py-12 md:py-24">
         {!activeBookId ? (
-          <div className="pt-8">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-8">
             <div className="mb-12 text-center">
               <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white mb-2 tracking-tight">Bibliothek</h1>
               <p className="text-gray-500 dark:text-gray-400 font-medium">Wähle ein Buch, um zu lernen</p>
@@ -1862,24 +1877,25 @@ export default function App() {
               {books.filter(b => b.language === appLanguage).map(book => (
                 <BookCard key={book.id} book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
               ))}
-              <div onClick={() => setBookModal({})} className="cursor-pointer aspect-[2/3] rounded-[24px] border-2 border-dashed border-gray-300 dark:border-white/20 hover:border-[#007AFF] dark:hover:border-[#007AFF] hover:bg-gray-50 dark:hover:bg-gray-900  flex flex-col items-center justify-center text-gray-400 hover:text-[#007AFF] group">
-                <Plus className="w-8 h-8 mb-2 group-hover:scale-110" />
+              <div onClick={() => setBookModal({})} className="cursor-pointer aspect-[2/3] rounded-[24px] border-2 border-dashed border-gray-300 dark:border-white/20 hover:border-[#007AFF] dark:hover:border-[#007AFF] hover:bg-gray-50 dark:hover:bg-white/5 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-[#007AFF] group shadow-sm">
+                <Plus className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
                 <span className="font-semibold text-sm">+ Buch</span>
               </div>
             </div>
           </div>
         ) : (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl mx-auto">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
           <div className="flex justify-center mb-8 pt-2">
             <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.08]">
-              {(["Grammatik","Wörter"] as const).map((tab) => (
+              {(["Grammatik", "Wörter"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => startTransition(() => setActiveTab(tab))}
-                  className={cn("flex-1 px-4 py-1.5  text-xs font-medium tracking-tight rounded-lg",
+                  className={cn(
+                    "flex-1 px-4 py-1.5 transition-all text-xs font-medium tracking-tight rounded-lg",
                     activeTab === tab
-                      ?"bg-white dark:bg-[#2C2C2E] text-gray-900 dark:text-white"
-                      :"text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-[#F5F5F7]" 
+                      ? "bg-white dark:bg-[#2C2C2E] text-gray-900 dark:text-white shadow-sm"
+                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-[#F5F5F7]" 
                   )}
                 >
                   {tab}
@@ -1892,7 +1908,7 @@ export default function App() {
             <div className="mb-10">
               <div 
                 onClick={() => setReviewCards(dueCards)}
-                className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-600/40 dark:hover:border-blue-500/40"
+                className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-600/40 dark:hover:border-blue-500/40 transition-all shadow-sm active:scale-[0.98]"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-blue-600/10 dark:bg-blue-500/10 flex items-center justify-center">
@@ -1934,13 +1950,13 @@ export default function App() {
                 return (
                   <section key={sectionKey}>
                     <div className="flex items-center mb-4 px-1">
-                      <div className="inline-flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] rounded-full p-0.5">
+                      <div className="inline-flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] rounded-full p-0.5 shadow-sm">
                         <span className="h-7 px-3 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-[#8E8E93]">
                           {level}
                         </span>
                         <button 
                           onClick={() => handlePlusClick(activeTab, level)}
-                          className="h-7 w-7 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500"
+                          className="h-7 w-7 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
                         >
                           <Plus className="w-3.5 h-3.5" />
                         </button>
@@ -1948,9 +1964,9 @@ export default function App() {
                     </div>
                     
                     {sortedDecks.length === 0 ? (
-                      <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px]">
+                      <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px] shadow-sm">
                         <p className="text-gray-400 dark:text-[#8E8E93] text-sm font-medium">
-                          {appLanguage === 'EN' ?"No decks in this level yet." :"Noch keine Decks in diesem Level."}
+                          {appLanguage === 'EN' ? "No decks in this level yet." : "Noch keine Decks in diesem Level."}
                         </p>
                       </div>
                     ) : (
@@ -1966,9 +1982,9 @@ export default function App() {
                           <div className="mt-4">
                             <button 
                               onClick={() => toggleCategory(sectionKey)}
-                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900   mx-2 mb-4"
+                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900  transition-colors mx-2 mb-4"
                             >
-                              <ChevronRight className={cn("w-4 h-4", isExpanded &&"rotate-90")} />
+                              <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
                               <span>Archiv anzeigen ({completedDecks.length})</span>
                             </button>
                             
@@ -1976,7 +1992,7 @@ export default function App() {
                               {isExpanded && (
                                 <motion.div
                                   initial={{ opacity: 0, height: 0 }}
-                                  animate={{ opacity: 1, height:"auto" }}
+                                  animate={{ opacity: 1, height: "auto" }}
                                   exit={{ opacity: 0, height: 0 }}
                                   className="overflow-hidden"
                                 >
@@ -1995,7 +2011,7 @@ export default function App() {
                     {sortedDecks.length > limit && (
                       <button 
                         onClick={() => handleLoadMore(sectionKey)}
-                        className="mt-6 mx-auto block px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-full"
+                        className="mt-6 mx-auto block px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-full transition-all"
                       >
                         Weitere {Math.min(10, sortedDecks.length - limit)} laden
                       </button>
