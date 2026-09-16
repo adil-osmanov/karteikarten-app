@@ -188,20 +188,23 @@ const useStore = create<DeckState>()((set, get) => ({
   books: [],
   setBooks: (books) => set({ books }),
   addBook: async (book) => {
+    const previousBooks = get().books;
+    set({ books: [...previousBooks, book] }); // Restore Optimistic UI
+    
+    // Clean payload: remove legacy fields (accentColor, coverType, coverValue) that cause schema cache errors
     const payload = {
       id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
-      activeLevels: book.activeLevels || ['A1'], coverType: book.coverType || null,
-      coverValue: book.coverValue || null, accentColor: book.accentColor || null
+      activeLevels: book.activeLevels || ['A1']
     };
+    
     let { error } = await supabase.from('books').insert(payload);
     
     if (error && error.message.includes('does not exist')) {
        const fallbackPayload = {
          id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
          tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
-         activelevels: book.activeLevels || ['A1'], covertype: book.coverType || null,
-         covervalue: book.coverValue || null, accentcolor: book.accentColor || null
+         activelevels: book.activeLevels || ['A1']
        };
        const fallbackRes = await supabase.from('books').insert(fallbackPayload);
        error = fallbackRes.error;
@@ -210,27 +213,26 @@ const useStore = create<DeckState>()((set, get) => ({
     if (error) {
       console.error("SUPABASE ERROR:", error);
       if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
-      return;
+      set({ books: previousBooks }); // Rollback on failure
     }
-    
-    const previousBooks = get().books;
-    set({ books: [...previousBooks, book] });
   },
   updateBook: async (book) => {
+    const previousBooks = get().books;
+    set({ books: previousBooks.map(b => b.id === book.id ? book : b) });
+    
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
-      activeLevels: book.activeLevels || ['A1'], coverType: book.coverType || null,
-      coverValue: book.coverValue || null, accentColor: book.accentColor || null
+      activeLevels: book.activeLevels || ['A1']
     };
+    
     let { error } = await supabase.from('books').update(payload).eq('id', book.id);
     
     if (error && error.message.includes('does not exist')) {
        const fallbackPayload = {
          language: book.language, title: book.title, subtitle: book.subtitle || null,
          tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
-         activelevels: book.activeLevels || ['A1'], covertype: book.coverType || null,
-         covervalue: book.coverValue || null, accentcolor: book.accentColor || null
+         activelevels: book.activeLevels || ['A1']
        };
        const fallbackRes = await supabase.from('books').update(fallbackPayload).eq('id', book.id);
        error = fallbackRes.error;
@@ -239,22 +241,20 @@ const useStore = create<DeckState>()((set, get) => ({
     if (error) {
       console.error("SUPABASE ERROR:", error);
       if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
-      return;
+      set({ books: previousBooks });
     }
-    
-    const previousBooks = get().books;
-    set({ books: previousBooks.map(b => b.id === book.id ? book : b) });
   },
   deleteBook: async (id) => {
+    const previousBooks = get().books;
+    set({ books: previousBooks.filter(b => b.id !== id) });
+    
     const { error } = await supabase.from('books').delete().eq('id', id);
+    
     if (error) {
       console.error("SUPABASE ERROR:", error);
       if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
-      return;
+      set({ books: previousBooks });
     }
-    
-    const previousBooks = get().books;
-    set({ books: previousBooks.filter(b => b.id !== id) });
   },
   incrementDailyProgress: () => set((state) => {
     const today = new Date().toISOString().split('T')[0];
@@ -1663,8 +1663,7 @@ export default function App() {
           if (res.error && res.error.message.includes('does not exist')) {
             const lowercaseDefaults = defaultBooks.map(b => ({
               id: b.id, language: b.language, title: b.title, subtitle: b.subtitle,
-              tintcolor: b.tintColor, coverimage: b.coverImage, activelevels: b.activeLevels,
-              covertype: b.coverType, covervalue: b.coverValue, accentcolor: b.accentColor
+              tintcolor: b.tintColor, coverimage: b.coverImage, activelevels: b.activeLevels
             }));
             await supabase.from('books').insert(lowercaseDefaults);
           }
