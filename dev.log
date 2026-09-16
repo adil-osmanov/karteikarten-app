@@ -1,0 +1,13 @@
+
+> karten@0.1.0 dev
+> next dev
+
+▲ Next.js 16.3.5 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.2.182:3000
+- Environments: .env.local
+✓ Ready in 352ms
+✓ Running next.config.ts took 28ms
+
+ GET / 200 in 368ms (next.js: 166ms, application-code: 202ms)
+ GET / 200 in 95ms (next.js: 22ms, application-code: 73ms)
