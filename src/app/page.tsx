@@ -13,6 +13,7 @@ import { twMerge } from "tailwind-merge";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createClient } from "@supabase/supabase-js";
+import ReactMarkdown from "react-markdown";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -1424,129 +1425,92 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     return () => window.removeEventListener('keydown', down);
   }, [onClose, onStartSession]);
 
-  const renderMarkdown = (md: string) => {
-    const parseInline = (text: string) => {
-      const parts = text.split(/(\*\*.*?\*\*)/g);
-      return parts.map((part, idx) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={idx} className="font-semibold text-gray-900 dark:text-white">{part.slice(2, -2)}</strong>;
+  const MarkdownComponents = {
+    p: ({ children }: any) => {
+      const firstChild = Array.isArray(children) ? children[0] : children;
+      if (typeof firstChild === 'string') {
+        const textStr = firstChild.trim();
+        if (textStr.startsWith('💡WIDGET_TEMPLATE💡')) {
+          const contentStr = textStr.replace('💡WIDGET_TEMPLATE💡', '');
+          const rest = Array.isArray(children) ? children.slice(1) : [];
+          return (
+            <div className="bg-blue-600 dark:bg-blue-500/5 dark:bg-blue-600 dark:bg-blue-500/10 border border-blue-600 dark:border-blue-500/20 dark:border-blue-600 dark:border-blue-500/20 rounded-2xl p-4 my-5 shadow-sm">
+               <div className="text-[10px] font-bold tracking-widest text-blue-600 dark:text-blue-500 uppercase mb-1.5">Ключевой шаблон</div>
+               <div className="text-[16px] font-medium text-gray-900 dark:text-white leading-relaxed">
+                 {contentStr}
+                 {rest}
+               </div>
+            </div>
+          );
         }
-        return part;
-      });
-    };
-
-    const lines = md.split('\n');
-    const blocks: { type: string, lines: string[] }[] = [];
-    let currentBlock: { type: string, lines: string[] } | null = null;
-
-    const pushBlock = () => {
-      if (currentBlock) blocks.push(currentBlock);
-      currentBlock = null;
-    };
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmed = line.trim();
+      }
+      return <p className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] my-2.5">{children}</p>;
+    },
+    strong: ({ children }: any) => <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>,
+    em: ({ children }: any) => <em className="italic text-gray-600 dark:text-[#EDEDED]/80">{children}</em>,
+    h1: ({ children }: any) => <h1 className="text-xl font-bold tracking-tight text-black dark:text-white mt-6 mb-3">{children}</h1>,
+    h2: ({ children }: any) => <h2 className="text-lg font-bold tracking-tight text-black dark:text-white mt-6 mb-3">{children}</h2>,
+    h3: ({ children }: any) => <h3 className="text-[11px] font-bold tracking-wider text-gray-500 dark:text-white/40 uppercase mt-6 mb-2">{children}</h3>,
+    ul: ({ children }: any) => <ul className="space-y-2 my-3 ml-5 list-disc marker:text-gray-400 dark:marker:text-white/30">{children}</ul>,
+    ol: ({ children }: any) => <ol className="space-y-2 my-3 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/50 font-medium">{children}</ol>,
+    li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] pl-1">{children}</li>,
+    blockquote: ({ children }: any) => {
+      let isAchtung = false;
+      try {
+        const firstChild = Array.isArray(children) ? children[0] : children;
+        if (firstChild?.props?.children) {
+           const firstText = Array.isArray(firstChild.props.children) ? firstChild.props.children[0] : firstChild.props.children;
+           if (typeof firstText === 'string' && firstText.trim().startsWith('⚠️')) {
+             isAchtung = true;
+           }
+        }
+      } catch (e) {}
       
-      if (trimmed === '') {
-        pushBlock();
-        continue;
-      }
-      if (trimmed.startsWith('# ')) {
-        pushBlock();
-        blocks.push({ type: 'h1', lines: [trimmed.slice(2)] });
-        continue;
-      }
-      if (trimmed.startsWith('## ')) {
-        pushBlock();
-        blocks.push({ type: 'h2', lines: [trimmed.slice(3)] });
-        continue;
-      }
-      if (trimmed.startsWith('### ')) {
-        pushBlock();
-        blocks.push({ type: 'h3', lines: [trimmed.slice(4)] });
-        continue;
-      }
-      if (trimmed.startsWith('⚠️')) {
-        pushBlock();
-        blocks.push({ type: 'achtung', lines: [trimmed.replace(/^⚠️\s*(Achtung:?)?\s*/i, '')] });
-        continue;
-      }
-      if (trimmed.startsWith('>')) {
-        if (currentBlock?.type !== 'quote') {
-          pushBlock();
-          currentBlock = { type: 'quote', lines: [] };
-        }
-        currentBlock.lines.push(trimmed.replace(/^>\s*/, ''));
-        continue;
-      }
-      if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
-        if (currentBlock?.type !== 'list') {
-          pushBlock();
-          currentBlock = { type: 'list', lines: [] };
-        }
-        currentBlock.lines.push(trimmed.replace(/^[\*\-]\s*/, ''));
-        continue;
+      if (isAchtung) {
+         return (
+           <blockquote className="bg-amber-500/10 dark:bg-amber-500/15 border-l-[3px] border-amber-500 px-4 py-4 rounded-r-2xl my-6 shadow-sm">
+             <div className="text-[15px] leading-relaxed text-amber-900 dark:text-amber-100/90 [&>p]:my-0">{children}</div>
+           </blockquote>
+         );
       }
       
-      // Paragraphs
-      if (currentBlock?.type === 'paragraph') {
-        currentBlock.lines.push(trimmed);
-      } else {
-        pushBlock();
-        currentBlock = { type: 'paragraph', lines: [trimmed] };
+      return (
+        <blockquote className="bg-blue-600 dark:bg-blue-500/5 dark:bg-blue-600 dark:bg-blue-500/10 border-l-[3px] border-blue-600 dark:border-blue-500 px-4 py-4 rounded-r-2xl my-6 shadow-sm">
+          <div className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] [&>p]:my-0">{children}</div>
+        </blockquote>
+      );
+    },
+    code: ({ node, inline, className, children, ...props }: any) => {
+      if (!inline) {
+        return (
+          <pre className="bg-gray-100 dark:bg-black/40 p-4 rounded-xl overflow-x-auto font-mono text-[13px] text-gray-800 dark:text-gray-300 my-4 border border-gray-200 dark:border-white/10 custom-scrollbar">
+            <code className={className} {...props}>{children}</code>
+          </pre>
+        );
       }
+      return (
+        <code className="bg-gray-100 dark:bg-white/10 text-pink-600 dark:text-pink-400 px-1.5 py-0.5 rounded-md font-mono text-[13px]" {...props}>
+          {children}
+        </code>
+      );
     }
-    pushBlock();
-
-    return blocks.map((block, i) => {
-      if (block.type === 'h1') {
-        return <h1 key={i} className="text-xl font-bold text-gray-900 dark:text-white mt-6 mb-3">{parseInline(block.lines[0])}</h1>;
-      }
-      if (block.type === 'h2') {
-        return <h2 key={i} className="text-lg font-bold text-gray-900 dark:text-white mt-5 mb-2">{parseInline(block.lines[0])}</h2>;
-      }
-      if (block.type === 'h3') {
-        return <h3 key={i} className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-white/50 mt-5 mb-2">{parseInline(block.lines[0])}</h3>;
-      }
-      if (block.type === 'quote') {
-        return (
-          <div key={i} className="bg-blue-50 dark:bg-white/5 border-l-2 border-blue-600 dark:border-blue-500 p-4 my-4 rounded-r-xl font-mono text-sm text-blue-800 dark:text-blue-200 whitespace-pre-wrap">
-            {parseInline(block.lines.join('\n'))}
-          </div>
-        );
-      }
-      if (block.type === 'achtung') {
-        return (
-          <div key={i} className="bg-amber-100 dark:bg-amber-500/10 border-l-2 border-amber-500 text-amber-900 dark:text-amber-200 text-xs p-4 rounded-r-xl my-4 flex items-start gap-3 shadow-sm">
-            <span className="shrink-0 text-base leading-none mt-0.5">⚠️</span>
-            <div className="whitespace-pre-wrap leading-relaxed">{parseInline(block.lines.join('\n'))}</div>
-          </div>
-        );
-      }
-      if (block.type === 'list') {
-        return (
-          <ul key={i} className="ml-5 list-disc my-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500">
-            {block.lines.map((l, j) => (
-              <li key={j} className="text-sm normal-case text-gray-700 dark:text-gray-300 leading-relaxed pl-1">
-                {parseInline(l)}
-              </li>
-            ))}
-          </ul>
-        );
-      }
-      if (block.type === 'paragraph') {
-        return (
-          <p key={i} className="text-sm normal-case text-gray-800 dark:text-gray-200 my-2.5 leading-relaxed">
-            {parseInline(block.lines.join(' '))}
-          </p>
-        );
-      }
-      return null;
-    });
   };
 
-  const renderedContent = useMemo(() => renderMarkdown(text || ''), [text]);
+  const renderedContent = useMemo(() => {
+    let preprocessed = (text || '').replace(/^( {4,}|\t+)/gm, '  ');
+    
+    // Auto-wrap ⚠️ blocks into blockquotes until the next blank line
+    preprocessed = preprocessed.replace(/^(⚠️.*(?:\n(?!\s*\n).*)*)/gm, (match) => {
+       return match.split('\n').map(line => line.trim().startsWith('>') ? line : '> ' + line).join('\n');
+    });
+
+    // Super robust Widget Template catcher (catches with or without **, with or without >)
+    preprocessed = preprocessed.replace(/^[>\s]*(?:\*\*|__)?\s*(Ключевой шаблон|Шаблон)\s*(?:\*\*|__)?\s*[:\-]?\s*(.*)/gim, '💡WIDGET_TEMPLATE💡$2');
+    
+    return (
+      <ReactMarkdown components={MarkdownComponents}>{preprocessed}</ReactMarkdown>
+    );
+  }, [text]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4 overscroll-contain touch-none" onClick={onClose}>
@@ -1559,8 +1523,17 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       >
         <div className="w-12 h-1.5 bg-gray-300 dark:bg-white/20 rounded-full mx-auto mb-5 shrink-0" />
         
-        <div className="flex-1 overflow-y-auto pr-2 pb-6 custom-scrollbar" style={{ maxHeight: '60vh' }}>
-          {text ? renderedContent : (<div className="flex flex-col items-center justify-center py-20 opacity-50"><BookOpen className="w-12 h-12 mb-4" /><p>Keine Theorie für dieses Deck gefunden.</p></div>)}
+        <div 
+          className="flex-1 overflow-y-auto pr-2 custom-scrollbar relative" 
+          style={{ 
+            maxHeight: '60vh', 
+            WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)', 
+            maskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)' 
+          }}
+        >
+          <div className="pb-16">
+            {text ? renderedContent : (<div className="flex flex-col items-center justify-center py-20 opacity-50"><BookOpen className="w-12 h-12 mb-4" /><p>Keine Theorie für dieses Deck gefunden.</p></div>)}
+          </div>
         </div>
         
         <div className="shrink-0 pt-5 mt-2 border-t border-black/5 dark:border-white/10 bg-transparent">
