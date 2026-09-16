@@ -1484,10 +1484,28 @@ export function useCloudSync() {
 
   useEffect(() => {
     if (!userId) return;
+    let isMounted = true;
+    
     const fetchInitial = async () => {
       try {
-        const { data, error } = await supabase.from('user_data_sync').select('payload').eq('user_id', userId).maybeSingle();
-        if (data?.payload) {
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+          console.warn('Supabase env vars missing. Running completely local.');
+          if (isMounted) useStore.getState().setDecks(useStore.getState().decks || []);
+          return;
+        }
+
+        const { data, error, status } = await supabase.from('user_data_sync').select('payload').eq('user_id', userId).maybeSingle();
+        
+        if (error || status === 401 || status === 403) {
+           console.warn('Supabase RLS or fetch error:', error?.message);
+           if (isMounted) {
+             useStore.getState().setDecks(useStore.getState().decks || []);
+             setSyncStatus('error');
+           }
+           return;
+        }
+
+        if (data?.payload && Object.keys(data.payload).length > 0) {
           const payload = data.payload as any;
           if (payload.books) setBooks(payload.books);
           if (payload.appLanguage) setAppLanguage(payload.appLanguage);
@@ -1496,19 +1514,22 @@ export function useCloudSync() {
               localStorage.setItem(k, v as string);
             }
           }
-          // Always call setDecks last to ensure isLoaded is set to true
-          setDecks(payload.decks || []);
+          if (isMounted) setDecks(payload.decks || []);
         } else {
-           // Initial load complete but no data
-           useStore.getState().setDecks(useStore.getState().decks || []);
+           if (isMounted) useStore.getState().setDecks(useStore.getState().decks || []);
         }
       } catch (err) {
-        console.error(err);
-        useStore.getState().setDecks(useStore.getState().decks || []);
+        console.error('Fatal sync error:', err);
+        if (isMounted) {
+          useStore.getState().setDecks(useStore.getState().decks || []);
+          setSyncStatus('error');
+        }
       }
     };
     fetchInitial();
-  }, [userId, setDecks, setBooks, setAppLanguage]);
+    
+    return () => { isMounted = false; };
+  }, [userId]); // Removed setDecks/setBooks from deps to guarantee it only runs once per user
 
   const triggerSync = useCallback(() => {
     if (!userId) return;
@@ -1517,31 +1538,41 @@ export function useCloudSync() {
     if (saveTimeout) clearTimeout(saveTimeout);
     
     saveTimeout = setTimeout(async () => {
-      const payload: any = {
-        decks: useStore.getState().decks,
-        books: useStore.getState().books,
-        appLanguage: useStore.getState().appLanguage,
-        localStorage: {}
-      };
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('deck_theory_') || key.startsWith('daily_activity_') || key === 'app_books_meta' || key === 'deck_languages' || key === 'deck_books')) {
-          payload.localStorage[key] = localStorage.getItem(key);
+      try {
+        if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+          setSyncStatus('error');
+          return;
         }
-      }
 
-      const { error } = await supabase.from('user_data_sync').upsert({
-        user_id: userId,
-        payload,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id' });
+        const payload: any = {
+          decks: useStore.getState().decks,
+          books: useStore.getState().books,
+          appLanguage: useStore.getState().appLanguage,
+          localStorage: {}
+        };
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('deck_theory_') || key.startsWith('daily_activity_') || key === 'app_books_meta' || key === 'deck_languages' || key === 'deck_books')) {
+            payload.localStorage[key] = localStorage.getItem(key);
+          }
+        }
 
-      if (error) {
-        console.error('Sync error:', error);
+        const { error, status } = await supabase.from('user_data_sync').upsert({
+          user_id: userId,
+          payload,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+        if (error || status === 401 || status === 403) {
+          console.warn('Sync save error or RLS blocked:', error?.message);
+          setSyncStatus('error');
+        } else {
+          setSyncStatus('success');
+          setTimeout(() => setSyncStatus('idle'), 2000);
+        }
+      } catch (err) {
+        console.error('Fatal sync save error:', err);
         setSyncStatus('error');
-      } else {
-        setSyncStatus('success');
-        setTimeout(() => setSyncStatus('idle'), 2000);
       }
     }, 1000);
   }, [userId]);
