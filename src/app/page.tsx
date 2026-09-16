@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useTransition, useMemo } from "react";
 import { 
   Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
@@ -1520,6 +1520,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 }
 
 export default function App() {
+  const [isPending, startTransition] = useTransition();
   const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
@@ -1540,7 +1541,7 @@ export default function App() {
   const handleEditTheory = useCallback((id: string) => setTheoryEditDeckId(id), []);
   const handleViewTheory = useCallback((id: string) => setTheoryViewDeckId(id), []);
   
-  const handleBookClick = useCallback((id: string) => setActiveBookId(id), []);
+  const handleBookClick = useCallback((id: string) => startTransition(() => setActiveBookId(id)), []);
   const handleBookEdit = useCallback((id: string) => setBookModal({ id }), []);
   const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
 
@@ -1704,10 +1705,32 @@ export default function App() {
 
   const categories = ["Grammatik", "Wörter"];
   
-  const filteredDecksList = decks.filter(d => {
-    if (activeBookId) return d.bookId === activeBookId;
-    return (d.language || 'DE') === appLanguage;
-  });
+  const filteredDecksList = useMemo(() => {
+    return decks.filter(d => {
+      if (activeBookId) return d.bookId === activeBookId;
+      return (d.language || 'DE') === appLanguage;
+    });
+  }, [decks, activeBookId, appLanguage]);
+
+  const groupedDecks = useMemo(() => {
+    const map: Record<string, Deck[]> = {};
+    filteredDecksList.forEach(d => {
+      const key = `${d.category}-${d.level || 'A1'}`;
+      if (!map[key]) map[key] = [];
+      map[key].push(d);
+    });
+    
+    for (const key in map) {
+      map[key].sort((a, b) => {
+        const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
+        const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
+        if (aIsCompleted && !bIsCompleted) return 1;
+        if (!aIsCompleted && bIsCompleted) return -1;
+        return 0;
+      });
+    }
+    return map;
+  }, [filteredDecksList]);
   
   const dueCards: { deckId: string, card: Flashcard }[] = [];
   filteredDecksList.forEach(deck => {
@@ -1738,7 +1761,7 @@ export default function App() {
       </div>
         )}
         
-        <HeaderWidgets activeBook={activeBook} onBack={() => setActiveBookId(null)} />
+        <HeaderWidgets activeBook={activeBook} onBack={() => startTransition(() => setActiveBookId(null))} />
 
       <AnimatePresence>
         {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
@@ -1863,7 +1886,7 @@ export default function App() {
               {(["Grammatik", "Wörter"] as const).map((tab) => (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => startTransition(() => setActiveTab(tab))}
                   className={cn(
                     "flex-1 px-4 py-1.5 transition-all text-xs font-medium tracking-tight rounded-lg",
                     activeTab === tab
@@ -1912,14 +1935,7 @@ export default function App() {
 
               return cefrLevels.map(level => {
                 const sectionKey = `${activeTab}-${level}`;
-                const levelDecks = filteredDecksList.filter(d => d.category === activeTab && (d.level || 'A1') === level);
-                const sortedDecks = [...levelDecks].sort((a, b) => {
-                  const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
-                  const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
-                  if (aIsCompleted && !bIsCompleted) return 1;
-                  if (!aIsCompleted && bIsCompleted) return -1;
-                  return 0;
-                });
+                const sortedDecks = groupedDecks[`${activeTab}-${level}`] || [];
 
                 const limit = visibleLimits[sectionKey] || 10;
                 const visibleDecks = sortedDecks.slice(0, limit);
@@ -1943,7 +1959,7 @@ export default function App() {
                       </div>
                     </div>
                     
-                    {levelDecks.length === 0 ? (
+                    {sortedDecks.length === 0 ? (
                       <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px] shadow-sm">
                         <p className="text-gray-400 dark:text-[#8E8E93] text-sm font-medium">
                           {appLanguage === 'EN' ? "No decks in this level yet." : "Noch keine Decks in diesem Level."}
