@@ -1430,20 +1430,11 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       const firstChild = Array.isArray(children) ? children[0] : children;
       if (typeof firstChild === 'string') {
         const textStr = firstChild.trim();
-        if (textStr.startsWith('⚠️')) {
-          return (
-            <div className="bg-amber-500/10 dark:bg-amber-500/15 border-l-[3px] border-amber-500 p-4 rounded-r-xl my-4 shadow-sm">
-               <p className="text-[15px] leading-relaxed text-amber-900 dark:text-amber-100/90 font-sans m-0">
-                 {children}
-               </p>
-            </div>
-          );
-        }
         if (textStr.startsWith('💡WIDGET_TEMPLATE💡')) {
           const contentStr = textStr.replace('💡WIDGET_TEMPLATE💡', '');
           const rest = Array.isArray(children) ? children.slice(1) : [];
           return (
-            <div className="bg-blue-50/50 dark:bg-[#007AFF]/10 border border-[#007AFF]/20 dark:border-[#007AFF]/20 rounded-2xl p-4 my-5 shadow-sm">
+            <div className="bg-[#007AFF]/5 dark:bg-[#007AFF]/10 border border-[#007AFF]/20 dark:border-[#007AFF]/20 rounded-2xl p-4 my-5 shadow-sm">
                <div className="text-[10px] font-bold tracking-widest text-[#007AFF] dark:text-[#0A84FF] uppercase mb-1.5">Ключевой шаблон</div>
                <div className="text-[16px] font-medium text-gray-900 dark:text-white leading-relaxed">
                  {contentStr}
@@ -1463,11 +1454,32 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     ul: ({ children }: any) => <ul className="space-y-2 my-3 ml-5 list-disc marker:text-gray-400 dark:marker:text-white/30">{children}</ul>,
     ol: ({ children }: any) => <ol className="space-y-2 my-3 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/50 font-medium">{children}</ol>,
     li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] pl-1">{children}</li>,
-    blockquote: ({ children }: any) => (
-      <blockquote className="bg-blue-50/50 dark:bg-white/5 border-l-[3px] border-[#007AFF] px-4 py-3 rounded-r-xl my-4 shadow-sm">
-        <div className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] [&>p]:my-0">{children}</div>
-      </blockquote>
-    ),
+    blockquote: ({ children }: any) => {
+      let isAchtung = false;
+      try {
+        const firstChild = Array.isArray(children) ? children[0] : children;
+        if (firstChild?.props?.children) {
+           const firstText = Array.isArray(firstChild.props.children) ? firstChild.props.children[0] : firstChild.props.children;
+           if (typeof firstText === 'string' && firstText.trim().startsWith('⚠️')) {
+             isAchtung = true;
+           }
+        }
+      } catch (e) {}
+      
+      if (isAchtung) {
+         return (
+           <blockquote className="bg-amber-500/10 dark:bg-amber-500/15 border-l-[3px] border-amber-500 px-4 py-4 rounded-r-2xl my-6 shadow-sm">
+             <div className="text-[15px] leading-relaxed text-amber-900 dark:text-amber-100/90 [&>p]:my-0">{children}</div>
+           </blockquote>
+         );
+      }
+      
+      return (
+        <blockquote className="bg-[#007AFF]/5 dark:bg-[#007AFF]/10 border-l-[3px] border-[#007AFF] px-4 py-4 rounded-r-2xl my-6 shadow-sm">
+          <div className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] [&>p]:my-0">{children}</div>
+        </blockquote>
+      );
+    },
     code: ({ node, inline, className, children, ...props }: any) => {
       if (!inline) {
         return (
@@ -1485,9 +1497,16 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   };
 
   const renderedContent = useMemo(() => {
-    // 1. Remove 4-space indents to prevent markdown from rendering unwanted gray <pre><code> blocks (the "zebra" effect).
-    // 2. We DO NOT aggressively split **Label:** to avoid breaking lists.
-    const preprocessed = (text || '').replace(/^( {4,}|	+)/gm, '  ');
+    let preprocessed = (text || '').replace(/^( {4,}|\t+)/gm, '  ');
+    
+    // Auto-wrap ⚠️ blocks into blockquotes until the next blank line
+    preprocessed = preprocessed.replace(/^(⚠️.*(?:\n(?!\s*\n).*)*)/gm, (match) => {
+       return match.split('\n').map(line => line.trim().startsWith('>') ? line : '> ' + line).join('\n');
+    });
+
+    // Super robust Widget Template catcher (catches with or without **, with or without >)
+    preprocessed = preprocessed.replace(/^[>\s]*(?:\*\*|__)?\s*(Ключевой шаблон|Шаблон)\s*(?:\*\*|__)?\s*[:\-]?\s*(.*)/gim, '💡WIDGET_TEMPLATE💡$2');
+    
     return (
       <ReactMarkdown components={MarkdownComponents}>{preprocessed}</ReactMarkdown>
     );
