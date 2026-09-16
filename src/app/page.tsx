@@ -169,6 +169,8 @@ interface DeckState {
   addBook: (book: BookMeta) => void;
   updateBook: (book: BookMeta) => void;
   deleteBook: (id: string) => void;
+  syncError: string | null;
+  setSyncError: (msg: string | null) => void;
 }
 
 const useStore = create<DeckState>()((set, get) => ({
@@ -180,24 +182,64 @@ const useStore = create<DeckState>()((set, get) => ({
     set({ appLanguage: lang });
   },
   dailyProgress: {},
+  syncError: null,
+  setSyncError: (msg) => set({ syncError: msg }),
   
   books: [],
   setBooks: (books) => set({ books }),
   addBook: async (book) => {
     const previousBooks = get().books;
     set({ books: [...previousBooks, book] });
-    const { error } = await supabase.from('books').insert(book);
+    
+    const payload = {
+      id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
+      tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
+      activeLevels: book.activeLevels || ['A1'], coverType: book.coverType || null,
+      coverValue: book.coverValue || null, accentColor: book.accentColor || null
+    };
+    let { error } = await supabase.from('books').insert(payload);
+    
+    if (error && error.message.includes('does not exist')) {
+       const fallbackPayload = {
+         id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
+         tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
+         activelevels: book.activeLevels || ['A1'], covertype: book.coverType || null,
+         covervalue: book.coverValue || null, accentcolor: book.accentColor || null
+       };
+       const fallbackRes = await supabase.from('books').insert(fallbackPayload);
+       error = fallbackRes.error;
+    }
+    
     if (error) {
-      console.error("Supabase Add Book Error:", error.message);
+      console.error("Supabase Add Book Error:", error.message); get().setSyncError("Add Book Error: " + error.message);
       set({ books: previousBooks });
     }
   },
   updateBook: async (book) => {
     const previousBooks = get().books;
     set({ books: previousBooks.map(b => b.id === book.id ? book : b) });
-    const { error } = await supabase.from('books').update(book).eq('id', book.id);
+    
+    const payload = {
+      language: book.language, title: book.title, subtitle: book.subtitle || null,
+      tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
+      activeLevels: book.activeLevels || ['A1'], coverType: book.coverType || null,
+      coverValue: book.coverValue || null, accentColor: book.accentColor || null
+    };
+    let { error } = await supabase.from('books').update(payload).eq('id', book.id);
+    
+    if (error && error.message.includes('does not exist')) {
+       const fallbackPayload = {
+         language: book.language, title: book.title, subtitle: book.subtitle || null,
+         tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
+         activelevels: book.activeLevels || ['A1'], covertype: book.coverType || null,
+         covervalue: book.coverValue || null, accentcolor: book.accentColor || null
+       };
+       const fallbackRes = await supabase.from('books').update(fallbackPayload).eq('id', book.id);
+       error = fallbackRes.error;
+    }
+    
     if (error) {
-      console.error("Supabase Update Book Error:", error.message);
+      console.error("Supabase Update Book Error:", error.message); get().setSyncError("Update Book Error: " + error.message);
       set({ books: previousBooks });
     }
   },
@@ -206,7 +248,7 @@ const useStore = create<DeckState>()((set, get) => ({
     set({ books: previousBooks.filter(b => b.id !== id) });
     const { error } = await supabase.from('books').delete().eq('id', id);
     if (error) {
-      console.error("Supabase Delete Book Error:", error.message);
+      console.error("Supabase Delete Book Error:", error.message); get().setSyncError("Delete Book Error: " + error.message);
       set({ books: previousBooks });
     }
   },
@@ -1535,7 +1577,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
 export default function App() {
   const [isPending, startTransition] = useTransition();
-  const { decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook } = useStore();
+  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
@@ -1591,14 +1633,37 @@ export default function App() {
           supabase.from('decks').select('*, cards(*)')
         ]);
 
+        if (booksRes.error) {
+          useStore.getState().setSyncError("Fetch Books Error: " + booksRes.error.message);
+        }
         if (booksRes.data && booksRes.data.length > 0) {
-          setBooks(booksRes.data);
+          const mappedBooks = booksRes.data.map((b: any) => ({
+            id: b.id,
+            language: b.language,
+            title: b.title,
+            subtitle: b.subtitle,
+            tintColor: b.tintColor || b.tintcolor || '#007AFF',
+            coverImage: b.coverImage || b.coverimage || null,
+            activeLevels: b.activeLevels || b.activelevels || ['A1'],
+            coverType: b.coverType || b.covertype,
+            coverValue: b.coverValue || b.covervalue,
+            accentColor: b.accentColor || b.accentcolor
+          }));
+          setBooks(mappedBooks);
         } else {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
             { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
           ];
-          await supabase.from('books').insert(defaultBooks);
+          const res = await supabase.from('books').insert(defaultBooks);
+          if (res.error && res.error.message.includes('does not exist')) {
+            const lowercaseDefaults = defaultBooks.map(b => ({
+              id: b.id, language: b.language, title: b.title, subtitle: b.subtitle,
+              tintcolor: b.tintColor, coverimage: b.coverImage, activelevels: b.activeLevels,
+              covertype: b.coverType, covervalue: b.coverValue, accentcolor: b.accentColor
+            }));
+            await supabase.from('books').insert(lowercaseDefaults);
+          }
           setBooks(defaultBooks);
         }
 
