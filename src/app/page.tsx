@@ -1488,6 +1488,8 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     });
   };
 
+  const renderedContent = useMemo(() => renderMarkdown(text || ''), [text]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4 overscroll-contain touch-none" onClick={onClose}>
       <motion.div 
@@ -1495,12 +1497,12 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 100 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl mx-auto backdrop-blur-3xl bg-white/95 dark:bg-[#1C1C1E]/90 border border-black/5 dark:border-white/[0.08] rounded-t-[32px] md:rounded-[32px] p-6 shadow-2xl flex flex-col max-h-[85vh]"
+        className="w-full max-w-xl mx-auto backdrop-blur-3xl bg-white/95 dark:bg-[#1C1C1E]/90 border border-black/5 dark:border-white/[0.08] rounded-t-[32px] md:rounded-[32px] p-6 shadow-2xl flex flex-col max-h-[85vh] transform-gpu will-change-[transform,opacity]" 
       >
         <div className="w-12 h-1.5 bg-gray-300 dark:bg-white/20 rounded-full mx-auto mb-5 shrink-0" />
         
         <div className="flex-1 overflow-y-auto pr-2 pb-6 custom-scrollbar" style={{ maxHeight: '60vh' }}>
-          {renderMarkdown(text)}
+          {text ? renderedContent : (<div className="flex flex-col items-center justify-center py-20 opacity-50"><BookOpen className="w-12 h-12 mb-4" /><p>Keine Theorie für dieses Deck gefunden.</p></div>)}
         </div>
         
         <div className="shrink-0 pt-5 mt-2 border-t border-black/5 dark:border-white/10 bg-transparent">
@@ -1608,6 +1610,33 @@ export default function App() {
     fetchDecks();
   }, [setDecks]);
 
+  const filteredDecksList = useMemo(() => {
+    return decks.filter(d => {
+      if (activeBookId) return d.bookId === activeBookId;
+      return (d.language || 'DE') === appLanguage;
+    });
+  }, [decks, activeBookId, appLanguage]);
+
+  const groupedDecks = useMemo(() => {
+    const map: Record<string, Deck[]> = {};
+    filteredDecksList.forEach(d => {
+      const key = `${d.category}-${d.level || 'A1'}`;
+      if (!map[key]) map[key] = [];
+      map[key].push(d);
+    });
+    
+    for (const key in map) {
+      map[key].sort((a, b) => {
+        const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
+        const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
+        if (aIsCompleted && !bIsCompleted) return 1;
+        if (!aIsCompleted && bIsCompleted) return -1;
+        return 0;
+      });
+    }
+    return map;
+  }, [filteredDecksList]);
+
   if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
 
   if (activeDeckId) {
@@ -1705,32 +1734,7 @@ export default function App() {
 
   const categories = ["Grammatik", "Wörter"];
   
-  const filteredDecksList = useMemo(() => {
-    return decks.filter(d => {
-      if (activeBookId) return d.bookId === activeBookId;
-      return (d.language || 'DE') === appLanguage;
-    });
-  }, [decks, activeBookId, appLanguage]);
 
-  const groupedDecks = useMemo(() => {
-    const map: Record<string, Deck[]> = {};
-    filteredDecksList.forEach(d => {
-      const key = `${d.category}-${d.level || 'A1'}`;
-      if (!map[key]) map[key] = [];
-      map[key].push(d);
-    });
-    
-    for (const key in map) {
-      map[key].sort((a, b) => {
-        const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
-        const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
-        if (aIsCompleted && !bIsCompleted) return 1;
-        if (!aIsCompleted && bIsCompleted) return -1;
-        return 0;
-      });
-    }
-    return map;
-  }, [filteredDecksList]);
   
   const dueCards: { deckId: string, card: Flashcard }[] = [];
   filteredDecksList.forEach(deck => {
