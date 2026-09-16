@@ -183,21 +183,33 @@ const useStore = create<DeckState>()((set, get) => ({
   
   books: [],
   setBooks: (books) => set({ books }),
-  addBook: (book) => set((state) => {
-    const newBooks = [...state.books, book];
-    if (typeof window !== 'undefined') localStorage.setItem('app_books_meta', JSON.stringify(newBooks));
-    return { books: newBooks };
-  }),
-  updateBook: (book) => set((state) => {
-    const newBooks = state.books.map(b => b.id === book.id ? book : b);
-    if (typeof window !== 'undefined') localStorage.setItem('app_books_meta', JSON.stringify(newBooks));
-    return { books: newBooks };
-  }),
-  deleteBook: (id) => set((state) => {
-    const newBooks = state.books.filter(b => b.id !== id);
-    if (typeof window !== 'undefined') localStorage.setItem('app_books_meta', JSON.stringify(newBooks));
-    return { books: newBooks };
-  }),
+  addBook: async (book) => {
+    const previousBooks = get().books;
+    set({ books: [...previousBooks, book] });
+    const { error } = await supabase.from('books').insert(book);
+    if (error) {
+      console.error("Supabase Add Book Error:", error.message);
+      set({ books: previousBooks });
+    }
+  },
+  updateBook: async (book) => {
+    const previousBooks = get().books;
+    set({ books: previousBooks.map(b => b.id === book.id ? book : b) });
+    const { error } = await supabase.from('books').update(book).eq('id', book.id);
+    if (error) {
+      console.error("Supabase Update Book Error:", error.message);
+      set({ books: previousBooks });
+    }
+  },
+  deleteBook: async (id) => {
+    const previousBooks = get().books;
+    set({ books: previousBooks.filter(b => b.id !== id) });
+    const { error } = await supabase.from('books').delete().eq('id', id);
+    if (error) {
+      console.error("Supabase Delete Book Error:", error.message);
+      set({ books: previousBooks });
+    }
+  },
   incrementDailyProgress: () => set((state) => {
     const today = new Date().toISOString().split('T')[0];
     return {
