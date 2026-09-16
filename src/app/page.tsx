@@ -362,7 +362,14 @@ const useStore = create<DeckState>()((set, get) => ({
         if (isCorrect && !isHilfe) {
           card.repetitions = (card.repetitions || 0) + 1;
           const r = card.repetitions;
-          card.interval = r === 1 ? 1 : r === 2 ? 3 : r === 3 ? 7 : r === 4 ? 14 : 30;
+          if (r === 1) card.interval = 1;
+          else if (r === 2) card.interval = 3;
+          else if (r === 3) card.interval = 7;
+          else if (r === 4) card.interval = 14;
+          else if (r === 5) card.interval = 30;
+          else if (r === 6) card.interval = 60;
+          else if (r === 7) card.interval = 120;
+          else card.interval = (card.interval || 120) * 2;
           card.nextReviewDate = Date.now() + card.interval * 86400000;
         } else {
           card.repetitions = 0;
