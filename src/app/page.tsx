@@ -1064,11 +1064,9 @@ const DeckCard = React.memo(({
   onDelete: (id: string, name: string) => void; 
   onEditTheory: (id: string) => void; onViewTheory: (id: string) => void; 
 }) => {
-  const { total, mastered, progressPercentage } = React.useMemo(() => {
-    const t = deck.cards.length;
-    const m = deck.cards.filter(c => c.isArchived).length;
-    return { total: t, mastered: m, progressPercentage: t > 0 ? (m / t) * 100 : 0 };
-  }, [deck.cards]);
+  const total = deck.cards.length;
+  const mastered = deck.cards.filter(c => c.isArchived).length;
+  const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
 
   return (
     <div 
@@ -1928,8 +1926,8 @@ export default function App() {
             </div>
           )}
 
-          <div className="relative">
-            {categories.map(cat => {
+          <div className="space-y-16">
+            {(() => {
               const cefrLevels: CEFRLevel[] = activeBook?.activeLevels?.length ? activeBook.activeLevels : ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
               const levelConfig: Record<CEFRLevel, { label: string, badgeClass: string }> = {
                 'A1': { label: 'A1', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
@@ -1939,103 +1937,91 @@ export default function App() {
                 'C1-C2': { label: 'C1-C2', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' }
               };
 
-              return (
-                <div key={cat} style={{ display: activeTab === cat ? 'block' : 'none' }} className="space-y-16">
-                  {cefrLevels.map(level => {
-                    const sectionKey = `${cat}-${level}`;
-                    const sortedDecks = groupedDecks[sectionKey] || [];
+              return cefrLevels.map(level => {
+                const sectionKey = `${activeTab}-${level}`;
+                const sortedDecks = groupedDecks[`${activeTab}-${level}`] || [];
 
-                    const limit = visibleLimits[sectionKey] || 10;
-                    const visibleDecks = sortedDecks.slice(0, limit);
-                    const inProgressDecks = visibleDecks.filter(d => d.cards.length === 0 || d.cards.length !== d.cards.filter(c => c.isArchived).length);
-                    const completedDecks = visibleDecks.filter(d => d.cards.length > 0 && d.cards.length === d.cards.filter(c => c.isArchived).length);
-                    const isExpanded = expandedCategories[sectionKey] || false;
+                const limit = visibleLimits[sectionKey] || 10;
+                const visibleDecks = sortedDecks.slice(0, limit);
+                const inProgressDecks = visibleDecks.filter(d => d.cards.length === 0 || d.cards.length !== d.cards.filter(c => c.isArchived).length);
+                const completedDecks = visibleDecks.filter(d => d.cards.length > 0 && d.cards.length === d.cards.filter(c => c.isArchived).length);
+                const isExpanded = expandedCategories[sectionKey] || false;
 
-                    return (
-                      <section key={sectionKey}>
-                        <div className="flex items-center mb-4 px-1">
-                          <div className="inline-flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] rounded-full p-0.5 shadow-sm">
-                            <span className="h-7 px-3 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-[#8E8E93]">
-                              {level}
-                            </span>
+                return (
+                  <section key={sectionKey}>
+                    <div className="flex items-center mb-4 px-1">
+                      <div className="inline-flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] rounded-full p-0.5 shadow-sm">
+                        <span className="h-7 px-3 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-[#8E8E93]">
+                          {level}
+                        </span>
+                        <button 
+                          onClick={() => handlePlusClick(activeTab, level)}
+                          className="h-7 w-7 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {sortedDecks.length === 0 ? (
+                      <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px] shadow-sm">
+                        <p className="text-gray-400 dark:text-[#8E8E93] text-sm font-medium">
+                          {appLanguage === 'EN' ? "No decks in this level yet." : "Noch keine Decks in diesem Level."}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {inProgressDecks.length > 0 && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {inProgressDecks.map(deck => (
+                              <DeckCard key={deck.id} deck={deck} isCompleted={false} activeTab={activeTab} onCardClick={handleDeckClick} onRename={handleRenameClick} onDelete={handleDeleteClick} onEditTheory={handleEditTheory} onViewTheory={handleViewTheory} />
+                            ))}
                           </div>
-                          <div className="ml-auto flex items-center gap-2">
-                            <button 
-                              onClick={() => setUploadTarget({ category: cat, level })}
-                              className="h-7 w-7 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                        
-                        {sortedDecks.length === 0 ? (
-                          <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px] shadow-sm">
-                            <p className="text-gray-400 dark:text-[#8E8E93] text-sm font-medium">
-                              {appLanguage === 'EN' ? "No decks in this level yet." : "Noch keine Decks in diesem Level."}
-                            </p>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              {inProgressDecks.map(deck => (
-                                <DeckCard key={deck.id} deck={deck} isCompleted={false} activeTab={cat} onCardClick={handleDeckClick} onRename={handleRenameClick} onDelete={handleDeleteClick} onEditTheory={handleEditTheory} onViewTheory={handleViewTheory} />
-                              ))}
-                            </div>
-
-                            {completedDecks.length > 0 && (
-                              <div className="mt-8">
-                                <div className="flex items-center gap-3 mb-4 px-1">
-                                  <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-200 dark:via-white/10 to-transparent" />
-                                  <button 
-                                    onClick={() => setExpandedCategories(prev => ({ ...prev, [sectionKey]: !prev[sectionKey] }))}
-                                    className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors uppercase tracking-wider"
-                                  >
-                                    {isExpanded ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
-                                    <span>Archiv anzeigen ({completedDecks.length})</span>
-                                  </button>
-                                  <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-200 dark:via-white/10 to-transparent" />
-                                </div>
-                                
-                                <AnimatePresence>
-                                  {isExpanded && (
-                                    <motion.div
-                                      initial={{ opacity: 0, height: 0 }}
-                                      animate={{ opacity: 1, height: "auto" }}
-                                      exit={{ opacity: 0, height: 0 }}
-                                      className="overflow-hidden"
-                                    >
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                                        {completedDecks.map(deck => (
-                                          <DeckCard key={deck.id} deck={deck} isCompleted={true} activeTab={cat} onCardClick={handleDeckClick} onRename={handleRenameClick} onDelete={handleDeleteClick} onEditTheory={handleEditTheory} onViewTheory={handleViewTheory} />
-                                        ))}
-                                      </div>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </div>
-                            )}
-
-                            {sortedDecks.length > limit && (
-                              <div className="mt-8 flex justify-center">
-                                <button
-                                  onClick={() => handleLoadMore(sectionKey)}
-                                  className="px-6 py-2.5 rounded-full bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] text-sm font-semibold text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-500 shadow-sm transition-all active:scale-95"
-                                >
-                                  Mehr laden
-                                </button>
-                              </div>
-                            )}
-                          </>
                         )}
-                      </section>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
+                        {completedDecks.length > 0 && (
+                          <div className="mt-4">
+                            <button 
+                              onClick={() => toggleCategory(sectionKey)}
+                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900  transition-colors mx-2 mb-4"
+                            >
+                              <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
+                              <span>Archiv anzeigen ({completedDecks.length})</span>
+                            </button>
+                            
+      <AnimatePresence>
+                              {isExpanded && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: "auto" }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+                                    {completedDecks.map(deck => (
+                                      <DeckCard key={deck.id} deck={deck} isCompleted={true} activeTab={activeTab} onCardClick={handleDeckClick} onRename={handleRenameClick} onDelete={handleDeleteClick} onEditTheory={handleEditTheory} onViewTheory={handleViewTheory} />
+                                    ))}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {sortedDecks.length > limit && (
+                      <button 
+                        onClick={() => handleLoadMore(sectionKey)}
+                        className="mt-6 mx-auto block px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-full transition-all"
+                      >
+                        Weitere {Math.min(10, sortedDecks.length - limit)} laden
+                      </button>
+                    )}
+                  </section>
+                );
+              });
+            })()}
 
+          </div>
         </motion.div>
         )}
       </main>
