@@ -1021,8 +1021,8 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
     <div className="relative group w-full h-full">
       {/* Glow Behind */}
       <div 
-        className="absolute inset-0 opacity-0 group-hover:opacity-40 transition-opacity duration-500 rounded-2xl blur-xl transform-gpu translate-z-0 will-change-[filter,transform]" 
-        style={{ backgroundColor: tintColor }} 
+        className="absolute inset-0 opacity-0 group-hover:opacity-60 transition-opacity duration-500 rounded-2xl transform-gpu translate-z-0 will-change-transform" 
+        style={{ boxShadow: `0 20px 60px -10px ${tintColor}` }} 
       />
       {/* Card */}
       <div onClick={onClick} className="relative z-10 cursor-pointer aspect-[2/3] rounded-2xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col bg-[#0A0A0C]" style={isImage ? {} : { backgroundColor: tintColor }}>
@@ -1072,7 +1072,7 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => onCardClick(deck.id)}
       className={cn(
-        "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative will-change-[filter,transform] transform-gpu translate-z-0",
+        "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative will-change-transform transform-gpu translate-z-0",
         isCompleted && "opacity-60 hover:opacity-100"
       )}
     >
@@ -1760,10 +1760,15 @@ export default function App() {
   return (
       <>
         {activeBookId && (
-          <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-1000 transform-gpu translate-z-0 will-change-[filter,transform]">
-         <div className="absolute top-[-20%] left-[-10%] w-[140%] h-[140%] bg-gradient-radial from-[var(--ambient)] to-transparent blur-[140px] opacity-[0.25] transition-all duration-1000 transform-gpu translate-z-0 will-change-[filter,transform]" style={{ '--ambient': activeBookColor } as any} />
-      </div>
-        )}
+        <div className="fixed inset-0 pointer-events-none -z-50 overflow-hidden">
+          <div 
+            className="absolute left-1/2 top-0 -translate-x-1/2 w-[150vw] md:w-[120vw] h-[80vh] opacity-50 dark:opacity-30 transition-colors duration-1000 transform-gpu translate-z-0 will-change-transform"
+            style={{
+              background: `radial-gradient(ellipse 70% 60% at 50% 0%, ${activeBookColor}40 0%, ${activeBookColor}10 45%, transparent 80%)`
+            }}
+          />
+        </div>
+      )}
         
         <HeaderWidgets activeBook={activeBook} onBack={() => startTransition(() => setActiveBookId(null))} />
 
