@@ -767,6 +767,9 @@ const playAudio = useCallback(async (text: string) => {
       return <span className="text-gray-400 dark:text-gray-500 font-light tracking-wide text-lg">Tippen...</span>;
     }
     return Array.from(inputText).map((char, i) => {
+      if (shouldCapitalize && i === 0) {
+        char = char.toUpperCase();
+      }
       const isMatch = char.toLowerCase() === card.targetWord[i]?.toLowerCase();
       return (
         <span key={i} className={cn("font-medium", isMatch ? "text-gray-900  dark:text-[#F5F5F7] " : "text-red-500")}>
@@ -777,6 +780,8 @@ const playAudio = useCallback(async (text: string) => {
   };
 
   const parts = card.sentence.split("___");
+  const shouldCapitalize = parts[0]?.trim() === "";
+  const displayTargetWord = shouldCapitalize ? card.targetWord.charAt(0).toUpperCase() + card.targetWord.slice(1) : card.targetWord;
 
   return (
     <motion.div 
@@ -838,13 +843,13 @@ const playAudio = useCallback(async (text: string) => {
           
           {phase === "Answer" ? (
             <span className="inline-block align-baseline mx-1 border-0 border-b-2 border-blue-600/30 dark:border-blue-500/40 text-blue-600 dark:text-blue-600 dark:text-blue-500 bg-transparent outline-none rounded-none py-0 px-1 transition-colors">
-              {card.targetWord}
+              {displayTargetWord}
             </span>
           ) : (
             <>
               {isMultipleChoice ? (
                 <span className="inline-block align-baseline mx-1 min-w-[3rem] border-0 border-b-2 border-black/10 dark:border-white/20 bg-transparent rounded-none py-0 px-1 text-transparent">
-                  {card.targetWord}
+                  {displayTargetWord}
                 </span>
               ) : (
                 <span className="inline-block relative align-baseline mx-1 min-w-[4rem] border-0 border-b-2 border-black/20 dark:border-white/20 focus-within:border-blue-600 dark:border-blue-500 dark:focus-within:border-blue-600 dark:border-blue-500 focus-within:ring-0 bg-transparent outline-none rounded-none py-0 px-1 transition-colors">
@@ -888,18 +893,20 @@ const playAudio = useCallback(async (text: string) => {
             exit={{ opacity: 0, scale: 0.95 }}
             className="grid grid-cols-2 gap-4"
           >
-            {card.options.map((opt, idx) => (
+            {card.options.map((opt, idx) => {
+              const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
+              return (
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
                 className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-all duration-150 ease-out active:scale-[0.99] border border-black/[0.05] dark:border-white/[0.06] relative flex items-center justify-between gap-3"
               >
-                <span className="flex-1 text-center pr-2">{opt}</span>
+                <span className="flex-1 text-center pr-2">{displayOpt}</span>
                 <span className="w-5 h-5 rounded bg-black/5 dark:bg-white/10 text-gray-500 dark:text-white/50 text-xs font-mono flex items-center justify-center flex-shrink-0 pointer-events-none">
                   {idx + 1}
                 </span>
               </button>
-            ))}
+            )})}
           </motion.div>
         )}
 
