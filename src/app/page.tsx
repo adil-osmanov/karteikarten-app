@@ -1427,16 +1427,31 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
   const MarkdownComponents = {
     p: ({ children }: any) => {
-      // Check if this paragraph is an Achtung alert
-      const isAlert = Array.isArray(children) && typeof children[0] === 'string' && children[0].trim().startsWith('⚠️');
-      if (isAlert) {
-        return (
-          <div className="bg-amber-500/10 dark:bg-amber-500/15 border-l-[3px] border-amber-500 p-4 rounded-r-xl my-4 shadow-sm">
-             <p className="text-[15px] leading-relaxed text-amber-900 dark:text-amber-100/90 font-sans m-0">
-               {children}
-             </p>
-          </div>
-        );
+      const firstChild = Array.isArray(children) ? children[0] : children;
+      if (typeof firstChild === 'string') {
+        const textStr = firstChild.trim();
+        if (textStr.startsWith('⚠️')) {
+          return (
+            <div className="bg-amber-500/10 dark:bg-amber-500/15 border-l-[3px] border-amber-500 p-4 rounded-r-xl my-4 shadow-sm">
+               <p className="text-[15px] leading-relaxed text-amber-900 dark:text-amber-100/90 font-sans m-0">
+                 {children}
+               </p>
+            </div>
+          );
+        }
+        if (textStr.startsWith('💡WIDGET_TEMPLATE💡')) {
+          const contentStr = textStr.replace('💡WIDGET_TEMPLATE💡', '');
+          const rest = Array.isArray(children) ? children.slice(1) : [];
+          return (
+            <div className="bg-blue-50/50 dark:bg-[#007AFF]/10 border border-[#007AFF]/20 dark:border-[#007AFF]/20 rounded-2xl p-4 my-5 shadow-sm">
+               <div className="text-[10px] font-bold tracking-widest text-[#007AFF] dark:text-[#0A84FF] uppercase mb-1.5">Ключевой шаблон</div>
+               <div className="text-[16px] font-medium text-gray-900 dark:text-white leading-relaxed">
+                 {contentStr}
+                 {rest}
+               </div>
+            </div>
+          );
+        }
       }
       return <p className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] my-2.5">{children}</p>;
     },
