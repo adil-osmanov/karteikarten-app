@@ -1434,7 +1434,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           const contentStr = textStr.replace('💡WIDGET_TEMPLATE💡', '');
           const rest = Array.isArray(children) ? children.slice(1) : [];
           return (
-            <div className="bg-blue-600 dark:bg-blue-500/5 dark:bg-blue-600 dark:bg-blue-500/10 border border-blue-600 dark:border-blue-500/20 dark:border-blue-600 dark:border-blue-500/20 rounded-2xl p-4 my-5 shadow-sm">
+            <div className="bg-blue-50/50 dark:bg-blue-500/10 border border-blue-600/20 dark:border-blue-500/20 rounded-2xl p-4 my-5 shadow-sm">
                <div className="text-[10px] font-bold tracking-widest text-blue-600 dark:text-blue-500 uppercase mb-1.5">Ключевой шаблон</div>
                <div className="text-[16px] font-medium text-gray-900 dark:text-white leading-relaxed">
                  {contentStr}
@@ -1455,16 +1455,13 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     ol: ({ children }: any) => <ol className="space-y-2 my-3 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/50 font-medium">{children}</ol>,
     li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] pl-1">{children}</li>,
     blockquote: ({ children }: any) => {
-      let isAchtung = false;
-      try {
-        const firstChild = Array.isArray(children) ? children[0] : children;
-        if (firstChild?.props?.children) {
-           const firstText = Array.isArray(firstChild.props.children) ? firstChild.props.children[0] : firstChild.props.children;
-           if (typeof firstText === 'string' && firstText.trim().startsWith('⚠️')) {
-             isAchtung = true;
-           }
-        }
-      } catch (e) {}
+      const checkAchtung = (node: any): boolean => {
+        if (typeof node === 'string') return node.includes('⚠️');
+        if (Array.isArray(node)) return node.some(checkAchtung);
+        if (node && node.props && node.props.children) return checkAchtung(node.props.children);
+        return false;
+      };
+      const isAchtung = checkAchtung(children);
       
       if (isAchtung) {
          return (
@@ -1475,7 +1472,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       }
       
       return (
-        <blockquote className="bg-blue-600 dark:bg-blue-500/5 dark:bg-blue-600 dark:bg-blue-500/10 border-l-[3px] border-blue-600 dark:border-blue-500 px-4 py-4 rounded-r-2xl my-6 shadow-sm">
+        <blockquote className="bg-blue-50/50 dark:bg-blue-500/10 border-l-[3px] border-blue-600 dark:border-blue-500 px-4 py-4 rounded-r-2xl my-6 shadow-sm">
           <div className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] [&>p]:my-0">{children}</div>
         </blockquote>
       );
