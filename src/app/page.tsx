@@ -1533,6 +1533,17 @@ export default function App() {
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteBookModal, setDeleteBookModal] = useState<{ id: string, title: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
+
+  const handleDeckClick = useCallback((id: string) => setActiveDeckId(id), []);
+  const handleRenameClick = useCallback((id: string, name: string) => { setRenameInput(name); setRenameModal({ id, name }); }, []);
+  const handleDeleteClick = useCallback((id: string, name: string) => setDeleteModal({ id, name }), []);
+  const handleEditTheory = useCallback((id: string) => setTheoryEditDeckId(id), []);
+  const handleViewTheory = useCallback((id: string) => setTheoryViewDeckId(id), []);
+  
+  const handleBookClick = useCallback((id: string) => setActiveBookId(id), []);
+  const handleBookEdit = useCallback((id: string) => setBookModal({ id }), []);
+  const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
+
   useEffect(() => {
     if (renameModal || deleteModal || bookModal || deleteBookModal) {
       document.body.style.overflow = 'hidden';
@@ -1690,15 +1701,6 @@ export default function App() {
   };
 
   
-  const handleDeckClick = useCallback((id: string) => setActiveDeckId(id), []);
-  const handleRenameClick = useCallback((id: string, name: string) => { setRenameInput(name); setRenameModal({ id, name }); }, []);
-  const handleDeleteClick = useCallback((id: string, name: string) => setDeleteModal({ id, name }), []);
-  const handleEditTheory = useCallback((id: string) => setTheoryEditDeckId(id), []);
-  const handleViewTheory = useCallback((id: string) => setTheoryViewDeckId(id), []);
-  
-  const handleBookClick = useCallback((id: string) => setActiveBookId(id), []);
-  const handleBookEdit = useCallback((id: string) => setBookModal({ id }), []);
-  const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
 
   const categories = ["Grammatik", "Wörter"];
   
