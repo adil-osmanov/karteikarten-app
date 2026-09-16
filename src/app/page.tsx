@@ -1426,37 +1426,37 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   }, [onClose, onStartSession]);
 
   const MarkdownComponents = {
-    p: ({ children }: any) => <p className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] my-3">{children}</p>,
-    strong: ({ children }: any) => <strong className="font-semibold text-black dark:text-white tracking-tight">{children}</strong>,
+    p: ({ children }: any) => {
+      // Check if this paragraph is an Achtung alert
+      const isAlert = Array.isArray(children) && typeof children[0] === 'string' && children[0].trim().startsWith('⚠️');
+      if (isAlert) {
+        return (
+          <div className="bg-amber-500/10 dark:bg-amber-500/15 border-l-[3px] border-amber-500 p-4 rounded-r-xl my-4 shadow-sm">
+             <p className="text-[15px] leading-relaxed text-amber-900 dark:text-amber-100/90 font-sans m-0">
+               {children}
+             </p>
+          </div>
+        );
+      }
+      return <p className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] my-2.5">{children}</p>;
+    },
+    strong: ({ children }: any) => <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>,
     em: ({ children }: any) => <em className="italic text-gray-600 dark:text-[#EDEDED]/80">{children}</em>,
-    h1: ({ children }: any) => <h1 className="text-2xl font-bold tracking-tight text-black dark:text-white mt-8 mb-4">{children}</h1>,
-    h2: ({ children }: any) => <h2 className="text-xl font-bold tracking-tight text-black dark:text-white mt-8 mb-4">{children}</h2>,
-    h3: ({ children }: any) => <h3 className="text-xs font-semibold tracking-wider text-gray-500 dark:text-white/40 uppercase mt-8 mb-3">{children}</h3>,
-    ul: ({ children }: any) => <ul className="space-y-3 my-4 ml-5 list-disc marker:text-gray-400 dark:marker:text-white/40">{children}</ul>,
-    ol: ({ children }: any) => <ol className="space-y-3 my-4 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/60 font-medium">{children}</ol>,
+    h1: ({ children }: any) => <h1 className="text-xl font-bold tracking-tight text-black dark:text-white mt-6 mb-3">{children}</h1>,
+    h2: ({ children }: any) => <h2 className="text-lg font-bold tracking-tight text-black dark:text-white mt-6 mb-3">{children}</h2>,
+    h3: ({ children }: any) => <h3 className="text-[11px] font-bold tracking-wider text-gray-500 dark:text-white/40 uppercase mt-6 mb-2">{children}</h3>,
+    ul: ({ children }: any) => <ul className="space-y-2 my-3 ml-5 list-disc marker:text-gray-400 dark:marker:text-white/30">{children}</ul>,
+    ol: ({ children }: any) => <ol className="space-y-2 my-3 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/50 font-medium">{children}</ol>,
     li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] pl-1">{children}</li>,
     blockquote: ({ children }: any) => (
-      <blockquote className="bg-gray-100 dark:bg-white/5 border-l-[3px] border-[#007AFF] px-4 py-3.5 rounded-r-2xl my-6 shadow-sm">
-        <div className="text-[15px] leading-relaxed text-gray-700 dark:text-[#EDEDED] [&>p]:my-0">{children}</div>
+      <blockquote className="bg-blue-50/50 dark:bg-white/5 border-l-[3px] border-[#007AFF] px-4 py-3 rounded-r-xl my-4 shadow-sm">
+        <div className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] [&>p]:my-0">{children}</div>
       </blockquote>
     ),
     code: ({ node, inline, className, children, ...props }: any) => {
-      const match = /language-(\w+)/.exec(className || '');
-      const contentStr = String(children).trim();
-      const isAchtung = contentStr.startsWith('⚠️') || contentStr.toLowerCase().startsWith('achtung');
-      
       if (!inline) {
-        if (isAchtung) {
-           return (
-             <div className="bg-amber-100/50 dark:bg-amber-500/10 border-l-[3px] border-amber-500 p-4 rounded-r-xl my-5 shadow-sm">
-                <div className="text-[15px] leading-relaxed text-amber-900 dark:text-[#EDEDED] font-sans whitespace-pre-wrap">
-                  {children}
-                </div>
-             </div>
-           );
-        }
         return (
-          <pre className="bg-gray-100 dark:bg-black/50 p-4 rounded-xl overflow-x-auto font-mono text-[13px] text-gray-800 dark:text-gray-300 my-5 border border-gray-200 dark:border-white/10 custom-scrollbar">
+          <pre className="bg-gray-100 dark:bg-black/40 p-4 rounded-xl overflow-x-auto font-mono text-[13px] text-gray-800 dark:text-gray-300 my-4 border border-gray-200 dark:border-white/10 custom-scrollbar">
             <code className={className} {...props}>{children}</code>
           </pre>
         );
@@ -1470,8 +1470,9 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   };
 
   const renderedContent = useMemo(() => {
-    // Pre-process text to separate labels like "**Label:** value" into "**Label:**\n\nvalue" to fix glued hierarchies
-    const preprocessed = (text || '').replace(/\*\*(.*?):\*\*\s+(?=\S)/g, '**$1:**\n\n');
+    // 1. Remove 4-space indents to prevent markdown from rendering unwanted gray <pre><code> blocks (the "zebra" effect).
+    // 2. We DO NOT aggressively split **Label:** to avoid breaking lists.
+    const preprocessed = (text || '').replace(/^( {4,}|	+)/gm, '  ');
     return (
       <ReactMarkdown components={MarkdownComponents}>{preprocessed}</ReactMarkdown>
     );
