@@ -1489,7 +1489,6 @@ export function useCloudSync() {
         const { data, error } = await supabase.from('user_data_sync').select('payload').eq('user_id', userId).maybeSingle();
         if (data?.payload) {
           const payload = data.payload as any;
-          if (payload.decks) setDecks(payload.decks);
           if (payload.books) setBooks(payload.books);
           if (payload.appLanguage) setAppLanguage(payload.appLanguage);
           if (payload.localStorage) {
@@ -1497,12 +1496,15 @@ export function useCloudSync() {
               localStorage.setItem(k, v as string);
             }
           }
+          // Always call setDecks last to ensure isLoaded is set to true
+          setDecks(payload.decks || []);
         } else {
            // Initial load complete but no data
-           useStore.getState().setDecks([]);
+           useStore.getState().setDecks(useStore.getState().decks || []);
         }
       } catch (err) {
         console.error(err);
+        useStore.getState().setDecks(useStore.getState().decks || []);
       }
     };
     fetchInitial();
