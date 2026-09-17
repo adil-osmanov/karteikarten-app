@@ -273,16 +273,31 @@ const useStore = create<DeckState>()((set, get) => ({
     const previousDecks = get().decks;
     set({ decks: [...previousDecks, deck] });
     
-    const { error: deckError } = await supabase.from('decks').insert({
+    const payload: any = {
       id: deck.id,
       name: deck.name,
       category: deck.category,
-      level: deck.level || 'A1'
-    });
+      level: deck.level || 'A1',
+      book_id: deck.bookId,
+      language: deck.language
+    };
     
-    if (deckError) {
-      console.error("Supabase Deck Insert Error:", deckError.message);
-      alert(`Fehler beim Speichern des Decks in der Datenbank: ${deckError.message}`);
+    let deckRes = await supabase.from('decks').insert(payload);
+    
+    if (deckRes.error && deckRes.error.message.includes('not exist')) {
+        console.warn("Falling back to deck insert without book_id/language columns. Please run the SQL migration.");
+        const fallbackPayload = {
+          id: deck.id,
+          name: deck.name,
+          category: deck.category,
+          level: deck.level || 'A1'
+        };
+        deckRes = await supabase.from('decks').insert(fallbackPayload);
+    }
+    
+    if (deckRes.error) {
+      console.error("Supabase Deck Insert Error:", deckRes.error.message);
+      alert(`Fehler beim Speichern des Decks in der Datenbank: ${deckRes.error.message}`);
       set({ decks: previousDecks });
       return;
     }
@@ -1661,8 +1676,8 @@ export default function App() {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
           const enhancedDecks = decksRes.data.map((d: any) => ({
             ...d,
-            language: langMap[d.id] || 'DE',
-            bookId: JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || (langMap[d.id] === 'EN' ? 'default-en' : 'default-de')
+            language: d.language || langMap[d.id] || 'DE',
+            bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
           }));
           setDecks(enhancedDecks as Deck[]);
         }
