@@ -359,6 +359,11 @@ const useStore = create<DeckState>()((set, get) => ({
       progress[todayStr] = (progress[todayStr] || 0) + 1;
       localStorage.setItem(key, JSON.stringify(progress));
       window.dispatchEvent(new Event('storage-update'));
+      
+      supabase.from('user_stats').upsert({
+        language: appLanguage,
+        daily_activity: progress
+      }).then(() => {});
     }
     const previousDecks = get().decks;
     let updatedCard: any = null;
@@ -1009,7 +1014,7 @@ function ActivityWidget() {
   for (let i = 0; i < 365; i++) {
     const dateStr = getLocalYMD(checkDate);
     const count = daily[dateStr] || 0;
-    if (count >= 1) {
+    if (count >= 10) {
       streak++;
       checkDate.setDate(checkDate.getDate() - 1);
     } else {
@@ -1030,7 +1035,7 @@ function ActivityWidget() {
     const dateStr = getLocalYMD(d);
     const count = daily[dateStr] || 0;
     days.push({ 
-      isCompleted: count >= 1, 
+      isCompleted: count >= 10, 
       isToday: dateStr === todayStr 
     });
   }
@@ -1631,10 +1636,31 @@ export default function App() {
     
     const fetchData = async () => {
       try {
-        const [booksRes, decksRes] = await Promise.all([
+        const [booksRes, decksRes, statsRes] = await Promise.all([
           supabase.from('books').select('*'),
-          supabase.from('decks').select('*, cards(*)')
+          supabase.from('decks').select('*, cards(*)'),
+          supabase.from('user_stats').select('*')
         ]);
+
+        if (statsRes && !statsRes.error && statsRes.data) {
+          statsRes.data.forEach((stat: any) => {
+            const lang = stat.language;
+            const cloudDaily = stat.daily_activity || {};
+            const localKey = `daily_activity_${lang}`;
+            const localDaily = JSON.parse(localStorage.getItem(localKey) || '{}');
+            let changed = false;
+            for (const date in cloudDaily) {
+              if ((cloudDaily[date] || 0) > (localDaily[date] || 0)) {
+                localDaily[date] = cloudDaily[date];
+                changed = true;
+              }
+            }
+            if (changed) {
+              localStorage.setItem(localKey, JSON.stringify(localDaily));
+              window.dispatchEvent(new Event('storage-update'));
+            }
+          });
+        }
 
         if (booksRes.error) {
           useStore.getState().setSyncError("Fetch Books Error: " + booksRes.error.message);
