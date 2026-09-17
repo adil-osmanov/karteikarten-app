@@ -1761,7 +1761,15 @@ export default function App() {
       map[key].push(d);
     });
     
-    // Original order is preserved (no sorting of completed decks to the bottom)
+    for (const key in map) {
+      map[key].sort((a, b) => {
+        const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
+        const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
+        if (aIsCompleted && !bIsCompleted) return 1;
+        if (!aIsCompleted && bIsCompleted) return -1;
+        return 0;
+      });
+    }
     return map;
   }, [filteredDecksList]);
 
