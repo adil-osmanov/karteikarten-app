@@ -612,6 +612,13 @@ function StudyCard({
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (phase === "Answer" && nextButtonRef.current) {
+      nextButtonRef.current.focus();
+    }
+  }, [phase]);
 
   const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2;
 
@@ -912,11 +919,13 @@ const playAudio = useCallback(async (text: string) => {
           
           {phase === "Answer" && card.baseWordInfo && (
             <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-4 p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center justify-center backdrop-blur-md transition-all duration-300 shadow-sm mx-auto max-w-sm"
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="mt-6 p-4 bg-slate-800/70 dark:bg-blue-950/40 border border-white/10 rounded-2xl flex items-center justify-center backdrop-blur-md shadow-lg mx-auto w-full max-w-sm overflow-hidden relative"
             >
-              <span className="text-[15px] font-medium text-blue-900 dark:text-blue-50 text-center tracking-wide">
+              <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
+              <span className="text-sm md:text-base font-medium text-slate-200 text-center tracking-wide font-sans z-10">
                 {card.baseWordInfo}
               </span>
             </motion.div>
@@ -958,6 +967,7 @@ const playAudio = useCallback(async (text: string) => {
             className="flex flex-col items-center w-full mt-4"
           >
             <button
+              ref={nextButtonRef}
               onClick={onNext}
               autoFocus
               className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-sm transition-transform duration-150 ease-out active:scale-[0.98]"
