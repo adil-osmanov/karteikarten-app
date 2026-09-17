@@ -319,28 +319,7 @@ const useStore = create<DeckState>()((set, get) => ({
     }));
     
     let { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
-    if (cardsError && (cardsError.message.includes('not exist') || cardsError.message.includes('Could not find'))) {
-        // Try lowercase column name first
-        const lowercaseFallback = cardsToInsert.map(c => {
-           const { baseWordInfo, ...rest } = c;
-           return { ...rest, basewordinfo: baseWordInfo };
-        });
-        let retryRes = await supabase.from('cards').insert(lowercaseFallback);
-        
-        if (retryRes.error) {
-           // Strip completely
-           const finalFallback = cardsToInsert.map(c => {
-             const { baseWordInfo, ...rest } = c;
-             return rest;
-           });
-           cardsError = (await supabase.from('cards').insert(finalFallback)).error;
-           if (!cardsError && typeof window !== 'undefined') {
-             alert("Внимание: Колонка baseWordInfo не найдена в базе данных Supabase! Грамматика не сохранена. Пожалуйста, выполните SQL скрипт.");
-           }
-        } else {
-           cardsError = null;
-        }
-    }
+    
     if (cardsError) {
       console.error("Supabase Cards Insert Error:", cardsError.message);
       alert(`Fehler beim Speichern der Karten: ${cardsError.message}`);
