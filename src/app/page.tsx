@@ -319,7 +319,7 @@ const useStore = create<DeckState>()((set, get) => ({
     }));
     
     let { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
-    if (cardsError && cardsError.message.includes('not exist')) {
+    if (cardsError && (cardsError.message.includes('not exist') || cardsError.message.includes('Could not find'))) {
         const fallbackCards = cardsToInsert.map(c => {
            const { baseWordInfo, ...rest } = c;
            return rest;
