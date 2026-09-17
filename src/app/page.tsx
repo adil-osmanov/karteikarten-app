@@ -320,11 +320,26 @@ const useStore = create<DeckState>()((set, get) => ({
     
     let { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
     if (cardsError && (cardsError.message.includes('not exist') || cardsError.message.includes('Could not find'))) {
-        const fallbackCards = cardsToInsert.map(c => {
+        // Try lowercase column name first
+        const lowercaseFallback = cardsToInsert.map(c => {
            const { baseWordInfo, ...rest } = c;
-           return rest;
+           return { ...rest, basewordinfo: baseWordInfo };
         });
-        cardsError = (await supabase.from('cards').insert(fallbackCards)).error;
+        let retryRes = await supabase.from('cards').insert(lowercaseFallback);
+        
+        if (retryRes.error) {
+           // Strip completely
+           const finalFallback = cardsToInsert.map(c => {
+             const { baseWordInfo, ...rest } = c;
+             return rest;
+           });
+           cardsError = (await supabase.from('cards').insert(finalFallback)).error;
+           if (!cardsError && typeof window !== 'undefined') {
+             alert("Внимание: Колонка baseWordInfo не найдена в базе данных Supabase! Грамматика не сохранена. Пожалуйста, выполните SQL скрипт.");
+           }
+        } else {
+           cardsError = null;
+        }
     }
     if (cardsError) {
       console.error("Supabase Cards Insert Error:", cardsError.message);
@@ -1733,6 +1748,10 @@ export default function App() {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
           const enhancedDecks = decksRes.data.map((d: any) => ({
             ...d,
+            cards: d.cards ? d.cards.map((c: any) => ({
+              ...c,
+              baseWordInfo: c.baseWordInfo || c.basewordinfo || null
+            })) : [],
             language: d.language || langMap[d.id] || 'DE',
             bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
           }));
