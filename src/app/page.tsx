@@ -1750,7 +1750,7 @@ export default function App() {
             ...d,
             cards: d.cards ? d.cards.map((c: any) => ({
               ...c,
-              baseWordInfo: c.baseWordInfo || c.basewordinfo || null
+              baseWordInfo: c.baseWordInfo || null
             })) : [],
             language: d.language || langMap[d.id] || 'DE',
             bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
