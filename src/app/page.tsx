@@ -922,10 +922,10 @@ const playAudio = useCallback(async (text: string) => {
               initial={{ opacity: 0, y: 10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className="mt-6 p-4 bg-slate-800/70 dark:bg-blue-950/40 border border-white/10 rounded-2xl flex items-center justify-center backdrop-blur-md shadow-lg mx-auto w-full max-w-sm overflow-hidden relative"
+              className="mt-6 px-5 py-3.5 bg-slate-800/70 dark:bg-blue-950/40 border border-white/10 rounded-2xl flex items-center justify-center backdrop-blur-md shadow-lg mx-auto w-fit max-w-[95%] overflow-hidden relative"
             >
               <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
-              <span className="text-sm md:text-base font-medium text-slate-200 text-center tracking-wide font-sans z-10">
+              <span className="text-xs sm:text-sm font-medium text-slate-200 text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis">
                 {card.baseWordInfo}
               </span>
             </motion.div>
