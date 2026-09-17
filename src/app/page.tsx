@@ -141,6 +141,7 @@ export interface Flashcard {
   nextReviewDate: number | null;
   interval: number;
   repetitions: number;
+  baseWordInfo?: string | null;
 }
 
 export interface Deck {
@@ -313,10 +314,18 @@ const useStore = create<DeckState>()((set, get) => ({
       isArchived: c.isArchived,
       nextReviewDate: c.nextReviewDate,
       interval: c.interval,
-      repetitions: c.repetitions
+      repetitions: c.repetitions,
+      baseWordInfo: c.baseWordInfo || null
     }));
     
-    const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
+    let { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
+    if (cardsError && cardsError.message.includes('not exist')) {
+        const fallbackCards = cardsToInsert.map(c => {
+           const { baseWordInfo, ...rest } = c;
+           return rest;
+        });
+        cardsError = (await supabase.from('cards').insert(fallbackCards)).error;
+    }
     if (cardsError) {
       console.error("Supabase Cards Insert Error:", cardsError.message);
       alert(`Fehler beim Speichern der Karten: ${cardsError.message}`);
@@ -900,6 +909,18 @@ const playAudio = useCallback(async (text: string) => {
           <p className="text-sm font-normal text-gray-500 dark:text-[#8E8E93] max-w-lg mx-auto leading-relaxed">
             {card.translation}
           </p>
+          
+          {phase === "Answer" && card.baseWordInfo && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center justify-center backdrop-blur-md transition-all duration-300 shadow-sm mx-auto max-w-sm"
+            >
+              <span className="text-[15px] font-medium text-blue-900 dark:text-blue-50 text-center tracking-wide">
+                {card.baseWordInfo}
+              </span>
+            </motion.div>
+          )}
         </div>
 
 
@@ -1786,7 +1807,8 @@ export default function App() {
             isArchived: false,
             nextReviewDate: null,
             interval: 0,
-            repetitions: 0
+            repetitions: 0,
+            baseWordInfo: parts.length >= 7 ? parts[6] : null
           });
         }
       });
