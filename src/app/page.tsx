@@ -1633,7 +1633,7 @@ export default function App() {
     const fetchData = async () => {
       try {
         const [booksRes, decksRes, statsRes] = await Promise.all([
-          supabase.from('books').select('*'),
+          supabase.from('books').select('*').order('created_at', { ascending: true }),
           supabase.from('decks').select('*, cards(*)'),
           supabase.from('user_stats').select('*')
         ]);
