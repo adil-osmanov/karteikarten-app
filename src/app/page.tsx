@@ -2130,32 +2130,76 @@ export default function App() {
                         </p>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {visibleDecks.map(deck => {
-                          const isCompleted = deck.cards.length > 0 && deck.cards.length === deck.cards.filter(c => c.isArchived).length;
-                          return (
-                            <div
-                              key={deck.id}
-                              draggable
-                              onDragStart={(e) => handleDragStart(e, deck.id)}
-                              onDragOver={handleDragOver}
-                              onDrop={(e) => handleDrop(e, deck.id)}
-                              onDragEnd={handleDragEnd}
-                              className={cn("transition-all duration-300", draggedDeckId === deck.id ? "opacity-30 scale-95" : "opacity-100")}
+                      <div className="space-y-6">
+                        {inProgressDecks.length > 0 && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {inProgressDecks.map(deck => (
+                              <div
+                                key={deck.id}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, deck.id)}
+                                onDragOver={handleDragOver}
+                                onDrop={(e) => handleDrop(e, deck.id)}
+                                onDragEnd={handleDragEnd}
+                                className={cn("transition-all duration-300", draggedDeckId === deck.id ? "opacity-30 scale-95" : "opacity-100")}
+                              >
+                                <DeckCard 
+                                  deck={deck} 
+                                  isCompleted={false} 
+                                  activeTab={activeTab} 
+                                  onCardClick={handleDeckClick} 
+                                  onRename={handleRenameClick} 
+                                  onDelete={handleDeleteClick} 
+                                  onEditTheory={handleEditTheory} 
+                                  onViewTheory={handleViewTheory} 
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {completedDecks.length > 0 && (
+                          <div className="mt-4">
+                            <button 
+                              onClick={() => toggleCategory(sectionKey)}
+                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mx-2 mb-4"
                             >
-                              <DeckCard 
-                                deck={deck} 
-                                isCompleted={isCompleted} 
-                                activeTab={activeTab} 
-                                onCardClick={handleDeckClick} 
-                                onRename={handleRenameClick} 
-                                onDelete={handleDeleteClick} 
-                                onEditTheory={handleEditTheory} 
-                                onViewTheory={handleViewTheory} 
-                              />
-                            </div>
-                          );
-                        })}
+                              <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
+                              <span>{appLanguage === 'EN' ? 'Archived' : 'Archiv anzeigen'}</span>
+                              <span className="bg-black/5 dark:bg-white/10 text-gray-500 dark:text-gray-400 text-xs px-2 py-0.5 rounded-full ml-1">
+                                {completedDecks.length}
+                              </span>
+                            </button>
+                            
+                            <AnimatePresence>
+                              {isExpanded && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: "auto", opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 pb-4">
+                                    {completedDecks.map(deck => (
+                                      <div key={deck.id} className="opacity-70 hover:opacity-100 transition-opacity">
+                                        <DeckCard 
+                                          deck={deck} 
+                                          isCompleted={true} 
+                                          activeTab={activeTab} 
+                                          onCardClick={handleDeckClick} 
+                                          onRename={handleRenameClick} 
+                                          onDelete={handleDeleteClick} 
+                                          onEditTheory={handleEditTheory} 
+                                          onViewTheory={handleViewTheory} 
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        )}
                       </div>
                     )}
                     {sortedDecks.length > limit && (
