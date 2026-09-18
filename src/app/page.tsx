@@ -353,13 +353,18 @@ const useStore = create<DeckState>()((set, get) => ({
 
   answerCard: async (deckId, cardId, isCorrect, isHilfe) => {
     // Update daily progress
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && isCorrect) {
       const { appLanguage } = get();
       const todayStr = new Date().toLocaleDateString('en-CA');
       const key = `daily_activity_${appLanguage}`;
       const stored = localStorage.getItem(key);
       const progress = stored ? JSON.parse(stored) : {};
-      progress[todayStr] = (progress[todayStr] || 0) + 1;
+      
+      const rawCount = progress[todayStr];
+      const currentCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
+      
+      progress[todayStr] = currentCount + 1;
+      
       localStorage.setItem(key, JSON.stringify(progress));
       window.dispatchEvent(new Event('storage-update'));
       
@@ -1008,7 +1013,7 @@ function DarkModeToggle() {
 
 function ActivityWidget() {
   const { appLanguage } = useStore();
-  const [daily, setDaily] = useState<Record<string, number>>({});
+  const [daily, setDaily] = useState<Record<string, any>>({});
 
   useEffect(() => {
     const loadProgress = () => {
@@ -1024,7 +1029,8 @@ function ActivityWidget() {
   }, [appLanguage]);
 
   const todayStr = new Date().toLocaleDateString('en-CA');
-  const todayCount = daily[todayStr] || 0;
+  const rawCount = daily[todayStr];
+  const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
 
   return (
     <div className="flex flex-col items-center justify-center px-2 mr-1">
@@ -1596,7 +1602,7 @@ export default function App() {
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
 
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
-  const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
+  const [visibleLimits, setVisibleLimits] = useState<Record<string, any>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1623,8 +1629,17 @@ export default function App() {
             const localDaily = JSON.parse(localStorage.getItem(localKey) || '{}');
             let changed = false;
             for (const date in cloudDaily) {
-              if ((cloudDaily[date] || 0) > (localDaily[date] || 0)) {
-                localDaily[date] = cloudDaily[date];
+              const rawCloud = cloudDaily[date];
+              const rawLocal = localDaily[date];
+              const cloudVal = typeof rawCloud === 'number' ? rawCloud : (rawCloud?.total || (typeof rawCloud === 'string' ? parseInt(rawCloud) || 0 : 0));
+              const localVal = typeof rawLocal === 'number' ? rawLocal : (rawLocal?.total || (typeof rawLocal === 'string' ? parseInt(rawLocal) || 0 : 0));
+              
+              if (cloudVal > localVal) {
+                localDaily[date] = cloudVal; // save as clean number
+                changed = true;
+              } else if (typeof rawLocal !== 'number') {
+                // If local is corrupted (object/string), fix it to a clean number
+                localDaily[date] = localVal;
                 changed = true;
               }
             }
