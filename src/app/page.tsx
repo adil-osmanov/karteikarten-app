@@ -353,13 +353,30 @@ const useStore = create<DeckState>()((set, get) => ({
 
   answerCard: async (deckId, cardId, isCorrect, isHilfe) => {
     // Update daily progress
-    if (typeof window !== 'undefined' && isCorrect) {
+    if (typeof window !== 'undefined') {
       const { appLanguage } = get();
+      const deck = get().decks.find(d => d.id === deckId);
+      const card = deck?.cards.find(c => c.id === cardId);
+      const isNew = card ? (card.masteryLevel === 0 && card.repetitions === 0) : false;
+      
       const todayStr = new Date().toLocaleDateString('en-CA');
       const key = `daily_activity_${appLanguage}`;
       const stored = localStorage.getItem(key);
       const progress = stored ? JSON.parse(stored) : {};
-      progress[todayStr] = (progress[todayStr] || 0) + 1;
+      
+      let todayData = progress[todayStr];
+      if (typeof todayData === 'number') {
+        todayData = { total: todayData, new: 0, review: todayData };
+      } else if (!todayData) {
+        todayData = { total: 0, new: 0, review: 0 };
+      }
+      
+      todayData.total += 1;
+      if (isNew) todayData.new += 1;
+      else todayData.review += 1;
+      
+      progress[todayStr] = todayData;
+      
       localStorage.setItem(key, JSON.stringify(progress));
       window.dispatchEvent(new Event('storage-update'));
       
@@ -1006,16 +1023,15 @@ function DarkModeToggle() {
 
 
 
-function ActivityWidget() {
+function ZenStatsWidget() {
   const { appLanguage } = useStore();
-  const [daily, setDaily] = useState<Record<string, number>>({});
+  const [daily, setDaily] = useState<any>({});
 
   useEffect(() => {
     const loadProgress = () => {
       try {
         const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
         if (stored) setDaily(JSON.parse(stored));
-        else setDaily({});
       } catch (e) {}
     };
     loadProgress();
@@ -1023,64 +1039,37 @@ function ActivityWidget() {
     return () => window.removeEventListener('storage-update', loadProgress);
   }, [appLanguage]);
 
-  const today = new Date();
-  const getLocalYMD = (d: Date) => d.toLocaleDateString('en-CA');
-  
-  let streak = 0;
-  let checkDate = new Date(today);
-  const todayStr = getLocalYMD(checkDate);
-  const todayCount = daily[todayStr] || 0;
-  
-  // If today has 0, check from yesterday. Otherwise check from today.
-  if (todayCount === 0) {
-    checkDate.setDate(checkDate.getDate() - 1);
-  }
-  
-  for (let i = 0; i < 365; i++) {
-    const dateStr = getLocalYMD(checkDate);
-    const count = daily[dateStr] || 0;
-    if (count >= 10) {
-      streak++;
-      checkDate.setDate(checkDate.getDate() - 1);
-    } else {
-      break;
-    }
-  }
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const todayData = daily[todayStr] || { total: 0, new: 0, review: 0 };
+  const total = typeof todayData === 'number' ? todayData : (todayData.total || 0);
+  const newCards = typeof todayData === 'number' ? 0 : (todayData.new || 0);
+  const reviewCards = typeof todayData === 'number' ? total : (todayData.review || 0);
 
-  // Calculate Monday-Sunday of current week
-  const days = [];
-  const dayOfWeek = today.getDay(); // 0 = Sun, 1 = Mon
-  const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - diffToMonday);
-
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    const dateStr = getLocalYMD(d);
-    const count = daily[dateStr] || 0;
-    days.push({ 
-      isCompleted: count >= 10, 
-      isToday: dateStr === todayStr 
-    });
-  }
+  const newPct = total === 0 ? 0 : (newCards / total) * 100;
+  const revPct = total === 0 ? 0 : (reviewCards / total) * 100;
 
   return (
-    <div className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] shadow-sm rounded-xl px-3 py-1.5 flex items-center gap-3 cursor-pointer group" title={`Heute: ${todayCount} Karten gelernt`}>
-      <div className="flex items-center gap-1.5">
-        <Flame className="w-4 h-4 text-orange-500" />
-        <span className="text-xs font-medium tabular-nums text-gray-900 dark:text-white">{streak}d</span>
+    <div className="w-full max-w-[280px] mx-auto mb-10 bg-white/40 dark:bg-[#1C1C1E]/40 backdrop-blur-2xl border border-black/[0.03] dark:border-white/[0.03] rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.03)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.1)] flex flex-col items-center">
+      <span className="text-[11px] tracking-[0.2em] uppercase font-medium text-gray-400 dark:text-gray-500 mb-2">Heute</span>
+      <div className="text-[64px] font-light tracking-tighter text-gray-800 dark:text-gray-100 leading-none mb-6 font-sans">
+        {total}
       </div>
-      <div className="h-3 w-[1px] bg-gray-200 dark:bg-white/10" />
-      <div className="flex items-center gap-1">
-        {days.map((day, idx) => (
-          <div key={idx} className={cn(
-            "h-4 w-1.5 rounded-full transition-all",
-            day.isCompleted ? "bg-blue-600 dark:bg-blue-500 shadow-[0_0_8px_rgba(37,99,235,0.4)] dark:shadow-[0_0_8px_rgba(59,130,246,0.4)]" :
-            day.isToday ? "bg-transparent border border-blue-600 dark:border-blue-500 animate-pulse" :
-            "bg-gray-200 dark:bg-white/15"
-          )} />
-        ))}
+      
+      {/* Sleek dual-tone progress line */}
+      <div className="w-full h-1 bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden flex mb-5">
+        <div className="h-full bg-blue-500/80 dark:bg-blue-400/80 transition-all duration-1000 ease-out" style={{ width: `${newPct}%` }} />
+        <div className="h-full bg-indigo-300 dark:bg-indigo-400/50 transition-all duration-1000 ease-out" style={{ width: `${revPct}%` }} />
+      </div>
+
+      <div className="flex w-full justify-between px-2">
+        <div className="flex flex-col items-center">
+          <span className="text-[17px] font-normal text-gray-700 dark:text-gray-300">{newCards}</span>
+          <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500">Neu</span>
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-[17px] font-normal text-gray-700 dark:text-gray-300">{reviewCards}</span>
+          <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500">Wdh</span>
+        </div>
       </div>
     </div>
   );
@@ -1121,7 +1110,6 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
         <LanguageSelector />
       )}
       <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
-        <ActivityWidget />
         <DarkModeToggle />
       </div>
     </>
@@ -1675,8 +1663,12 @@ export default function App() {
             const localDaily = JSON.parse(localStorage.getItem(localKey) || '{}');
             let changed = false;
             for (const date in cloudDaily) {
-              if ((cloudDaily[date] || 0) > (localDaily[date] || 0)) {
-                localDaily[date] = cloudDaily[date];
+              const cloudVal = cloudDaily[date];
+              const localVal = localDaily[date];
+              const cloudTotal = typeof cloudVal === 'number' ? cloudVal : (cloudVal?.total || 0);
+              const localTotal = typeof localVal === 'number' ? localVal : (localVal?.total || 0);
+              if (cloudTotal > localTotal) {
+                localDaily[date] = cloudVal;
                 changed = true;
               }
             }
@@ -2009,6 +2001,7 @@ export default function App() {
       <main className="relative z-10 max-w-5xl mx-auto px-6 py-12 md:py-24">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-8">
+            <ZenStatsWidget />
             <div className="mb-12 text-center">
               <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white mb-2 tracking-tight">Bibliothek</h1>
               <p className="text-gray-500 dark:text-gray-400 font-medium">Wähle ein Buch, um zu lernen</p>
