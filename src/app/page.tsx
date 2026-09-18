@@ -7,7 +7,7 @@ import {
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
   Clock
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { create } from "zustand";
@@ -173,6 +173,8 @@ interface DeckState {
   deleteBook: (id: string) => void;
   syncError: string | null;
   setSyncError: (msg: string | null) => void;
+  deckOrder: string[];
+  setDeckOrder: (order: string[]) => void;
 }
 
 const useStore = create<DeckState>()((set, get) => ({
@@ -186,6 +188,11 @@ const useStore = create<DeckState>()((set, get) => ({
   dailyProgress: {},
   syncError: null,
   setSyncError: (msg) => set({ syncError: msg }),
+  deckOrder: [],
+  setDeckOrder: (order) => {
+    if (typeof window !== 'undefined') localStorage.setItem('deck_order', JSON.stringify(order));
+    set({ deckOrder: order });
+  },
   
   books: [],
   setBooks: (books) => set({ books }),
@@ -1564,7 +1571,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
 export default function App() {
   const [isPending, startTransition] = useTransition();
-  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook } = useStore();
+  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
@@ -1612,6 +1619,8 @@ export default function App() {
     if (savedLang === 'DE' || savedLang === 'EN') {
       setAppLanguage(savedLang);
     }
+    const savedOrder = localStorage.getItem('deck_order');
+    if (savedOrder) useStore.getState().setDeckOrder(JSON.parse(savedOrder));
     
     const fetchData = async () => {
       try {
@@ -1724,15 +1733,16 @@ export default function App() {
     
     for (const key in map) {
       map[key].sort((a, b) => {
-        const aIsCompleted = a.cards.length > 0 && a.cards.length === a.cards.filter(c => c.isArchived).length;
-        const bIsCompleted = b.cards.length > 0 && b.cards.length === b.cards.filter(c => c.isArchived).length;
-        if (aIsCompleted && !bIsCompleted) return 1;
-        if (!aIsCompleted && bIsCompleted) return -1;
+        const indexA = deckOrder.indexOf(a.id);
+        const indexB = deckOrder.indexOf(b.id);
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
         return 0;
       });
     }
     return map;
-  }, [filteredDecksList]);
+  }, [filteredDecksList, deckOrder]);
 
   if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
 
@@ -1822,6 +1832,45 @@ export default function App() {
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+  };
+
+  const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('deckId', id);
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => setDraggedDeckId(id), 0);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const draggedId = e.dataTransfer.getData('deckId');
+    if (!draggedId || draggedId === targetId) return;
+
+    const { decks, deckOrder, setDeckOrder } = useStore.getState();
+    const currentOrder = deckOrder.length > 0 ? deckOrder : decks.map(d => d.id);
+    
+    const updatedOrder = [...currentOrder];
+    if (!updatedOrder.includes(draggedId)) updatedOrder.push(draggedId);
+    if (!updatedOrder.includes(targetId)) updatedOrder.push(targetId);
+
+    const oldIndex = updatedOrder.indexOf(draggedId);
+    const newIndex = updatedOrder.indexOf(targetId);
+
+    updatedOrder.splice(oldIndex, 1);
+    updatedOrder.splice(newIndex, 0, draggedId);
+
+    setDeckOrder(updatedOrder);
+    setDraggedDeckId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedDeckId(null);
   };
 
   const handleLoadMore = (cat: string) => {
@@ -2073,42 +2122,32 @@ export default function App() {
                         </p>
                       </div>
                     ) : (
-                      <div className="space-y-6">
-                        {inProgressDecks.length > 0 && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {inProgressDecks.map(deck => (
-                              <DeckCard key={deck.id} deck={deck} isCompleted={false} activeTab={activeTab} onCardClick={handleDeckClick} onRename={handleRenameClick} onDelete={handleDeleteClick} onEditTheory={handleEditTheory} onViewTheory={handleViewTheory} />
-                            ))}
-                          </div>
-                        )}
-                        {completedDecks.length > 0 && (
-                          <div className="mt-4">
-                            <button 
-                              onClick={() => toggleCategory(sectionKey)}
-                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900  transition-colors mx-2 mb-4"
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {visibleDecks.map(deck => {
+                          const isCompleted = deck.cards.length > 0 && deck.cards.length === deck.cards.filter(c => c.isArchived).length;
+                          return (
+                            <div
+                              key={deck.id}
+                              draggable
+                              onDragStart={(e) => handleDragStart(e, deck.id)}
+                              onDragOver={handleDragOver}
+                              onDrop={(e) => handleDrop(e, deck.id)}
+                              onDragEnd={handleDragEnd}
+                              className={cn("transition-all duration-300", draggedDeckId === deck.id ? "opacity-30 scale-95" : "opacity-100")}
                             >
-                              <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
-                              <span>Archiv anzeigen ({completedDecks.length})</span>
-                            </button>
-                            
-      <AnimatePresence>
-                              {isExpanded && (
-                                <motion.div
-                                  initial={{ opacity: 0, height: 0 }}
-                                  animate={{ opacity: 1, height: "auto" }}
-                                  exit={{ opacity: 0, height: 0 }}
-                                  className="overflow-hidden"
-                                >
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
-                                    {completedDecks.map(deck => (
-                                      <DeckCard key={deck.id} deck={deck} isCompleted={true} activeTab={activeTab} onCardClick={handleDeckClick} onRename={handleRenameClick} onDelete={handleDeleteClick} onEditTheory={handleEditTheory} onViewTheory={handleViewTheory} />
-                                    ))}
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-                        )}
+                              <DeckCard 
+                                deck={deck} 
+                                isCompleted={isCompleted} 
+                                activeTab={activeTab} 
+                                onCardClick={handleDeckClick} 
+                                onRename={handleRenameClick} 
+                                onDelete={handleDeleteClick} 
+                                onEditTheory={handleEditTheory} 
+                                onViewTheory={handleViewTheory} 
+                              />
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                     {sortedDecks.length > limit && (
