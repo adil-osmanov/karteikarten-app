@@ -355,28 +355,11 @@ const useStore = create<DeckState>()((set, get) => ({
     // Update daily progress
     if (typeof window !== 'undefined') {
       const { appLanguage } = get();
-      const deck = get().decks.find(d => d.id === deckId);
-      const card = deck?.cards.find(c => c.id === cardId);
-      const isNew = card ? (card.masteryLevel === 0 && card.repetitions === 0) : false;
-      
       const todayStr = new Date().toLocaleDateString('en-CA');
       const key = `daily_activity_${appLanguage}`;
       const stored = localStorage.getItem(key);
       const progress = stored ? JSON.parse(stored) : {};
-      
-      let todayData = progress[todayStr];
-      if (typeof todayData === 'number') {
-        todayData = { total: todayData, new: 0, review: todayData };
-      } else if (!todayData) {
-        todayData = { total: 0, new: 0, review: 0 };
-      }
-      
-      todayData.total += 1;
-      if (isNew) todayData.new += 1;
-      else todayData.review += 1;
-      
-      progress[todayStr] = todayData;
-      
+      progress[todayStr] = (progress[todayStr] || 0) + 1;
       localStorage.setItem(key, JSON.stringify(progress));
       window.dispatchEvent(new Event('storage-update'));
       
@@ -1023,15 +1006,16 @@ function DarkModeToggle() {
 
 
 
-function ZenStatsWidget() {
-  const { appLanguage, decks } = useStore();
-  const [daily, setDaily] = useState<any>({});
+function ActivityWidget() {
+  const { appLanguage } = useStore();
+  const [daily, setDaily] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const loadProgress = () => {
       try {
         const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
         if (stored) setDaily(JSON.parse(stored));
+        else setDaily({});
       } catch (e) {}
     };
     loadProgress();
@@ -1039,85 +1023,13 @@ function ZenStatsWidget() {
     return () => window.removeEventListener('storage-update', loadProgress);
   }, [appLanguage]);
 
-  // Long Term Memory
-  const longTermCount = useMemo(() => {
-    return decks.reduce((sum, deck) => sum + deck.cards.filter(c => c.isArchived).length, 0);
-  }, [decks]);
-
-  // Today
-  const getLocalYMD = (d: Date) => d.toLocaleDateString('en-CA');
-  const todayStr = getLocalYMD(new Date());
-  const todayData = daily[todayStr] || { total: 0, new: 0, review: 0 };
-  const total = typeof todayData === 'number' ? todayData : (todayData.total || 0);
-  const newCards = typeof todayData === 'number' ? 0 : (todayData.new || 0);
-  const reviewCards = typeof todayData === 'number' ? total : (todayData.review || 0);
-
-  // Week Rhythm (Mon-Sun of current week)
-  const chartDays = [];
-  const today = new Date();
-  const dayOfWeek = today.getDay(); // 0 = Sun, 1 = Mon
-  const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - diffToMonday);
-
-  let maxVal = 10; // minimum visual scale
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    const dStr = getLocalYMD(d);
-    const valObj = daily[dStr];
-    const val = typeof valObj === 'number' ? valObj : (valObj?.total || 0);
-    if (val > maxVal) maxVal = val;
-    chartDays.push({ val, isToday: dStr === todayStr });
-  }
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const todayCount = daily[todayStr] || 0;
 
   return (
-    <div className="w-full flex flex-col gap-3">
-      {/* TODAY */}
-      <div className="bg-white/40 dark:bg-[#1C1C1E]/40 backdrop-blur-2xl border border-black/[0.03] dark:border-white/[0.03] rounded-[24px] p-6 shadow-[0_8px_30px_rgb(0,0,0,0.03)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.08)] flex flex-col items-center text-center transition-all">
-        <span className="text-[11px] tracking-[0.2em] uppercase font-medium text-gray-400 dark:text-gray-500 mb-2">Heute</span>
-        <div className="text-[72px] font-light tracking-tighter text-gray-900 dark:text-white leading-none mb-3 font-sans">
-          {total}
-        </div>
-        <div className="flex items-center gap-3 text-xs font-medium text-gray-400 dark:text-gray-500">
-          <span>{newCards} Neu</span>
-          <div className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-600" />
-          <span>{reviewCards} Wdh</span>
-        </div>
-      </div>
-
-      {/* LONG TERM */}
-      <div className="bg-white/40 dark:bg-[#1C1C1E]/40 backdrop-blur-2xl border border-black/[0.03] dark:border-white/[0.03] rounded-[20px] p-4 shadow-[0_4px_20px_rgb(0,0,0,0.02)] dark:shadow-[0_4px_20px_rgb(0,0,0,0.06)] flex items-center justify-between">
-        <div className="flex flex-col">
-          <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400 dark:text-gray-500 mb-0.5">Langzeitgedächtnis</span>
-          <span className="text-xl font-medium text-gray-800 dark:text-gray-200 leading-tight">
-            {longTermCount} <span className="text-[11px] font-normal text-gray-400">Wörter</span>
-          </span>
-        </div>
-        <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center shrink-0">
-          <CheckCircle2 className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-        </div>
-      </div>
-
-      {/* WEEK RHYTHM */}
-      <div className="bg-white/40 dark:bg-[#1C1C1E]/40 backdrop-blur-2xl border border-black/[0.03] dark:border-white/[0.03] rounded-[20px] pt-5 pb-4 px-5 shadow-[0_4px_20px_rgb(0,0,0,0.02)] dark:shadow-[0_4px_20px_rgb(0,0,0,0.06)] h-28 flex items-end justify-between gap-2">
-        {chartDays.map((d, i) => {
-          const heightPct = Math.max((d.val / maxVal) * 100, 4); // min 4% to show a dot
-          return (
-            <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
-              <div className="w-full max-w-[12px] bg-gray-100 dark:bg-white/5 rounded-full overflow-hidden flex flex-col justify-end h-full">
-                <div 
-                  className={clsx(
-                    "w-full rounded-full transition-all duration-1000",
-                    d.isToday ? "bg-blue-500 dark:bg-blue-400" : "bg-gray-300 dark:bg-white/20"
-                  )}
-                  style={{ height: `${heightPct}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div className="flex flex-col items-center justify-center px-2 mr-1">
+      <span className="text-[9px] uppercase tracking-[0.2em] font-medium text-gray-400 dark:text-gray-500 leading-none mb-1">Heute</span>
+      <span className="text-xl font-light tabular-nums text-gray-900 dark:text-white leading-none">{todayCount}</span>
     </div>
   );
 }
@@ -1157,6 +1069,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
         <LanguageSelector />
       )}
       <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
+        <ActivityWidget />
         <DarkModeToggle />
       </div>
     </>
@@ -1710,12 +1623,8 @@ export default function App() {
             const localDaily = JSON.parse(localStorage.getItem(localKey) || '{}');
             let changed = false;
             for (const date in cloudDaily) {
-              const cloudVal = cloudDaily[date];
-              const localVal = localDaily[date];
-              const cloudTotal = typeof cloudVal === 'number' ? cloudVal : (cloudVal?.total || 0);
-              const localTotal = typeof localVal === 'number' ? localVal : (localVal?.total || 0);
-              if (cloudTotal > localTotal) {
-                localDaily[date] = cloudVal;
+              if ((cloudDaily[date] || 0) > (localDaily[date] || 0)) {
+                localDaily[date] = cloudDaily[date];
                 changed = true;
               }
             }
@@ -2045,18 +1954,14 @@ export default function App() {
 
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
-      <main className="relative z-10 max-w-6xl mx-auto px-6 py-12 md:py-24">
+      <main className="relative z-10 max-w-5xl mx-auto px-6 py-12 md:py-24">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-8">
-            <div className="flex flex-col lg:flex-row gap-12 lg:gap-16 items-start">
-              
-              {/* Main Content (Books) */}
-              <div className="flex-1 w-full order-2 lg:order-1">
-                <div className="mb-10 text-left">
-                  <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white mb-2 tracking-tight">Bibliothek</h1>
-                  <p className="text-gray-500 dark:text-gray-400 font-medium">Wähle ein Buch, um zu lernen</p>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-10">
+            <div className="mb-12 text-center">
+              <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white mb-2 tracking-tight">Bibliothek</h1>
+              <p className="text-gray-500 dark:text-gray-400 font-medium">Wähle ein Buch, um zu lernen</p>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
               {books.filter(b => b.language === appLanguage).map(book => (
                 <BookCard key={book.id} book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
               ))}
@@ -2064,14 +1969,6 @@ export default function App() {
                 <Plus className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
                 <span className="font-semibold text-sm">+ Buch</span>
               </div>
-              </div>
-              </div>
-
-              {/* Sidebar (Zen Stats) */}
-              <aside className="w-full max-w-[280px] shrink-0 order-2 lg:sticky lg:top-24 mx-auto lg:mx-0 ">
-                <ZenStatsWidget />
-              </aside>
-
             </div>
           </div>
         ) : (
