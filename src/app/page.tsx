@@ -1573,6 +1573,7 @@ export default function App() {
   const [isPending, startTransition] = useTransition();
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder } = useStore();
   const [isMounted, setIsMounted] = useState(false);
+  const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
@@ -1620,7 +1621,14 @@ export default function App() {
       setAppLanguage(savedLang);
     }
     const savedOrder = localStorage.getItem('deck_order');
-    if (savedOrder) useStore.getState().setDeckOrder(JSON.parse(savedOrder));
+    if (savedOrder) {
+      try {
+        const parsed = JSON.parse(savedOrder);
+        if (Array.isArray(parsed)) {
+          useStore.getState().setDeckOrder(parsed);
+        }
+      } catch(e) {}
+    }
     
     const fetchData = async () => {
       try {
@@ -1834,7 +1842,7 @@ export default function App() {
     setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
   };
 
-  const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
+
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     e.dataTransfer.setData('deckId', id);
