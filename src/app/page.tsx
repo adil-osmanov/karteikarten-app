@@ -1454,8 +1454,8 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           const contentStr = textStr.replace('💡WIDGET_TEMPLATE💡', '');
           const rest = Array.isArray(children) ? children.slice(1) : [];
           return (
-            <div className="bg-blue-50/50 dark:bg-blue-500/10 border border-blue-600/20 dark:border-blue-500/20 rounded-2xl p-4 my-5 shadow-sm">
-               <div className="text-[10px] font-bold tracking-widest text-blue-600 dark:text-blue-500 uppercase mb-1.5">Ключевой шаблон</div>
+            <div className="bg-blue-50/50 dark:bg-blue-500/10 border border-blue-600/20 dark:border-blue-500/20 rounded-2xl px-5 py-5 my-6 shadow-sm">
+               <div className="text-[11px] font-semibold tracking-[0.15em] text-blue-600 dark:text-blue-500 uppercase mb-2">Ключевой шаблон</div>
                <div className="text-[16px] font-medium text-gray-900 dark:text-white leading-relaxed">
                  {contentStr}
                  {rest}
@@ -1464,16 +1464,16 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           );
         }
       }
-      return <p className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] my-2.5">{children}</p>;
+      return <p className="text-[15px] leading-relaxed text-gray-700 dark:text-white/80 my-3">{children}</p>;
     },
     strong: ({ children }: any) => <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>,
-    em: ({ children }: any) => <em className="italic text-gray-600 dark:text-[#EDEDED]/80">{children}</em>,
-    h1: ({ children }: any) => <h1 className="text-xl font-bold tracking-tight text-black dark:text-white mt-6 mb-3">{children}</h1>,
-    h2: ({ children }: any) => <h2 className="text-lg font-bold tracking-tight text-black dark:text-white mt-6 mb-3">{children}</h2>,
-    h3: ({ children }: any) => <h3 className="text-[11px] font-bold tracking-wider text-gray-500 dark:text-white/40 uppercase mt-6 mb-2">{children}</h3>,
-    ul: ({ children }: any) => <ul className="space-y-2 my-3 ml-5 list-disc marker:text-gray-400 dark:marker:text-white/30">{children}</ul>,
-    ol: ({ children }: any) => <ol className="space-y-2 my-3 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/50 font-medium">{children}</ol>,
-    li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] pl-1">{children}</li>,
+    em: ({ children }: any) => <em className="italic text-gray-600 dark:text-white/70">{children}</em>,
+    h1: ({ children }: any) => <h1 className="text-xl font-bold tracking-tight text-black dark:text-white mt-8 mb-4">{children}</h1>,
+    h2: ({ children }: any) => <h2 className="text-lg font-bold tracking-tight text-black dark:text-white mt-8 mb-4">{children}</h2>,
+    h3: ({ children }: any) => <h3 className="text-xs font-semibold tracking-[0.15em] text-gray-500 dark:text-white/40 uppercase mt-8 mb-3">{children}</h3>,
+    ul: ({ children }: any) => <ul className="space-y-3 my-4 ml-5 list-disc marker:text-gray-400 dark:marker:text-white/30">{children}</ul>,
+    ol: ({ children }: any) => <ol className="space-y-3 my-4 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/50 font-medium">{children}</ol>,
+    li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-700 dark:text-white/80 pl-1">{children}</li>,
     blockquote: ({ children }: any) => {
       const checkAchtung = (node: any): boolean => {
         if (typeof node === 'string') return node.includes('⚠️');
@@ -1485,15 +1485,15 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       
       if (isAchtung) {
          return (
-           <blockquote className="bg-amber-500/10 dark:bg-amber-500/15 border-l-[3px] border-amber-500 px-4 py-4 rounded-r-2xl my-6 shadow-sm">
-             <div className="text-[15px] leading-relaxed text-amber-900 dark:text-amber-100/90 [&>p]:my-0">{children}</div>
+           <blockquote className="bg-amber-500/10 border border-amber-500/20 px-5 py-5 rounded-2xl my-6 shadow-sm">
+             <div className="text-[15px] leading-relaxed font-medium text-amber-600 dark:text-amber-500 [&>p]:my-0">{children}</div>
            </blockquote>
          );
       }
       
       return (
-        <blockquote className="bg-blue-50/50 dark:bg-blue-500/10 border-l-[3px] border-blue-600 dark:border-blue-500 px-4 py-4 rounded-r-2xl my-6 shadow-sm">
-          <div className="text-[15px] leading-relaxed text-gray-800 dark:text-[#EDEDED] [&>p]:my-0">{children}</div>
+        <blockquote className="bg-blue-50/50 dark:bg-blue-500/10 border border-blue-600/20 dark:border-blue-500/20 px-5 py-5 rounded-2xl my-6 shadow-sm">
+          <div className="text-[15px] leading-relaxed text-gray-700 dark:text-white/80 [&>p]:my-0">{children}</div>
         </blockquote>
       );
     },
@@ -1556,7 +1556,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         <div className="shrink-0 pt-5 mt-2 border-t border-black/5 dark:border-white/10 bg-transparent">
           <button 
             onClick={onStartSession}
-            className="w-full bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white font-medium py-3.5 rounded-xl transition-all shadow-[0_4px_20px_rgba(37,99,235,0.3)] dark:shadow-[0_4px_20px_rgba(59,130,246,0.3)] active:scale-[0.98] text-lg mb-3"
+            className="w-full bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white font-semibold py-4 rounded-2xl transition-all shadow-[0_4px_14px_0_rgba(10,132,255,0.3)] dark:shadow-[0_4px_14px_0_rgba(10,132,255,0.35)] active:scale-[0.98] text-lg mb-3"
           >
             Start
           </button>
