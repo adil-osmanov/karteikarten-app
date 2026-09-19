@@ -175,6 +175,8 @@ interface DeckState {
   setSyncError: (msg: string | null) => void;
   deckOrder: string[];
   setDeckOrder: (order: string[]) => void;
+  playbackSpeed: number;
+  setPlaybackSpeed: (speed: number) => void;
 }
 
 const useStore = create<DeckState>()((set, get) => ({
@@ -192,6 +194,11 @@ const useStore = create<DeckState>()((set, get) => ({
   setDeckOrder: (order) => {
     if (typeof window !== 'undefined') localStorage.setItem('deck_order', JSON.stringify(order));
     set({ deckOrder: order });
+  },
+  playbackSpeed: 1,
+  setPlaybackSpeed: (speed) => {
+    if (typeof window !== 'undefined') localStorage.setItem('playback_speed', speed.toString());
+    set({ playbackSpeed: speed });
   },
   
   books: [],
@@ -617,7 +624,7 @@ function StudyCard({
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const { playbackSpeed, setPlaybackSpeed } = useStore();
   const inputRef = useRef<HTMLInputElement>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -858,7 +865,7 @@ const playAudio = useCallback(async (text: string) => {
           </button>
           
           <button
-            onClick={() => setPlaybackSpeed(p => p === 1 ? 0.75 : 1)}
+            onClick={() => setPlaybackSpeed(playbackSpeed === 1 ? 0.75 : 1)}
             className="flex items-center justify-center h-[28px] px-3 rounded-full bg-gray-50/80 dark:bg-[#2C2C2E]/60 backdrop-blur-md border border-black/[0.03] dark:border-white/[0.05] text-gray-500 dark:text-[#8E8E93] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] hover:text-gray-700 dark:hover:text-[#EBEBF5] transition-all active:scale-[0.96] shadow-sm select-none"
             title="Playback Speed"
           >
@@ -1651,6 +1658,11 @@ export default function App() {
           useStore.getState().setDeckOrder(parsed);
         }
       } catch(e) {}
+    }
+    const savedSpeed = localStorage.getItem('playback_speed');
+    if (savedSpeed) {
+      const speed = parseFloat(savedSpeed);
+      if (!isNaN(speed)) useStore.getState().setPlaybackSpeed(speed);
     }
     
     const fetchData = async () => {
