@@ -617,6 +617,7 @@ function StudyCard({
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const inputRef = useRef<HTMLInputElement>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -650,6 +651,7 @@ const playAudio = useCallback(async (text: string) => {
         audioCache.set(text, audioUrl);
       }
       const audio = new Audio(audioUrl);
+      audio.playbackRate = playbackSpeed;
       
       audio.onended = () => setIsPlayingAudio(false);
       audio.onerror = () => setIsPlayingAudio(false);
@@ -659,7 +661,7 @@ const playAudio = useCallback(async (text: string) => {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = "de-DE";
-        utterance.rate = 0.9;
+        utterance.rate = playbackSpeed * 0.9;
         utterance.onend = () => setIsPlayingAudio(false);
         utterance.onerror = () => setIsPlayingAudio(false);
         window.speechSynthesis.speak(utterance);
@@ -667,7 +669,7 @@ const playAudio = useCallback(async (text: string) => {
         setIsPlayingAudio(false);
       }
     }
-  }, []);
+  }, [playbackSpeed]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -840,19 +842,40 @@ const playAudio = useCallback(async (text: string) => {
       }}
     >
       <div className="w-full flex items-center justify-between mb-8">
-        <button 
-          onClick={() => {
-            const fullSentence = card.sentence.replace("___", phase === "Answer" ? card.targetWord : "Lücke");
-            playAudio(fullSentence);
-          }}
-          disabled={isPlayingAudio}
-          className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
-        >
-          <Volume2 className="w-5 h-5" />
-          <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded-[4px] px-1 shadow-sm pointer-events-none">
-            R
-          </span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => {
+              const fullSentence = card.sentence.replace("___", phase === "Answer" ? card.targetWord : "Lücke");
+              playAudio(fullSentence);
+            }}
+            disabled={isPlayingAudio}
+            className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          >
+            <Volume2 className="w-5 h-5" />
+            <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded-[4px] px-1 shadow-sm pointer-events-none">
+              R
+            </span>
+          </button>
+          
+          <button
+            onClick={() => setPlaybackSpeed(p => p === 1 ? 0.75 : p === 0.75 ? 0.5 : 1)}
+            className="flex items-center justify-center h-[28px] px-3 rounded-full bg-gray-50/80 dark:bg-[#2C2C2E]/60 backdrop-blur-md border border-black/[0.03] dark:border-white/[0.05] text-gray-500 dark:text-[#8E8E93] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] hover:text-gray-700 dark:hover:text-[#EBEBF5] transition-all active:scale-[0.96] shadow-sm select-none"
+            title="Playback Speed"
+          >
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={playbackSpeed}
+                initial={{ opacity: 0, y: 4, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -4, scale: 0.9 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                className="text-[11px] font-semibold tabular-nums tracking-wide leading-none"
+              >
+                {playbackSpeed}x
+              </motion.span>
+            </AnimatePresence>
+          </button>
+        </div>
         <div className="flex items-center gap-4">
           <button 
             onClick={handleHilfe}
