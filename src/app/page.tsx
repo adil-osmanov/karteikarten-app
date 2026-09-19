@@ -385,7 +385,7 @@ const useStore = create<DeckState>()((set, get) => ({
       supabase.from('user_stats').upsert({
         language: appLanguage,
         daily_activity: progress
-      }).then(() => {});
+      }, { onConflict: 'language' }).then(() => {});
     }
     const previousDecks = get().decks;
     let updatedCard: any = null;
@@ -1674,32 +1674,48 @@ export default function App() {
         ]);
 
         if (statsRes && !statsRes.error && statsRes.data) {
-          statsRes.data.forEach((stat: any) => {
-            const lang = stat.language;
-            const cloudDaily = stat.daily_activity || {};
+          const pushStats = (lang: string) => {
             const localKey = `daily_activity_${lang}`;
             const localDaily = JSON.parse(localStorage.getItem(localKey) || '{}');
-            let changed = false;
-            for (const date in cloudDaily) {
+            const cloudStat = statsRes.data.find((s: any) => s.language === lang) || { daily_activity: {} };
+            const cloudDaily = cloudStat.daily_activity || {};
+            
+            let localChanged = false;
+            let cloudChanged = false;
+            
+            const allDates = new Set([...Object.keys(localDaily), ...Object.keys(cloudDaily)]);
+            allDates.forEach(date => {
               const rawCloud = cloudDaily[date];
               const rawLocal = localDaily[date];
               const cloudVal = typeof rawCloud === 'number' ? rawCloud : (rawCloud?.total || (typeof rawCloud === 'string' ? parseInt(rawCloud) || 0 : 0));
               const localVal = typeof rawLocal === 'number' ? rawLocal : (rawLocal?.total || (typeof rawLocal === 'string' ? parseInt(rawLocal) || 0 : 0));
               
-              if (cloudVal > localVal) {
-                localDaily[date] = cloudVal; // save as clean number
-                changed = true;
-              } else if (typeof rawLocal !== 'number') {
-                // If local is corrupted (object/string), fix it to a clean number
-                localDaily[date] = localVal;
-                changed = true;
+              const maxVal = Math.max(cloudVal, localVal);
+              
+              if (maxVal > localVal || (rawLocal !== undefined && typeof rawLocal !== 'number')) {
+                localDaily[date] = maxVal;
+                localChanged = true;
               }
-            }
-            if (changed) {
+              if (maxVal > cloudVal || cloudDaily[date] === undefined) {
+                cloudDaily[date] = maxVal;
+                cloudChanged = true;
+              }
+            });
+
+            if (localChanged) {
               localStorage.setItem(localKey, JSON.stringify(localDaily));
               window.dispatchEvent(new Event('storage-update'));
             }
-          });
+            if (cloudChanged) {
+              supabase.from('user_stats').upsert({
+                language: lang,
+                daily_activity: cloudDaily
+              }, { onConflict: 'language' }).then(() => {});
+            }
+          };
+
+          pushStats('DE');
+          pushStats('EN');
         }
 
         if (booksRes.error) {
