@@ -192,7 +192,10 @@ const useStore = create<DeckState>()((set, get) => ({
   setSyncError: (msg) => set({ syncError: msg }),
   deckOrder: [],
   setDeckOrder: (order) => {
-    if (typeof window !== 'undefined') localStorage.setItem('deck_order', JSON.stringify(order));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('deck_order', JSON.stringify(order));
+      syncAppStateToCloud();
+    }
     set({ deckOrder: order });
   },
   playbackSpeed: 1,
@@ -1397,12 +1400,14 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
       localStorage.removeItem(`deck_theory_${deckId}`);
     }
     window.dispatchEvent(new Event('theory-update'));
+    syncAppStateToCloud();
     onClose();
   };
 
   const handleDelete = () => {
     localStorage.removeItem(`deck_theory_${deckId}`);
     window.dispatchEvent(new Event('theory-update'));
+    syncAppStateToCloud();
     onClose();
   };
 
@@ -1599,6 +1604,28 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   );
 }
 
+
+// --- CLOUD SYNC HELPER ---
+export const syncAppStateToCloud = async () => {
+  if (typeof window === 'undefined') return;
+  const state: any = { theory: {} };
+  
+  const order = localStorage.getItem('deck_order');
+  if (order) state.deckOrder = JSON.parse(order);
+  
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('deck_theory_')) {
+      state.theory[key] = localStorage.getItem(key);
+    }
+  }
+  
+  await supabase.from('user_stats').upsert({
+    language: 'GLOBAL_APP_STATE',
+    daily_activity: state
+  }, { onConflict: 'language' });
+};
+
 export default function App() {
   const [isPending, startTransition] = useTransition();
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder } = useStore();
@@ -1669,7 +1696,7 @@ export default function App() {
       try {
         const [booksRes, decksRes, statsRes] = await Promise.all([
           supabase.from('books').select('*').order('created_at', { ascending: true }),
-          supabase.from('decks').select('*, cards(*)'),
+          supabase.from('decks').select('*, cards(*)').order('created_at', { ascending: true }),
           supabase.from('user_stats').select('*')
         ]);
 
@@ -1716,6 +1743,21 @@ export default function App() {
 
           pushStats('DE');
           pushStats('EN');
+          
+          const globalStat = statsRes.data.find((s: any) => s.language === 'GLOBAL_APP_STATE');
+          if (globalStat && globalStat.daily_activity) {
+            const state = globalStat.daily_activity;
+            if (state.deckOrder && Array.isArray(state.deckOrder)) {
+              localStorage.setItem('deck_order', JSON.stringify(state.deckOrder));
+              useStore.getState().setDeckOrder(state.deckOrder);
+            }
+            if (state.theory) {
+              for (const [key, val] of Object.entries(state.theory)) {
+                if (typeof val === 'string') localStorage.setItem(key, val);
+              }
+              window.dispatchEvent(new Event('theory-update'));
+            }
+          }
         }
 
         if (booksRes.error) {
