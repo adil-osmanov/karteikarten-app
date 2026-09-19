@@ -833,6 +833,40 @@ const playAudio = useCallback(async (text: string) => {
     });
   };
 
+  
+  const parseNoun = (text: string) => {
+    const match = text.match(/^(der|die|das)\s+(.*)$/i);
+    if (!match) return null;
+    const article = match[1].toLowerCase();
+    
+    let colorClasses = "";
+    let articleClasses = "";
+    let textClasses = "";
+    let borderClasses = "";
+    
+    if (article === 'der') {
+      colorClasses = "bg-blue-50 dark:bg-blue-500/10 border-blue-200/60 dark:border-blue-500/20 shadow-blue-500/5";
+      articleClasses = "font-semibold text-blue-600 dark:text-blue-400";
+      textClasses = "text-blue-800 dark:text-blue-200";
+      borderClasses = "border-blue-600/30 dark:border-blue-500/40";
+    } else if (article === 'die') {
+      colorClasses = "bg-rose-50 dark:bg-rose-500/10 border-rose-200/60 dark:border-rose-500/20 shadow-rose-500/5";
+      articleClasses = "font-semibold text-rose-600 dark:text-rose-400";
+      textClasses = "text-rose-800 dark:text-rose-200";
+      borderClasses = "border-rose-600/30 dark:border-rose-500/40";
+    } else if (article === 'das') {
+      colorClasses = "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200/60 dark:border-emerald-500/20 shadow-emerald-500/5";
+      articleClasses = "font-semibold text-emerald-600 dark:text-emerald-400";
+      textClasses = "text-emerald-800 dark:text-emerald-200";
+      borderClasses = "border-emerald-600/30 dark:border-emerald-500/40";
+    }
+    
+    return { article: match[1], rest: match[2], colorClasses, articleClasses, textClasses, borderClasses };
+  };
+
+  const parsedBaseWord = card.baseWordInfo ? parseNoun(card.baseWordInfo) : null;
+  const parsedTargetWord = phase === "Answer" ? parseNoun(card.targetWord) : null;
+
   const parts = card.sentence.split("___");
   const shouldCapitalize = parts[0]?.trim() === "";
   const displayTargetWord = shouldCapitalize ? card.targetWord.charAt(0).toUpperCase() + card.targetWord.slice(1) : card.targetWord;
@@ -917,8 +951,15 @@ const playAudio = useCallback(async (text: string) => {
           {parts[0]}
           
           {phase === "Answer" ? (
-            <span className="inline-block align-baseline mx-1 border-0 border-b-2 border-blue-600/30 dark:border-blue-500/40 text-blue-600 dark:text-blue-600 dark:text-blue-500 bg-transparent outline-none rounded-none py-0 px-1 transition-colors">
-              {displayTargetWord}
+            <span className={cn(
+              "inline-block align-baseline mx-1 border-0 border-b-2 bg-transparent outline-none rounded-none py-0 px-1 transition-colors",
+              parsedTargetWord ? parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses : "border-blue-600/30 dark:border-blue-500/40 text-blue-600 dark:text-blue-500"
+            )}>
+              {parsedTargetWord ? (
+                <><span className={parsedTargetWord.articleClasses}>{shouldCapitalize ? parsedTargetWord.article.charAt(0).toUpperCase() + parsedTargetWord.article.slice(1) : parsedTargetWord.article}</span> {parsedTargetWord.rest}</>
+              ) : (
+                displayTargetWord
+              )}
             </span>
           ) : (
             <>
@@ -961,11 +1002,23 @@ const playAudio = useCallback(async (text: string) => {
               initial={{ opacity: 0, y: 10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className="mt-6 px-5 py-3.5 bg-slate-800/70 dark:bg-blue-950/40 border border-white/10 rounded-2xl flex items-center justify-center backdrop-blur-md shadow-lg mx-auto w-fit max-w-[95%] overflow-hidden relative"
+              className={cn(
+                "mt-6 px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative",
+                parsedBaseWord 
+                  ? parsedBaseWord.colorClasses 
+                  : "bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg"
+              )}
             >
-              <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
-              <span className="text-xs sm:text-sm font-medium text-slate-200 text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis">
-                {card.baseWordInfo}
+              {!parsedBaseWord && <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />}
+              <span className={cn(
+                "text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis",
+                parsedBaseWord ? parsedBaseWord.textClasses : "text-slate-200 dark:text-[#EBEBF5]"
+              )}>
+                {parsedBaseWord ? (
+                  <><span className={parsedBaseWord.articleClasses}>{parsedBaseWord.article}</span> {parsedBaseWord.rest}</>
+                ) : (
+                  card.baseWordInfo
+                )}
               </span>
             </motion.div>
           )}
@@ -1693,7 +1746,15 @@ export default function App() {
     }
     
     const fetchData = async () => {
+      
       try {
+        const cachedBooks = localStorage.getItem('cache_books');
+        if (cachedBooks) setBooks(JSON.parse(cachedBooks));
+        const cachedDecks = localStorage.getItem('cache_decks');
+        if (cachedDecks) setDecks(JSON.parse(cachedDecks));
+      } catch (e) {}
+      
+try {
         const [booksRes, decksRes, statsRes] = await Promise.all([
           supabase.from('books').select('*').order('created_at', { ascending: true }),
           supabase.from('decks').select('*, cards(*)').order('created_at', { ascending: true }),
@@ -1777,7 +1838,8 @@ export default function App() {
             accentColor: b.accentColor || b.accentcolor
           }));
           setBooks(mappedBooks);
-        } else {
+          localStorage.setItem('cache_books', JSON.stringify(mappedBooks));
+        } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
             { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
@@ -1791,11 +1853,13 @@ export default function App() {
             await supabase.from('books').insert(lowercaseDefaults);
           }
           setBooks(defaultBooks);
+          localStorage.setItem('cache_books', JSON.stringify(defaultBooks));
         }
 
         if (decksRes.error) {
           console.error("Supabase Fetch Decks Error:", decksRes.error.message);
-          setDecks([]);
+          // Only clear decks if we are sure it's not a network error, but for offline robustness, do NOT wipe cache.
+          if (!localStorage.getItem('cache_decks')) { setDecks([]); }
         } else if (decksRes.data) {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
           const enhancedDecks = decksRes.data.map((d: any) => ({
@@ -1808,10 +1872,11 @@ export default function App() {
             bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
           }));
           setDecks(enhancedDecks as Deck[]);
+          localStorage.setItem('cache_decks', JSON.stringify(enhancedDecks));
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
-        setDecks([]);
+        // Do nothing, let the cache render
       }
     };
     fetchData();
