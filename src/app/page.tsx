@@ -858,7 +858,7 @@ const playAudio = useCallback(async (text: string) => {
           </button>
           
           <button
-            onClick={() => setPlaybackSpeed(p => p === 1 ? 0.75 : p === 0.75 ? 0.5 : 1)}
+            onClick={() => setPlaybackSpeed(p => p === 1 ? 0.75 : 1)}
             className="flex items-center justify-center h-[28px] px-3 rounded-full bg-gray-50/80 dark:bg-[#2C2C2E]/60 backdrop-blur-md border border-black/[0.03] dark:border-white/[0.05] text-gray-500 dark:text-[#8E8E93] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] hover:text-gray-700 dark:hover:text-[#EBEBF5] transition-all active:scale-[0.96] shadow-sm select-none"
             title="Playback Speed"
           >
