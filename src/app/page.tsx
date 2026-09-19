@@ -2119,7 +2119,7 @@ export default function App() {
 
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
-      <main className="relative z-10 max-w-5xl mx-auto px-6 py-12 md:py-24">
+      <main className="relative z-10 max-w-5xl mx-auto px-6 pt-24 pb-12 md:pt-32 md:pb-24">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-8">
             <div className="mb-12 text-center">
