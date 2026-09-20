@@ -834,6 +834,17 @@ const playAudio = useCallback(async (text: string) => {
   };
 
   
+  const parseBaseWordInfo = (text: string | undefined | null) => {
+    if (!text) return { main: "", sub: "" };
+    const match = text.match(/\(([^)]+)\)/);
+    if (match) {
+      const subText = match[1].split(',').map(s => s.trim()).join(' • ');
+      const mainText = text.replace(match[0], '').replace(/\s+—/g, ' —').replace(/  +/g, ' ').trim();
+      return { main: mainText, sub: subText };
+    }
+    return { main: text, sub: "" };
+  };
+
   const parseNoun = (text: string) => {
     const match = text.match(/^(der|die|das)\s+(.*)$/i);
     if (!match) return null;
@@ -864,7 +875,8 @@ const playAudio = useCallback(async (text: string) => {
     return { article: match[1], rest: match[2], colorClasses, articleClasses, textClasses, borderClasses };
   };
 
-  const parsedBaseWord = card.baseWordInfo ? parseNoun(card.baseWordInfo) : null;
+  const parsedInfo = parseBaseWordInfo(card.baseWordInfo);
+  const parsedBaseWord = parsedInfo.main ? parseNoun(parsedInfo.main) : null;
   const parsedTargetWord = phase === "Answer" ? parseNoun(card.targetWord) : null;
 
   const parts = card.sentence.split("___");
@@ -1002,24 +1014,34 @@ const playAudio = useCallback(async (text: string) => {
               initial={{ opacity: 0, y: 10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className={cn(
-                "mt-6 px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative",
-                parsedBaseWord 
-                  ? parsedBaseWord.colorClasses 
-                  : "bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg"
-              )}
+              className="mt-6 flex flex-col items-center gap-2"
             >
-              {!parsedBaseWord && <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />}
-              <span className={cn(
-                "text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis",
-                parsedBaseWord ? parsedBaseWord.textClasses : "text-slate-200 dark:text-[#EBEBF5]"
-              )}>
-                {parsedBaseWord ? (
-                  <><span className={parsedBaseWord.articleClasses}>{parsedBaseWord.article}</span> {parsedBaseWord.rest}</>
-                ) : (
-                  card.baseWordInfo
+              <div
+                className={cn(
+                  "px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative",
+                  parsedBaseWord 
+                    ? parsedBaseWord.colorClasses 
+                    : "bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg"
                 )}
-              </span>
+              >
+                {!parsedBaseWord && <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />}
+                <span className={cn(
+                  "text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis",
+                  parsedBaseWord ? parsedBaseWord.textClasses : "text-slate-200 dark:text-[#EBEBF5]"
+                )}>
+                  {parsedBaseWord ? (
+                    <><span className={parsedBaseWord.articleClasses}>{parsedBaseWord.article}</span> {parsedBaseWord.rest}</>
+                  ) : (
+                    parsedInfo.main
+                  )}
+                </span>
+              </div>
+              
+              {parsedInfo.sub && (
+                <span className="text-[13px] text-gray-500 dark:text-[#8E8E93] font-medium tracking-wide">
+                  {parsedInfo.sub}
+                </span>
+              )}
             </motion.div>
           )}
         </div>
