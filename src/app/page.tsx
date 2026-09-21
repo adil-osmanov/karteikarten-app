@@ -28,6 +28,29 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 let cachedAudioCtx: AudioContext | null = null;
 const audioCache = new Map<string, string>();
 
+const initAudioCtx = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (!cachedAudioCtx) {
+      cachedAudioCtx = new AudioContextClass();
+    }
+    if (cachedAudioCtx.state === 'suspended') {
+      cachedAudioCtx.resume();
+    }
+    
+    // iOS Safari trick: play a silent oscillator to permanently unlock audio
+    const osc = cachedAudioCtx.createOscillator();
+    const gain = cachedAudioCtx.createGain();
+    gain.gain.value = 0;
+    osc.connect(gain);
+    gain.connect(cachedAudioCtx.destination);
+    osc.start(cachedAudioCtx.currentTime);
+    osc.stop(cachedAudioCtx.currentTime + 0.001);
+  } catch (e) {}
+};
+
 const playTockSound = () => {
   if (typeof window === 'undefined') return;
   try {
@@ -1258,7 +1281,7 @@ const DeckCard = React.memo(({
 
   return (
     <div 
-      onClick={() => onCardClick(deck.id)}
+      onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
         "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative will-change-transform transform-gpu translate-z-0",
         isCompleted && "opacity-60 hover:opacity-100"
@@ -1297,7 +1320,7 @@ const DeckCard = React.memo(({
               />
             )}
             <button
-              onClick={(e) => { e.stopPropagation(); onStartDictation(deck.id); }}
+              onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
               className="flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
               title="Dictation Mode"
             >
