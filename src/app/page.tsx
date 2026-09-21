@@ -2434,10 +2434,8 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const [inputText, setInputText] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
-  const [shakeIndex, setShakeIndex] = useState(-1);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   
-  const inputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const loopTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -2454,6 +2452,16 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     return card.sentence.replace("___", card.targetWord).replace(/\s+/g, " ").trim();
   }, [card]);
 
+  // Initial punctuation auto-fill
+  useEffect(() => {
+    if (!targetSentence) return;
+    let startText = "";
+    while (startText.length < targetSentence.length && /[.,?!;:«»„“"'()[\]{}\-—–]/.test(targetSentence[startText.length])) {
+      startText += targetSentence[startText.length];
+    }
+    setInputText(startText);
+  }, [targetSentence, currentIndex]);
+
   const playMicrosoftAudio = useCallback(async (rate: number = 1.0) => {
     if (!targetSentence) return;
     
@@ -2463,7 +2471,6 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     }
     
     try {
-      // First try to fetch from /api/tts
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2481,7 +2488,6 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       
       await audio.play();
     } catch (e) {
-      // Fallback if API fails
       setIsPlayingAudio(false);
     }
   }, [targetSentence]);
@@ -2502,103 +2508,104 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     };
   }, [targetSentence, playMicrosoftAudio, resetLoopTimer]);
 
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Tab' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        playMicrosoftAudio(1.0);
-        resetLoopTimer();
-        inputRef.current?.focus();
-        return;
-      }
-      
-      // Ironclad focus return
-      if (document.activeElement !== inputRef.current && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        inputRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [playMicrosoftAudio, resetLoopTimer]);
-
-  const handleSuccess = () => {
+  const handleSuccess = useCallback(() => {
     setIsSuccess(true);
-    if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+    if (navigator.vibrate) navigator.vibrate(50);
     setTimeout(() => {
       if (currentIndex < cardsToPlay.length - 1) {
         setCurrentIndex(prev => prev + 1);
-        setInputText("");
         setIsSuccess(false);
         setGaveUp(false);
       } else {
         onClose();
       }
     }, 800);
-  };
+  }, [currentIndex, cardsToPlay.length, onClose]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    resetLoopTimer();
-    if (isSuccess || gaveUp) return;
-    
-    const val = e.target.value;
-    
-    if (val.length < inputText.length) {
-      setInputText(val);
-      return;
-    }
-    
-    for (let i = 0; i < inputText.length; i++) {
-      if (inputText[i] !== targetSentence[i]) {
-        if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
-        setShakeIndex(inputText.length - 1);
-        setTimeout(() => setShakeIndex(-1), 200);
-        return; 
-      }
-    }
-    
-    if (val.length > targetSentence.length) return;
-    
-    const lastCharTyped = val[val.length - 1];
-    const mappedChar = RU_TO_DE[lastCharTyped] || lastCharTyped;
-    
-    const newVal = inputText + mappedChar;
-    const isCorrect = mappedChar === targetSentence[newVal.length - 1];
-    
-    if (isCorrect) {
-      if (navigator.vibrate) navigator.vibrate(10);
-    } else {
-      if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
-      setShakeIndex(newVal.length - 1);
-      setTimeout(() => setShakeIndex(-1), 200);
-    }
-    
-    setInputText(newVal);
-    
-    if (newVal === targetSentence) {
-      handleSuccess();
-    }
-  };
-
-  const handleGiveUp = () => {
+  const handleGiveUp = useCallback(() => {
     setGaveUp(true);
     setInputText(targetSentence);
     if (navigator.vibrate) navigator.vibrate([50, 100, 50]);
     setTimeout(() => {
       if (currentIndex < cardsToPlay.length - 1) {
         setCurrentIndex(prev => prev + 1);
-        setInputText("");
         setIsSuccess(false);
         setGaveUp(false);
       } else {
         onClose();
       }
     }, 2500);
-  };
+  }, [currentIndex, cardsToPlay.length, onClose, targetSentence]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      
+      if (e.key === 'Tab' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        playMicrosoftAudio(1.0);
+        resetLoopTimer();
+        return;
+      }
+      
+      if (isSuccess || gaveUp) return;
+      
+      resetLoopTimer();
+
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        setInputText(prev => {
+          if (prev.length === 0) return prev;
+          if (prev[prev.length - 1] !== targetSentence[prev.length - 1]) {
+            return prev.slice(0, -1);
+          }
+          let res = prev.slice(0, -1);
+          while (res.length > 0 && /[.,?!;:«»„“"'()[\]{}\-—–]/.test(res[res.length - 1])) {
+            res = res.slice(0, -1);
+          }
+          return res;
+        });
+        return;
+      }
+
+      if (e.key.length === 1) {
+        e.preventDefault();
+        
+        // Block if error exists
+        if (inputText.length > 0 && inputText[inputText.length - 1] !== targetSentence[inputText.length - 1]) {
+          if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+          return;
+        }
+        
+        if (inputText.length >= targetSentence.length) return;
+        
+        const typedChar = RU_TO_DE[e.key] || e.key;
+        const expectedChar = targetSentence[inputText.length];
+        
+        if (typedChar === expectedChar) {
+          // Success char
+          let newText = inputText + typedChar;
+          while (newText.length < targetSentence.length && /[.,?!;:«»„“"'()[\]{}\-—–]/.test(targetSentence[newText.length])) {
+            newText += targetSentence[newText.length];
+          }
+          setInputText(newText);
+          
+          if (newText === targetSentence) {
+            handleSuccess();
+          }
+        } else {
+          // Error char
+          if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+          setInputText(inputText + typedChar);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [inputText, targetSentence, isSuccess, gaveUp, playMicrosoftAudio, resetLoopTimer, handleSuccess]);
 
   if (!card) return null;
-
-  const words = targetSentence.split(' ');
-  let charIndex = 0;
 
   return (
     <>
@@ -2617,7 +2624,6 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
       className="fixed inset-0 z-[100] flex flex-col bg-[#1C1C1E] text-white"
-      onClick={() => inputRef.current?.focus()}
     >
       <div className="pt-14 px-6 flex items-center justify-between opacity-70">
         <div className="text-xs font-semibold tracking-[0.2em] uppercase text-white/50">Dictation</div>
@@ -2629,7 +2635,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       
       <div className="mt-8 flex justify-center gap-6">
         <button 
-          onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(1.0); inputRef.current?.focus(); }}
+          onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(1.0); }}
           className={cn(
             "w-16 h-16 flex items-center justify-center rounded-full backdrop-blur-md transition-all active:scale-95 shadow-lg",
             isPlayingAudio ? "bg-white/20 text-white" : "bg-white/10 text-white/90 hover:bg-white/20"
@@ -2638,7 +2644,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
           <Play className="w-6 h-6 ml-1" fill="currentColor" />
         </button>
         <button 
-          onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(0.65); inputRef.current?.focus(); }}
+          onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(0.65); }}
           className="w-12 h-12 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 active:scale-95 transition-all text-white/60 self-center backdrop-blur-md"
           title="Slow (0.65x)"
         >
@@ -2647,69 +2653,27 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center px-6 md:px-12 w-full max-w-4xl mx-auto">
-        <div className="text-[#F2F2F7] text-3xl md:text-4xl lg:text-5xl font-sans tracking-tight leading-[1.6] flex flex-wrap justify-center content-center text-center">
-          {words.map((word, wIdx) => {
-            const wordNode = (
-              <span key={wIdx} className="inline-block whitespace-pre mr-[0.3em] last:mr-0 mb-4">
-                {word.split('').map((char, cIdx) => {
-                  const globalIdx = charIndex++;
-                  const isTyped = globalIdx < inputText.length;
-                  const typedChar = inputText[globalIdx];
-                  const isCorrect = typedChar === char;
-                  const isMistake = isTyped && !isCorrect;
-                  const shouldShake = shakeIndex === globalIdx;
-
-                  if (!isTyped && !isSuccess && !gaveUp) {
-                    return null; // hide untyped characters entirely
-                  }
-
-                  return (
-                    <span 
-                      key={cIdx} 
-                      className={cn(
-                        "transition-colors duration-150 inline-block",
-                        isSuccess ? "text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.4)]" : 
-                        gaveUp && !isTyped ? "text-white/20" :
-                        gaveUp && isMistake ? "text-red-500/50" :
-                        isCorrect ? "text-[#F2F2F7]" : "text-red-500",
-                        shouldShake ? "animate-dict-shake text-red-500" : ""
-                      )}
-                    >
-                      {char}
-                    </span>
-                  );
-                })}
+        <div className="text-center text-3xl md:text-4xl lg:text-5xl font-sans tracking-tight whitespace-pre-wrap break-words leading-[1.6]">
+          {inputText.split('').map((char, i) => {
+            const isMistake = i === inputText.length - 1 && char !== targetSentence[i];
+            return (
+              <span 
+                key={i} 
+                className={cn(
+                  "transition-colors duration-150 inline",
+                  isSuccess ? "text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.4)]" : 
+                  gaveUp ? "text-white/30" :
+                  isMistake ? "text-red-500 animate-dict-shake inline-block" : "text-[#F2F2F7]"
+                )}
+              >
+                {char}
               </span>
             );
-            charIndex++; // space
-            return wordNode;
           })}
-          
           {!isSuccess && !gaveUp && (
-            <motion.span 
-              animate={{ opacity: [1, 0, 1] }}
-              transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-              className="inline-block w-[3px] md:w-[4px] bg-blue-500 rounded-full shrink-0 ml-1 mb-4"
-              style={{ height: '1.2em', verticalAlign: 'middle', marginTop: '-0.1em' }}
-            />
+            <span className="animate-pulse text-blue-500 font-light inline-block w-[2px] -ml-[1px] opacity-80" style={{ transform: 'translateY(-2px)' }}>|</span>
           )}
         </div>
-        
-        <input
-          ref={inputRef}
-          type="text"
-          value={inputText}
-          onChange={handleChange}
-          onBlur={(e) => {
-            // Re-focus instantly to maintain ironclad focus unless giving up
-            if (!gaveUp && !isSuccess) e.target.focus();
-          }}
-          autoFocus
-          className="opacity-0 absolute w-0 h-0 inset-0 pointer-events-none"
-          autoComplete="off"
-          autoCorrect="off"
-          spellCheck="false"
-        />
       </div>
 
       <div className="pb-12 pt-6 flex justify-center">
