@@ -2536,7 +2536,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       if (!isPlayingRef.current) {
         playMicrosoftAudio(audioRateRef.current);
       }
-    }, 2000);
+    }, 1000);
   }, [playMicrosoftAudio]);
 
   useEffect(() => {
@@ -2664,9 +2664,9 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
-      className="fixed inset-0 z-[100] flex flex-col bg-[#1C1C1E] text-[#F2F2F7]"
+      className="fixed inset-0 z-[100] flex flex-col bg-[#1C1C1E] text-[#F2F2F7] overflow-hidden"
     >
-      <div className="w-full px-5 pt-12 pb-4 flex items-center justify-between">
+      <div className="w-full px-5 pt-12 pb-4 flex items-center justify-between shrink-0">
         <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-2 -ml-2 text-white/50 hover:text-white transition-colors">
           <ArrowLeft className="w-6 h-6" />
         </button>
@@ -2675,42 +2675,43 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         </span>
       </div>
       
-      <div className="w-full h-1 bg-white/5">
+      <div className="w-full h-1 bg-white/5 shrink-0">
         <div 
           className="h-full bg-blue-500 transition-all duration-300" 
           style={{ width: `${((currentIndex + 1) / cardsToPlay.length) * 100}%` }} 
         />
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center px-6 md:px-12 w-full max-w-4xl mx-auto pb-[15vh]">
-        
-        <div className="w-full flex justify-center items-center gap-4 mb-10">
-          <button 
-            onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(1.0, true); }} 
-            className="transition-all duration-300 outline-none"
-          >
-            <Volume2 
-              className={cn(
-                "w-6 h-6 transition-all duration-300",
-                isPlayingAudio 
-                  ? "animate-pulse text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)] scale-110" 
-                  : "text-white/30 hover:text-white/60"
-              )} 
-            />
-          </button>
-          <button 
-            onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(0.75, true); }} 
+      {/* Completely decoupled stable block for audio controls */}
+      <div className="w-full h-20 shrink-0 flex justify-center items-center gap-4 mt-6">
+        <button 
+          onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(1.0, true); }} 
+          className="transition-all duration-300 outline-none"
+        >
+          <Volume2 
             className={cn(
-              "text-[11px] font-bold px-2 py-1 rounded transition-colors outline-none", 
-              isPlayingAudio && audioRateRef.current === 0.75 
-                ? "bg-white/20 text-white" 
-                : "bg-white/10 text-white/30 hover:bg-white/20 hover:text-white/60"
-            )}
-          >
-            0.75x
-          </button>
-        </div>
+              "w-6 h-6 transition-all duration-300",
+              isPlayingAudio 
+                ? "animate-pulse text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)] scale-110" 
+                : "text-white/30 hover:text-white/60"
+            )} 
+          />
+        </button>
+        <button 
+          onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(0.75, true); }} 
+          className={cn(
+            "text-[11px] font-bold px-2 py-1 rounded transition-colors outline-none", 
+            isPlayingAudio && audioRateRef.current === 0.75 
+              ? "bg-white/20 text-white" 
+              : "bg-white/10 text-white/30 hover:bg-white/20 hover:text-white/60"
+          )}
+        >
+          0.75x
+        </button>
+      </div>
 
+      {/* Flexible isolated text area */}
+      <div className="flex-1 flex flex-col items-center justify-center px-6 md:px-12 w-full max-w-4xl mx-auto pb-[20vh]">
         <AnimatePresence mode="wait">
           <motion.div 
             key={currentIndex}
@@ -2727,7 +2728,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
                   key={i} 
                   className={cn(
                     "transition-colors duration-200 inline",
-                    isSuccess ? "text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.4)]" : 
+                    isSuccess ? "text-green-400 [text-shadow:0_0_15px_rgba(74,222,128,0.5)]" : 
                     isMistake ? "text-red-500 animate-dict-shake inline-block" : "text-[#F2F2F7]"
                   )}
                 >
