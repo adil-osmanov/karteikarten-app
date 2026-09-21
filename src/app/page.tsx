@@ -2496,7 +2496,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
     loopTimerRef.current = setTimeout(() => {
       playMicrosoftAudio(1.0);
-    }, 6000);
+    }, 4000);
   }, [playMicrosoftAudio]);
 
   useEffect(() => {
@@ -2510,6 +2510,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
 
   const handleSuccess = useCallback(() => {
     setIsSuccess(true);
+    playFeedbackSound(true);
     if (navigator.vibrate) navigator.vibrate(50);
     setTimeout(() => {
       if (currentIndex < cardsToPlay.length - 1) {
@@ -2584,6 +2585,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         
         if (typedChar === expectedChar) {
           // Success char
+          playTockSound();
           let newText = inputText + typedChar;
           while (newText.length < targetSentence.length && /[.,?!;:«»„“"'()[\]{}\-—–]/.test(targetSentence[newText.length])) {
             newText += targetSentence[newText.length];
@@ -2595,6 +2597,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
           }
         } else {
           // Error char
+          playFeedbackSound(false);
           if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
           setInputText(inputText + typedChar);
         }
@@ -2618,6 +2621,13 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       .animate-dict-shake {
         animation: custom-shake 0.2s ease-in-out;
       }
+      @keyframes dict-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+      .animate-dict-pulse {
+        animation: dict-pulse 0.8s ease-in-out infinite;
+      }
     `}</style>
     <motion.div 
       initial={{ opacity: 0, scale: 0.98 }}
@@ -2637,15 +2647,15 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         <button 
           onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(1.0); }}
           className={cn(
-            "w-16 h-16 flex items-center justify-center rounded-full backdrop-blur-md transition-all active:scale-95 shadow-lg",
-            isPlayingAudio ? "bg-white/20 text-white" : "bg-white/10 text-white/90 hover:bg-white/20"
+            "w-16 h-16 flex items-center justify-center rounded-full backdrop-blur-xl border transition-all active:scale-95 shadow-[0_4px_30px_rgba(0,0,0,0.1)]",
+            isPlayingAudio ? "bg-white/20 border-white/20 text-white" : "bg-white/10 border-white/5 text-white/90 hover:bg-white/20 hover:border-white/10"
           )}
         >
           <Play className="w-6 h-6 ml-1" fill="currentColor" />
         </button>
         <button 
           onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(0.65); }}
-          className="w-12 h-12 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 active:scale-95 transition-all text-white/60 self-center backdrop-blur-md"
+          className="w-12 h-12 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 active:scale-95 transition-all text-white/40 hover:text-white/80 self-center backdrop-blur-md"
           title="Slow (0.65x)"
         >
           <Snail className="w-5 h-5" />
@@ -2653,7 +2663,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center px-6 md:px-12 w-full max-w-4xl mx-auto">
-        <div className="text-center text-3xl md:text-4xl lg:text-5xl font-sans tracking-tight whitespace-pre-wrap break-words leading-[1.6]">
+        <div className="text-center text-3xl md:text-4xl lg:text-5xl font-sans antialiased tracking-tight whitespace-pre-wrap break-words leading-[1.6]">
           {inputText.split('').map((char, i) => {
             const isMistake = i === inputText.length - 1 && char !== targetSentence[i];
             return (
@@ -2671,7 +2681,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
             );
           })}
           {!isSuccess && !gaveUp && (
-            <span className="animate-pulse text-blue-500 font-light inline-block w-[2px] -ml-[1px] opacity-80" style={{ transform: 'translateY(-2px)' }}>|</span>
+            <span className="inline-block w-[3px] h-[1.1em] bg-blue-500 rounded-full align-middle ml-[2px] animate-dict-pulse" style={{ transform: 'translateY(-2px)' }}></span>
           )}
         </div>
       </div>
@@ -2680,7 +2690,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         {!isSuccess && !gaveUp && (
           <button 
             onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
-            className="text-xs font-semibold text-white/20 hover:text-white/50 transition-colors uppercase tracking-[0.2em] px-6 py-3 rounded-full hover:bg-white/5"
+            className="text-xs font-semibold text-white/40 hover:text-white/80 transition-colors uppercase tracking-[0.2em] px-6 py-3 rounded-full hover:bg-white/5"
           >
             Сдаюсь / Показать текст
           </button>
