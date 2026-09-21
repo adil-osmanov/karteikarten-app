@@ -5,7 +5,7 @@ import {
   Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
-  Clock
+  Clock, Mic, Snail, Play, X, Headphones
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -1244,12 +1244,13 @@ BookCard.displayName = "BookCard";
 
 
 const DeckCard = React.memo(({ 
-  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onEditTheory, onViewTheory 
+  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onEditTheory, onViewTheory, onStartDictation 
 }: { 
   deck: Deck; isCompleted: boolean; activeTab: string; 
   onCardClick: (id: string) => void; onRename: (id: string, name: string) => void; 
   onDelete: (id: string, name: string) => void; 
   onEditTheory: (id: string) => void; onViewTheory: (id: string) => void; 
+  onStartDictation: (id: string) => void;
 }) => {
   const total = deck.cards.length;
   const mastered = deck.cards.filter(c => c.isArchived).length;
@@ -1287,13 +1288,22 @@ const DeckCard = React.memo(({
       
       <div className="mt-auto">
         <div className="flex items-center justify-between w-full text-sm font-bold mb-3">
-          {activeTab === 'Grammatik' && (
-            <DeckTheoryIndicator 
-              deckId={deck.id} 
-              onOpenEdit={(e) => { e.stopPropagation(); onEditTheory(deck.id); }} 
-              onOpenView={(e) => { e.stopPropagation(); onViewTheory(deck.id); }} 
-            />
-          )}
+          <div className="flex items-center gap-2">
+            {activeTab === 'Grammatik' && (
+              <DeckTheoryIndicator 
+                deckId={deck.id} 
+                onOpenEdit={(e) => { e.stopPropagation(); onEditTheory(deck.id); }} 
+                onOpenView={(e) => { e.stopPropagation(); onViewTheory(deck.id); }} 
+              />
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); onStartDictation(deck.id); }}
+              className="flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
+              title="Dictation Mode"
+            >
+              <Mic className="w-4 h-4" />
+            </button>
+          </div>
           <span className={cn("ml-auto", isCompleted ? "text-green-600" : "text-gray-400")}>{mastered} / {total}</span>
         </div>
         <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
@@ -1707,6 +1717,7 @@ export default function App() {
   const [isMounted, setIsMounted] = useState(false);
   const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
+  const [dictationDeckId, setDictationDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
@@ -2111,6 +2122,7 @@ try {
         {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
         {theoryEditDeckId && <TheoryEditorModal deckId={theoryEditDeckId} onClose={() => setTheoryEditDeckId(null)} />}
         {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} onEdit={() => { setTheoryEditDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
+        {dictationDeckId && <DictationPlayer deck={decks.find(d => d.id === dictationDeckId)!} onClose={() => setDictationDeckId(null)} />}
       </AnimatePresence>
 
 {/* RENAME MODAL */}
@@ -2328,7 +2340,8 @@ try {
                                   isCompleted={false} 
                                   activeTab={activeTab} 
                                   onCardClick={handleDeckClick} 
-                                  onRename={handleRenameClick} 
+                                  onRename={handleRenameClick}
+                                  onStartDictation={(id) => setDictationDeckId(id)} 
                                   onDelete={handleDeleteClick} 
                                   onEditTheory={handleEditTheory} 
                                   onViewTheory={handleViewTheory} 
@@ -2367,7 +2380,8 @@ try {
                                           isCompleted={true} 
                                           activeTab={activeTab} 
                                           onCardClick={handleDeckClick} 
-                                          onRename={handleRenameClick} 
+                                          onRename={handleRenameClick}
+                                  onStartDictation={(id) => setDictationDeckId(id)} 
                                           onDelete={handleDeleteClick} 
                                           onEditTheory={handleEditTheory} 
                                           onViewTheory={handleViewTheory} 
@@ -2400,5 +2414,212 @@ try {
         )}
       </main>
     </>
+  );
+}
+
+
+function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void }) {
+  useScrollLock(true);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [inputText, setInputText] = useState("");
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [gaveUp, setGaveUp] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // We filter out archived/mastered cards just like normal, or play all?
+  // Let's play all unmastered, or all if empty.
+  const cardsToPlay = useMemo(() => {
+    let unmastered = deck.cards.filter(c => c.masteryLevel < 4 && !c.isArchived);
+    if (unmastered.length === 0) unmastered = [...deck.cards];
+    return unmastered.sort(() => Math.random() - 0.5);
+  }, [deck]);
+
+  const card = cardsToPlay[currentIndex];
+  
+  // Combine sentence and answer
+  const targetSentence = useMemo(() => {
+    if (!card) return "";
+    return card.sentence.replace("___", card.targetWord).replace(/\s+/g, " ").trim();
+  }, [card]);
+
+  const speak = useCallback((rate: number = 1.0) => {
+    if (!targetSentence) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(targetSentence);
+    utterance.lang = "de-DE";
+    utterance.rate = rate;
+    
+    const voices = window.speechSynthesis.getVoices();
+    const premiumVoice = voices.find(v => v.lang.startsWith('de') && (v.name.includes('Premium') || v.name.includes('Enhanced')));
+    if (premiumVoice) utterance.voice = premiumVoice;
+    
+    window.speechSynthesis.speak(utterance);
+  }, [targetSentence]);
+
+  // Initial playback
+  useEffect(() => {
+    window.speechSynthesis.getVoices(); // iOS warmup
+    const warmup = new SpeechSynthesisUtterance('');
+    warmup.volume = 0;
+    window.speechSynthesis.speak(warmup);
+    
+    speak(0.9);
+    
+    return () => window.speechSynthesis.cancel();
+  }, [speak]);
+
+  // Typing logic
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isSuccess || gaveUp) return;
+    
+    const val = e.target.value;
+    
+    // Deleting is always allowed
+    if (val.length < inputText.length) {
+      setInputText(val);
+      return;
+    }
+    
+    // Check if current text already has an error (prevent typing MORE correct/wrong chars)
+    for (let i = 0; i < inputText.length; i++) {
+      if (inputText[i] !== targetSentence[i]) {
+        // Block typing, must backspace!
+        return;
+      }
+    }
+    
+    if (val.length > targetSentence.length) return;
+    
+    setInputText(val);
+    
+    if (val === targetSentence) {
+      setIsSuccess(true);
+      setTimeout(() => {
+        if (currentIndex < cardsToPlay.length - 1) {
+          setCurrentIndex(prev => prev + 1);
+          setInputText("");
+          setIsSuccess(false);
+          setGaveUp(false);
+        } else {
+          onClose();
+        }
+      }, 800);
+    }
+  };
+
+  const handleGiveUp = () => {
+    setGaveUp(true);
+    setInputText(targetSentence);
+    setTimeout(() => {
+      if (currentIndex < cardsToPlay.length - 1) {
+        setCurrentIndex(prev => prev + 1);
+        setInputText("");
+        setIsSuccess(false);
+        setGaveUp(false);
+      } else {
+        onClose();
+      }
+    }, 2500);
+  };
+
+  if (!card) return null;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      className="fixed inset-0 z-[100] flex flex-col bg-[#000000] text-white"
+      onClick={() => inputRef.current?.focus()}
+    >
+      {/* Header */}
+      <div className="pt-12 px-6 flex items-center justify-between opacity-70">
+        <div className="text-xs font-semibold tracking-[0.2em] uppercase text-white/50">Dictation</div>
+        <div className="text-sm font-medium tabular-nums">{currentIndex + 1} / {cardsToPlay.length}</div>
+        <button onClick={onClose} className="p-2 -mr-2 hover:bg-white/10 rounded-full transition-colors">
+          <X className="w-5 h-5" />
+        </button>
+      </div>
+      
+      {/* Play Controls */}
+      <div className="mt-12 flex justify-center gap-6">
+        <button 
+          onClick={(e) => { e.stopPropagation(); speak(0.9); inputRef.current?.focus(); }}
+          className="w-16 h-16 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all text-white"
+        >
+          <Play className="w-6 h-6 ml-1" fill="currentColor" />
+        </button>
+        <button 
+          onClick={(e) => { e.stopPropagation(); speak(0.65); inputRef.current?.focus(); }}
+          className="w-12 h-12 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 active:scale-95 transition-all text-white/70 self-center"
+          title="Slow (0.65x)"
+        >
+          <Snail className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Typing Area */}
+      <div className="flex-1 flex flex-col items-center justify-center px-8 w-full max-w-4xl mx-auto">
+        <div className="text-3xl md:text-5xl font-medium tracking-tight leading-relaxed flex flex-wrap justify-center gap-x-[1px] md:gap-x-[2px] break-all">
+          {inputText.split('').map((char, i) => {
+            const isCorrect = char === targetSentence[i];
+            const isLast = i === inputText.length - 1;
+            const isMistake = !isCorrect;
+            
+            return (
+              <span 
+                key={i} 
+                className={cn(
+                  "transition-colors duration-150",
+                  isSuccess ? "text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.5)]" : 
+                  gaveUp ? "text-amber-400" :
+                  isCorrect ? "text-white" : "text-red-500",
+                  isMistake && isLast && !gaveUp ? "animate-pulse" : ""
+                )}
+              >
+                {char === ' ' ? '\u00A0' : char}
+              </span>
+            );
+          })}
+          
+          {/* Cursor */}
+          {!isSuccess && !gaveUp && (
+            <motion.span 
+              animate={{ opacity: [1, 0, 1] }}
+              transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+              className="w-1 md:w-1.5 h-[1.1em] bg-blue-500 rounded-full ml-1 shrink-0"
+              style={{ marginTop: '0.15em' }}
+            />
+          )}
+        </div>
+        
+        {/* Hidden Input */}
+        <input
+          ref={inputRef}
+          type="text"
+          value={inputText}
+          onChange={handleChange}
+          onBlur={() => inputRef.current?.focus()}
+          autoFocus
+          className="opacity-0 absolute inset-0 pointer-events-none w-[1px] h-[1px]"
+          autoComplete="off"
+          autoCorrect="off"
+          
+          spellCheck="false"
+        />
+      </div>
+
+      {/* Footer / Give Up */}
+      <div className="pb-12 flex justify-center">
+        {!isSuccess && !gaveUp && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
+            className="text-sm font-medium text-white/30 hover:text-white/60 transition-colors uppercase tracking-widest"
+          >
+            Сдаюсь / Показать текст
+          </button>
+        )}
+      </div>
+    </motion.div>
   );
 }
