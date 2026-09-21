@@ -2418,16 +2418,29 @@ try {
 }
 
 
+const RU_TO_DE: Record<string, string> = {
+  'й':'q', 'ц':'w', 'у':'e', 'к':'r', 'е':'t', 'н':'z', 'г':'u', 'ш':'i', 'щ':'o', 'з':'p', 'х':'ü', 'ъ':'+',
+  'ф':'a', 'ы':'s', 'в':'d', 'а':'f', 'п':'g', 'р':'h', 'о':'j', 'л':'k', 'д':'l', 'ж':'ö', 'э':'ä',
+  'я':'y', 'ч':'x', 'с':'c', 'м':'v', 'и':'b', 'т':'n', 'ь':'m', 'б':',', 'ю':'.', 'ё':'^',
+  'Й':'Q', 'Ц':'W', 'У':'E', 'К':'R', 'Е':'T', 'Н':'Z', 'Г':'U', 'Ш':'I', 'Щ':'O', 'З':'P', 'Х':'Ü', 'Ъ':'*',
+  'Ф':'A', 'Ы':'S', 'В':'D', 'А':'F', 'П':'G', 'Р':'H', 'О':'J', 'Л':'K', 'Д':'L', 'Ж':'Ö', 'Э':'Ä',
+  'Я':'Y', 'Ч':'X', 'С':'C', 'М':'V', 'И':'B', 'Т':'N', 'Ь':'M', 'Б':';', 'Ю':':', 'Ё':'°',
+  '«':'"', '»':'"', '„':'"', '“':'"'
+};
+
 function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void }) {
   useScrollLock(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [inputText, setInputText] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
+  const [shakeIndex, setShakeIndex] = useState(-1);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  
   const inputRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const loopTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // We filter out archived/mastered cards just like normal, or play all?
-  // Let's play all unmastered, or all if empty.
   const cardsToPlay = useMemo(() => {
     let unmastered = deck.cards.filter(c => c.masteryLevel < 4 && !c.isArchived);
     if (unmastered.length === 0) unmastered = [...deck.cards];
@@ -2436,80 +2449,140 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
 
   const card = cardsToPlay[currentIndex];
   
-  // Combine sentence and answer
   const targetSentence = useMemo(() => {
     if (!card) return "";
     return card.sentence.replace("___", card.targetWord).replace(/\s+/g, " ").trim();
   }, [card]);
 
-  const speak = useCallback((rate: number = 1.0) => {
+  const playMicrosoftAudio = useCallback(async (rate: number = 1.0) => {
     if (!targetSentence) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(targetSentence);
-    utterance.lang = "de-DE";
-    utterance.rate = rate;
     
-    const voices = window.speechSynthesis.getVoices();
-    const premiumVoice = voices.find(v => v.lang.startsWith('de') && (v.name.includes('Premium') || v.name.includes('Enhanced')));
-    if (premiumVoice) utterance.voice = premiumVoice;
+    setIsPlayingAudio(true);
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
     
-    window.speechSynthesis.speak(utterance);
+    try {
+      // First try to fetch from /api/tts
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: targetSentence })
+      });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.playbackRate = rate;
+      audioRef.current = audio;
+      
+      audio.onended = () => setIsPlayingAudio(false);
+      audio.onerror = () => setIsPlayingAudio(false);
+      
+      await audio.play();
+    } catch (e) {
+      // Fallback if API fails
+      setIsPlayingAudio(false);
+    }
   }, [targetSentence]);
 
-  // Initial playback
-  useEffect(() => {
-    window.speechSynthesis.getVoices(); // iOS warmup
-    const warmup = new SpeechSynthesisUtterance('');
-    warmup.volume = 0;
-    window.speechSynthesis.speak(warmup);
-    
-    speak(0.9);
-    
-    return () => window.speechSynthesis.cancel();
-  }, [speak]);
+  const resetLoopTimer = useCallback(() => {
+    if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
+    loopTimerRef.current = setTimeout(() => {
+      playMicrosoftAudio(1.0);
+    }, 6000);
+  }, [playMicrosoftAudio]);
 
-  // Typing logic
+  useEffect(() => {
+    playMicrosoftAudio(1.0);
+    resetLoopTimer();
+    return () => {
+      if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
+      if (audioRef.current) audioRef.current.pause();
+    };
+  }, [targetSentence, playMicrosoftAudio, resetLoopTimer]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        playMicrosoftAudio(1.0);
+        resetLoopTimer();
+        inputRef.current?.focus();
+        return;
+      }
+      
+      // Ironclad focus return
+      if (document.activeElement !== inputRef.current && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [playMicrosoftAudio, resetLoopTimer]);
+
+  const handleSuccess = () => {
+    setIsSuccess(true);
+    if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+    setTimeout(() => {
+      if (currentIndex < cardsToPlay.length - 1) {
+        setCurrentIndex(prev => prev + 1);
+        setInputText("");
+        setIsSuccess(false);
+        setGaveUp(false);
+      } else {
+        onClose();
+      }
+    }, 800);
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    resetLoopTimer();
     if (isSuccess || gaveUp) return;
     
     const val = e.target.value;
     
-    // Deleting is always allowed
     if (val.length < inputText.length) {
       setInputText(val);
       return;
     }
     
-    // Check if current text already has an error (prevent typing MORE correct/wrong chars)
     for (let i = 0; i < inputText.length; i++) {
       if (inputText[i] !== targetSentence[i]) {
-        // Block typing, must backspace!
-        return;
+        if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+        setShakeIndex(inputText.length - 1);
+        setTimeout(() => setShakeIndex(-1), 200);
+        return; 
       }
     }
     
     if (val.length > targetSentence.length) return;
     
-    setInputText(val);
+    const lastCharTyped = val[val.length - 1];
+    const mappedChar = RU_TO_DE[lastCharTyped] || lastCharTyped;
     
-    if (val === targetSentence) {
-      setIsSuccess(true);
-      setTimeout(() => {
-        if (currentIndex < cardsToPlay.length - 1) {
-          setCurrentIndex(prev => prev + 1);
-          setInputText("");
-          setIsSuccess(false);
-          setGaveUp(false);
-        } else {
-          onClose();
-        }
-      }, 800);
+    const newVal = inputText + mappedChar;
+    const isCorrect = mappedChar === targetSentence[newVal.length - 1];
+    
+    if (isCorrect) {
+      if (navigator.vibrate) navigator.vibrate(10);
+    } else {
+      if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+      setShakeIndex(newVal.length - 1);
+      setTimeout(() => setShakeIndex(-1), 200);
+    }
+    
+    setInputText(newVal);
+    
+    if (newVal === targetSentence) {
+      handleSuccess();
     }
   };
 
   const handleGiveUp = () => {
     setGaveUp(true);
     setInputText(targetSentence);
+    if (navigator.vibrate) navigator.vibrate([50, 100, 50]);
     setTimeout(() => {
       if (currentIndex < cardsToPlay.length - 1) {
         setCurrentIndex(prev => prev + 1);
@@ -2524,102 +2597,132 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
 
   if (!card) return null;
 
+  const words = targetSentence.split(' ');
+  let charIndex = 0;
+
   return (
+    <>
+    <style>{`
+      @keyframes custom-shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-3px); }
+        75% { transform: translateX(3px); }
+      }
+      .animate-dict-shake {
+        animation: custom-shake 0.2s ease-in-out;
+      }
+    `}</style>
     <motion.div 
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
-      className="fixed inset-0 z-[100] flex flex-col bg-[#000000] text-white"
+      className="fixed inset-0 z-[100] flex flex-col bg-[#1C1C1E] text-white"
       onClick={() => inputRef.current?.focus()}
     >
-      {/* Header */}
-      <div className="pt-12 px-6 flex items-center justify-between opacity-70">
+      <div className="pt-14 px-6 flex items-center justify-between opacity-70">
         <div className="text-xs font-semibold tracking-[0.2em] uppercase text-white/50">Dictation</div>
-        <div className="text-sm font-medium tabular-nums">{currentIndex + 1} / {cardsToPlay.length}</div>
-        <button onClick={onClose} className="p-2 -mr-2 hover:bg-white/10 rounded-full transition-colors">
-          <X className="w-5 h-5" />
+        <div className="text-sm font-medium tabular-nums text-white/60">{currentIndex + 1} / {cardsToPlay.length}</div>
+        <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-2 -mr-2 hover:bg-white/10 rounded-full transition-colors">
+          <X className="w-5 h-5 text-white/70" />
         </button>
       </div>
       
-      {/* Play Controls */}
-      <div className="mt-12 flex justify-center gap-6">
+      <div className="mt-8 flex justify-center gap-6">
         <button 
-          onClick={(e) => { e.stopPropagation(); speak(0.9); inputRef.current?.focus(); }}
-          className="w-16 h-16 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all text-white"
+          onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(1.0); inputRef.current?.focus(); }}
+          className={cn(
+            "w-16 h-16 flex items-center justify-center rounded-full backdrop-blur-md transition-all active:scale-95 shadow-lg",
+            isPlayingAudio ? "bg-white/20 text-white" : "bg-white/10 text-white/90 hover:bg-white/20"
+          )}
         >
           <Play className="w-6 h-6 ml-1" fill="currentColor" />
         </button>
         <button 
-          onClick={(e) => { e.stopPropagation(); speak(0.65); inputRef.current?.focus(); }}
-          className="w-12 h-12 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 active:scale-95 transition-all text-white/70 self-center"
+          onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(0.65); inputRef.current?.focus(); }}
+          className="w-12 h-12 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 active:scale-95 transition-all text-white/60 self-center backdrop-blur-md"
           title="Slow (0.65x)"
         >
           <Snail className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Typing Area */}
-      <div className="flex-1 flex flex-col items-center justify-center px-8 w-full max-w-4xl mx-auto">
-        <div className="text-3xl md:text-5xl font-medium tracking-tight leading-relaxed flex flex-wrap justify-center gap-x-[1px] md:gap-x-[2px] break-all">
-          {inputText.split('').map((char, i) => {
-            const isCorrect = char === targetSentence[i];
-            const isLast = i === inputText.length - 1;
-            const isMistake = !isCorrect;
-            
-            return (
-              <span 
-                key={i} 
-                className={cn(
-                  "transition-colors duration-150",
-                  isSuccess ? "text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.5)]" : 
-                  gaveUp ? "text-amber-400" :
-                  isCorrect ? "text-white" : "text-red-500",
-                  isMistake && isLast && !gaveUp ? "animate-pulse" : ""
-                )}
-              >
-                {char === ' ' ? '\u00A0' : char}
+      <div className="flex-1 flex flex-col items-center justify-center px-6 md:px-12 w-full max-w-4xl mx-auto">
+        <div className="text-[#F2F2F7] text-3xl md:text-4xl lg:text-5xl font-sans tracking-tight leading-[1.6] flex flex-wrap justify-center content-center text-center">
+          {words.map((word, wIdx) => {
+            const wordNode = (
+              <span key={wIdx} className="inline-block whitespace-pre mr-[0.3em] last:mr-0 mb-4">
+                {word.split('').map((char, cIdx) => {
+                  const globalIdx = charIndex++;
+                  const isTyped = globalIdx < inputText.length;
+                  const typedChar = inputText[globalIdx];
+                  const isCorrect = typedChar === char;
+                  const isMistake = isTyped && !isCorrect;
+                  const shouldShake = shakeIndex === globalIdx;
+
+                  if (!isTyped && !isSuccess && !gaveUp) {
+                    return null; // hide untyped characters entirely
+                  }
+
+                  return (
+                    <span 
+                      key={cIdx} 
+                      className={cn(
+                        "transition-colors duration-150 inline-block",
+                        isSuccess ? "text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.4)]" : 
+                        gaveUp && !isTyped ? "text-white/20" :
+                        gaveUp && isMistake ? "text-red-500/50" :
+                        isCorrect ? "text-[#F2F2F7]" : "text-red-500",
+                        shouldShake ? "animate-dict-shake text-red-500" : ""
+                      )}
+                    >
+                      {char}
+                    </span>
+                  );
+                })}
               </span>
             );
+            charIndex++; // space
+            return wordNode;
           })}
           
-          {/* Cursor */}
           {!isSuccess && !gaveUp && (
             <motion.span 
               animate={{ opacity: [1, 0, 1] }}
               transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-              className="w-1 md:w-1.5 h-[1.1em] bg-blue-500 rounded-full ml-1 shrink-0"
-              style={{ marginTop: '0.15em' }}
+              className="inline-block w-[3px] md:w-[4px] bg-blue-500 rounded-full shrink-0 ml-1 mb-4"
+              style={{ height: '1.2em', verticalAlign: 'middle', marginTop: '-0.1em' }}
             />
           )}
         </div>
         
-        {/* Hidden Input */}
         <input
           ref={inputRef}
           type="text"
           value={inputText}
           onChange={handleChange}
-          onBlur={() => inputRef.current?.focus()}
+          onBlur={(e) => {
+            // Re-focus instantly to maintain ironclad focus unless giving up
+            if (!gaveUp && !isSuccess) e.target.focus();
+          }}
           autoFocus
-          className="opacity-0 absolute inset-0 pointer-events-none w-[1px] h-[1px]"
+          className="opacity-0 absolute w-0 h-0 inset-0 pointer-events-none"
           autoComplete="off"
           autoCorrect="off"
-          
           spellCheck="false"
         />
       </div>
 
-      {/* Footer / Give Up */}
-      <div className="pb-12 flex justify-center">
+      <div className="pb-12 pt-6 flex justify-center">
         {!isSuccess && !gaveUp && (
           <button 
             onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
-            className="text-sm font-medium text-white/30 hover:text-white/60 transition-colors uppercase tracking-widest"
+            className="text-xs font-semibold text-white/20 hover:text-white/50 transition-colors uppercase tracking-[0.2em] px-6 py-3 rounded-full hover:bg-white/5"
           >
             Сдаюсь / Показать текст
           </button>
         )}
       </div>
     </motion.div>
+    </>
   );
 }
