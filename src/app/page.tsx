@@ -2436,7 +2436,8 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const loopTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isPlayingRef = useRef(false);
   const audioRateRef = useRef(1.0);
 
   const cardsToPlay = useMemo(() => {
@@ -2452,14 +2453,6 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     return card.sentence.replace("___", card.targetWord).replace(/\s+/g, " ").trim();
   }, [card]);
 
-  const parsedTranslation = useMemo(() => {
-    if (!card) return "";
-    const raw = card.translation || "";
-    if (raw.includes('—')) return raw.split('—')[1].trim();
-    if (raw.includes('-')) return raw.split('-')[1].trim();
-    return raw.trim();
-  }, [card]);
-
   useEffect(() => {
     if (!targetSentence) return;
     let startText = "";
@@ -2469,16 +2462,19 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     setInputText(startText);
   }, [targetSentence, currentIndex]);
 
-  const playMicrosoftAudio = useCallback(async (rate: number = 1.0) => {
+  const playMicrosoftAudio = useCallback(async (rate: number = 1.0, force: boolean = false) => {
     if (!targetSentence) return;
-    audioRateRef.current = rate;
+    if (isPlayingRef.current && !force) return;
     
+    audioRateRef.current = rate;
+    isPlayingRef.current = true;
     setIsPlayingAudio(true);
+    
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.onended = null;
     }
-    if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     
     try {
       const res = await fetch('/api/tts', {
@@ -2494,24 +2490,36 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       audioRef.current = audio;
       
       audio.onended = () => {
+        isPlayingRef.current = false;
         setIsPlayingAudio(false);
-        // Continuous Loop: replay after 1500ms
-        loopTimerRef.current = setTimeout(() => {
-          playMicrosoftAudio(audioRateRef.current);
-        }, 1500);
+        resetIdleTimer();
       };
-      audio.onerror = () => setIsPlayingAudio(false);
+      audio.onerror = () => {
+        isPlayingRef.current = false;
+        setIsPlayingAudio(false);
+      };
       
       await audio.play();
     } catch (e) {
+      isPlayingRef.current = false;
       setIsPlayingAudio(false);
     }
   }, [targetSentence]);
 
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    
+    idleTimerRef.current = setTimeout(() => {
+      if (!isPlayingRef.current) {
+        playMicrosoftAudio(audioRateRef.current);
+      }
+    }, 2000);
+  }, [playMicrosoftAudio]);
+
   useEffect(() => {
     playMicrosoftAudio(1.0);
     return () => {
-      if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.onended = null;
@@ -2524,10 +2532,12 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     playFeedbackSound(true);
     if (navigator.vibrate) navigator.vibrate(50);
     
-    if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.onended = null;
+      isPlayingRef.current = false;
+      setIsPlayingAudio(false);
     }
 
     setTimeout(() => {
@@ -2537,7 +2547,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       } else {
         onClose();
       }
-    }, 800);
+    }, 1000);
   }, [currentIndex, cardsToPlay.length, onClose]);
 
   useEffect(() => {
@@ -2546,11 +2556,13 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       
       if (e.key === 'Tab' || e.key === 'ArrowUp') {
         e.preventDefault();
-        playMicrosoftAudio(audioRateRef.current);
+        playMicrosoftAudio(audioRateRef.current, true);
         return;
       }
       
       if (isSuccess) return;
+
+      resetIdleTimer();
 
       if (e.key === 'Backspace') {
         e.preventDefault();
@@ -2571,7 +2583,6 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       if (e.key.length === 1) {
         e.preventDefault();
         
-        // Block if error exists
         if (inputText.length > 0 && inputText[inputText.length - 1] !== targetSentence[inputText.length - 1]) {
           if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
           return;
@@ -2583,7 +2594,6 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         const expectedChar = targetSentence[inputText.length];
         
         if (typedChar === expectedChar) {
-          // Success char
           playTockSound();
           let newText = inputText + typedChar;
           while (newText.length < targetSentence.length && /[.,?!;:«»„“"'()[\]{}\-—–]/.test(targetSentence[newText.length])) {
@@ -2595,7 +2605,6 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
             handleSuccess();
           }
         } else {
-          // Error char
           playFeedbackSound(false);
           if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
           setInputText(inputText + typedChar);
@@ -2605,7 +2614,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [inputText, targetSentence, isSuccess, playMicrosoftAudio, handleSuccess]);
+  }, [inputText, targetSentence, isSuccess, playMicrosoftAudio, resetIdleTimer, handleSuccess]);
 
   if (!card) return null;
 
@@ -2634,7 +2643,6 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       exit={{ opacity: 0, scale: 0.98 }}
       className="fixed inset-0 z-[100] flex flex-col bg-[#1C1C1E] text-[#F2F2F7]"
     >
-      {/* Unified Header */}
       <div className="w-full px-5 pt-12 pb-4 flex items-center justify-between">
         <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-2 -ml-2 text-white/50 hover:text-white transition-colors">
           <ArrowLeft className="w-6 h-6" />
@@ -2643,7 +2651,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
           {currentIndex + 1} / {cardsToPlay.length}
         </span>
       </div>
-      {/* Progress Bar */}
+      
       <div className="w-full h-1 bg-white/5">
         <div 
           className="h-full bg-blue-500 transition-all duration-300" 
@@ -2652,48 +2660,63 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center px-6 md:px-12 w-full max-w-4xl mx-auto pb-[15vh]">
-        {/* Miniature Audio Controls & Contextual Translation */}
-        <div className="w-full flex flex-col items-center mb-10">
-          <div className="flex items-center gap-4 mb-3">
-            <button 
-              onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(1.0); }} 
-              className={cn("text-white/40 hover:text-white transition-colors", isPlayingAudio && audioRateRef.current === 1.0 ? "text-white" : "")}
-            >
-              <Volume2 className="w-5 h-5" />
-            </button>
-            <button 
-              onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(0.75); }} 
-              className={cn("text-[11px] font-bold px-2 py-1 rounded transition-colors", isPlayingAudio && audioRateRef.current === 0.75 ? "bg-white/20 text-white" : "bg-white/10 text-white/40 hover:bg-white/20 hover:text-white")}
-            >
-              0.75x
-            </button>
-          </div>
-          <div className="text-sm md:text-base text-white/40 font-light text-center px-4 max-w-lg leading-relaxed">
-            {parsedTranslation}
-          </div>
+        
+        <div className="w-full flex justify-center items-center gap-4 mb-10">
+          <button 
+            onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(1.0, true); }} 
+            className="transition-all duration-300 outline-none"
+          >
+            <Volume2 
+              className={cn(
+                "w-6 h-6 transition-all duration-300",
+                isPlayingAudio 
+                  ? "animate-pulse text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)] scale-110" 
+                  : "text-white/30 hover:text-white/60"
+              )} 
+            />
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); playMicrosoftAudio(0.75, true); }} 
+            className={cn(
+              "text-[11px] font-bold px-2 py-1 rounded transition-colors outline-none", 
+              isPlayingAudio && audioRateRef.current === 0.75 
+                ? "bg-white/20 text-white" 
+                : "bg-white/10 text-white/30 hover:bg-white/20 hover:text-white/60"
+            )}
+          >
+            0.75x
+          </button>
         </div>
 
-        {/* Dictation Text */}
-        <div className="text-center text-3xl md:text-4xl lg:text-5xl font-sans antialiased tracking-tight whitespace-pre-wrap break-words leading-[1.6]">
-          {inputText.split('').map((char, i) => {
-            const isMistake = i === inputText.length - 1 && char !== targetSentence[i];
-            return (
-              <span 
-                key={i} 
-                className={cn(
-                  "transition-colors duration-150 inline",
-                  isSuccess ? "text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.4)]" : 
-                  isMistake ? "text-red-500 animate-dict-shake inline-block" : "text-[#F2F2F7]"
-                )}
-              >
-                {char}
-              </span>
-            );
-          })}
-          {!isSuccess && (
-            <span className="inline-block w-[3px] h-[1.1em] bg-blue-500 rounded-full align-middle ml-[2px] animate-dict-pulse" style={{ transform: 'translateY(-2px)' }}></span>
-          )}
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div 
+            key={currentIndex}
+            initial={{ opacity: 0, filter: 'blur(8px)', y: 10 }}
+            animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
+            exit={{ opacity: 0, filter: 'blur(8px)', y: -10 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            className="text-center text-3xl md:text-4xl lg:text-5xl font-sans antialiased tracking-tight whitespace-pre-wrap break-words leading-[1.6]"
+          >
+            {inputText.split('').map((char, i) => {
+              const isMistake = i === inputText.length - 1 && char !== targetSentence[i];
+              return (
+                <span 
+                  key={i} 
+                  className={cn(
+                    "transition-colors duration-200 inline",
+                    isSuccess ? "text-green-400 drop-shadow-[0_0_15px_rgba(74,222,128,0.4)]" : 
+                    isMistake ? "text-red-500 animate-dict-shake inline-block" : "text-[#F2F2F7]"
+                  )}
+                >
+                  {char}
+                </span>
+              );
+            })}
+            {!isSuccess && (
+              <span className="inline-block w-[3px] h-[1.1em] bg-blue-500 rounded-full align-middle ml-[2px] animate-dict-pulse" style={{ transform: 'translateY(-2px)' }}></span>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </motion.div>
     </>
