@@ -33,21 +33,27 @@ const initAudioCtx = () => {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
+    
     if (!cachedAudioCtx) {
       cachedAudioCtx = new AudioContextClass();
     }
-    if (cachedAudioCtx.state === 'suspended') {
-      cachedAudioCtx.resume();
-    }
     
-    // iOS Safari trick: play a silent oscillator to permanently unlock audio
-    const osc = cachedAudioCtx.createOscillator();
-    const gain = cachedAudioCtx.createGain();
-    gain.gain.value = 0;
-    osc.connect(gain);
-    gain.connect(cachedAudioCtx.destination);
-    osc.start(cachedAudioCtx.currentTime);
-    osc.stop(cachedAudioCtx.currentTime + 0.001);
+    const unlock = () => {
+      if (!cachedAudioCtx) return;
+      const osc = cachedAudioCtx.createOscillator();
+      const gain = cachedAudioCtx.createGain();
+      gain.gain.value = 0;
+      osc.connect(gain);
+      gain.connect(cachedAudioCtx.destination);
+      osc.start(cachedAudioCtx.currentTime);
+      osc.stop(cachedAudioCtx.currentTime + 0.001);
+    };
+
+    if (cachedAudioCtx.state === 'suspended') {
+      cachedAudioCtx.resume().then(unlock).catch(() => {});
+    } else {
+      unlock();
+    }
   } catch (e) {}
 };
 
@@ -56,70 +62,69 @@ const playTockSound = () => {
   try {
     const ctx = cachedAudioCtx || new (window.AudioContext || (window as any).webkitAudioContext)();
     if (!cachedAudioCtx) cachedAudioCtx = ctx;
-    if (ctx.state === 'suspended') ctx.resume();
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
+    
+    // Slightly louder and sharper click for better tactility
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(120, ctx.currentTime);
+    osc.frequency.setValueAtTime(150, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.02);
+    
     gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.05, ctx.currentTime + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.03);
+    gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.04);
+    
     osc.connect(gain);
     gain.connect(ctx.destination);
+    
     osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.04);
+    osc.stop(ctx.currentTime + 0.05);
   } catch (e) {}
 };
 
 const playFeedbackSound = (isCorrect: boolean) => {
   if (typeof window === 'undefined') return;
-  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-  if (!AudioContextClass) return;
-  
-  if (!cachedAudioCtx) {
-    cachedAudioCtx = new AudioContextClass();
-  }
-  
-  const ctx = cachedAudioCtx;
-  if (ctx.state === 'suspended') {
-    ctx.resume();
-  }
-  
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  
-  if (isCorrect) {
-    // Success: Soft double chime (C5 -> E5)
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-    osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1); // E5
+  try {
+    const ctx = cachedAudioCtx || new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (!cachedAudioCtx) cachedAudioCtx = ctx;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.03);
-    gain.gain.linearRampToValueAtTime(0.02, ctx.currentTime + 0.1);
-    gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.13);
-    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
     
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.3);
-  } else {
-    // Error: Short dull thud
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(150, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.15);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
     
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.02);
-    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.15);
-    
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.15);
-  }
+    if (isCorrect) {
+      // Success: Clear, bright chime
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1); // E5
+      
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.03);
+      gain.gain.linearRampToValueAtTime(0.05, ctx.currentTime + 0.1);
+      gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.13);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } else {
+      // Error: Noticeable thud
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(150, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.2);
+      
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+      
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
+    }
+  } catch (e) {}
 };
 
 // --- STORE & TYPES ---
