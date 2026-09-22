@@ -1326,7 +1326,7 @@ const DeckCard = React.memo(({
             )}
             <button
               onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
-              className="flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
+              className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
               title="Dictation Mode"
             >
               <Mic className="w-4 h-4" />
