@@ -2912,12 +2912,16 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isSuccess, setIsSuccess] = useState<boolean | null>(null);
   const [browserHeard, setBrowserHeard] = useState<string>("");
-  const [isListening, setIsListening] = useState(false);
+  
+  // Жесткая стейт-машина: 'idle' | 'playing-tts' | 'listening' | 'validating'
+  const [micStatus, setMicStatus] = useState<'idle' | 'playing-tts' | 'listening' | 'validating'>('idle');
   
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  
+  // КРИТИЧЕСКИ ВАЖНО: Защита от бесконечного цикла TTS
+  const ttsPlayedForIndex = useRef<number>(-1);
 
-  // Изоляция: берем все карточки (игнорируем masteryLevel), перемешиваем
   const cardsToPlay = useMemo(() => {
     return [...deck.cards].sort(() => Math.random() - 0.5);
   }, [deck]);
@@ -2929,7 +2933,6 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     return card.sentence.replace("___", card.targetWord).replace(/\s+/g, " ").trim();
   }, [card]);
 
-  // Системный бип
   const playBeep = useCallback(() => {
     if (!cachedAudioCtx) return;
     try {
@@ -2949,79 +2952,104 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     } catch (e) {}
   }, []);
 
-  const startListening = useCallback(() => {
-    if (isListening) return;
-    setIsSuccess(null);
-    setBrowserHeard("");
-    try {
-      recognitionRef.current?.start();
-      setIsListening(true);
-    } catch (e) {
-      // Игнорируем ошибку, если уже запущен
-    }
-  }, [isListening]);
-
-  // Инициализация Speech API
+  // Инициализация Speech API (только один раз при монтировании)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
+      if (SpeechRecognition && !recognitionRef.current) {
         recognitionRef.current = new SpeechRecognition();
         recognitionRef.current.lang = 'de-DE';
         recognitionRef.current.continuous = false;
         recognitionRef.current.interimResults = false;
-
-        recognitionRef.current.onresult = (event: any) => {
-          setIsListening(false);
-          const text = event.results[0][0].transcript;
-          const confidence = event.results[0][0].confidence;
-          
-          const cleanHeard = text.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
-          const cleanTarget = card.targetWord.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
-          const cleanSentence = targetSentence.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
-          
-          // Строгая валидация (Strict Validation)
-          if (cleanHeard === cleanTarget || cleanHeard === cleanSentence || confidence > 0.85) {
-            setIsSuccess(true);
-            setBrowserHeard(""); 
-            playFeedbackSound(true);
-            setTimeout(() => {
-              if (currentIndex < cardsToPlay.length - 1) {
-                setCurrentIndex(prev => prev + 1);
-                setIsSuccess(null);
-                setBrowserHeard("");
-              } else {
-                onClose();
-              }
-            }, 1000);
-          } else {
-            setIsSuccess(false);
-            setBrowserHeard(text); // Просто текст, без "Browser hörte:"
-            playFeedbackSound(false);
-          }
-        };
-
-        recognitionRef.current.onerror = (event: any) => {
-          setIsSuccess(false);
-          setIsListening(false);
-          if (event.error === 'not-allowed') {
-            setBrowserHeard("Zugriff auf Mikrofon verweigert");
-          } else {
-            setBrowserHeard(`Fehler: ${event.error}`);
-          }
-        };
-        
-        recognitionRef.current.onend = () => {
-          setIsListening(false);
-        };
       }
     }
+    
+    return () => {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch(e) {}
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.onended = null;
+      }
+    };
+  }, []);
+
+  // Обновление обработчиков событий Speech API при смене карточки
+  useEffect(() => {
+    if (!recognitionRef.current) return;
+
+    recognitionRef.current.onresult = (event: any) => {
+      setMicStatus('validating');
+      const text = event.results[0][0].transcript;
+      const confidence = event.results[0][0].confidence;
+      
+      const cleanHeard = text.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
+      const cleanTarget = card.targetWord.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
+      const cleanSentence = targetSentence.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
+      
+      if (cleanHeard === cleanTarget || cleanHeard === cleanSentence || confidence > 0.85) {
+        setIsSuccess(true);
+        setBrowserHeard(""); 
+        playFeedbackSound(true);
+        setTimeout(() => {
+          if (currentIndex < cardsToPlay.length - 1) {
+            setCurrentIndex(prev => prev + 1);
+            setIsSuccess(null);
+            setBrowserHeard("");
+            setMicStatus('idle'); // Переход на следующую карточку
+          } else {
+            onClose();
+          }
+        }, 1000);
+      } else {
+        setIsSuccess(false);
+        setBrowserHeard(text);
+        playFeedbackSound(false);
+        setMicStatus('idle');
+      }
+    };
+
+    recognitionRef.current.onerror = (event: any) => {
+      setMicStatus('idle');
+      if (event.error === 'aborted') {
+        // Safari aborted (system reset). Do NOT show error, just wait for user click.
+        setBrowserHeard(""); 
+      } else if (event.error === 'not-allowed') {
+        setIsSuccess(false);
+        setBrowserHeard("Zugriff auf Mikrofon verweigert");
+      } else {
+        setIsSuccess(false);
+        setBrowserHeard(`Fehler: ${event.error}`);
+      }
+    };
+    
+    recognitionRef.current.onend = () => {
+      setMicStatus(prev => prev === 'listening' ? 'idle' : prev);
+    };
   }, [card, targetSentence, currentIndex, cardsToPlay.length, onClose]);
 
-  // Автозапуск флоу (TTS -> Beep -> Mic)
+  const startListening = useCallback(() => {
+    if (micStatus === 'listening') return;
+    setIsSuccess(null);
+    setBrowserHeard("");
+    setMicStatus('listening');
+    try {
+      recognitionRef.current?.start();
+    } catch (e) {
+      // Игнорируем ошибку, если уже запущен
+    }
+  }, [micStatus]);
+
+  // Safari Fix: Изолированный автозапуск TTS (только один раз на каждую карточку)
   useEffect(() => {
     if (!targetSentence) return;
+    // Блокировка от повторных запусков при ререндерах
+    if (ttsPlayedForIndex.current === currentIndex) return;
+    
     let isSubscribed = true;
+    ttsPlayedForIndex.current = currentIndex;
+    setMicStatus('playing-tts');
 
     const runFlow = async () => {
       try {
@@ -3041,9 +3069,12 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         audio.onended = () => {
           if (!isSubscribed) return;
           playBeep();
+          // SAFARI FIX: Ждем 500ms перед стартом микрофона, чтобы аудио-движок успел освободить контекст
           setTimeout(() => {
-            if (isSubscribed) startListening();
-          }, 300); // Чуть-чуть паузы после бипа перед стартом микрофона
+            if (isSubscribed) {
+               startListening();
+            }
+          }, 500);
         };
         
         await audio.play();
@@ -3052,12 +3083,11 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
            playBeep();
            setTimeout(() => {
              if (isSubscribed) startListening();
-           }, 300);
+           }, 500);
         }
       }
     };
 
-    // Запускаем через небольшую паузу после появления карточки
     const initialDelay = setTimeout(() => {
       runFlow();
     }, 300);
@@ -3065,15 +3095,8 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     return () => {
       isSubscribed = false;
       clearTimeout(initialDelay);
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.onended = null;
-      }
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch(e) {}
-      }
     };
-  }, [targetSentence, playBeep, startListening]);
+  }, [targetSentence, currentIndex, playBeep, startListening]);
 
   if (!card) return null;
 
@@ -3131,15 +3154,20 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       {/* Mic Control */}
       <div className="shrink-0 h-32 flex items-center justify-center w-full pb-8">
         <button 
-          onClick={startListening}
+          onClick={() => {
+            // Ручной запуск доступен только в состоянии 'idle'
+            if (micStatus === 'idle') startListening();
+          }}
+          disabled={micStatus === 'playing-tts' || micStatus === 'validating'}
           className={cn(
             "w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 transform-gpu z-10 outline-none",
-            isListening 
+            micStatus === 'playing-tts' || micStatus === 'validating' ? "opacity-50 cursor-not-allowed bg-gray-400" :
+            micStatus === 'listening' 
               ? "bg-red-500 shadow-[0_0_40px_rgba(239,68,68,0.5)] scale-110" 
               : "bg-blue-600 dark:bg-blue-500 hover:scale-105 active:scale-95"
           )}
         >
-          <Mic className={cn("w-10 h-10 text-white", isListening && "animate-pulse")} />
+          <Mic className={cn("w-10 h-10 text-white", micStatus === 'listening' && "animate-pulse")} />
         </button>
       </div>
     </div>
