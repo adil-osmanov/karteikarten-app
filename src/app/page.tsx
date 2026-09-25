@@ -38,27 +38,23 @@ const initAudioCtx = () => {
       cachedAudioCtx = new AudioContextClass();
     }
     
-    const unlock = () => {
-      if (!cachedAudioCtx) return;
-      const osc = cachedAudioCtx.createOscillator();
-      const gain = cachedAudioCtx.createGain();
-      gain.gain.value = 0;
-      osc.connect(gain);
-      gain.connect(cachedAudioCtx.destination);
-      osc.start(cachedAudioCtx.currentTime);
-      osc.stop(cachedAudioCtx.currentTime + 0.001);
-      
-      try {
-        const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
-        silentAudio.play().catch(() => {});
-      } catch(e) {}
-    };
-
+    // SYNCHRONOUS UNLOCK (crucial for iOS Safari)
     if (cachedAudioCtx.state === 'suspended') {
-      cachedAudioCtx.resume().then(unlock).catch(() => {});
-    } else {
-      unlock();
+      cachedAudioCtx.resume().catch(() => {});
     }
+    
+    const osc = cachedAudioCtx.createOscillator();
+    const gain = cachedAudioCtx.createGain();
+    gain.gain.value = 0;
+    osc.connect(gain);
+    gain.connect(cachedAudioCtx.destination);
+    osc.start(cachedAudioCtx.currentTime);
+    osc.stop(cachedAudioCtx.currentTime + 0.001);
+    
+    try {
+      const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+      silentAudio.play().catch(() => {});
+    } catch(e) {}
   } catch (e) {}
 };
 
@@ -67,25 +63,28 @@ const playTockSound = () => {
   try {
     const ctx = cachedAudioCtx || new (window.AudioContext || (window as any).webkitAudioContext)();
     if (!cachedAudioCtx) cachedAudioCtx = ctx;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+    }
     
+    const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     
-    // Slightly louder and sharper click for better tactility
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(150, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.02);
+    // Use slightly offset time to guarantee ramp execution in Safari
+    osc.frequency.setValueAtTime(150, now + 0.001);
+    osc.frequency.exponentialRampToValueAtTime(40, now + 0.02);
     
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.04);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.15, now + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
     
     osc.connect(gain);
     gain.connect(ctx.destination);
     
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.05);
+    osc.start(now);
+    osc.stop(now + 0.05);
   } catch (e) {}
 };
 
