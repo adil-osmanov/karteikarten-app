@@ -5,7 +5,7 @@ import {
   Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
-  Clock, Mic, Snail, Play, X, Headphones, Database
+  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -1415,13 +1415,14 @@ BookCard.displayName = "BookCard";
 
 
 const DeckCard = React.memo(({ 
-  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onEditTheory, onViewTheory, onStartDictation 
+  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onEditTheory, onViewTheory, onStartDictation, onStartShadowing
 }: { 
   deck: Deck; isCompleted: boolean; activeTab: string; 
   onCardClick: (id: string) => void; onRename: (id: string, name: string) => void; 
   onDelete: (id: string, name: string) => void; 
   onEditTheory: (id: string) => void; onViewTheory: (id: string) => void; 
   onStartDictation: (id: string) => void;
+  onStartShadowing: (id: string) => void;
 }) => {
   const total = deck.cards.length;
   const mastered = deck.cards.filter(c => c.isArchived).length;
@@ -1471,6 +1472,13 @@ const DeckCard = React.memo(({
               onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
               className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
               title="Dictation Mode"
+            >
+              <Keyboard className="w-4 h-4" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
+              className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
+              title="Shadowing Mode"
             >
               <Mic className="w-4 h-4" />
             </button>
@@ -1889,6 +1897,7 @@ export default function App() {
   const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [dictationDeckId, setDictationDeckId] = useState<string | null>(null);
+  const [shadowingDeckId, setShadowingDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
@@ -2294,6 +2303,7 @@ try {
         {theoryEditDeckId && <TheoryEditorModal deckId={theoryEditDeckId} onClose={() => setTheoryEditDeckId(null)} />}
         {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { initAudioCtx(); setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} onEdit={() => { setTheoryEditDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
         {dictationDeckId && <DictationPlayer deck={decks.find(d => d.id === dictationDeckId)!} onClose={() => setDictationDeckId(null)} />}
+        {shadowingDeckId && <ShadowingPlayer deck={decks.find(d => d.id === shadowingDeckId)!} onClose={() => setShadowingDeckId(null)} />}
       </AnimatePresence>
 
 {/* RENAME MODAL */}
@@ -2512,7 +2522,8 @@ try {
                                   activeTab={activeTab} 
                                   onCardClick={handleDeckClick} 
                                   onRename={handleRenameClick}
-                                  onStartDictation={(id) => setDictationDeckId(id)} 
+                                  onStartDictation={(id) => setDictationDeckId(id)}
+                                  onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                   onDelete={handleDeleteClick} 
                                   onEditTheory={handleEditTheory} 
                                   onViewTheory={handleViewTheory} 
@@ -2552,7 +2563,8 @@ try {
                                           activeTab={activeTab} 
                                           onCardClick={handleDeckClick} 
                                           onRename={handleRenameClick}
-                                  onStartDictation={(id) => setDictationDeckId(id)} 
+                                  onStartDictation={(id) => setDictationDeckId(id)}
+                                  onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                           onDelete={handleDeleteClick} 
                                           onEditTheory={handleEditTheory} 
                                           onViewTheory={handleViewTheory} 
@@ -2892,5 +2904,171 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       </div>
     </motion.div>
     </>
+  );
+}
+
+function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void }) {
+  useScrollLock(true);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isSuccess, setIsSuccess] = useState<boolean | null>(null);
+  const [browserHeard, setBrowserHeard] = useState<string>("");
+  
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  const cardsToPlay = useMemo(() => {
+    let unmastered = deck.cards.filter(c => c.masteryLevel < 4 && !c.isArchived);
+    if (unmastered.length === 0) unmastered = [...deck.cards];
+    return unmastered.sort(() => Math.random() - 0.5);
+  }, [deck]);
+
+  const card = cardsToPlay[currentIndex];
+  
+  const targetSentence = useMemo(() => {
+    if (!card) return "";
+    return card.sentence.replace("___", card.targetWord).replace(/\s+/g, " ").trim();
+  }, [card]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        recognitionRef.current = new SpeechRecognition();
+        recognitionRef.current.lang = 'de-DE';
+        recognitionRef.current.continuous = false;
+        recognitionRef.current.interimResults = false;
+
+        recognitionRef.current.onresult = (event: any) => {
+          const text = event.results[0][0].transcript;
+          setBrowserHeard(text);
+          setIsListening(false);
+          
+          const cleanHeard = text.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
+          const cleanTarget = card.targetWord.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
+          const cleanSentence = targetSentence.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
+          
+          if (cleanHeard.includes(cleanTarget) || cleanHeard === cleanSentence || cleanSentence.includes(cleanHeard) && cleanHeard.length > 3) {
+            setIsSuccess(true);
+            playFeedbackSound(true);
+            setTimeout(() => {
+              if (currentIndex < cardsToPlay.length - 1) {
+                setCurrentIndex(prev => prev + 1);
+                setIsSuccess(null);
+                setBrowserHeard("");
+              } else {
+                onClose();
+              }
+            }, 1000);
+          } else {
+            setIsSuccess(false);
+            playFeedbackSound(false);
+          }
+        };
+
+        recognitionRef.current.onerror = (event: any) => {
+          console.error('Speech recognition error', event.error);
+          if (event.error === 'not-allowed') {
+            setBrowserHeard("Zugriff auf Mikrofon verweigert (Access Denied)");
+          } else {
+            setBrowserHeard(`Fehler: ${event.error}`);
+          }
+          setIsSuccess(false);
+          setIsListening(false);
+        };
+        
+        recognitionRef.current.onend = () => {
+          setIsListening(false);
+        };
+      }
+    }
+  }, [card, targetSentence, currentIndex, cardsToPlay.length, onClose]);
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+    } else {
+      setIsSuccess(null);
+      setBrowserHeard("");
+      try {
+        recognitionRef.current?.start();
+        setIsListening(true);
+      } catch (e) {
+        setBrowserHeard("Spracherkennung nicht verfügbar");
+      }
+    }
+  };
+
+  if (!card) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-white dark:bg-[#1C1C1E] flex flex-col justify-between">
+      <div className="flex-1 flex flex-col pt-16 px-6 max-w-3xl mx-auto w-full relative">
+        <button 
+          onClick={onClose}
+          className="absolute top-6 right-6 p-3 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-gray-400 rounded-full transition-colors active:scale-95"
+        >
+          <X className="w-6 h-6" />
+        </button>
+
+        <div className="flex flex-col flex-1 pb-32">
+          {/* Top Status */}
+          <div className="w-full h-8 shrink-0 flex items-center justify-center mb-8">
+             <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">
+               Shadowing • {currentIndex + 1} / {cardsToPlay.length}
+             </span>
+          </div>
+          
+          <div className="flex-1 flex flex-col justify-center gap-12 relative max-w-2xl mx-auto w-full px-4">
+             {/* Target Sentence */}
+             <div className="text-center space-y-4">
+               <h2 className={cn(
+                 "text-4xl md:text-5xl font-bold leading-[1.35] tracking-tight transition-colors duration-500",
+                 isSuccess === true ? "text-green-500" : isSuccess === false ? "text-red-500" : "text-gray-900 dark:text-[#F5F5F7]"
+               )}>
+                 {targetSentence}
+               </h2>
+               <p className="text-xl md:text-2xl font-medium text-gray-500 dark:text-[#8E8E93]">
+                 {card.translation}
+               </p>
+             </div>
+
+             {/* Feedback Area */}
+             <div className="min-h-[60px] flex items-center justify-center">
+               <AnimatePresence mode="wait">
+                 {browserHeard && (
+                   <motion.div 
+                     initial={{ opacity: 0, y: 10 }}
+                     animate={{ opacity: 1, y: 0 }}
+                     exit={{ opacity: 0, y: -10 }}
+                     className={cn(
+                       "text-center px-6 py-3 rounded-2xl border text-lg font-medium",
+                       isSuccess === true ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400" : 
+                       "bg-red-50 border-red-200 text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400"
+                     )}
+                   >
+                     Browser hörte: "{browserHeard}"
+                   </motion.div>
+                 )}
+               </AnimatePresence>
+             </div>
+          </div>
+        </div>
+
+        {/* Mic Control Widget */}
+        <div className="fixed bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-white via-white to-transparent dark:from-[#1C1C1E] dark:via-[#1C1C1E] flex items-center justify-center pointer-events-none pb-8">
+          <button 
+            onClick={toggleListening}
+            className={cn(
+              "pointer-events-auto w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 transform-gpu",
+              isListening 
+                ? "bg-red-500 shadow-[0_0_40px_rgba(239,68,68,0.5)] scale-110" 
+                : "bg-blue-600 dark:bg-blue-500 hover:scale-105 active:scale-95"
+            )}
+          >
+            <Mic className={cn("w-10 h-10 text-white", isListening && "animate-pulse")} />
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
