@@ -515,14 +515,14 @@ function StudyInterface({
 
   useEffect(() => {
     if (reviewCards) {
-      setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
+      setActiveCards([...reviewCards]);
       setInitialTotal(reviewCards.length);
       setMasteredInSession(0);
     } else if (deckId) {
       const deck = useStore.getState().decks.find((d) => d.id === deckId);
       if (deck) {
         const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
-        setActiveCards(active.sort(() => Math.random() - 0.5));
+        setActiveCards(active);
         setInitialTotal(active.length);
         setMasteredInSession(0);
       }
@@ -586,7 +586,7 @@ function StudyInterface({
         const deck = useStore.getState().decks.find((d) => d.id === deckId);
         if (deck) {
           const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c }));
-          setActiveCards(active.sort(() => Math.random() - 0.5));
+          setActiveCards(active);
           setCurrentIndex(0);
           setRoundCounter(prev => prev + 1);
           setInitialTotal(active.length);
@@ -2597,7 +2597,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const cardsToPlay = useMemo(() => {
     let unmastered = deck.cards.filter(c => c.masteryLevel < 4 && !c.isArchived);
     if (unmastered.length === 0) unmastered = [...deck.cards];
-    return unmastered.sort(() => Math.random() - 0.5);
+    return unmastered;
   }, [deck]);
 
   const card = cardsToPlay[currentIndex];
