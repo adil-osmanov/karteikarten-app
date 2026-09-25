@@ -2913,14 +2913,14 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const [isSuccess, setIsSuccess] = useState<boolean | null>(null);
   const [browserHeard, setBrowserHeard] = useState<string>("");
   
-  // Жесткая стейт-машина: 'idle' | 'playing-tts' | 'listening' | 'validating'
   const [micStatus, setMicStatus] = useState<'idle' | 'playing-tts' | 'listening' | 'validating'>('idle');
   
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  
-  // КРИТИЧЕСКИ ВАЖНО: Защита от бесконечного цикла TTS
   const ttsPlayedForIndex = useRef<number>(-1);
+  
+  // SAFARI FIX: Флаг первого клика пользователя (для обхода блокировки getUserMedia)
+  const hasGrantedMicPermission = useRef<boolean>(false);
 
   const cardsToPlay = useMemo(() => {
     return [...deck.cards].sort(() => Math.random() - 0.5);
@@ -2952,7 +2952,6 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     } catch (e) {}
   }, []);
 
-  // Инициализация Speech API (только один раз при монтировании)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -2975,7 +2974,6 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     };
   }, []);
 
-  // Обновление обработчиков событий Speech API при смене карточки
   useEffect(() => {
     if (!recognitionRef.current) return;
 
@@ -2997,7 +2995,7 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
             setCurrentIndex(prev => prev + 1);
             setIsSuccess(null);
             setBrowserHeard("");
-            setMicStatus('idle'); // Переход на следующую карточку
+            setMicStatus('idle'); 
           } else {
             onClose();
           }
@@ -3006,14 +3004,13 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         setIsSuccess(false);
         setBrowserHeard(text);
         playFeedbackSound(false);
-        setMicStatus('idle');
+        setMicStatus('idle'); // Гарантированный сброс стейта
       }
     };
 
     recognitionRef.current.onerror = (event: any) => {
-      setMicStatus('idle');
+      setMicStatus('idle'); // Fail-safe: ВСЕГДА разблокируем кнопку при ЛЮБОЙ ошибке
       if (event.error === 'aborted') {
-        // Safari aborted (system reset). Do NOT show error, just wait for user click.
         setBrowserHeard(""); 
       } else if (event.error === 'not-allowed') {
         setIsSuccess(false);
@@ -3024,8 +3021,12 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       }
     };
     
+    recognitionRef.current.onnomatch = () => {
+      setMicStatus('idle'); // Fail-safe
+    };
+
     recognitionRef.current.onend = () => {
-      setMicStatus(prev => prev === 'listening' ? 'idle' : prev);
+      setMicStatus(prev => prev === 'listening' ? 'idle' : prev); // Fail-safe
     };
   }, [card, targetSentence, currentIndex, cardsToPlay.length, onClose]);
 
@@ -3037,14 +3038,12 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     try {
       recognitionRef.current?.start();
     } catch (e) {
-      // Игнорируем ошибку, если уже запущен
+      setMicStatus('idle'); // Fail-safe: Если Safari заблокировал старт синхронно
     }
   }, [micStatus]);
 
-  // Safari Fix: Изолированный автозапуск TTS (только один раз на каждую карточку)
   useEffect(() => {
     if (!targetSentence) return;
-    // Блокировка от повторных запусков при ререндерах
     if (ttsPlayedForIndex.current === currentIndex) return;
     
     let isSubscribed = true;
@@ -3069,10 +3068,16 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         audio.onended = () => {
           if (!isSubscribed) return;
           playBeep();
-          // SAFARI FIX: Ждем 500ms перед стартом микрофона, чтобы аудио-движок успел освободить контекст
+          
           setTimeout(() => {
             if (isSubscribed) {
-               startListening();
+              if (hasGrantedMicPermission.current) {
+                // Если юзер уже кликал микрофон в этой сессии, автостарт разрешен
+                startListening();
+              } else {
+                // ПЕРВЫЙ ЗАПУСК: Ждем клика юзера
+                setMicStatus('idle');
+              }
             }
           }, 500);
         };
@@ -3082,7 +3087,10 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         if (isSubscribed) {
            playBeep();
            setTimeout(() => {
-             if (isSubscribed) startListening();
+             if (isSubscribed) {
+                if (hasGrantedMicPermission.current) startListening();
+                else setMicStatus('idle');
+             }
            }, 500);
         }
       }
@@ -3109,7 +3117,6 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         <X className="w-6 h-6" />
       </button>
 
-      {/* Top Status */}
       <div className="w-full shrink-0 flex items-center justify-center pt-2">
          <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">
            Shadowing • {currentIndex + 1} / {cardsToPlay.length}
@@ -3117,7 +3124,6 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center gap-10 w-full max-w-2xl mx-auto px-4">
-         {/* Sentences */}
          <div className="flex flex-col items-center gap-4">
            <h2 className={cn(
              "text-4xl md:text-5xl font-bold leading-[1.35] tracking-tight text-center transition-colors duration-500",
@@ -3130,7 +3136,6 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
            </p>
          </div>
 
-         {/* Error Block */}
          <div className="min-h-[70px] w-full flex items-center justify-center">
            <AnimatePresence mode="wait">
              {browserHeard && (
@@ -3151,11 +3156,10 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
          </div>
       </div>
 
-      {/* Mic Control */}
       <div className="shrink-0 h-32 flex items-center justify-center w-full pb-8">
         <button 
           onClick={() => {
-            // Ручной запуск доступен только в состоянии 'idle'
+            hasGrantedMicPermission.current = true;
             if (micStatus === 'idle') startListening();
           }}
           disabled={micStatus === 'playing-tts' || micStatus === 'validating'}
