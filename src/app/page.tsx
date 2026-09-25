@@ -5,7 +5,7 @@ import {
   Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
-  Clock, Mic, Snail, Play, X, Headphones
+  Clock, Mic, Snail, Play, X, Headphones, Database
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -1205,9 +1205,122 @@ function LanguageSelector() {
   );
 }
 
+
+function AdminModal({ onClose }: { onClose: () => void }) {
+  const { decks } = useStore();
+  
+  const stats = useMemo(() => {
+    let total = 0;
+    let mastered = 0;
+    let problematic = 0;
+    let learning = 0;
+    
+    decks.forEach(d => {
+      d.cards.forEach(c => {
+        total++;
+        if (c.masteryLevel >= 4 || c.isArchived) mastered++;
+        else if (c.masteryLevel <= 1) problematic++;
+        else learning++;
+      });
+    });
+    return { total, mastered, problematic, learning };
+  }, [decks]);
+
+  const handleExport = () => {
+    let md = `# Context Core: User State\n`;
+    md += `Дата выгрузки: ${new Date().toLocaleDateString('ru-RU')}\n\n`;
+    
+    const masteredList: string[] = [];
+    const problematicList: string[] = [];
+    const learningList: string[] = [];
+    
+    decks.forEach(d => {
+      d.cards.forEach(c => {
+        const line = `- ${c.targetWord}: ${c.translation || ''} (из колоды "${d.name}")`;
+        if (c.masteryLevel >= 4 || c.isArchived) masteredList.push(line);
+        else if (c.masteryLevel <= 1) problematicList.push(line);
+        else learningList.push(line);
+      });
+    });
+    
+    md += `## 1. Выученный материал (Mastered / Archive)\n`;
+    md += `*Инструкция для ИИ: Эти слова пользователь знает идеально. Исключи их из генерации новых карточек для изучения, но можешь использовать их для составления текстов для чтения.*\n`;
+    md += masteredList.length ? masteredList.join('\n') : "Нет слов";
+    md += `\n\n`;
+    
+    md += `## 2. Красная зона (Problematic Words)\n`;
+    md += `*Инструкция для ИИ: В этих словах пользователь делает больше всего ошибок. Фокус на них.*\n`;
+    md += problematicList.length ? problematicList.join('\n') : "Нет проблемных слов";
+    md += `\n\n`;
+    
+    md += `## 3. В процессе изучения (Learning)\n`;
+    md += learningList.length ? learningList.join('\n') : "Нет активных слов";
+    
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStr = new Date().toISOString().split('T')[0];
+    a.download = `Context_Core_${dateStr}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-8 w-full max-w-lg border border-black/5 dark:border-white/10 text-gray-900 dark:text-[#F2F2F7] shadow-2xl relative"
+      >
+        <button onClick={onClose} className="absolute top-6 right-6 text-gray-400 hover:text-gray-900 dark:text-white/40 dark:hover:text-white transition-colors">
+          <X className="w-5 h-5" />
+        </button>
+        <h2 className="text-2xl font-bold tracking-tight mb-2">Admin Dashboard</h2>
+        <p className="text-gray-500 dark:text-white/40 text-sm mb-8">Экспорт базы для ИИ-генераций (Context Core)</p>
+        
+        <div className="grid grid-cols-2 gap-4 mb-8">
+          <div className="bg-gray-100 dark:bg-white/5 rounded-2xl p-4">
+            <div className="text-gray-500 dark:text-white/40 text-xs font-semibold uppercase tracking-wider mb-1">Всего слов</div>
+            <div className="font-mono text-2xl">{stats.total}</div>
+          </div>
+          <div className="bg-green-50 dark:bg-green-500/10 rounded-2xl p-4">
+            <div className="text-green-600 dark:text-green-400/60 text-xs font-semibold uppercase tracking-wider mb-1">Выучено</div>
+            <div className="font-mono text-2xl text-green-600 dark:text-green-400">{stats.mastered}</div>
+          </div>
+          <div className="bg-red-50 dark:bg-red-500/10 rounded-2xl p-4">
+            <div className="text-red-600 dark:text-red-400/60 text-xs font-semibold uppercase tracking-wider mb-1">Красная зона</div>
+            <div className="font-mono text-2xl text-red-600 dark:text-red-400">{stats.problematic}</div>
+          </div>
+          <div className="bg-blue-50 dark:bg-blue-500/10 rounded-2xl p-4">
+            <div className="text-blue-600 dark:text-blue-400/60 text-xs font-semibold uppercase tracking-wider mb-1">В процессе</div>
+            <div className="font-mono text-2xl text-blue-600 dark:text-blue-400">{stats.learning}</div>
+          </div>
+        </div>
+        
+        <button 
+          onClick={handleExport}
+          className="w-full bg-blue-600 dark:bg-white text-white dark:text-black font-semibold py-4 rounded-2xl transition-all shadow-[0_4px_14px_rgba(37,99,235,0.3)] dark:shadow-[0_4px_20px_rgba(255,255,255,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.4)] dark:hover:shadow-[0_4px_25px_rgba(255,255,255,0.4)] active:scale-[0.98] text-base flex items-center justify-center gap-2"
+        >
+          <Database className="w-5 h-5" />
+          Export Context Core (.md)
+        </button>
+      </motion.div>
+    </div>
+  );
+}
+
 function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, onBack?: () => void }) {
+  const [adminOpen, setAdminOpen] = useState(false);
   return (
     <>
+      <AnimatePresence>
+        {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} />}
+      </AnimatePresence>
       {activeBook ? (
         <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50">
           <button onClick={onBack} className="text-sm font-medium text-gray-500 hover:text-gray-900 dark:text-white/70 dark:hover:text-white transition-colors flex items-center gap-1 cursor-pointer bg-white/50 dark:bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-black/5 dark:border-white/10 shadow-sm hover:shadow-md">
@@ -1218,6 +1331,13 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
         <LanguageSelector />
       )}
       <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
+        <button 
+          onClick={() => setAdminOpen(true)}
+          className="w-8 h-8 flex items-center justify-center rounded-full bg-white/50 dark:bg-black/20 backdrop-blur-md border border-black/5 dark:border-white/10 text-gray-500 dark:text-white/70 hover:text-gray-900 dark:hover:text-white transition-colors cursor-pointer"
+          title="Admin Dashboard"
+        >
+          <Database className="w-4 h-4" />
+        </button>
         <ActivityWidget />
         <DarkModeToggle />
       </div>
