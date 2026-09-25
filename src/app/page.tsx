@@ -307,15 +307,28 @@ const useStore = create<DeckState>()((set, get) => ({
       set({ books: previousBooks });
     }
   },
-  incrementDailyProgress: () => set((state) => {
-    const today = new Date().toISOString().split('T')[0];
-    return {
-      dailyProgress: {
-        ...state.dailyProgress,
-        [today]: (state.dailyProgress[today] || 0) + 1
-      }
-    };
-  }),
+  incrementDailyProgress: () => {
+    if (typeof window !== 'undefined') {
+      const { appLanguage } = get();
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const key = `daily_activity_${appLanguage}`;
+      const stored = localStorage.getItem(key);
+      const progress = stored ? JSON.parse(stored) : {};
+      
+      const rawCount = progress[todayStr];
+      const currentCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
+      
+      progress[todayStr] = currentCount + 1;
+      
+      localStorage.setItem(key, JSON.stringify(progress));
+      window.dispatchEvent(new Event('storage-update'));
+      
+      supabase.from('user_stats').upsert({
+        language: appLanguage,
+        daily_activity: progress
+      }, { onConflict: 'language' }).then(() => {});
+    }
+  },
   
   setDecks: (decks) => set({ decks, isLoaded: true }),
   
@@ -402,25 +415,8 @@ const useStore = create<DeckState>()((set, get) => ({
 
   answerCard: async (deckId, cardId, isCorrect, isHilfe) => {
     // Update daily progress
-    if (typeof window !== 'undefined' && isCorrect) {
-      const { appLanguage } = get();
-      const todayStr = new Date().toLocaleDateString('en-CA');
-      const key = `daily_activity_${appLanguage}`;
-      const stored = localStorage.getItem(key);
-      const progress = stored ? JSON.parse(stored) : {};
-      
-      const rawCount = progress[todayStr];
-      const currentCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
-      
-      progress[todayStr] = currentCount + 1;
-      
-      localStorage.setItem(key, JSON.stringify(progress));
-      window.dispatchEvent(new Event('storage-update'));
-      
-      supabase.from('user_stats').upsert({
-        language: appLanguage,
-        daily_activity: progress
-      }, { onConflict: 'language' }).then(() => {});
+    if (isCorrect) {
+      get().incrementDailyProgress();
     }
     const previousDecks = get().decks;
     let updatedCard: any = null;
@@ -2712,6 +2708,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
 
   const handleSuccess = useCallback(() => {
     setIsSuccess(true);
+    useStore.getState().incrementDailyProgress();
     playFeedbackSound(true);
     if (navigator.vibrate) navigator.vibrate(50);
     
@@ -2985,6 +2982,7 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       // CONFIDENCE THRESHOLD: Требуем точного совпадения слова/фразы И уверенности >= 85%
       if ((wordMatches || sentenceMatches) && confidence >= 0.85) {
         setIsSuccess(true);
+        useStore.getState().incrementDailyProgress();
         setBrowserHeard("");
         
         if (cachedAudioCtx && cachedAudioCtx.state === 'suspended') {
