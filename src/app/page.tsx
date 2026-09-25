@@ -2918,8 +2918,9 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsPlayedForIndex = useRef<number>(-1);
+  const isListeningRef = useRef<boolean>(false);
   
-  // SAFARI FIX: Флаг первого клика пользователя (для обхода блокировки getUserMedia)
+  // Флаг первого клика пользователя (для обхода блокировки getUserMedia)
   const hasGrantedMicPermission = useRef<boolean>(false);
 
   const cardsToPlay = useMemo(() => {
@@ -2977,7 +2978,13 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   useEffect(() => {
     if (!recognitionRef.current) return;
 
+    recognitionRef.current.onstart = () => {
+      isListeningRef.current = true;
+      setMicStatus('listening');
+    };
+
     recognitionRef.current.onresult = (event: any) => {
+      isListeningRef.current = false;
       setMicStatus('validating');
       const text = event.results[0][0].transcript;
       const confidence = event.results[0][0].confidence;
@@ -3004,12 +3011,13 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         setIsSuccess(false);
         setBrowserHeard(text);
         playFeedbackSound(false);
-        setMicStatus('idle'); // Гарантированный сброс стейта
+        setMicStatus('idle');
       }
     };
 
     recognitionRef.current.onerror = (event: any) => {
-      setMicStatus('idle'); // Fail-safe: ВСЕГДА разблокируем кнопку при ЛЮБОЙ ошибке
+      isListeningRef.current = false;
+      setMicStatus('idle'); // Гарантированный сброс
       if (event.error === 'aborted') {
         setBrowserHeard(""); 
       } else if (event.error === 'not-allowed') {
@@ -3022,25 +3030,35 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     };
     
     recognitionRef.current.onnomatch = () => {
-      setMicStatus('idle'); // Fail-safe
+      isListeningRef.current = false;
+      setMicStatus('idle');
     };
 
     recognitionRef.current.onend = () => {
-      setMicStatus(prev => prev === 'listening' ? 'idle' : prev); // Fail-safe
+      isListeningRef.current = false;
+      setMicStatus(prev => prev === 'listening' ? 'idle' : prev);
     };
   }, [card, targetSentence, currentIndex, cardsToPlay.length, onClose]);
 
   const startListening = useCallback(() => {
-    if (micStatus === 'listening') return;
+    if (isListeningRef.current) return;
+    
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+
     setIsSuccess(null);
     setBrowserHeard("");
-    setMicStatus('listening');
+    
     try {
       recognitionRef.current?.start();
+      isListeningRef.current = true;
+      setMicStatus('listening');
     } catch (e) {
-      setMicStatus('idle'); // Fail-safe: Если Safari заблокировал старт синхронно
+      isListeningRef.current = false;
+      setMicStatus('idle');
     }
-  }, [micStatus]);
+  }, []);
 
   useEffect(() => {
     if (!targetSentence) return;
@@ -3072,10 +3090,8 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
           setTimeout(() => {
             if (isSubscribed) {
               if (hasGrantedMicPermission.current) {
-                // Если юзер уже кликал микрофон в этой сессии, автостарт разрешен
                 startListening();
               } else {
-                // ПЕРВЫЙ ЗАПУСК: Ждем клика юзера
                 setMicStatus('idle');
               }
             }
@@ -3160,12 +3176,12 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         <button 
           onClick={() => {
             hasGrantedMicPermission.current = true;
-            if (micStatus === 'idle') startListening();
+            startListening();
           }}
-          disabled={micStatus === 'playing-tts' || micStatus === 'validating'}
+          disabled={micStatus === 'validating'}
           className={cn(
             "w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 transform-gpu z-10 outline-none",
-            micStatus === 'playing-tts' || micStatus === 'validating' ? "opacity-50 cursor-not-allowed bg-gray-400" :
+            micStatus === 'validating' ? "opacity-50 cursor-not-allowed bg-gray-400" :
             micStatus === 'listening' 
               ? "bg-red-500 shadow-[0_0_40px_rgba(239,68,68,0.5)] scale-110" 
               : "bg-blue-600 dark:bg-blue-500 hover:scale-105 active:scale-95"
