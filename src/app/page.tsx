@@ -669,6 +669,21 @@ function StudyCard({
     }
   }, [phase]);
 
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const handleNativeKeyDown = (e: KeyboardEvent) => {
+      if (phase !== "Question") return;
+      const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
+      if (isSpecialKey) return;
+      
+      // Fire sound natively to bypass React Synthetic Event iOS restrictions
+      playTockSound();
+    };
+    el.addEventListener('keydown', handleNativeKeyDown);
+    return () => el.removeEventListener('keydown', handleNativeKeyDown);
+  }, [phase]);
+
   const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2;
 
   useEffect(() => {
@@ -779,7 +794,7 @@ const playAudio = useCallback(async (text: string) => {
         break;
       }
     }
-    playTockSound();
+    
     setInputText(value);
     
     // Play error sound if the latest typed character is wrong
@@ -823,7 +838,6 @@ const playAudio = useCallback(async (text: string) => {
       const end = e.currentTarget.selectionEnd || 0;
       const newValue = inputText.slice(0, start) + char + inputText.slice(end);
       
-      playTockSound();
       setInputText(newValue);
       
       let isValidSoFar = true;
