@@ -1218,54 +1218,30 @@ export const exportToMarkdown = (bookId?: string) => {
     if (book) titleSuffix = book.title.replace(/\s+/g, '_');
   }
   
+  // Filter out Grammar decks
   const vocabDecks = targetDecks.filter(d => !d.category?.toLowerCase().includes('gramm'));
   
-  // --- EXTREME VOCABULARY COMPRESSION ---
-  const vocabMastered = new Set<string>();
-  const vocabProblematic = new Set<string>();
+  // Extract ALL vocabulary words without checking mastery level
+  const allWords = new Set<string>();
   
   vocabDecks.forEach(d => {
     d.cards.forEach(c => {
-      const word = c.targetWord.trim();
+      const word = c.targetWord?.trim();
       if (!word) return;
-      const wordLower = word.toLowerCase();
-      
-      if (c.masteryLevel >= 4 || c.isArchived) {
-        vocabMastered.add(wordLower);
-      } else {
-        vocabProblematic.add(wordLower);
-      }
+      allWords.add(word.toLowerCase());
     });
   });
   
-  // Deduplicate strictly
-  vocabMastered.forEach(w => {
-    vocabProblematic.delete(w);
-  });
+  const wordsArr = Array.from(allWords);
+  const textContent = wordsArr.length ? wordsArr.join(', ') : "";
   
-  // --- BUILD MARKDOWN ---
-  let md = `# Context Core: User State (${titleSuffix})\n`;
-  md += `Дата выгрузки: ${new Date().toLocaleDateString('ru-RU')}\n\n`;
-  
-  md += `## 1. Выученные слова (Mastered)\n`;
-  md += `*Инструкция для ИИ: Эти слова пользователь знает идеально. Исключи их из списков для заучивания, но свободно используй в текстах.*\n`;
-  const masteredArr = Array.from(vocabMastered);
-  md += masteredArr.length ? masteredArr.join(', ') : "Нет слов";
-  md += `\n\n`;
-  
-  md += `## 2. В процессе / Проблемные (Learning & Red Zone)\n`;
-  md += `*Инструкция для ИИ: Фокус на этих словах. Пользователь делает в них ошибки или только начал учить.*\n`;
-  const probArr = Array.from(vocabProblematic);
-  md += probArr.length ? probArr.join(', ') : "Нет слов";
-  md += `\n`;
-  
-  // --- DOWNLOAD BLOB ---
-  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+  // DOWNLOAD BLOB as .txt
+  const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   const dateStr = new Date().toISOString().split('T')[0];
-  a.download = `Context_Core_${titleSuffix}_${dateStr}.md`;
+  a.download = `Context_Vocabulary_${titleSuffix}_${dateStr}.txt`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
