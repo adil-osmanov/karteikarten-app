@@ -1219,25 +1219,21 @@ export const exportToMarkdown = (bookId?: string) => {
   }
   
   const vocabDecks = targetDecks.filter(d => !d.category?.toLowerCase().includes('gramm'));
-  const grammarDecks = targetDecks.filter(d => d.category?.toLowerCase().includes('gramm'));
   
-  // --- VOCABULARY COMPRESSION ---
+  // --- EXTREME VOCABULARY COMPRESSION ---
   const vocabMastered = new Set<string>();
-  const vocabProblematic = new Map<string, string>();
+  const vocabProblematic = new Set<string>();
   
   vocabDecks.forEach(d => {
     d.cards.forEach(c => {
       const word = c.targetWord.trim();
+      if (!word) return;
       const wordLower = word.toLowerCase();
-      const origCaseWord = word;
       
       if (c.masteryLevel >= 4 || c.isArchived) {
         vocabMastered.add(wordLower);
       } else {
-        // Level 0-3 (Learning / Problematic)
-        if (!vocabProblematic.has(wordLower)) {
-          vocabProblematic.set(wordLower, `${origCaseWord}: ${c.translation || ''}`);
-        }
+        vocabProblematic.add(wordLower);
       }
     });
   });
@@ -1247,40 +1243,10 @@ export const exportToMarkdown = (bookId?: string) => {
     vocabProblematic.delete(w);
   });
   
-  // --- GRAMMAR ANALYTICS ---
-  const grammarMastered: string[] = [];
-  const grammarProblematic: string[] = [];
-  
-  grammarDecks.forEach(d => {
-    if (d.cards.length === 0) return;
-    
-    let totalMastery = 0;
-    const weakCards: any[] = [];
-    
-    d.cards.forEach(c => {
-      totalMastery += c.masteryLevel;
-      if (c.masteryLevel < 4 && !c.isArchived) {
-        weakCards.push(c);
-      }
-    });
-    
-    const avgMastery = totalMastery / d.cards.length;
-    
-    if (avgMastery > 3) {
-      grammarMastered.push(`- Тема: ${d.name} - Усвоено`);
-    } else {
-      weakCards.forEach(c => {
-        const sent = c.sentence || "";
-        grammarProblematic.push(`- Тема ${d.name}: ${sent} -> Ответ: ${c.targetWord}`);
-      });
-    }
-  });
-  
   // --- BUILD MARKDOWN ---
   let md = `# Context Core: User State (${titleSuffix})\n`;
   md += `Дата выгрузки: ${new Date().toLocaleDateString('ru-RU')}\n\n`;
   
-  md += `# СЛОВАРЬ (Vocabulary)\n\n`;
   md += `## 1. Выученные слова (Mastered)\n`;
   md += `*Инструкция для ИИ: Эти слова пользователь знает идеально. Исключи их из списков для заучивания, но свободно используй в текстах.*\n`;
   const masteredArr = Array.from(vocabMastered);
@@ -1289,19 +1255,8 @@ export const exportToMarkdown = (bookId?: string) => {
   
   md += `## 2. В процессе / Проблемные (Learning & Red Zone)\n`;
   md += `*Инструкция для ИИ: Фокус на этих словах. Пользователь делает в них ошибки или только начал учить.*\n`;
-  const probArr = Array.from(vocabProblematic.values());
-  md += probArr.length ? probArr.map(s => `- ${s}`).join('\n') : "Нет проблемных слов";
-  md += `\n\n`;
-  
-  md += `# ГРАММАТИКА (Grammar)\n\n`;
-  md += `## 1. Усвоенные темы (Mastered)\n`;
-  md += `*Инструкция для ИИ: Эти темы усвоены. Можно использовать сложные конструкции из них.*\n`;
-  md += grammarMastered.length ? grammarMastered.join('\n') : "Нет уверенных тем";
-  md += `\n\n`;
-  
-  md += `## 2. Слабые места (Red Zone)\n`;
-  md += `*Инструкция для ИИ: Пользователь плавает в этих темах. Примеры предложений показывают, где именно возникают ошибки для анализа синтаксиса.*\n`;
-  md += grammarProblematic.length ? grammarProblematic.join('\n') : "Нет слабых мест";
+  const probArr = Array.from(vocabProblematic);
+  md += probArr.length ? probArr.join(', ') : "Нет слов";
   md += `\n`;
   
   // --- DOWNLOAD BLOB ---
