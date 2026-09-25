@@ -47,6 +47,11 @@ const initAudioCtx = () => {
       gain.connect(cachedAudioCtx.destination);
       osc.start(cachedAudioCtx.currentTime);
       osc.stop(cachedAudioCtx.currentTime + 0.001);
+      
+      try {
+        const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+        silentAudio.play().catch(() => {});
+      } catch(e) {}
     };
 
     if (cachedAudioCtx.state === 'suspended') {
@@ -820,8 +825,7 @@ const playAudio = useCallback(async (text: string) => {
       const newValue = inputText.slice(0, start) + char + inputText.slice(end);
       
       playTockSound();
-      playTockSound();
-    setInputText(newValue);
+      setInputText(newValue);
       
       let isValidSoFar = true;
       for (let i = 0; i < newValue.length; i++) {
@@ -2275,7 +2279,7 @@ try {
       <AnimatePresence>
         {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
         {theoryEditDeckId && <TheoryEditorModal deckId={theoryEditDeckId} onClose={() => setTheoryEditDeckId(null)} />}
-        {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} onEdit={() => { setTheoryEditDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
+        {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { initAudioCtx(); setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} onEdit={() => { setTheoryEditDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
         {dictationDeckId && <DictationPlayer deck={decks.find(d => d.id === dictationDeckId)!} onClose={() => setDictationDeckId(null)} />}
       </AnimatePresence>
 
@@ -2413,7 +2417,7 @@ try {
           {dueCards.length > 0 && (
             <div className="mb-10">
               <div 
-                onClick={() => setReviewCards(dueCards)}
+                onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
                 className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-600/40 dark:hover:border-blue-500/40 transition-all shadow-sm active:scale-[0.98]"
               >
                 <div className="flex items-center gap-3">
