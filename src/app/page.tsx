@@ -132,6 +132,18 @@ const playFeedbackSound = (isCorrect: boolean) => {
 };
 
 // --- PREMIUM AUDIO EFFECTS (RAG/Podcast Quality) ---
+const createReverbImpulse = (ctx: AudioContext, duration: number, decay: number) => {
+  const length = ctx.sampleRate * duration;
+  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let i = 0; i < 2; i++) {
+    const channel = impulse.getChannelData(i);
+    for (let j = 0; j < length; j++) {
+      channel[j] = (Math.random() * 2 - 1) * Math.pow(1 - j / length, decay);
+    }
+  }
+  return impulse;
+};
+
 const applyPremiumEffects = (audio: HTMLAudioElement) => {
   if (typeof window === 'undefined' || !cachedAudioCtx) return;
   try {
@@ -149,19 +161,37 @@ const applyPremiumEffects = (audio: HTMLAudioElement) => {
     trebleFilter.frequency.value = 4000;
     trebleFilter.gain.value = 2;
     
-    // 3. Dynamics Compressor (Radio Density)
+    // 3. De-esser / Lowpass (Smooth Sibilance)
+    const lowpassFilter = cachedAudioCtx.createBiquadFilter();
+    lowpassFilter.type = 'lowpass';
+    lowpassFilter.frequency.value = 6800; // Cut off harsh digital highs
+    
+    // 4. Dynamics Compressor (Radio Density)
     const compressor = cachedAudioCtx.createDynamicsCompressor();
     compressor.threshold.value = -24;
     compressor.knee.value = 30;
     compressor.ratio.value = 3;
     compressor.attack.value = 0.003;
     compressor.release.value = 0.25;
+
+    // 5. Micro-Reverb (Studio Room)
+    const convolver = cachedAudioCtx.createConvolver();
+    convolver.buffer = createReverbImpulse(cachedAudioCtx, 0.18, 3);
+    const wetGain = cachedAudioCtx.createGain();
+    wetGain.gain.value = 0.15; // 15% wet mix
     
-    // 4. Routing Chain
+    // 6. Routing Chain
     source.connect(bassFilter);
     bassFilter.connect(trebleFilter);
-    trebleFilter.connect(compressor);
-    compressor.connect(cachedAudioCtx.destination);
+    trebleFilter.connect(lowpassFilter);
+    lowpassFilter.connect(compressor);
+    
+    // Dry/Wet Split
+    compressor.connect(cachedAudioCtx.destination); // Dry signal
+    compressor.connect(convolver);
+    convolver.connect(wetGain);
+    wetGain.connect(cachedAudioCtx.destination); // Wet signal
+
   } catch (e) {
     // Failsafe (e.g. already connected)
   }
