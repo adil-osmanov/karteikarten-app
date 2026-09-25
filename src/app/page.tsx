@@ -131,6 +131,42 @@ const playFeedbackSound = (isCorrect: boolean) => {
   } catch (e) {}
 };
 
+// --- PREMIUM AUDIO EFFECTS (RAG/Podcast Quality) ---
+const applyPremiumEffects = (audio: HTMLAudioElement) => {
+  if (typeof window === 'undefined' || !cachedAudioCtx) return;
+  try {
+    const source = cachedAudioCtx.createMediaElementSource(audio);
+    
+    // 1. Bass Filter (Depth)
+    const bassFilter = cachedAudioCtx.createBiquadFilter();
+    bassFilter.type = 'lowshelf';
+    bassFilter.frequency.value = 150;
+    bassFilter.gain.value = 4;
+    
+    // 2. Treble Filter (Clarity)
+    const trebleFilter = cachedAudioCtx.createBiquadFilter();
+    trebleFilter.type = 'highshelf';
+    trebleFilter.frequency.value = 4000;
+    trebleFilter.gain.value = 2;
+    
+    // 3. Dynamics Compressor (Radio Density)
+    const compressor = cachedAudioCtx.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 30;
+    compressor.ratio.value = 3;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.25;
+    
+    // 4. Routing Chain
+    source.connect(bassFilter);
+    bassFilter.connect(trebleFilter);
+    trebleFilter.connect(compressor);
+    compressor.connect(cachedAudioCtx.destination);
+  } catch (e) {
+    // Failsafe (e.g. already connected)
+  }
+};
+
 // --- STORE & TYPES ---
 
 
@@ -708,6 +744,7 @@ const playAudio = useCallback(async (text: string) => {
         audioCache.set(text, audioUrl);
       }
       const audio = new Audio(audioUrl);
+      applyPremiumEffects(audio);
       audio.playbackRate = playbackSpeed;
       
       audio.onended = () => setIsPlayingAudio(false);
@@ -2657,6 +2694,7 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      applyPremiumEffects(audio);
       audio.playbackRate = rate;
       audioRef.current = audio;
       
