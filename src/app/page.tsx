@@ -2977,11 +2977,16 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       const cleanTarget = card.targetWord.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
       const cleanSentence = targetSentence.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
       
-      if (cleanHeard === cleanTarget || cleanHeard === cleanSentence || confidence > 0.85) {
+      // EXACT MATCH: Разбиваем по пробелам, чтобы избежать проблем с юникодом в регулярках ()
+      const heardWords = cleanHeard.split(/\s+/);
+      const wordMatches = heardWords.includes(cleanTarget);
+      const sentenceMatches = cleanHeard === cleanSentence;
+      
+      // CONFIDENCE THRESHOLD: Требуем точного совпадения слова/фразы И уверенности >= 85%
+      if ((wordMatches || sentenceMatches) && confidence >= 0.85) {
         setIsSuccess(true);
         setBrowserHeard("");
         
-        // AUDIO DUCKING FIX: Пробуждаем перед SFX
         if (cachedAudioCtx && cachedAudioCtx.state === 'suspended') {
            cachedAudioCtx.resume().catch(() => {});
         }
@@ -3002,7 +3007,8 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         }, 1000);
       } else {
         setIsSuccess(false);
-        setBrowserHeard(text);
+        // Показываем очищенный транскрипт и % уверенности, чтобы юзер видел причину провала
+        setBrowserHeard(`${cleanHeard} (Conf: ${Math.round(confidence * 100)}%)`);
         
         if (cachedAudioCtx && cachedAudioCtx.state === 'suspended') {
            cachedAudioCtx.resume().catch(() => {});
