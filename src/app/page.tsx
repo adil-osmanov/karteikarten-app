@@ -1206,7 +1206,132 @@ function LanguageSelector() {
 }
 
 
-function AdminModal({ onClose }: { onClose: () => void }) {
+export const exportToMarkdown = (bookId?: string) => {
+  const { decks, books } = useStore.getState();
+  
+  let targetDecks = decks;
+  let titleSuffix = "Global";
+  
+  if (bookId) {
+    targetDecks = decks.filter(d => d.bookId === bookId);
+    const book = books.find(b => b.id === bookId);
+    if (book) titleSuffix = book.title.replace(/\s+/g, '_');
+  }
+  
+  const vocabDecks = targetDecks.filter(d => !d.category?.toLowerCase().includes('gramm'));
+  const grammarDecks = targetDecks.filter(d => d.category?.toLowerCase().includes('gramm'));
+  
+  // --- VOCABULARY COMPRESSION ---
+  const vocabMastered = new Set<string>();
+  const vocabProblematic = new Map<string, string>();
+  
+  vocabDecks.forEach(d => {
+    d.cards.forEach(c => {
+      const word = c.targetWord.trim();
+      const wordLower = word.toLowerCase();
+      const origCaseWord = word;
+      
+      if (c.masteryLevel >= 4 || c.isArchived) {
+        vocabMastered.add(wordLower);
+      } else if (c.masteryLevel <= 1) {
+        if (!vocabProblematic.has(wordLower)) {
+          vocabProblematic.set(wordLower, `${origCaseWord}: ${c.translation || ''}`);
+        }
+      }
+    });
+  });
+  
+  // Deduplicate strictly
+  vocabMastered.forEach(w => {
+    vocabProblematic.delete(w);
+  });
+  
+  // --- GRAMMAR ANALYTICS ---
+  const grammarMastered: string[] = [];
+  const grammarProblematic: { topic: string, examples: string[] }[] = [];
+  
+  grammarDecks.forEach(d => {
+    if (d.cards.length === 0) return;
+    
+    let totalMastery = 0;
+    const lowMasteryCards: string[] = [];
+    
+    d.cards.forEach(c => {
+      totalMastery += c.masteryLevel;
+      if (c.masteryLevel <= 1) {
+        let ex = c.sentence.replace('___', c.targetWord);
+        if (c.translation) ex += ` (${c.translation})`;
+        lowMasteryCards.push(ex);
+      }
+    });
+    
+    const avgMastery = totalMastery / d.cards.length;
+    
+    if (avgMastery >= 3) {
+      grammarMastered.push(d.name);
+    } else {
+      grammarProblematic.push({
+        topic: d.name,
+        // Max 5 examples to save LLM tokens
+        examples: lowMasteryCards.sort(() => Math.random() - 0.5).slice(0, 5)
+      });
+    }
+  });
+  
+  // --- BUILD MARKDOWN ---
+  let md = `# Context Core: User State (${titleSuffix})\n`;
+  md += `Дата выгрузки: ${new Date().toLocaleDateString('ru-RU')}\n\n`;
+  
+  md += `# СЛОВАРЬ (Vocabulary)\n\n`;
+  md += `## 1. Выученные слова (Mastered)\n`;
+  md += `*Инструкция для ИИ: Эти слова пользователь знает идеально. Исключи их из списков для заучивания, но свободно используй в текстах.*\n`;
+  const masteredArr = Array.from(vocabMastered);
+  md += masteredArr.length ? masteredArr.join(', ') : "Нет слов";
+  md += `\n\n`;
+  
+  md += `## 2. Красная зона (Problematic Words)\n`;
+  md += `*Инструкция для ИИ: Фокус на этих словах. Пользователь делает в них ошибки.*\n`;
+  const probArr = Array.from(vocabProblematic.values());
+  md += probArr.length ? probArr.map(s => `- ${s}`).join('\n') : "Нет проблемных слов";
+  md += `\n\n`;
+  
+  md += `# ГРАММАТИКА (Grammar)\n\n`;
+  md += `## 1. Уверенные темы (Mastered)\n`;
+  md += `*Инструкция для ИИ: Эти темы усвоены. Можно использовать сложные конструкции из них.*\n`;
+  md += grammarMastered.length ? grammarMastered.map(t => `- ${t}`).join('\n') : "Нет уверенных тем";
+  md += `\n\n`;
+  
+  md += `## 2. Слабые места (Red Zone)\n`;
+  md += `*Инструкция для ИИ: Пользователь плавает в этих темах. Примеры предложений показывают, где именно возникают ошибки.*\n`;
+  if (grammarProblematic.length > 0) {
+    grammarProblematic.forEach(g => {
+      md += `### ${g.topic}\n`;
+      if (g.examples.length > 0) {
+        md += `Примеры ошибок:\n`;
+        g.examples.forEach(ex => md += `- ${ex}\n`);
+      } else {
+        md += `- (Требует практики)\n`;
+      }
+      md += '\n';
+    });
+  } else {
+    md += "Нет проблемных тем\n";
+  }
+  
+  // --- DOWNLOAD BLOB ---
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const dateStr = new Date().toISOString().split('T')[0];
+  a.download = `Context_Core_${titleSuffix}_${dateStr}.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?: BookMeta | null }) {
   const { decks } = useStore();
   
   const stats = useMemo(() => {
@@ -1215,6 +1340,7 @@ function AdminModal({ onClose }: { onClose: () => void }) {
     let problematic = 0;
     let learning = 0;
     
+    // We only calculate stats for the global DB to show overall progress
     decks.forEach(d => {
       d.cards.forEach(c => {
         total++;
@@ -1225,48 +1351,6 @@ function AdminModal({ onClose }: { onClose: () => void }) {
     });
     return { total, mastered, problematic, learning };
   }, [decks]);
-
-  const handleExport = () => {
-    let md = `# Context Core: User State\n`;
-    md += `Дата выгрузки: ${new Date().toLocaleDateString('ru-RU')}\n\n`;
-    
-    const masteredList: string[] = [];
-    const problematicList: string[] = [];
-    const learningList: string[] = [];
-    
-    decks.forEach(d => {
-      d.cards.forEach(c => {
-        const line = `- ${c.targetWord}: ${c.translation || ''} (из колоды "${d.name}")`;
-        if (c.masteryLevel >= 4 || c.isArchived) masteredList.push(line);
-        else if (c.masteryLevel <= 1) problematicList.push(line);
-        else learningList.push(line);
-      });
-    });
-    
-    md += `## 1. Выученный материал (Mastered / Archive)\n`;
-    md += `*Инструкция для ИИ: Эти слова пользователь знает идеально. Исключи их из генерации новых карточек для изучения, но можешь использовать их для составления текстов для чтения.*\n`;
-    md += masteredList.length ? masteredList.join('\n') : "Нет слов";
-    md += `\n\n`;
-    
-    md += `## 2. Красная зона (Problematic Words)\n`;
-    md += `*Инструкция для ИИ: В этих словах пользователь делает больше всего ошибок. Фокус на них.*\n`;
-    md += problematicList.length ? problematicList.join('\n') : "Нет проблемных слов";
-    md += `\n\n`;
-    
-    md += `## 3. В процессе изучения (Learning)\n`;
-    md += learningList.length ? learningList.join('\n') : "Нет активных слов";
-    
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const dateStr = new Date().toISOString().split('T')[0];
-    a.download = `Context_Core_${dateStr}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
@@ -1281,7 +1365,7 @@ function AdminModal({ onClose }: { onClose: () => void }) {
           <X className="w-5 h-5" />
         </button>
         <h2 className="text-2xl font-bold tracking-tight mb-2">Admin Dashboard</h2>
-        <p className="text-gray-500 dark:text-white/40 text-sm mb-8">Экспорт базы для ИИ-генераций (Context Core)</p>
+        <p className="text-gray-500 dark:text-white/40 text-sm mb-8">Экспорт базы для ИИ-генераций (RAG Context Core)</p>
         
         <div className="grid grid-cols-2 gap-4 mb-8">
           <div className="bg-gray-100 dark:bg-white/5 rounded-2xl p-4">
@@ -1302,13 +1386,25 @@ function AdminModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         
-        <button 
-          onClick={handleExport}
-          className="w-full bg-blue-600 dark:bg-white text-white dark:text-black font-semibold py-4 rounded-2xl transition-all shadow-[0_4px_14px_rgba(37,99,235,0.3)] dark:shadow-[0_4px_20px_rgba(255,255,255,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.4)] dark:hover:shadow-[0_4px_25px_rgba(255,255,255,0.4)] active:scale-[0.98] text-base flex items-center justify-center gap-2"
-        >
-          <Database className="w-5 h-5" />
-          Export Context Core (.md)
-        </button>
+        <div className="flex flex-col gap-3">
+          <button 
+            onClick={() => exportToMarkdown()}
+            className="w-full bg-blue-600 dark:bg-white text-white dark:text-black font-semibold py-4 rounded-2xl transition-all shadow-[0_4px_14px_rgba(37,99,235,0.3)] dark:shadow-[0_4px_20px_rgba(255,255,255,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.4)] dark:hover:shadow-[0_4px_25px_rgba(255,255,255,0.4)] active:scale-[0.98] text-base flex items-center justify-center gap-2"
+          >
+            <Database className="w-5 h-5" />
+            Export Context Core (Global)
+          </button>
+
+          {activeBook && (
+            <button 
+              onClick={() => exportToMarkdown(activeBook.id)}
+              className="w-full bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white font-semibold py-4 rounded-2xl transition-all hover:bg-gray-200 dark:hover:bg-white/20 active:scale-[0.98] text-base flex items-center justify-center gap-2"
+            >
+              <Database className="w-5 h-5 opacity-60" />
+              Export "{activeBook.title}" (Local)
+            </button>
+          )}
+        </div>
       </motion.div>
     </div>
   );
@@ -1319,7 +1415,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
   return (
     <>
       <AnimatePresence>
-        {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} />}
+        {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} activeBook={activeBook} />}
       </AnimatePresence>
       {activeBook ? (
         <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50">
