@@ -2912,14 +2912,14 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isSuccess, setIsSuccess] = useState<boolean | null>(null);
   const [browserHeard, setBrowserHeard] = useState<string>("");
-  
   const [isListening, setIsListening] = useState(false);
+  
   const recognitionRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Изоляция: берем все карточки (игнорируем masteryLevel), перемешиваем
   const cardsToPlay = useMemo(() => {
-    let unmastered = deck.cards.filter(c => c.masteryLevel < 4 && !c.isArchived);
-    if (unmastered.length === 0) unmastered = [...deck.cards];
-    return unmastered.sort(() => Math.random() - 0.5);
+    return [...deck.cards].sort(() => Math.random() - 0.5);
   }, [deck]);
 
   const card = cardsToPlay[currentIndex];
@@ -2929,6 +2929,39 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     return card.sentence.replace("___", card.targetWord).replace(/\s+/g, " ").trim();
   }, [card]);
 
+  // Системный бип
+  const playBeep = useCallback(() => {
+    if (!cachedAudioCtx) return;
+    try {
+      const now = cachedAudioCtx.currentTime;
+      const osc = cachedAudioCtx.createOscillator();
+      const gain = cachedAudioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.1, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.connect(gain);
+      gain.connect(cachedAudioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } catch (e) {}
+  }, []);
+
+  const startListening = useCallback(() => {
+    if (isListening) return;
+    setIsSuccess(null);
+    setBrowserHeard("");
+    try {
+      recognitionRef.current?.start();
+      setIsListening(true);
+    } catch (e) {
+      // Игнорируем ошибку, если уже запущен
+    }
+  }, [isListening]);
+
+  // Инициализация Speech API
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -2939,16 +2972,18 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         recognitionRef.current.interimResults = false;
 
         recognitionRef.current.onresult = (event: any) => {
-          const text = event.results[0][0].transcript;
-          setBrowserHeard(text);
           setIsListening(false);
+          const text = event.results[0][0].transcript;
+          const confidence = event.results[0][0].confidence;
           
           const cleanHeard = text.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
           const cleanTarget = card.targetWord.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
           const cleanSentence = targetSentence.toLowerCase().replace(/[.,?!;:«»„“"'()[\]{}\-—–]/g, "").trim();
           
-          if (cleanHeard.includes(cleanTarget) || cleanHeard === cleanSentence || cleanSentence.includes(cleanHeard) && cleanHeard.length > 3) {
+          // Строгая валидация (Strict Validation)
+          if (cleanHeard === cleanTarget || cleanHeard === cleanSentence || confidence > 0.85) {
             setIsSuccess(true);
+            setBrowserHeard(""); 
             playFeedbackSound(true);
             setTimeout(() => {
               if (currentIndex < cardsToPlay.length - 1) {
@@ -2961,19 +2996,19 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
             }, 1000);
           } else {
             setIsSuccess(false);
+            setBrowserHeard(text); // Просто текст, без "Browser hörte:"
             playFeedbackSound(false);
           }
         };
 
         recognitionRef.current.onerror = (event: any) => {
-          console.error('Speech recognition error', event.error);
+          setIsSuccess(false);
+          setIsListening(false);
           if (event.error === 'not-allowed') {
-            setBrowserHeard("Zugriff auf Mikrofon verweigert (Access Denied)");
+            setBrowserHeard("Zugriff auf Mikrofon verweigert");
           } else {
             setBrowserHeard(`Fehler: ${event.error}`);
           }
-          setIsSuccess(false);
-          setIsListening(false);
         };
         
         recognitionRef.current.onend = () => {
@@ -2983,91 +3018,129 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     }
   }, [card, targetSentence, currentIndex, cardsToPlay.length, onClose]);
 
-  const toggleListening = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-    } else {
-      setIsSuccess(null);
-      setBrowserHeard("");
+  // Автозапуск флоу (TTS -> Beep -> Mic)
+  useEffect(() => {
+    if (!targetSentence) return;
+    let isSubscribed = true;
+
+    const runFlow = async () => {
       try {
-        recognitionRef.current?.start();
-        setIsListening(true);
+        const res = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: targetSentence })
+        });
+        if (!res.ok) throw new Error();
+        const blob = await res.blob();
+        if (!isSubscribed) return;
+        
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        
+        audio.onended = () => {
+          if (!isSubscribed) return;
+          playBeep();
+          setTimeout(() => {
+            if (isSubscribed) startListening();
+          }, 300); // Чуть-чуть паузы после бипа перед стартом микрофона
+        };
+        
+        await audio.play();
       } catch (e) {
-        setBrowserHeard("Spracherkennung nicht verfügbar");
+        if (isSubscribed) {
+           playBeep();
+           setTimeout(() => {
+             if (isSubscribed) startListening();
+           }, 300);
+        }
       }
-    }
-  };
+    };
+
+    // Запускаем через небольшую паузу после появления карточки
+    const initialDelay = setTimeout(() => {
+      runFlow();
+    }, 300);
+
+    return () => {
+      isSubscribed = false;
+      clearTimeout(initialDelay);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.onended = null;
+      }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch(e) {}
+      }
+    };
+  }, [targetSentence, playBeep, startListening]);
 
   if (!card) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-white dark:bg-[#1C1C1E] flex flex-col justify-between">
-      <div className="flex-1 flex flex-col pt-16 px-6 max-w-3xl mx-auto w-full relative">
-        <button 
-          onClick={onClose}
-          className="absolute top-6 right-6 p-3 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-gray-400 rounded-full transition-colors active:scale-95"
-        >
-          <X className="w-6 h-6" />
-        </button>
+    <div className="fixed inset-0 z-[100] bg-white dark:bg-[#1C1C1E] flex flex-col p-6 overflow-hidden">
+      <button 
+        onClick={onClose}
+        className="absolute top-6 right-6 p-3 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-gray-400 rounded-full transition-colors active:scale-95 z-10"
+      >
+        <X className="w-6 h-6" />
+      </button>
 
-        <div className="flex flex-col flex-1 pb-32">
-          {/* Top Status */}
-          <div className="w-full h-8 shrink-0 flex items-center justify-center mb-8">
-             <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">
-               Shadowing • {currentIndex + 1} / {cardsToPlay.length}
-             </span>
-          </div>
-          
-          <div className="flex-1 flex flex-col justify-center gap-12 relative max-w-2xl mx-auto w-full px-4">
-             {/* Target Sentence */}
-             <div className="text-center space-y-4">
-               <h2 className={cn(
-                 "text-4xl md:text-5xl font-bold leading-[1.35] tracking-tight transition-colors duration-500",
-                 isSuccess === true ? "text-green-500" : isSuccess === false ? "text-red-500" : "text-gray-900 dark:text-[#F5F5F7]"
-               )}>
-                 {targetSentence}
-               </h2>
-               <p className="text-xl md:text-2xl font-medium text-gray-500 dark:text-[#8E8E93]">
-                 {card.translation}
-               </p>
-             </div>
+      {/* Top Status */}
+      <div className="w-full shrink-0 flex items-center justify-center pt-2">
+         <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">
+           Shadowing • {currentIndex + 1} / {cardsToPlay.length}
+         </span>
+      </div>
 
-             {/* Feedback Area */}
-             <div className="min-h-[60px] flex items-center justify-center">
-               <AnimatePresence mode="wait">
-                 {browserHeard && (
-                   <motion.div 
-                     initial={{ opacity: 0, y: 10 }}
-                     animate={{ opacity: 1, y: 0 }}
-                     exit={{ opacity: 0, y: -10 }}
-                     className={cn(
-                       "text-center px-6 py-3 rounded-2xl border text-lg font-medium",
-                       isSuccess === true ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400" : 
-                       "bg-red-50 border-red-200 text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400"
-                     )}
-                   >
-                     Browser hörte: "{browserHeard}"
-                   </motion.div>
+      <div className="flex-1 flex flex-col items-center justify-center gap-10 w-full max-w-2xl mx-auto px-4">
+         {/* Sentences */}
+         <div className="flex flex-col items-center gap-4">
+           <h2 className={cn(
+             "text-4xl md:text-5xl font-bold leading-[1.35] tracking-tight text-center transition-colors duration-500",
+             isSuccess === true ? "text-green-500" : isSuccess === false ? "text-red-500" : "text-gray-900 dark:text-[#F5F5F7]"
+           )}>
+             {targetSentence}
+           </h2>
+           <p className="text-xl md:text-2xl font-medium text-gray-500 dark:text-[#8E8E93] text-center">
+             {card.translation}
+           </p>
+         </div>
+
+         {/* Error Block */}
+         <div className="min-h-[70px] w-full flex items-center justify-center">
+           <AnimatePresence mode="wait">
+             {browserHeard && (
+               <motion.div 
+                 initial={{ opacity: 0, y: 10 }}
+                 animate={{ opacity: 1, y: 0 }}
+                 exit={{ opacity: 0, y: -10 }}
+                 className={cn(
+                   "text-center px-8 py-4 rounded-2xl border text-xl font-semibold max-w-lg w-full shadow-sm",
+                   isSuccess === true ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-500/10 dark:border-green-500/20 dark:text-green-400" : 
+                   "bg-red-50 border-red-200 text-red-700 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400"
                  )}
-               </AnimatePresence>
-             </div>
-          </div>
-        </div>
+               >
+                 {browserHeard}
+               </motion.div>
+             )}
+           </AnimatePresence>
+         </div>
+      </div>
 
-        {/* Mic Control Widget */}
-        <div className="fixed bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-white via-white to-transparent dark:from-[#1C1C1E] dark:via-[#1C1C1E] flex items-center justify-center pointer-events-none pb-8">
-          <button 
-            onClick={toggleListening}
-            className={cn(
-              "pointer-events-auto w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 transform-gpu",
-              isListening 
-                ? "bg-red-500 shadow-[0_0_40px_rgba(239,68,68,0.5)] scale-110" 
-                : "bg-blue-600 dark:bg-blue-500 hover:scale-105 active:scale-95"
-            )}
-          >
-            <Mic className={cn("w-10 h-10 text-white", isListening && "animate-pulse")} />
-          </button>
-        </div>
+      {/* Mic Control */}
+      <div className="shrink-0 h-32 flex items-center justify-center w-full pb-8">
+        <button 
+          onClick={startListening}
+          className={cn(
+            "w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 transform-gpu z-10 outline-none",
+            isListening 
+              ? "bg-red-500 shadow-[0_0_40px_rgba(239,68,68,0.5)] scale-110" 
+              : "bg-blue-600 dark:bg-blue-500 hover:scale-105 active:scale-95"
+          )}
+        >
+          <Mic className={cn("w-10 h-10 text-white", isListening && "animate-pulse")} />
+        </button>
       </div>
     </div>
   );
