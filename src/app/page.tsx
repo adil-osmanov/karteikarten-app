@@ -2920,7 +2920,6 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const ttsPlayedForIndex = useRef<number>(-1);
   const isListeningRef = useRef<boolean>(false);
   
-  // Флаг первого клика пользователя (для обхода блокировки getUserMedia)
   const hasGrantedMicPermission = useRef<boolean>(false);
 
   const cardsToPlay = useMemo(() => {
@@ -2933,25 +2932,6 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     if (!card) return "";
     return card.sentence.replace("___", card.targetWord).replace(/\s+/g, " ").trim();
   }, [card]);
-
-  const playBeep = useCallback(() => {
-    if (!cachedAudioCtx) return;
-    try {
-      const now = cachedAudioCtx.currentTime;
-      const osc = cachedAudioCtx.createOscillator();
-      const gain = cachedAudioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(800, now);
-      osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.1, now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-      osc.connect(gain);
-      gain.connect(cachedAudioCtx.destination);
-      osc.start(now);
-      osc.stop(now + 0.15);
-    } catch (e) {}
-  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -2981,6 +2961,10 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     recognitionRef.current.onstart = () => {
       isListeningRef.current = true;
       setMicStatus('listening');
+      // AUDIO DUCKING FIX: Принудительно будим AudioContext при старте микрофона
+      if (cachedAudioCtx && cachedAudioCtx.state === 'suspended') {
+        cachedAudioCtx.resume().catch(() => {});
+      }
     };
 
     recognitionRef.current.onresult = (event: any) => {
@@ -2995,9 +2979,18 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       
       if (cleanHeard === cleanTarget || cleanHeard === cleanSentence || confidence > 0.85) {
         setIsSuccess(true);
-        setBrowserHeard(""); 
+        setBrowserHeard("");
+        
+        // AUDIO DUCKING FIX: Пробуждаем перед SFX
+        if (cachedAudioCtx && cachedAudioCtx.state === 'suspended') {
+           cachedAudioCtx.resume().catch(() => {});
+        }
         playFeedbackSound(true);
+        
         setTimeout(() => {
+          if (audioRef.current) {
+            audioRef.current.pause();
+          }
           if (currentIndex < cardsToPlay.length - 1) {
             setCurrentIndex(prev => prev + 1);
             setIsSuccess(null);
@@ -3010,6 +3003,10 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       } else {
         setIsSuccess(false);
         setBrowserHeard(text);
+        
+        if (cachedAudioCtx && cachedAudioCtx.state === 'suspended') {
+           cachedAudioCtx.resume().catch(() => {});
+        }
         playFeedbackSound(false);
         setMicStatus('idle');
       }
@@ -3017,7 +3014,7 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
 
     recognitionRef.current.onerror = (event: any) => {
       isListeningRef.current = false;
-      setMicStatus('idle'); // Гарантированный сброс
+      setMicStatus('idle');
       if (event.error === 'aborted') {
         setBrowserHeard(""); 
       } else if (event.error === 'not-allowed') {
@@ -3043,10 +3040,7 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
   const startListening = useCallback(() => {
     if (isListeningRef.current) return;
     
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-
+    // НЕ ОСТАНАВЛИВАЕМ AUDIO! (Concurrent Execution)
     setIsSuccess(null);
     setBrowserHeard("");
     
@@ -3054,6 +3048,10 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       recognitionRef.current?.start();
       isListeningRef.current = true;
       setMicStatus('listening');
+      
+      if (cachedAudioCtx && cachedAudioCtx.state === 'suspended') {
+        cachedAudioCtx.resume().catch(() => {});
+      }
     } catch (e) {
       isListeningRef.current = false;
       setMicStatus('idle');
@@ -3066,7 +3064,11 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     
     let isSubscribed = true;
     ttsPlayedForIndex.current = currentIndex;
-    setMicStatus('playing-tts');
+    
+    // Если микрофон уже включен (не первый запуск), мы сразу перейдем в listening
+    if (!hasGrantedMicPermission.current) {
+       setMicStatus('playing-tts');
+    }
 
     const runFlow = async () => {
       try {
@@ -3083,44 +3085,38 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
         const audio = new Audio(url);
         audioRef.current = audio;
         
+        // СИНХРОННЫЙ СТАРТ: Микрофон включается вместе с началом аудио!
+        audio.onplay = () => {
+          if (!isSubscribed) return;
+          if (hasGrantedMicPermission.current) {
+            startListening();
+          }
+        };
+
+        // Мы больше не включаем микрофон в onended, и не останавливаем его принудительно.
         audio.onended = () => {
           if (!isSubscribed) return;
-          playBeep();
-          
-          setTimeout(() => {
-            if (isSubscribed) {
-              if (hasGrantedMicPermission.current) {
-                startListening();
-              } else {
-                setMicStatus('idle');
-              }
-            }
-          }, 500);
+          // Если юзер еще не кликал первый раз, просто вернем статус в idle
+          if (!hasGrantedMicPermission.current) {
+            setMicStatus('idle');
+          }
         };
         
         await audio.play();
       } catch (e) {
         if (isSubscribed) {
-           playBeep();
-           setTimeout(() => {
-             if (isSubscribed) {
-                if (hasGrantedMicPermission.current) startListening();
-                else setMicStatus('idle');
-             }
-           }, 500);
+           if (hasGrantedMicPermission.current) startListening();
+           else setMicStatus('idle');
         }
       }
     };
 
-    const initialDelay = setTimeout(() => {
-      runFlow();
-    }, 300);
+    runFlow();
 
     return () => {
       isSubscribed = false;
-      clearTimeout(initialDelay);
     };
-  }, [targetSentence, currentIndex, playBeep, startListening]);
+  }, [targetSentence, currentIndex, startListening]);
 
   if (!card) return null;
 
