@@ -1326,8 +1326,9 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
     let problematic = 0;
     let learning = 0;
     
-    // We only calculate stats for the global DB to show overall progress
-    decks.forEach(d => {
+    const targetDecks = activeBook ? decks.filter(d => d.bookId === activeBook.id) : decks;
+    
+    targetDecks.forEach(d => {
       d.cards.forEach(c => {
         total++;
         if (c.masteryLevel >= 4 || c.isArchived) mastered++;
@@ -1336,7 +1337,7 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
       });
     });
     return { total, mastered, problematic, learning };
-  }, [decks]);
+  }, [decks, activeBook]);
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
@@ -1351,7 +1352,9 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
           <X className="w-5 h-5" />
         </button>
         <h2 className="text-2xl font-bold tracking-tight mb-2">Admin Dashboard</h2>
-        <p className="text-gray-500 dark:text-white/40 text-sm mb-8">Экспорт базы для ИИ-генераций (RAG Context Core)</p>
+        <p className="text-gray-500 dark:text-white/40 text-sm mb-8">
+          Экспорт базы для ИИ-генераций {activeBook ? `("${activeBook.title}")` : '(Global)'}
+        </p>
         
         <div className="grid grid-cols-2 gap-4 mb-8">
           <div className="bg-gray-100 dark:bg-white/5 rounded-2xl p-4">
