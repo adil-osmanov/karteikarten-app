@@ -1233,7 +1233,8 @@ export const exportToMarkdown = (bookId?: string) => {
       
       if (c.masteryLevel >= 4 || c.isArchived) {
         vocabMastered.add(wordLower);
-      } else if (c.masteryLevel <= 1) {
+      } else {
+        // Level 0-3 (Learning / Problematic)
         if (!vocabProblematic.has(wordLower)) {
           vocabProblematic.set(wordLower, `${origCaseWord}: ${c.translation || ''}`);
         }
@@ -1248,32 +1249,29 @@ export const exportToMarkdown = (bookId?: string) => {
   
   // --- GRAMMAR ANALYTICS ---
   const grammarMastered: string[] = [];
-  const grammarProblematic: { topic: string, examples: string[] }[] = [];
+  const grammarProblematic: string[] = [];
   
   grammarDecks.forEach(d => {
     if (d.cards.length === 0) return;
     
     let totalMastery = 0;
-    const lowMasteryCards: string[] = [];
+    const weakCards: any[] = [];
     
     d.cards.forEach(c => {
       totalMastery += c.masteryLevel;
-      if (c.masteryLevel <= 1) {
-        let ex = c.sentence.replace('___', c.targetWord);
-        if (c.translation) ex += ` (${c.translation})`;
-        lowMasteryCards.push(ex);
+      if (c.masteryLevel < 4 && !c.isArchived) {
+        weakCards.push(c);
       }
     });
     
     const avgMastery = totalMastery / d.cards.length;
     
-    if (avgMastery >= 3) {
-      grammarMastered.push(d.name);
+    if (avgMastery > 3) {
+      grammarMastered.push(`- Тема: ${d.name} - Усвоено`);
     } else {
-      grammarProblematic.push({
-        topic: d.name,
-        // Max 5 examples to save LLM tokens
-        examples: lowMasteryCards.sort(() => Math.random() - 0.5).slice(0, 5)
+      weakCards.forEach(c => {
+        const sent = c.sentence || "";
+        grammarProblematic.push(`- Тема ${d.name}: ${sent} -> Ответ: ${c.targetWord}`);
       });
     }
   });
@@ -1289,34 +1287,22 @@ export const exportToMarkdown = (bookId?: string) => {
   md += masteredArr.length ? masteredArr.join(', ') : "Нет слов";
   md += `\n\n`;
   
-  md += `## 2. Красная зона (Problematic Words)\n`;
-  md += `*Инструкция для ИИ: Фокус на этих словах. Пользователь делает в них ошибки.*\n`;
+  md += `## 2. В процессе / Проблемные (Learning & Red Zone)\n`;
+  md += `*Инструкция для ИИ: Фокус на этих словах. Пользователь делает в них ошибки или только начал учить.*\n`;
   const probArr = Array.from(vocabProblematic.values());
   md += probArr.length ? probArr.map(s => `- ${s}`).join('\n') : "Нет проблемных слов";
   md += `\n\n`;
   
   md += `# ГРАММАТИКА (Grammar)\n\n`;
-  md += `## 1. Уверенные темы (Mastered)\n`;
+  md += `## 1. Усвоенные темы (Mastered)\n`;
   md += `*Инструкция для ИИ: Эти темы усвоены. Можно использовать сложные конструкции из них.*\n`;
-  md += grammarMastered.length ? grammarMastered.map(t => `- ${t}`).join('\n') : "Нет уверенных тем";
+  md += grammarMastered.length ? grammarMastered.join('\n') : "Нет уверенных тем";
   md += `\n\n`;
   
   md += `## 2. Слабые места (Red Zone)\n`;
-  md += `*Инструкция для ИИ: Пользователь плавает в этих темах. Примеры предложений показывают, где именно возникают ошибки.*\n`;
-  if (grammarProblematic.length > 0) {
-    grammarProblematic.forEach(g => {
-      md += `### ${g.topic}\n`;
-      if (g.examples.length > 0) {
-        md += `Примеры ошибок:\n`;
-        g.examples.forEach(ex => md += `- ${ex}\n`);
-      } else {
-        md += `- (Требует практики)\n`;
-      }
-      md += '\n';
-    });
-  } else {
-    md += "Нет проблемных тем\n";
-  }
+  md += `*Инструкция для ИИ: Пользователь плавает в этих темах. Примеры предложений показывают, где именно возникают ошибки для анализа синтаксиса.*\n`;
+  md += grammarProblematic.length ? grammarProblematic.join('\n') : "Нет слабых мест";
+  md += `\n`;
   
   // --- DOWNLOAD BLOB ---
   const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
@@ -1388,22 +1374,12 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
         
         <div className="flex flex-col gap-3">
           <button 
-            onClick={() => exportToMarkdown()}
+            onClick={() => exportToMarkdown(activeBook?.id)}
             className="w-full bg-blue-600 dark:bg-white text-white dark:text-black font-semibold py-4 rounded-2xl transition-all shadow-[0_4px_14px_rgba(37,99,235,0.3)] dark:shadow-[0_4px_20px_rgba(255,255,255,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.4)] dark:hover:shadow-[0_4px_25px_rgba(255,255,255,0.4)] active:scale-[0.98] text-base flex items-center justify-center gap-2"
           >
             <Database className="w-5 h-5" />
-            Export Context Core (Global)
+            {activeBook ? `Export "${activeBook.title}" (Local)` : "Export Context Core (Global)"}
           </button>
-
-          {activeBook && (
-            <button 
-              onClick={() => exportToMarkdown(activeBook.id)}
-              className="w-full bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white font-semibold py-4 rounded-2xl transition-all hover:bg-gray-200 dark:hover:bg-white/20 active:scale-[0.98] text-base flex items-center justify-center gap-2"
-            >
-              <Database className="w-5 h-5 opacity-60" />
-              Export "{activeBook.title}" (Local)
-            </button>
-          )}
         </div>
       </motion.div>
     </div>
