@@ -5,7 +5,7 @@ import {
   Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
-  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Dumbbell
+  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -499,11 +499,13 @@ const useStore = create<DeckState>()((set, get) => ({
 function StudyInterface({ 
   deckId, 
   onBack,
-  reviewCards
+  reviewCards,
+  isDrillMode
 }: { 
   deckId?: string, 
   onBack: () => void,
-  reviewCards?: { deckId: string, card: Flashcard }[]
+  reviewCards?: { deckId: string, card: Flashcard }[],
+  isDrillMode?: boolean
 }) {
   const { answerCard, decks } = useStore();
   
@@ -621,7 +623,7 @@ function StudyInterface({
           <StudyCard
             key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
             card={liveCard}
-            forceInputMode={!!reviewCards}
+            forceInputMode={!!reviewCards && !isDrillMode}
             onAnswer={(correct, isHilfe) => {
               answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
               if (correct && !isHilfe) {
@@ -1895,6 +1897,7 @@ export default function App() {
   const [dictationDeckId, setDictationDeckId] = useState<string | null>(null);
   const [shadowingDeckId, setShadowingDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
+  const [drillCards, setDrillCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [bookModal, setBookModal] = useState<{ id?: string } | null>(null);
@@ -2117,7 +2120,7 @@ try {
          const j = Math.floor(Math.random() * (i + 1));
          [drillCards[i], drillCards[j]] = [drillCards[j], drillCards[i]];
       }
-      setReviewCards(drillCards);
+      setDrillCards(drillCards);
     } else {
       alert(`Keine aktiven Karten für Level ${level} gefunden.`);
     }
@@ -2159,6 +2162,14 @@ try {
     return (
       <>
         <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
+      </>
+    );
+  }
+
+  if (drillCards) {
+    return (
+      <>
+        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} />
       </>
     );
   }
@@ -2514,7 +2525,7 @@ try {
                           className="h-7 w-7 mr-0.5 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
                           title={`Глобальная тренировка ${level}`}
                         >
-                          <Dumbbell className="w-3.5 h-3.5" />
+                          <Shuffle className="w-3.5 h-3.5" />
                         </button>
                         <button 
                           onClick={() => handlePlusClick(activeTab, level)}
