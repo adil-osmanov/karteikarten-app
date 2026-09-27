@@ -1905,6 +1905,31 @@ export default function App() {
   const [deleteBookModal, setDeleteBookModal] = useState<{ id: string, title: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
 
+  const handleGlobalDrill = useCallback((level: LanguageLevel) => {
+    initAudioCtx();
+    const drillCards: { deckId: string, card: Flashcard }[] = [];
+    
+    filteredDecksList.forEach(d => {
+      if (d.level === level) {
+        d.cards.forEach(c => {
+          if (!c.isArchived) {
+            drillCards.push({ deckId: d.id, card: c });
+          }
+        });
+      }
+    });
+    
+    if (drillCards.length > 0) {
+      for (let i = drillCards.length - 1; i > 0; i--) {
+         const j = Math.floor(Math.random() * (i + 1));
+         [drillCards[i], drillCards[j]] = [drillCards[j], drillCards[i]];
+      }
+      setReviewCards(drillCards);
+    } else {
+      alert(`Keine aktiven Karten für Level ${level} gefunden.`);
+    }
+  }, [filteredDecksList]);
+
   const handleDeckClick = useCallback((id: string) => setActiveDeckId(id), []);
   const handleRenameClick = useCallback((id: string, name: string) => { setRenameInput(name); setRenameModal({ id, name }); }, []);
   const handleDeleteClick = useCallback((id: string, name: string) => setDeleteModal({ id, name }), []);
@@ -2483,6 +2508,13 @@ try {
                         <span className="h-7 px-3 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-[#8E8E93]">
                           {level}
                         </span>
+                        <button 
+                          onClick={() => handleGlobalDrill(level)}
+                          className="h-7 w-7 mr-0.5 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
+                          title={`Глобальная тренировка ${level}`}
+                        >
+                          <Dumbbell className="w-3.5 h-3.5" />
+                        </button>
                         <button 
                           onClick={() => handlePlusClick(activeTab, level)}
                           className="h-7 w-7 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
