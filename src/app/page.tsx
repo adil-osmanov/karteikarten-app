@@ -58,78 +58,24 @@ const initAudioCtx = () => {
   } catch (e) {}
 };
 
+const TOCK_B64 = "data:audio/wav;base64,UklGRk4FAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YSoFAAAAAFQEiQiRDF8Q6BMiFwUaiRynHl0gpSF/Iusi6SJ7IqYhbiDaHu8ctRo2GHkViRJuDzQM5AiIBSoC1v6R+2f4X/WB8tXvYO0o6zLpgucb5v/kL+Ss43XjiuPo44zkdOWc5gDomelk61vtd++z8Qj0cfbm+GL73v1UAL8CGgVfB4kJlQt9DT4P1hBBEn4TihRlFQ4WhBbIFtoWuxZtFvEVShV5FIITaBItEdQPYg7aDD4LlAneByEGXwSdAt0AJf90/c/7Ovq2+EX36/Wo9IDzcvKB8azw9u9f7+fuje5S7jbuN+5V7pDu5u5W797vffAy8fvx1vLB87v0wfXT9u33Dvk0+l37iPyy/dv+AAAfATgCSQNRBE8FQQYmB/4HyAiDCS4KyQpUC88LOAyRDNgMDw02DUwNUg1IDS8NCA3SDI8MPwzjC3wLCguOCgkKfAnoCE0IrAcHB10GsQUBBVAEnwPsAjsCigHcADAAh//i/kD+o/0L/Xn87Ptl++X6bPr5+Y35KfnM+Hb4KPji96P3bPc89xT38/bZ9sb2uva19rf2v/bN9uH2+vYZ9z73Z/eV98f3/fc3+HX4tvj6+EH5ivnV+SP6cvrD+hT7Z/u7+w/8Y/y4/Az9Yf20/Qj+Wv6s/vz+S/+Z/+b/MAB5AMAABgFKAYwBzAEJAkUCfgK2AusCHgNPA30DqQPTA/sDIAREBGUEhAShBLwE1ATrBAAFEwUkBTMFQAVMBVYFXgVlBWoFbQVwBXEFcAVuBWwFaAViBVwFVQVNBUQFOgUwBSQFGAUMBf4E8ATiBNMExAS0BKQElASDBHIEYQRQBD8ELQQbBAoE+APmA9UDwwOxA6ADjgN9A2sDWgNJAzkDKAMYAwcD9wLoAtgCyQK6AqsCnQKPAoECcwJmAlkCTAJAAjQCKAIdAhECBgL8AfIB6AHeAdUBzAHDAbsBsgGrAaMBnAGVAY4BiAGCAXwBdgFxAWwBZwFjAV8BWwFXAVMBUAFNAUoBSAFFAUMBQQFAAT4BPQE8ATsBOgE6AToBOQE5AToBOgE6AToBOwE8AT0BPgE/AUABQgFDAUUBRwFJAUsBTQFPAVIBVAFWAVkBWwFeAWEBYwFmAWkBbAFvAXIBdAF3AXoBfQGAAYMBhgGIAYsBjgGRAYcBmgGzAZ0BnwGiAaQBpgGnAakBqwGsAa0BrgGvAbABsQGxAbIBsgGyAbEBsQGwAa8BrgGtAasBqQGnAaUBogGfAZwBmQGVAZEBjQGIAYMBfgF5AXMBbQFnAWABWQFSAUsBQwE7ATMBKgEhARgBDwEFAfsA8QDnAN0A0gDHALwAsAClAJkAjgCCAHYAagBdAFEARQA5ACwAIAAUAAcA/P/w/+T/2P/M/8H/tf+q/5//lP+K/4D/dv9s/2P/W/9S/0r/Q/88/zX/L/8p/yT/H/8b/xj/Ff8T/xH/EP8P/w//EP8R/xP/Ff8Y/xz/IP8l/yr/MP83/z7/Rf9N/1X/Xv9o/3H/e/+G/5D/m/+m/7L/vf/J/9X/4f/s//j/AwAOABoAJQAwADsARQBPAFkAYgBrAHMAewCCAIkAjwCUAJkAnQChAKMApQCmAKcApgClAKQAoQCeAJoAlQCQAIoAhAB9AHUAbQBkAFsAUgBIAD4ANAAqAB8AFQAKAAAA9v/s/+L/2P/O/8X/vf+0/63/pf+f/5n/lP+P/4v/iP+G/4X/hP+E/4X/hv+J/4z/kP+U/5r/oP+m/63/tf+9/8X/zv/X/+D/6f/y/w==";
+
 const playTockSound = () => {
   if (typeof window === 'undefined') return;
   try {
-    const ctx = cachedAudioCtx || new (window.AudioContext || (window as any).webkitAudioContext)();
-    if (!cachedAudioCtx) cachedAudioCtx = ctx;
-    if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-    }
-    
-    // Add small offset so Safari doesn't ignore past-scheduled ramps
-    const now = ctx.currentTime + 0.005;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(250, now);
-    osc.frequency.exponentialRampToValueAtTime(40, now + 0.05);
-    
-    // Start with volume instantly to avoid Safari 0-volume bug
-    gain.gain.setValueAtTime(0.2, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-    
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    
-    osc.start(now);
-    osc.stop(now + 0.07);
-  } catch (e) {
-    console.error("Tock error:", e);
-  }
+    const audio = new Audio(TOCK_B64);
+    audio.play().catch(() => {});
+  } catch (e) {}
 };
+
+const SUCCESS_B64 = "data:audio/wav;base64,";
+const FAIL_B64 = "data:audio/wav;base64,";
 
 const playFeedbackSound = (isCorrect: boolean) => {
   if (typeof window === 'undefined') return;
   try {
-    const ctx = cachedAudioCtx || new (window.AudioContext || (window as any).webkitAudioContext)();
-    if (!cachedAudioCtx) cachedAudioCtx = ctx;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    
-    if (isCorrect) {
-      // Success: Clear, bright chime
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1); // E5
-      
-      gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.03);
-      gain.gain.linearRampToValueAtTime(0.05, ctx.currentTime + 0.1);
-      gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.13);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
-      
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.4);
-    } else {
-      // Error: Noticeable thud
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(150, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.2);
-      
-      gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
-      
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.2);
-    }
+    const audio = new Audio(isCorrect ? SUCCESS_B64 : FAIL_B64);
+    audio.play().catch(() => {});
   } catch (e) {}
 };
 
