@@ -1521,7 +1521,7 @@ DeckCard.displayName = "DeckCard";
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
   useScrollLock(true);
   const { appLanguage } = useStore();
-  const [title, setTitle] = useState(book?.name || "");
+  const [title, setTitle] = useState(book?.title || "");
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
   const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue || "#1C1C1E");
   const [coverImage, setCoverImage] = useState<string | null>(book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null));
