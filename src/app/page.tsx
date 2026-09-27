@@ -2121,12 +2121,12 @@ try {
     });
   }, [decks, activeBookId, appLanguage]);
 
-  const handleGlobalDrill = useCallback((level: LanguageLevel) => {
+  const handleGlobalDrill = useCallback((level: LanguageLevel, category: "Grammatik" | "Wörter") => {
     initAudioCtx();
     const drillCards: { deckId: string, card: Flashcard }[] = [];
     
     filteredDecksList.forEach(d => {
-      if (d.level === level) {
+      if (d.level === level && d.category === category) {
         d.cards.forEach(c => {
           if (!c.isArchived) {
             drillCards.push({ deckId: d.id, card: c });
@@ -2142,7 +2142,7 @@ try {
       }
       setDrillCards(drillCards);
     } else {
-      alert(`Keine aktiven Karten für Level ${level} gefunden.`);
+      alert(`Keine aktiven Karten für Level ${level} (${category}) gefunden.`);
     }
   }, [filteredDecksList]);
 
@@ -2541,7 +2541,7 @@ try {
                           {level}
                         </span>
                         <button 
-                          onClick={() => handleGlobalDrill(level)}
+                          onClick={() => handleGlobalDrill(level, activeTab)}
                           className="h-7 w-7 mr-0.5 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
                           title={`Глобальная тренировка ${level}`}
                         >
