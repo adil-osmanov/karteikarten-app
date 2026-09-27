@@ -5,7 +5,7 @@ import {
   Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
-  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database
+  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Dumbbell
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
