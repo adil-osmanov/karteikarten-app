@@ -577,7 +577,7 @@ function StudyInterface({
   const { deckId: currentDeckId, card: currentCardSnapshot } = activeCards[currentIndex];
   // Get live card to instantly reflect masteryLevel updates (blue dots)
   const liveCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
-  const currentDeckTitle = decks.find(d => d.id === currentDeckId)?.title;
+  const currentDeckTitle = decks.find(d => d.id === currentDeckId)?.name;
   
   const handleNext = () => {
     if (currentIndex < activeCards.length - 1) {
@@ -1521,7 +1521,7 @@ DeckCard.displayName = "DeckCard";
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
   useScrollLock(true);
   const { appLanguage } = useStore();
-  const [title, setTitle] = useState(book?.title || "");
+  const [title, setTitle] = useState(book?.name || "");
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
   const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue || "#1C1C1E");
   const [coverImage, setCoverImage] = useState<string | null>(book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null));
