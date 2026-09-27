@@ -577,6 +577,7 @@ function StudyInterface({
   const { deckId: currentDeckId, card: currentCardSnapshot } = activeCards[currentIndex];
   // Get live card to instantly reflect masteryLevel updates (blue dots)
   const liveCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
+  const currentDeckTitle = decks.find(d => d.id === currentDeckId)?.title;
   
   const handleNext = () => {
     if (currentIndex < activeCards.length - 1) {
@@ -623,6 +624,7 @@ function StudyInterface({
           <StudyCard
             key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
             card={liveCard}
+            deckTitle={currentDeckTitle}
             forceInputMode={!!reviewCards && !isDrillMode}
             onAnswer={(correct, isHilfe) => {
               answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
@@ -645,16 +647,19 @@ function StudyInterface({
 
 function StudyCard({ 
   card, 
+  deckTitle,
   onAnswer, 
   onNext,
   forceInputMode = false
 }: { 
   card: Flashcard, 
+  deckTitle?: string,
   onAnswer: (correct: boolean, isHilfe: boolean) => void,
   onNext: () => void,
   forceInputMode?: boolean
 }) {
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
+  const [hasErrored, setHasErrored] = useState(false);
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const { playbackSpeed, setPlaybackSpeed } = useStore();
@@ -771,12 +776,14 @@ const playAudio = useCallback(async (text: string) => {
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
     const correct = option === card.targetWord;
+    if (!correct) setHasErrored(true);
     playFeedbackSound(correct);
     onAnswer(correct, false);
     handleReveal();
   };
 
   const handleHilfe = () => {
+    setHasErrored(true);
     onAnswer(false, true); // isHilfe = true
     handleReveal();
   };
@@ -848,6 +855,7 @@ const playAudio = useCallback(async (text: string) => {
       
       const lastCharIndex = newValue.length - 1;
       if (newValue.length > 0 && newValue[lastCharIndex].toLowerCase() !== card.targetWord[lastCharIndex]?.toLowerCase()) {
+        setHasErrored(true);
         playFeedbackSound(false);
       }
 
@@ -976,6 +984,18 @@ const playAudio = useCallback(async (text: string) => {
           </button>
         </div>
         <div className="flex items-center gap-4">
+          <AnimatePresence>
+            {hasErrored && deckTitle && (
+              <motion.span 
+                initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
+                animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
+                exit={{ opacity: 0 }}
+                className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
+              >
+                {deckTitle}
+              </motion.span>
+            )}
+          </AnimatePresence>
           <button 
             onClick={handleHilfe}
             disabled={phase !== "Question"}
@@ -2525,7 +2545,7 @@ try {
                           className="h-7 w-7 mr-0.5 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
                           title={`Глобальная тренировка ${level}`}
                         >
-                          <Shuffle className="w-3.5 h-3.5" />
+                          <Play className="w-3.5 h-3.5 fill-current" />
                         </button>
                         <button 
                           onClick={() => handlePlusClick(activeTab, level)}
