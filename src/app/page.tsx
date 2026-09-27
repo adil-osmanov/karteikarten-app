@@ -624,7 +624,7 @@ function StudyInterface({
           <StudyCard
             key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
             card={liveCard}
-            deckTitle={currentDeckTitle}
+            deckTitle={reviewCards ? currentDeckTitle : undefined}
             forceInputMode={!!reviewCards && !isDrillMode}
             onAnswer={(correct, isHilfe) => {
               answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
