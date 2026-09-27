@@ -1905,31 +1905,6 @@ export default function App() {
   const [deleteBookModal, setDeleteBookModal] = useState<{ id: string, title: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
 
-  const handleGlobalDrill = useCallback((level: LanguageLevel) => {
-    initAudioCtx();
-    const drillCards: { deckId: string, card: Flashcard }[] = [];
-    
-    filteredDecksList.forEach(d => {
-      if (d.level === level) {
-        d.cards.forEach(c => {
-          if (!c.isArchived) {
-            drillCards.push({ deckId: d.id, card: c });
-          }
-        });
-      }
-    });
-    
-    if (drillCards.length > 0) {
-      for (let i = drillCards.length - 1; i > 0; i--) {
-         const j = Math.floor(Math.random() * (i + 1));
-         [drillCards[i], drillCards[j]] = [drillCards[j], drillCards[i]];
-      }
-      setReviewCards(drillCards);
-    } else {
-      alert(`Keine aktiven Karten für Level ${level} gefunden.`);
-    }
-  }, [filteredDecksList]);
-
   const handleDeckClick = useCallback((id: string) => setActiveDeckId(id), []);
   const handleRenameClick = useCallback((id: string, name: string) => { setRenameInput(name); setRenameModal({ id, name }); }, []);
   const handleDeleteClick = useCallback((id: string, name: string) => setDeleteModal({ id, name }), []);
@@ -2122,6 +2097,32 @@ try {
       return (d.language || 'DE') === appLanguage;
     });
   }, [decks, activeBookId, appLanguage]);
+
+  const handleGlobalDrill = useCallback((level: LanguageLevel) => {
+    initAudioCtx();
+    const drillCards: { deckId: string, card: Flashcard }[] = [];
+    
+    filteredDecksList.forEach(d => {
+      if (d.level === level) {
+        d.cards.forEach(c => {
+          if (!c.isArchived) {
+            drillCards.push({ deckId: d.id, card: c });
+          }
+        });
+      }
+    });
+    
+    if (drillCards.length > 0) {
+      for (let i = drillCards.length - 1; i > 0; i--) {
+         const j = Math.floor(Math.random() * (i + 1));
+         [drillCards[i], drillCards[j]] = [drillCards[j], drillCards[i]];
+      }
+      setReviewCards(drillCards);
+    } else {
+      alert(`Keine aktiven Karten für Level ${level} gefunden.`);
+    }
+  }, [filteredDecksList]);
+
 
   const groupedDecks = useMemo(() => {
     const map: Record<string, Deck[]> = {};
