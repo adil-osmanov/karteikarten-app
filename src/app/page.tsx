@@ -67,25 +67,27 @@ const playTockSound = () => {
         ctx.resume().catch(() => {});
     }
     
-    const now = ctx.currentTime;
+    // Add small offset so Safari doesn't ignore past-scheduled ramps
+    const now = ctx.currentTime + 0.005;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     
     osc.type = 'sine';
-    // Use slightly offset time to guarantee ramp execution in Safari
-    osc.frequency.setValueAtTime(150, now + 0.001);
-    osc.frequency.exponentialRampToValueAtTime(40, now + 0.02);
+    osc.frequency.setValueAtTime(250, now);
+    osc.frequency.exponentialRampToValueAtTime(40, now + 0.05);
     
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.15, now + 0.005);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
+    // Start with volume instantly to avoid Safari 0-volume bug
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
     
     osc.connect(gain);
     gain.connect(ctx.destination);
     
     osc.start(now);
-    osc.stop(now + 0.05);
-  } catch (e) {}
+    osc.stop(now + 0.07);
+  } catch (e) {
+    console.error("Tock error:", e);
+  }
 };
 
 const playFeedbackSound = (isCorrect: boolean) => {
@@ -672,20 +674,20 @@ function StudyCard({
     }
   }, [phase]);
 
+  // Attach typing sound natively to window to bypass React event limitations and ensure it fires
   useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    const handleNativeKeyDown = (e: KeyboardEvent) => {
-      if (phase !== "Question") return;
+    if (phase !== "Question") return;
+    if (!forceInputMode && card.masteryLevel < 2) return;
+    
+    const handleNativeGlobalKeyDown = (e: KeyboardEvent) => {
       const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
       if (isSpecialKey) return;
-      
-      // Fire sound natively to bypass React Synthetic Event iOS restrictions
       playTockSound();
     };
-    el.addEventListener('keydown', handleNativeKeyDown);
-    return () => el.removeEventListener('keydown', handleNativeKeyDown);
-  }, [phase]);
+    
+    window.addEventListener('keydown', handleNativeGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
+  }, [phase, forceInputMode, card.masteryLevel]);
 
   const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2;
 
