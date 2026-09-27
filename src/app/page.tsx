@@ -857,7 +857,6 @@ const playAudio = useCallback(async (text: string) => {
       
       const lastCharIndex = newValue.length - 1;
       if (newValue.length > 0 && newValue[lastCharIndex].toLowerCase() !== card.targetWord[lastCharIndex]?.toLowerCase()) {
-        setHasErrored(true);
         playFeedbackSound(false);
       }
 
