@@ -447,11 +447,27 @@ const useStore = create<DeckState>()((set, get) => ({
           else card.interval = (card.interval || 120) * 2;
           card.nextReviewDate = Date.now() + card.interval * 86400000;
         } else {
-          card.repetitions = 0;
-          card.interval = 0;
-          card.nextReviewDate = null;
-          card.isArchived = false;
-          card.masteryLevel = 0;
+          // SRS Penalty: Drop by 2 repetition levels instead of full reset
+          card.repetitions = Math.max(0, (card.repetitions || 1) - 2);
+          
+          if (card.repetitions === 0) {
+            // Drop back to learning phase, but keep mastery high (2) so they just review it a bit
+            card.isArchived = false;
+            card.masteryLevel = 2;
+            card.interval = 0;
+            card.nextReviewDate = null;
+          } else {
+            const r = card.repetitions;
+            if (r === 1) card.interval = 1;
+            else if (r === 2) card.interval = 3;
+            else if (r === 3) card.interval = 7;
+            else if (r === 4) card.interval = 14;
+            else if (r === 5) card.interval = 30;
+            else if (r === 6) card.interval = 60;
+            else if (r === 7) card.interval = 120;
+            else card.interval = Math.max(1, Math.floor((card.interval || 120) * 0.5));
+            // nextReviewDate remains unchanged or will be updated when they answer correctly later in this session
+          }
         }
       } else {
         if (isCorrect && !isHilfe) {
@@ -464,11 +480,8 @@ const useStore = create<DeckState>()((set, get) => ({
             card.nextReviewDate = Date.now() + 86400000;
           }
         } else {
-          if (!isCorrect && !isHilfe) {
-            card.masteryLevel = 0; 
-          } else if (isHilfe) {
-            card.masteryLevel = Math.max(0, card.masteryLevel - 1); 
-          }
+          // Penalty: only drop 1 mastery level for any mistake (wrong option or Hilfe)
+          card.masteryLevel = Math.max(0, card.masteryLevel - 1);
         }
       }
 
