@@ -845,27 +845,60 @@ const playAudio = useCallback(async (text: string) => {
   };
 
   
-  const parseBaseWordInfo = (text: string | undefined | null) => {
-    if (!text) return { main: "", sub: "" };
+  type ParsedInfo = 
+  | { type: 'none' }
+  | { type: 'noun'; article: string; word: string; sub: string; colorClasses: string; articleClasses: string; textClasses: string; borderClasses: string }
+  | { type: 'verb'; forms: string[]; sub: string }
+  | { type: 'other'; main: string; sub: string };
+
+  const parseBaseWordInfo = (text: string | undefined | null): ParsedInfo => {
+    if (!text) return { type: 'none' };
+    
+    let subText = "";
+    let mainText = text;
+    
     const match = text.match(/\(([^)]+)\)/);
     if (match) {
-      const subText = match[1].split(',').map(s => s.trim()).join(' • ');
-      const mainText = text.replace(match[0], '').replace(/\s+—/g, ' —').replace(/  +/g, ' ').trim();
-      return { main: mainText, sub: subText };
+      subText = match[1].split(',').map(s => s.trim()).join(' • ');
+      mainText = text.replace(match[0], '').replace(/\s+,/g, ',').replace(/\s+—/g, ' —').replace(/  +/g, ' ').trim();
     }
-    return { main: text, sub: "" };
+    
+    const nounMatch = mainText.match(/^(der|die|das)\s+(.*)$/i);
+    if (nounMatch) {
+      const article = nounMatch[1].toLowerCase();
+      let colorClasses = "", articleClasses = "", textClasses = "", borderClasses = "";
+      if (article === 'der') {
+        colorClasses = "bg-blue-50 dark:bg-blue-500/10 border-blue-200/60 dark:border-blue-500/20 shadow-blue-500/5";
+        articleClasses = "font-semibold text-blue-600 dark:text-blue-400";
+        textClasses = "text-blue-800 dark:text-blue-200";
+        borderClasses = "border-blue-600/30 dark:border-blue-500/40";
+      } else if (article === 'die') {
+        colorClasses = "bg-rose-50 dark:bg-rose-500/10 border-rose-200/60 dark:border-rose-500/20 shadow-rose-500/5";
+        articleClasses = "font-semibold text-rose-600 dark:text-rose-400";
+        textClasses = "text-rose-800 dark:text-rose-200";
+        borderClasses = "border-rose-600/30 dark:border-rose-500/40";
+      } else if (article === 'das') {
+        colorClasses = "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200/60 dark:border-emerald-500/20 shadow-emerald-500/5";
+        articleClasses = "font-semibold text-emerald-600 dark:text-emerald-400";
+        textClasses = "text-emerald-800 dark:text-emerald-200";
+        borderClasses = "border-emerald-600/30 dark:border-emerald-500/40";
+      }
+      return { type: 'noun', article: nounMatch[1], word: nounMatch[2].trim(), sub: subText, colorClasses, articleClasses, textClasses, borderClasses };
+    }
+    
+    if (mainText.includes(',')) {
+      const verbForms = mainText.split(',').map(s => s.trim()).filter(Boolean);
+      if (verbForms.length > 1) return { type: 'verb', forms: verbForms, sub: subText };
+    }
+    
+    return { type: 'other', main: mainText, sub: subText };
   };
 
-  const parseNoun = (text: string) => {
-    const match = text.match(/^(der|die|das)\s+(.*)$/i);
-    if (!match) return null;
-    const article = match[1].toLowerCase();
-    
-    let colorClasses = "";
-    let articleClasses = "";
-    let textClasses = "";
-    let borderClasses = "";
-    
+  const parseTargetNoun = (text: string) => {
+    const nounMatch = text.match(/^(der|die|das)\s+(.*)$/i);
+    if (!nounMatch) return null;
+    const article = nounMatch[1].toLowerCase();
+    let colorClasses = "", articleClasses = "", textClasses = "", borderClasses = "";
     if (article === 'der') {
       colorClasses = "bg-blue-50 dark:bg-blue-500/10 border-blue-200/60 dark:border-blue-500/20 shadow-blue-500/5";
       articleClasses = "font-semibold text-blue-600 dark:text-blue-400";
@@ -882,13 +915,11 @@ const playAudio = useCallback(async (text: string) => {
       textClasses = "text-emerald-800 dark:text-emerald-200";
       borderClasses = "border-emerald-600/30 dark:border-emerald-500/40";
     }
-    
-    return { article: match[1], rest: match[2], colorClasses, articleClasses, textClasses, borderClasses };
+    return { article: nounMatch[1], rest: nounMatch[2].trim(), colorClasses, articleClasses, textClasses, borderClasses };
   };
 
   const parsedInfo = parseBaseWordInfo(card.baseWordInfo);
-  const parsedBaseWord = parsedInfo.main ? parseNoun(parsedInfo.main) : null;
-  const parsedTargetWord = phase === "Answer" ? parseNoun(card.targetWord) : null;
+  const parsedTargetWord = phase === "Answer" ? parseTargetNoun(card.targetWord) : null;
 
   const parts = card.sentence.split("___");
   const shouldCapitalize = parts[0]?.trim() === "";
@@ -1032,38 +1063,54 @@ const playAudio = useCallback(async (text: string) => {
             {card.translation}
           </p>
           
-          {phase === "Answer" && card.baseWordInfo && (
+          {phase === "Answer" && card.baseWordInfo && parsedInfo.type !== 'none' && (
             <motion.div 
               initial={{ opacity: 0, y: 10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
               className="mt-6 flex flex-col items-center gap-2"
             >
-              <div
-                className={cn(
-                  "px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative",
-                  parsedBaseWord 
-                    ? parsedBaseWord.colorClasses 
-                    : "bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg"
-                )}
-              >
-                {!parsedBaseWord && <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />}
-                <span className={cn(
-                  "text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis",
-                  parsedBaseWord ? parsedBaseWord.textClasses : "text-slate-200 dark:text-[#EBEBF5]"
-                )}>
-                  {parsedBaseWord ? (
-                    <><span className={parsedBaseWord.articleClasses}>{parsedBaseWord.article}</span> {parsedBaseWord.rest}</>
-                  ) : (
-                    parsedInfo.main
-                  )}
-                </span>
-              </div>
-              
-              {parsedInfo.sub && (
-                <span className="text-[13px] text-gray-500 dark:text-[#8E8E93] font-medium tracking-wide">
-                  {parsedInfo.sub}
-                </span>
+              {parsedInfo.type === 'noun' && (
+                <>
+                  <div className={cn("px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative", parsedInfo.colorClasses)}>
+                    <span className={cn("text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis", parsedInfo.textClasses)}>
+                      <span className={parsedInfo.articleClasses}>{parsedInfo.article}</span> <span className="opacity-40 font-light mx-1">|</span> {parsedInfo.word}
+                    </span>
+                  </div>
+                  {parsedInfo.sub && <span className="text-[13px] text-gray-500 dark:text-[#8E8E93] font-medium tracking-wide">{parsedInfo.sub}</span>}
+                </>
+              )}
+
+              {parsedInfo.type === 'verb' && (
+                <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 max-w-full">
+                  {parsedInfo.forms.map((form, idx) => (
+                    <React.Fragment key={idx}>
+                      <div className="px-3 sm:px-4 py-2 border rounded-xl flex items-center justify-center bg-indigo-50/80 dark:bg-indigo-500/10 border-indigo-200/60 dark:border-indigo-500/20 shadow-sm relative overflow-visible">
+                         <span className="text-xs sm:text-sm font-medium text-indigo-700 dark:text-indigo-300 tracking-wide font-sans z-10">{form}</span>
+                         {idx === 0 && parsedInfo.sub && (
+                           <span className="absolute -top-2.5 -right-2 text-[10px] font-bold px-1.5 py-0.5 rounded-md border bg-white dark:bg-[#2C2C2E] border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-sm z-20">
+                             {parsedInfo.sub}
+                           </span>
+                         )}
+                      </div>
+                      {idx < parsedInfo.forms.length - 1 && (
+                        <span className="text-indigo-300 dark:text-indigo-500/50 text-xs sm:text-sm font-medium">➔</span>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
+
+              {parsedInfo.type === 'other' && (
+                <>
+                  <div className="px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg">
+                    <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
+                    <span className="text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis text-slate-200 dark:text-[#EBEBF5]">
+                      {parsedInfo.main}
+                    </span>
+                  </div>
+                  {parsedInfo.sub && <span className="text-[13px] text-gray-500 dark:text-[#8E8E93] font-medium tracking-wide">{parsedInfo.sub}</span>}
+                </>
               )}
             </motion.div>
           )}
