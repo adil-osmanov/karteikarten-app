@@ -1406,8 +1406,19 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
 
 const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
-  const actualCoverImage = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
-  const isImage = !!actualCoverImage;
+  const initialCoverStr = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
+  let lightCover = initialCoverStr;
+  let darkCover = initialCoverStr;
+  
+  if (initialCoverStr && initialCoverStr.startsWith('{"light":')) {
+    try {
+      const parsed = JSON.parse(initialCoverStr);
+      lightCover = parsed.light || null;
+      darkCover = parsed.dark || null;
+    } catch {}
+  }
+  
+  const isImage = !!(lightCover || darkCover);
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
 
   return (
@@ -1419,8 +1430,11 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
       />
       {/* Card */}
       <div onClick={onClick} className="relative z-10 cursor-pointer aspect-[2/3] rounded-2xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col bg-[#0A0A0C]" style={isImage ? {} : { backgroundColor: tintColor }}>
-        {isImage && (
-          <img src={actualCoverImage} className="absolute inset-0 w-full h-full object-cover" alt="Cover" />
+        {lightCover && (
+          <img src={lightCover} className={cn("absolute inset-0 w-full h-full object-cover", darkCover ? "dark:hidden" : "")} alt="Light Cover" />
+        )}
+        {darkCover && (
+          <img src={darkCover} className={cn("absolute inset-0 w-full h-full object-cover", lightCover ? "hidden dark:block" : "")} alt="Dark Cover" />
         )}
         
         {/* Inner Ring */}
@@ -1541,13 +1555,30 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const [title, setTitle] = useState(book?.title || "");
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
   const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue || "#1C1C1E");
-  const [coverImage, setCoverImage] = useState<string | null>(book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null));
+  
+  const initialCoverStr = book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null);
+  let initLight = initialCoverStr;
+  let initDark = initialCoverStr;
+  
+  if (initialCoverStr && initialCoverStr.startsWith('{"light":')) {
+    try {
+      const parsed = JSON.parse(initialCoverStr);
+      initLight = parsed.light || null;
+      initDark = parsed.dark || null;
+    } catch {}
+  }
+  
+  const [coverLight, setCoverLight] = useState<string | null>(initLight);
+  const [coverDark, setCoverDark] = useState<string | null>(initDark);
+  
   const [activeLevels, setActiveLevels] = useState<LanguageLevel[]>(book?.activeLevels || ['A1', 'A2', 'B1', 'B2', 'C1-C2']);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const fileInputLightRef = useRef<HTMLInputElement>(null);
+  const fileInputDarkRef = useRef<HTMLInputElement>(null);
   
   const allLevels: LanguageLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'light' | 'dark') => {
     const file = e.target.files?.[0];
     if (file) {
       const img = new Image();
@@ -1568,7 +1599,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
           const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          setCoverImage(dataUrl);
+          if (type === 'light') setCoverLight(dataUrl);
+          else setCoverDark(dataUrl);
         }
       };
       img.src = URL.createObjectURL(file);
@@ -1583,13 +1615,23 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   
   const handleSave = () => {
     if (!title.trim()) return;
+    
+    let finalCoverImage = null;
+    if (coverLight || coverDark) {
+      if (coverLight === coverDark) {
+        finalCoverImage = coverLight;
+      } else {
+        finalCoverImage = JSON.stringify({ light: coverLight, dark: coverDark });
+      }
+    }
+    
     onSave({
       id: book?.id || crypto.randomUUID(),
       language: book?.language || appLanguage,
       title: title.trim(),
       subtitle: subtitle.trim(),
       tintColor,
-      coverImage,
+      coverImage: finalCoverImage,
       activeLevels: activeLevels.length ? activeLevels : ['A1']
     });
   };
@@ -1606,22 +1648,48 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
         
         <div className="space-y-4">
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cover Foto</label>
-              <button onClick={() => fileInputRef.current?.click()} className="text-xs font-medium text-blue-600 dark:text-blue-500 hover:text-[#0056b3]">
-                + Foto laden
-              </button>
-              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
-            </div>
-            
-            {coverImage && (
-              <div className="relative h-24 rounded-xl overflow-hidden mb-3 border border-gray-200 dark:border-white/10 group">
-                <img src={coverImage} alt="Cover preview" className="w-full h-full object-cover" />
-                <button onClick={() => setCoverImage(null)} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="text-xs text-white font-medium bg-black/60 px-3 py-1.5 rounded-full shadow-sm">Entfernen</span>
-                </button>
+            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Cover Fotos (Hell & Dunkel)</label>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Light Mode</span>
+                  <button onClick={() => fileInputLightRef.current?.click()} className="text-[11px] font-medium text-blue-600 dark:text-blue-500 hover:text-[#0056b3]">+ Laden</button>
+                  <input type="file" accept="image/*" className="hidden" ref={fileInputLightRef} onChange={(e) => handleImageUpload(e, 'light')} />
+                </div>
+                {coverLight ? (
+                  <div className="relative h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10 group">
+                    <img src={coverLight} alt="Light Cover" className="w-full h-full object-cover" />
+                    <button onClick={() => setCoverLight(null)} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Entfernen</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="h-24 rounded-xl border-2 border-dashed border-gray-200 dark:border-white/10 flex items-center justify-center text-gray-400 text-[10px]">
+                    Kein Bild
+                  </div>
+                )}
               </div>
-            )}
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Dark Mode</span>
+                  <button onClick={() => fileInputDarkRef.current?.click()} className="text-[11px] font-medium text-blue-600 dark:text-blue-500 hover:text-[#0056b3]">+ Laden</button>
+                  <input type="file" accept="image/*" className="hidden" ref={fileInputDarkRef} onChange={(e) => handleImageUpload(e, 'dark')} />
+                </div>
+                {coverDark ? (
+                  <div className="relative h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10 group">
+                    <img src={coverDark} alt="Dark Cover" className="w-full h-full object-cover" />
+                    <button onClick={() => setCoverDark(null)} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Entfernen</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="h-24 rounded-xl border-2 border-dashed border-gray-200 dark:border-white/10 flex items-center justify-center text-gray-400 text-[10px]">
+                    Kein Bild
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           
           <div>
