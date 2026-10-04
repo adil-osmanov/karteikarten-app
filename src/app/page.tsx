@@ -1065,30 +1065,34 @@ const playAudio = useCallback(async (text: string) => {
               className="mt-6 flex flex-col items-center gap-2"
             >
               {parsedInfo.type === 'noun' && (
-                <div className={cn("px-5 py-3.5 border rounded-2xl flex flex-col items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] relative gap-1", parsedInfo.colorClasses)}>
-                  <span className={cn("text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10", parsedInfo.textClasses)}>
-                    <span className={parsedInfo.articleClasses}>{parsedInfo.article}</span> {parsedInfo.word}
-                  </span>
+                <>
+                  <div className={cn("px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] relative", parsedInfo.colorClasses)}>
+                    <span className={cn("text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10", parsedInfo.textClasses)}>
+                      <span className={parsedInfo.articleClasses}>{parsedInfo.article}</span> {parsedInfo.word}
+                    </span>
+                  </div>
                   {parsedInfo.sub && (
-                    <span className={cn("text-[12px] sm:text-[13px] font-medium tracking-wide z-10 opacity-70", parsedInfo.textClasses)}>
+                    <span className="text-[13px] font-medium text-center tracking-wide font-sans z-10 text-slate-500 dark:text-[#8E8E93] mt-1">
                       {parsedInfo.sub}
                     </span>
                   )}
-                </div>
+                </>
               )}
 
               {parsedInfo.type === 'other' && (
-                <div className="px-5 py-3.5 border rounded-2xl flex flex-col items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] relative bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg gap-1.5">
-                  <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none rounded-2xl" />
-                  <span className="text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 text-slate-200 dark:text-[#EBEBF5]">
-                    {parsedInfo.main}
-                  </span>
+                <>
+                  <div className="px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] relative bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg">
+                    <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none rounded-2xl" />
+                    <span className="text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 text-slate-200 dark:text-[#EBEBF5]">
+                      {parsedInfo.main}
+                    </span>
+                  </div>
                   {parsedInfo.sub && (
-                    <span className="text-[12px] sm:text-[13px] font-medium text-center tracking-wide font-sans z-10 text-slate-400 dark:text-[#8E8E93]">
+                    <span className="text-[13px] font-medium text-center tracking-wide font-sans z-10 text-slate-500 dark:text-[#8E8E93] mt-1">
                       {parsedInfo.sub}
                     </span>
                   )}
-                </div>
+                </>
               )}
             </motion.div>
           )}
