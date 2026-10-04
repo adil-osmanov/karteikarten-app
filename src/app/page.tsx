@@ -2542,12 +2542,11 @@ try {
 
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
-      <main className="relative z-10 max-w-5xl mx-auto px-6 pt-24 pb-12 md:pt-32 md:pb-24">
+      <main className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 pt-20 pb-12 md:pt-24 md:pb-24">
         {!activeBookId ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-8">
-            <div className="mb-12 text-center">
-              <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white mb-2 tracking-tight">Bibliothek</h1>
-              <p className="text-gray-500 dark:text-gray-400 font-medium">Wähle ein Buch, um zu lernen</p>
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="mb-6 mt-2">
+              <h1 className="text-[28px] md:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">Bibliothek</h1>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
               {books.filter(b => b.language === appLanguage).map(book => (
