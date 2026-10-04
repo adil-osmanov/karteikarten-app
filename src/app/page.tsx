@@ -455,6 +455,17 @@ const useStore = create<DeckState>()((set, get) => ({
   }
 }));
 
+if (typeof window !== 'undefined') {
+  useStore.subscribe((state, prevState) => {
+    if (state.books !== prevState.books) {
+      localStorage.setItem('cache_books', JSON.stringify(state.books));
+    }
+    if (state.decks !== prevState.decks) {
+      localStorage.setItem('cache_decks', JSON.stringify(state.decks));
+    }
+  });
+}
+
 
 // --- STUDY INTERFACE ---
 
