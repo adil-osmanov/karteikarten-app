@@ -1414,7 +1414,7 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
     <div className="relative group w-full h-full">
       {/* Glow Behind */}
       <div 
-        className="absolute inset-0 opacity-0 group-hover:opacity-60 transition-opacity duration-500 rounded-2xl transform-gpu translate-z-0 will-change-transform" 
+        className="absolute inset-0 opacity-0 dark:group-hover:opacity-60 transition-opacity duration-500 rounded-2xl transform-gpu translate-z-0 will-change-transform" 
         style={{ boxShadow: `0 20px 60px -10px ${tintColor}` }} 
       />
       {/* Card */}
@@ -2358,7 +2358,7 @@ try {
         {activeBookId && (
         <div className="fixed inset-0 pointer-events-none -z-50 overflow-hidden">
           <div 
-            className="absolute left-1/2 top-0 -translate-x-1/2 w-[150vw] md:w-[120vw] h-[80vh] opacity-50 dark:opacity-30 transition-colors duration-1000 transform-gpu translate-z-0 will-change-transform"
+            className="absolute left-1/2 top-0 -translate-x-1/2 w-[150vw] md:w-[120vw] h-[80vh] opacity-0 dark:opacity-30 transition-colors duration-1000 transform-gpu translate-z-0 will-change-transform"
             style={{
               background: `radial-gradient(ellipse 70% 60% at 50% 0%, ${activeBookColor}40 0%, ${activeBookColor}10 45%, transparent 80%)`
             }}
