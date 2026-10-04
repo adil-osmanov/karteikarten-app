@@ -1,22 +1,21 @@
 import React, { useState, useCallback } from "react";
-import { ArrowBigUp, Delete, CornerDownLeft } from "lucide-react";
+import { ArrowBigUp, Delete } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface VirtualKeyboardProps {
   onKeyPress: (key: string) => void;
   onBackspace: () => void;
-  onSubmit: () => void;
   className?: string;
 }
 
-export function VirtualKeyboard({ onKeyPress, onBackspace, onSubmit, className }: VirtualKeyboardProps) {
+export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualKeyboardProps) {
   const [isShifted, setIsShifted] = useState(false);
 
   const rows = [
     ["q", "w", "e", "r", "t", "z", "u", "i", "o", "p", "ü"],
     ["a", "s", "d", "f", "g", "h", "j", "k", "l", "ö", "ä"],
-    ["SHIFT", "y", "x", "c", "v", "b", "n", "m", "ß", "BACKSPACE"],
-    ["SPACE", "ENTER"]
+    ["y", "x", "c", "v", "b", "n", "m", "ß"],
+    ["SHIFT", "SPACE", "BACKSPACE"]
   ];
 
   const handleKeyClick = useCallback((key: string) => {
@@ -27,11 +26,6 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, onSubmit, className }
     
     if (key === "BACKSPACE") {
       onBackspace();
-      return;
-    }
-    
-    if (key === "ENTER") {
-      onSubmit();
       return;
     }
     
@@ -46,30 +40,27 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, onSubmit, className }
     
     // Auto-reset shift after a character is typed (iOS style)
     if (isShifted) setIsShifted(false);
-  }, [isShifted, onKeyPress, onBackspace, onSubmit]);
+  }, [isShifted, onKeyPress, onBackspace]);
 
   const renderKey = (key: string) => {
     let content: React.ReactNode = isShifted ? key.toUpperCase() : key;
     let extraClasses = "flex-1 min-w-[28px]"; // Default proportional width
 
-    const isFunctional = key === "SHIFT" || key === "BACKSPACE" || key === "ENTER";
+    const isFunctional = key === "SHIFT" || key === "BACKSPACE";
 
     if (key === "SHIFT") {
-      content = <ArrowBigUp size={22} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
-      extraClasses = "w-[44px] flex-none";
+      content = <ArrowBigUp size={24} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
+      extraClasses = "flex-[1.5] max-w-[65px] flex-none";
     } else if (key === "BACKSPACE") {
-      content = <Delete size={22} strokeWidth={2.5} />;
-      extraClasses = "w-[44px] flex-none";
+      content = <Delete size={24} strokeWidth={2.5} />;
+      extraClasses = "flex-[1.5] max-w-[65px] flex-none";
     } else if (key === "SPACE") {
-      content = <span className="text-[14px] font-semibold opacity-40">Leerzeichen</span>;
-      extraClasses = "flex-[3]";
-    } else if (key === "ENTER") {
-      content = <CornerDownLeft size={20} strokeWidth={2.5} />;
-      extraClasses = "flex-[1.2]";
+      content = <span className="text-[15px] font-semibold opacity-40">Leerzeichen</span>;
+      extraClasses = "flex-[6]";
     }
 
     // Active state classes for premium feeling
-    const baseClasses = "flex items-center justify-center rounded-[10px] shadow-sm h-12 text-[19px] font-medium transition-all duration-75 select-none";
+    const baseClasses = "flex items-center justify-center rounded-[10px] shadow-sm h-[52px] text-[21px] font-medium transition-all duration-75 select-none";
     
     const bgColor = isFunctional 
       ? "bg-gray-300/80 dark:bg-[#323232]"

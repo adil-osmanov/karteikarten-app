@@ -789,9 +789,6 @@ const playAudio = useCallback(async (text: string) => {
     processNewValue(inputText.slice(0, -1));
   };
 
-  const handleVirtualSubmit = () => {
-    handleHilfe();
-  };
 
   const GERMAN_KEY_MAP: Record<string, { base: string, shift: string }> = {
     'KeyA': { base: 'a', shift: 'A' }, 'KeyB': { base: 'b', shift: 'B' }, 'KeyC': { base: 'c', shift: 'C' },
@@ -1129,7 +1126,6 @@ const playAudio = useCallback(async (text: string) => {
             <VirtualKeyboard 
               onKeyPress={handleVirtualKeyPress}
               onBackspace={handleVirtualBackspace}
-              onSubmit={handleVirtualSubmit}
             />
           </motion.div>
         )}
