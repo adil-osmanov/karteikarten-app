@@ -1119,9 +1119,11 @@ const playAudio = useCallback(async (text: string) => {
       <div className="mt-2 w-full">
         {phase === "Question" && !isMultipleChoice && (
           <motion.div 
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 250 }}
             animate={{ opacity: 1, y: 0 }}
-            className="md:hidden mt-6 mb-2"
+            exit={{ opacity: 0, y: 250 }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="md:hidden fixed bottom-0 left-0 right-0 z-[100]"
           >
             <VirtualKeyboard 
               onKeyPress={handleVirtualKeyPress}

@@ -50,17 +50,17 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
 
     if (key === "SHIFT") {
       content = <ArrowBigUp size={24} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
-      extraClasses = "flex-[1.5] max-w-[65px] flex-none";
+      extraClasses = "flex-[1.25] flex-none";
     } else if (key === "BACKSPACE") {
       content = <Delete size={24} strokeWidth={2.5} />;
-      extraClasses = "flex-[1.5] max-w-[65px] flex-none";
+      extraClasses = "flex-[1.25] flex-none";
     } else if (key === "SPACE") {
       content = <span className="text-[15px] font-semibold opacity-40">Leerzeichen</span>;
-      extraClasses = "flex-[6]";
+      extraClasses = "flex-[5]";
     }
 
     // Active state classes for premium feeling
-    const baseClasses = "flex items-center justify-center rounded-[10px] shadow-sm h-[52px] text-[21px] font-medium transition-all duration-75 select-none";
+    const baseClasses = "flex items-center justify-center rounded-[8px] shadow-sm h-[52px] text-[22px] font-medium transition-all duration-75 select-none";
     
     const bgColor = isFunctional 
       ? "bg-gray-300/80 dark:bg-[#323232]"
@@ -89,7 +89,7 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
   };
 
   return (
-    <div className={cn("w-full max-w-[500px] mx-auto p-2 bg-gray-200/80 dark:bg-[#252525] rounded-xl flex flex-col gap-2", className)}>
+    <div className={cn("w-full bg-[#D0D3D9]/90 dark:bg-[#1C1C1E]/95 backdrop-blur-xl pt-3 pb-[max(env(safe-area-inset-bottom),1.5rem)] px-1 sm:px-2 flex flex-col gap-2.5 border-t border-black/5 dark:border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]", className)}>
       {rows.map((row, idx) => (
         <div key={idx} className="flex justify-center gap-1.5 w-full">
           {row.map(key => renderKey(key))}
