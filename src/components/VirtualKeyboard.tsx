@@ -14,8 +14,8 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
   const rows = [
     ["q", "w", "e", "r", "t", "z", "u", "i", "o", "p", "ü"],
     ["a", "s", "d", "f", "g", "h", "j", "k", "l", "ö", "ä"],
-    ["y", "x", "c", "v", "b", "n", "m", "ß"],
-    ["SHIFT", "SPACE", "BACKSPACE"]
+    ["SHIFT", "y", "x", "c", "v", "b", "n", "m", "ß"],
+    ["SPACE", "BACKSPACE"]
   ];
 
   const handleKeyClick = useCallback((key: string) => {
@@ -44,23 +44,23 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
 
   const renderKey = (key: string) => {
     let content: React.ReactNode = isShifted ? key.toUpperCase() : key;
-    let extraClasses = "flex-1 min-w-[28px]"; // Default proportional width
+    let extraClasses = "flex-1 min-w-[24px]"; // Proportional width for all letters
 
     const isFunctional = key === "SHIFT" || key === "BACKSPACE";
 
     if (key === "SHIFT") {
-      content = <ArrowBigUp size={24} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
-      extraClasses = "flex-[1.25] flex-none";
+      content = <ArrowBigUp size={22} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
+      extraClasses = "flex-[2] max-w-[85px] flex-none"; // Wide enough to compensate missing keys
     } else if (key === "BACKSPACE") {
-      content = <Delete size={24} strokeWidth={2.5} />;
-      extraClasses = "flex-[1.25] flex-none";
+      content = <Delete size={22} strokeWidth={2.5} />;
+      extraClasses = "flex-[1.5] max-w-[80px] flex-none"; // Placed in Row 4, takes up moderate space
     } else if (key === "SPACE") {
       content = <span className="text-[15px] font-semibold opacity-40">Leerzeichen</span>;
-      extraClasses = "flex-[5]";
+      extraClasses = "flex-[4]"; // Massive spacebar
     }
 
     // Active state classes for premium feeling
-    const baseClasses = "flex items-center justify-center rounded-[8px] shadow-sm h-[52px] text-[22px] font-medium transition-all duration-75 select-none";
+    const baseClasses = "flex items-center justify-center rounded-[8px] shadow-sm h-12 text-[20px] font-medium transition-all duration-75 select-none";
     
     const bgColor = isFunctional 
       ? "bg-gray-300/80 dark:bg-[#323232]"
@@ -89,7 +89,7 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
   };
 
   return (
-    <div className={cn("w-full bg-[#D0D3D9]/90 dark:bg-[#1C1C1E]/95 backdrop-blur-xl pt-3 pb-[max(env(safe-area-inset-bottom),1.5rem)] px-1 sm:px-2 flex flex-col gap-2.5 border-t border-black/5 dark:border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]", className)}>
+    <div className={cn("w-full max-w-[600px] mx-auto p-2.5 bg-gray-200/80 dark:bg-[#252525] rounded-2xl flex flex-col gap-2.5", className)}>
       {rows.map((row, idx) => (
         <div key={idx} className="flex justify-center gap-1.5 w-full">
           {row.map(key => renderKey(key))}
