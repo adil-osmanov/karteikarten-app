@@ -1422,40 +1422,45 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
 
   return (
-    <div className="relative group w-full h-full">
-      {/* Glow Behind */}
+    <div className="relative group w-full h-full flex flex-col">
+      {/* Glow Behind (Dark Mode Only) */}
       <div 
-        className="absolute inset-0 opacity-0 dark:group-hover:opacity-60 transition-opacity duration-500 rounded-2xl transform-gpu translate-z-0 will-change-transform" 
+        className="absolute inset-0 opacity-0 dark:group-hover:opacity-60 transition-opacity duration-500 rounded-[20px] transform-gpu translate-z-0 will-change-transform" 
         style={{ boxShadow: `0 20px 60px -10px ${tintColor}` }} 
       />
-      {/* Card */}
-      <div onClick={onClick} className="relative z-10 cursor-pointer aspect-[2/3] rounded-2xl overflow-hidden shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 flex flex-col bg-[#0A0A0C]" style={isImage ? {} : { backgroundColor: tintColor }}>
-        {lightCover && (
-          <img src={lightCover} className={cn("absolute inset-0 w-full h-full object-cover", darkCover ? "dark:hidden" : "")} alt="Light Cover" />
-        )}
-        {darkCover && (
-          <img src={darkCover} className={cn("absolute inset-0 w-full h-full object-cover", lightCover ? "hidden dark:block" : "")} alt="Dark Cover" />
-        )}
+      
+      {/* Unified Card */}
+      <div onClick={onClick} className="relative z-10 cursor-pointer w-full h-full rounded-[20px] overflow-hidden bg-white dark:bg-[#1C1C1E] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-none border border-black/[0.04] dark:border-white/10 hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 flex flex-col">
         
-        {/* Inner Ring */}
-        <div className="absolute inset-0 rounded-2xl ring-1 ring-white/10 pointer-events-none z-30" />
-        
-        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-40">
-          <button onClick={onEdit} className="p-2 text-white/70 hover:text-white bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full transition-all">
-            <Edit2 className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={onDelete} className="p-2 text-white/70 hover:text-red-400 bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full transition-all">
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+        {/* Cover Image Section */}
+        <div className="relative w-full aspect-[2/3] shrink-0" style={isImage ? {} : { backgroundColor: tintColor }}>
+          {lightCover && (
+            <img src={lightCover} className={cn("absolute inset-0 w-full h-full object-cover", darkCover ? "dark:hidden" : "")} alt="Light Cover" />
+          )}
+          {darkCover && (
+            <img src={darkCover} className={cn("absolute inset-0 w-full h-full object-cover", lightCover ? "hidden dark:block" : "")} alt="Dark Cover" />
+          )}
+          
+          {/* Inner Ring for Cover */}
+          <div className="absolute inset-0 ring-1 ring-black/5 dark:ring-white/10 pointer-events-none z-30" />
+          
+          {/* Action Buttons */}
+          <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-40">
+            <button onClick={onEdit} className="p-2 text-white/90 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={onDelete} className="p-2 text-white/90 hover:text-red-400 bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
         
-        <div className="absolute inset-y-0 left-0 w-4 bg-black/20 mix-blend-overlay border-r border-white/10 z-20 pointer-events-none" />
-        {isImage && <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0C] via-[#0A0A0C]/40 to-transparent z-10 pointer-events-none" />}
-        
-        <div className="relative z-20 flex-1 flex flex-col justify-end p-4 md:p-5">
-          <h3 className="text-lg md:text-xl font-bold text-white leading-tight mb-1">{book.title}</h3>
-          {book.subtitle && <p className="text-xs md:text-sm font-medium text-white/70">{book.subtitle}</p>}
+        {/* Text Section */}
+        <div className="flex-1 flex flex-col justify-start p-4 bg-white dark:bg-[#1C1C1E]">
+          <h3 className="text-[15px] md:text-[17px] font-bold text-gray-900 dark:text-white leading-tight line-clamp-2">{book.title}</h3>
+          {book.subtitle && <p className="text-[12px] md:text-[13px] font-medium text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">{book.subtitle}</p>}
         </div>
+
       </div>
     </div>
   );
@@ -2548,9 +2553,11 @@ try {
               {books.filter(b => b.language === appLanguage).map(book => (
                 <BookCard key={book.id} book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
               ))}
-              <div onClick={() => setBookModal({})} className="cursor-pointer aspect-[2/3] rounded-[24px] border-2 border-dashed border-gray-300 dark:border-white/20 hover:border-blue-600 dark:border-blue-500 dark:hover:border-blue-600 dark:border-blue-500 hover:bg-gray-50 dark:hover:bg-white/5 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-500 group shadow-sm">
-                <Plus className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
-                <span className="font-semibold text-sm">+ Buch</span>
+              <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
+                <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
+                  <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
+                </div>
+                <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
               </div>
             </div>
           </div>
