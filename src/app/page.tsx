@@ -848,7 +848,6 @@ const playAudio = useCallback(async (text: string) => {
   type ParsedInfo = 
   | { type: 'none' }
   | { type: 'noun'; article: string; word: string; sub: string; colorClasses: string; articleClasses: string; textClasses: string; borderClasses: string }
-  | { type: 'verb'; forms: string[]; sub: string }
   | { type: 'other'; main: string; sub: string };
 
   const parseBaseWordInfo = (text: string | undefined | null): ParsedInfo => {
@@ -884,11 +883,6 @@ const playAudio = useCallback(async (text: string) => {
         borderClasses = "border-emerald-600/30 dark:border-emerald-500/40";
       }
       return { type: 'noun', article: nounMatch[1], word: nounMatch[2].trim(), sub: subText, colorClasses, articleClasses, textClasses, borderClasses };
-    }
-    
-    if (mainText.includes(',')) {
-      const verbForms = mainText.split(',').map(s => s.trim()).filter(Boolean);
-      if (verbForms.length > 1) return { type: 'verb', forms: verbForms, sub: subText };
     }
     
     return { type: 'other', main: mainText, sub: subText };
@@ -1081,27 +1075,7 @@ const playAudio = useCallback(async (text: string) => {
                 </>
               )}
 
-              {parsedInfo.type === 'verb' && (
-                <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 max-w-full">
-                  {parsedInfo.forms.map((form, idx) => (
-                    <React.Fragment key={idx}>
-                      <div className="px-3 sm:px-4 py-2 border rounded-xl flex items-center justify-center bg-indigo-50/80 dark:bg-indigo-500/10 border-indigo-200/60 dark:border-indigo-500/20 shadow-sm relative overflow-visible">
-                         <span className="text-xs sm:text-sm font-medium text-indigo-700 dark:text-indigo-300 tracking-wide font-sans z-10">{form}</span>
-                         {idx === 0 && parsedInfo.sub && (
-                           <span className="absolute -top-2.5 -right-2 text-[10px] font-bold px-1.5 py-0.5 rounded-md border bg-white dark:bg-[#2C2C2E] border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400 shadow-sm z-20">
-                             {parsedInfo.sub}
-                           </span>
-                         )}
-                      </div>
-                      {idx < parsedInfo.forms.length - 1 && (
-                        <span className="text-indigo-300 dark:text-indigo-500/50 text-xs sm:text-sm font-medium">➔</span>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </div>
-              )}
-
-              {parsedInfo.type === 'other' && (
+                            {parsedInfo.type === 'other' && (
                 <>
                   <div className="px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg">
                     <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
