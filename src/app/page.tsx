@@ -1074,7 +1074,7 @@ const playAudio = useCallback(async (text: string) => {
                 <>
                   <div className={cn("px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative", parsedInfo.colorClasses)}>
                     <span className={cn("text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis", parsedInfo.textClasses)}>
-                      <span className={parsedInfo.articleClasses}>{parsedInfo.article}</span> <span className="opacity-40 font-light mx-1">|</span> {parsedInfo.word}
+                      <span className={parsedInfo.articleClasses}>{parsedInfo.article}</span> {parsedInfo.word}
                     </span>
                   </div>
                   {parsedInfo.sub && <span className="text-[13px] text-gray-500 dark:text-[#8E8E93] font-medium tracking-wide">{parsedInfo.sub}</span>}
