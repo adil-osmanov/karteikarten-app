@@ -14,8 +14,8 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
   const rows = [
     ["q", "w", "e", "r", "t", "z", "u", "i", "o", "p", "ü"],
     ["a", "s", "d", "f", "g", "h", "j", "k", "l", "ö", "ä"],
-    ["SHIFT", "y", "x", "c", "v", "b", "n", "m", "ß"],
-    ["SPACE", "BACKSPACE"]
+    ["SHIFT", "y", "x", "c", "v", "b", "n", "m", "ß", "BACKSPACE"],
+    ["_SPACER_LEFT", "SPACE", "_SPACER_RIGHT"]
   ];
 
   const handleKeyClick = useCallback((key: string) => {
@@ -43,20 +43,24 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
   }, [isShifted, onKeyPress, onBackspace]);
 
   const renderKey = (key: string) => {
+    if (key.startsWith("_SPACER_")) {
+      return <div key={key} style={{ flex: 2.5 }} className="pointer-events-none" />;
+    }
+
     let content: React.ReactNode = isShifted ? key.toUpperCase() : key;
-    let extraClasses = "flex-1"; // Proportional width (1 unit)
+    let flexValue = 1; // Default for all letters
 
     const isFunctional = key === "SHIFT" || key === "BACKSPACE";
 
     if (key === "SHIFT") {
       content = <ArrowBigUp size={22} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
-      extraClasses = "flex-[3]"; // Exactly 3 units to balance 8 letters = 11 total
+      flexValue = 1.5;
     } else if (key === "BACKSPACE") {
       content = <Delete size={22} strokeWidth={2.5} />;
-      extraClasses = "flex-[3]"; // Exactly 3 units (same size as Shift)
+      flexValue = 1.5;
     } else if (key === "SPACE") {
       content = <span className="text-[15px] font-semibold opacity-40">Leerzeichen</span>;
-      extraClasses = "flex-[8]"; // Exactly 8 units (3 + 8 = 11 total for the row)
+      flexValue = 6;
     }
 
     // Active state classes for premium feeling
@@ -80,8 +84,8 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
           e.preventDefault(); // Prevents input from losing focus
           handleKeyClick(key);
         }}
-        style={{ touchAction: "manipulation" }} // Fix double-tap zoom
-        className={cn(baseClasses, colorClasses, extraClasses)}
+        style={{ flex: flexValue, touchAction: "manipulation" }} // Fix double-tap zoom and set precise width
+        className={cn(baseClasses, colorClasses)}
       >
         {content}
       </button>
