@@ -14,6 +14,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
+import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -749,9 +750,8 @@ const playAudio = useCallback(async (text: string) => {
     handleReveal();
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const processNewValue = (value: string) => {
     if (phase !== "Question") return;
-    const value = e.target.value;
     
     let isValidSoFar = true;
     for (let i = 0; i < value.length; i++) {
@@ -763,7 +763,6 @@ const playAudio = useCallback(async (text: string) => {
     
     setInputText(value);
     
-    // Play error sound if the latest typed character is wrong
     const lastCharIndex = value.length - 1;
     if (value.length > 0 && value[lastCharIndex].toLowerCase() !== card.targetWord[lastCharIndex]?.toLowerCase()) {
       playFeedbackSound(false);
@@ -774,6 +773,24 @@ const playAudio = useCallback(async (text: string) => {
       onAnswer(true, false);
       handleReveal();
     }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    processNewValue(e.target.value);
+  };
+
+  const handleVirtualKeyPress = (char: string) => {
+    playTockSound();
+    processNewValue(inputText + char);
+  };
+
+  const handleVirtualBackspace = () => {
+    playTockSound();
+    processNewValue(inputText.slice(0, -1));
+  };
+
+  const handleVirtualSubmit = () => {
+    handleHilfe();
   };
 
   const GERMAN_KEY_MAP: Record<string, { base: string, shift: string }> = {
@@ -1036,13 +1053,14 @@ const playAudio = useCallback(async (text: string) => {
                     ref={inputRef}
                     autoFocus
                     type="text"
+                    inputMode="none"
                     value={inputText}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
                     className="absolute inset-0 opacity-0 cursor-text w-full h-full"
                     autoComplete="off"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                   />
                 </span>
               )}
@@ -1102,6 +1120,20 @@ const playAudio = useCallback(async (text: string) => {
       </div>
 
       <div className="mt-2 w-full">
+        {phase === "Question" && !isMultipleChoice && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="md:hidden mt-6 mb-2"
+          >
+            <VirtualKeyboard 
+              onKeyPress={handleVirtualKeyPress}
+              onBackspace={handleVirtualBackspace}
+              onSubmit={handleVirtualSubmit}
+            />
+          </motion.div>
+        )}
+
         {phase === "Question" && isMultipleChoice && (
           <motion.div 
             initial={{ opacity: 0 }}
