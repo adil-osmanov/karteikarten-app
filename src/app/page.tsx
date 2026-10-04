@@ -847,20 +847,13 @@ const playAudio = useCallback(async (text: string) => {
   
   type ParsedInfo = 
   | { type: 'none' }
-  | { type: 'noun'; article: string; word: string; sub: string; colorClasses: string; articleClasses: string; textClasses: string; borderClasses: string }
-  | { type: 'other'; main: string; sub: string };
+  | { type: 'noun'; article: string; word: string; colorClasses: string; articleClasses: string; textClasses: string; borderClasses: string }
+  | { type: 'other'; main: string };
 
   const parseBaseWordInfo = (text: string | undefined | null): ParsedInfo => {
     if (!text) return { type: 'none' };
     
-    let subText = "";
-    let mainText = text;
-    
-    const match = text.match(/\(([^)]+)\)/);
-    if (match) {
-      subText = match[1].split(',').map(s => s.trim()).join(' • ');
-      mainText = text.replace(match[0], '').replace(/\s+,/g, ',').replace(/\s+—/g, ' —').replace(/  +/g, ' ').trim();
-    }
+    const mainText = text.trim();
     
     const nounMatch = mainText.match(/^(der|die|das)\s+(.*)$/i);
     if (nounMatch) {
@@ -882,10 +875,10 @@ const playAudio = useCallback(async (text: string) => {
         textClasses = "text-emerald-800 dark:text-emerald-200";
         borderClasses = "border-emerald-600/30 dark:border-emerald-500/40";
       }
-      return { type: 'noun', article: nounMatch[1], word: nounMatch[2].trim(), sub: subText, colorClasses, articleClasses, textClasses, borderClasses };
+      return { type: 'noun', article: nounMatch[1], word: nounMatch[2].trim(), colorClasses, articleClasses, textClasses, borderClasses };
     }
     
-    return { type: 'other', main: mainText, sub: subText };
+    return { type: 'other', main: mainText };
   };
 
   const parseTargetNoun = (text: string) => {
@@ -1065,26 +1058,20 @@ const playAudio = useCallback(async (text: string) => {
               className="mt-6 flex flex-col items-center gap-2"
             >
               {parsedInfo.type === 'noun' && (
-                <>
-                  <div className={cn("px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative", parsedInfo.colorClasses)}>
-                    <span className={cn("text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis", parsedInfo.textClasses)}>
-                      <span className={parsedInfo.articleClasses}>{parsedInfo.article}</span> {parsedInfo.word}
-                    </span>
-                  </div>
-                  {parsedInfo.sub && <span className="text-[13px] text-gray-500 dark:text-[#8E8E93] font-medium tracking-wide">{parsedInfo.sub}</span>}
-                </>
+                <div className={cn("px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] relative", parsedInfo.colorClasses)}>
+                  <span className={cn("text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10", parsedInfo.textClasses)}>
+                    <span className={parsedInfo.articleClasses}>{parsedInfo.article}</span> {parsedInfo.word}
+                  </span>
+                </div>
               )}
 
-                            {parsedInfo.type === 'other' && (
-                <>
-                  <div className="px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] overflow-hidden relative bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg">
-                    <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
-                    <span className="text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis text-slate-200 dark:text-[#EBEBF5]">
-                      {parsedInfo.main}
-                    </span>
-                  </div>
-                  {parsedInfo.sub && <span className="text-[13px] text-gray-500 dark:text-[#8E8E93] font-medium tracking-wide">{parsedInfo.sub}</span>}
-                </>
+              {parsedInfo.type === 'other' && (
+                <div className="px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] relative bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg">
+                  <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none rounded-2xl" />
+                  <span className="text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 text-slate-200 dark:text-[#EBEBF5]">
+                    {parsedInfo.main}
+                  </span>
+                </div>
               )}
             </motion.div>
           )}
