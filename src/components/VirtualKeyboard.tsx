@@ -52,25 +52,34 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, onSubmit, className }
     let content: React.ReactNode = isShifted ? key.toUpperCase() : key;
     let extraClasses = "flex-1 min-w-[28px]"; // Default proportional width
 
+    const isFunctional = key === "SHIFT" || key === "BACKSPACE" || key === "ENTER";
+
     if (key === "SHIFT") {
-      content = <ArrowBigUp size={20} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
-      extraClasses = "w-[44px] flex-none bg-gray-300/60 dark:bg-[#3A3A3A]"; // Slightly distinct background for functional keys
+      content = <ArrowBigUp size={22} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
+      extraClasses = "w-[44px] flex-none";
     } else if (key === "BACKSPACE") {
-      content = <Delete size={20} strokeWidth={2.5} />;
-      extraClasses = "w-[44px] flex-none bg-gray-300/60 dark:bg-[#3A3A3A]";
+      content = <Delete size={22} strokeWidth={2.5} />;
+      extraClasses = "w-[44px] flex-none";
     } else if (key === "SPACE") {
-      content = <span className="text-[13px] font-semibold opacity-40">Leerzeichen</span>;
+      content = <span className="text-[14px] font-semibold opacity-40">Leerzeichen</span>;
       extraClasses = "flex-[3]";
     } else if (key === "ENTER") {
-      content = <CornerDownLeft size={18} strokeWidth={2.5} />;
-      extraClasses = "flex-1 bg-blue-500 text-white dark:bg-blue-600 border-none";
+      content = <CornerDownLeft size={20} strokeWidth={2.5} />;
+      extraClasses = "flex-[1.2]";
     }
 
     // Active state classes for premium feeling
-    const baseClasses = "flex items-center justify-center rounded-lg shadow-sm h-11 text-[17px] font-semibold transition-all duration-75 select-none";
-    const colorClasses = key === "ENTER" 
-      ? "active:bg-blue-600 dark:active:bg-blue-700 active:scale-[0.97]"
-      : "bg-white dark:bg-[#4A4A4A] text-black dark:text-white active:bg-gray-300 dark:active:bg-[#5A5A5A] active:scale-[0.97]";
+    const baseClasses = "flex items-center justify-center rounded-[10px] shadow-sm h-12 text-[19px] font-medium transition-all duration-75 select-none";
+    
+    const bgColor = isFunctional 
+      ? "bg-gray-300/80 dark:bg-[#323232]"
+      : "bg-white dark:bg-[#4A4A4A]";
+      
+    const activeBgColor = isFunctional
+      ? "active:bg-gray-400/80 dark:active:bg-[#202020]"
+      : "active:bg-gray-300 dark:active:bg-[#5A5A5A]";
+
+    const colorClasses = `${bgColor} ${activeBgColor} text-black dark:text-white active:scale-[0.96]`;
 
     return (
       <button
