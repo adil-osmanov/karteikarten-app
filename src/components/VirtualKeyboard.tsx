@@ -44,19 +44,19 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
 
   const renderKey = (key: string) => {
     let content: React.ReactNode = isShifted ? key.toUpperCase() : key;
-    let extraClasses = "flex-1 min-w-[24px]"; // Proportional width for all letters
+    let extraClasses = "flex-1"; // Proportional width (1 unit)
 
     const isFunctional = key === "SHIFT" || key === "BACKSPACE";
 
     if (key === "SHIFT") {
       content = <ArrowBigUp size={22} className={cn(isShifted ? "fill-current" : "")} strokeWidth={isShifted ? 2.5 : 2} />;
-      extraClasses = "flex-[2] max-w-[85px] flex-none"; // Wide enough to compensate missing keys
+      extraClasses = "flex-[3]"; // Exactly 3 units to balance 8 letters = 11 total
     } else if (key === "BACKSPACE") {
       content = <Delete size={22} strokeWidth={2.5} />;
-      extraClasses = "flex-[1.5] max-w-[80px] flex-none"; // Placed in Row 4, takes up moderate space
+      extraClasses = "flex-[3]"; // Exactly 3 units (same size as Shift)
     } else if (key === "SPACE") {
       content = <span className="text-[15px] font-semibold opacity-40">Leerzeichen</span>;
-      extraClasses = "flex-[4]"; // Massive spacebar
+      extraClasses = "flex-[8]"; // Exactly 8 units (3 + 8 = 11 total for the row)
     }
 
     // Active state classes for premium feeling
