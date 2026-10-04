@@ -1699,10 +1699,38 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
           
           <div>
             <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Tint Color (Akzent & Glow)</label>
-            <div className="flex gap-2">
-              {['#1C1C1E', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6', '#AF52DE'].map(c => (
-                <button key={c} onClick={() => setTintColor(c)} className={`w-8 h-8 rounded-full border-2 transition-all ${tintColor === c ? 'border-white scale-110 shadow-md' : 'border-transparent hover:scale-105'}`} style={{ backgroundColor: c }} />
-              ))}
+            <div className="flex gap-2 flex-wrap items-center">
+              {['#1C1C1E', '#FFFFFF', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6', '#AF52DE'].map(c => {
+                const isActive = tintColor.toUpperCase() === c.toUpperCase();
+                return (
+                  <button 
+                    key={c} 
+                    onClick={() => setTintColor(c)} 
+                    className={`w-8 h-8 rounded-full border border-black/10 dark:border-white/10 transition-all ${isActive ? 'ring-2 ring-blue-500 dark:ring-blue-400 ring-offset-2 ring-offset-white dark:ring-offset-[#1C1C1E] scale-110 shadow-md' : 'hover:scale-105 shadow-sm'}`} 
+                    style={{ backgroundColor: c }} 
+                  />
+                );
+              })}
+              
+              {(() => {
+                const predefined = ['#1C1C1E', '#FFFFFF', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6', '#AF52DE'];
+                const isCustom = !predefined.map(c => c.toUpperCase()).includes(tintColor.toUpperCase());
+                return (
+                  <div 
+                    className={`relative w-8 h-8 rounded-full overflow-hidden shadow-sm transition-all cursor-pointer flex items-center justify-center border border-black/10 dark:border-white/10 ${isCustom ? 'ring-2 ring-blue-500 dark:ring-blue-400 ring-offset-2 ring-offset-white dark:ring-offset-[#1C1C1E] scale-110 shadow-md' : 'hover:scale-105'}`}
+                    style={{ background: isCustom ? tintColor : 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)' }}
+                    title="Eigene Farbe wählen"
+                  >
+                    {!isCustom && <div className="absolute inset-0 bg-white/20 dark:bg-black/20 pointer-events-none" />}
+                    <input 
+                      type="color" 
+                      value={tintColor} 
+                      onChange={e => setTintColor(e.target.value)} 
+                      className="absolute opacity-0 w-[200%] h-[200%] cursor-pointer"
+                    />
+                  </div>
+                );
+              })()}
             </div>
           </div>
           
