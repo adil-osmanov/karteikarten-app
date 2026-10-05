@@ -459,13 +459,23 @@ if (typeof window !== 'undefined') {
   useStore.subscribe((state, prevState) => {
     try {
       if (!prevState || state.books !== prevState.books) {
-        localStorage.setItem('cache_books', JSON.stringify(state.books));
+        try {
+          localStorage.setItem('cache_books', JSON.stringify(state.books));
+        } catch (e) {
+          console.warn('Failed to save books cache, clearing it to prevent stale data:', e);
+          localStorage.removeItem('cache_books');
+        }
       }
       if (!prevState || state.decks !== prevState.decks) {
-        localStorage.setItem('cache_decks', JSON.stringify(state.decks));
+        try {
+          localStorage.setItem('cache_decks', JSON.stringify(state.decks));
+        } catch (e) {
+          console.warn('Failed to save decks cache, clearing it to prevent stale data:', e);
+          localStorage.removeItem('cache_decks');
+        }
       }
     } catch (e) {
-      console.warn('Failed to sync Zustand cache:', e);
+      console.warn('Failed in Zustand subscriber:', e);
     }
   });
 }
@@ -2203,7 +2213,12 @@ try {
             accentColor: b.accentColor || b.accentcolor
           }));
           setBooks(mappedBooks);
-          localStorage.setItem('cache_books', JSON.stringify(mappedBooks));
+          try {
+            localStorage.setItem('cache_books', JSON.stringify(mappedBooks));
+          } catch(e) {
+            console.warn('Quota exceeded, clearing cache_books');
+            localStorage.removeItem('cache_books');
+          }
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
@@ -2218,7 +2233,7 @@ try {
             await supabase.from('books').insert(lowercaseDefaults);
           }
           setBooks(defaultBooks);
-          localStorage.setItem('cache_books', JSON.stringify(defaultBooks));
+          try { localStorage.setItem('cache_books', JSON.stringify(defaultBooks)); } catch(e) { localStorage.removeItem('cache_books'); }
         }
 
         if (decksRes.error) {
@@ -2237,7 +2252,12 @@ try {
             bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
           }));
           setDecks(enhancedDecks as Deck[]);
-          localStorage.setItem('cache_decks', JSON.stringify(enhancedDecks));
+          try {
+            localStorage.setItem('cache_decks', JSON.stringify(enhancedDecks));
+          } catch(e) {
+            console.warn('Quota exceeded, clearing cache_decks');
+            localStorage.removeItem('cache_decks');
+          }
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
