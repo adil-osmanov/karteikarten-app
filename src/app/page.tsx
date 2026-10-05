@@ -460,18 +460,18 @@ if (typeof window !== 'undefined') {
     try {
       if (!prevState || state.books !== prevState.books) {
         try {
-          localStorage.setItem('cache_books', JSON.stringify(state.books));
+          localStorage.setItem('cache_books_v2', JSON.stringify(state.books));
         } catch (e) {
           console.warn('Failed to save books cache, clearing it to prevent stale data:', e);
-          localStorage.removeItem('cache_books');
+          localStorage.removeItem('cache_books_v2');
         }
       }
       if (!prevState || state.decks !== prevState.decks) {
         try {
-          localStorage.setItem('cache_decks', JSON.stringify(state.decks));
+          localStorage.setItem('cache_decks_v2', JSON.stringify(state.decks));
         } catch (e) {
           console.warn('Failed to save decks cache, clearing it to prevent stale data:', e);
-          localStorage.removeItem('cache_decks');
+          localStorage.removeItem('cache_decks_v2');
         }
       }
     } catch (e) {
@@ -1629,8 +1629,13 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
           const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          if (type === 'light') setCoverLight(dataUrl);
-          else setCoverDark(dataUrl);
+          if (type === 'light') {
+            setCoverLight(dataUrl);
+            if (coverLight === coverDark) setCoverDark(dataUrl);
+          } else {
+            setCoverDark(dataUrl);
+            if (coverLight === coverDark) setCoverLight(dataUrl);
+          }
         }
       };
       img.src = URL.createObjectURL(file);
@@ -1689,7 +1694,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
                 {coverLight ? (
                   <div className="relative h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10 group">
                     <img src={coverLight} alt="Light Cover" className="w-full h-full object-cover" />
-                    <button onClick={() => setCoverLight(null)} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => { setCoverLight(null); if (coverLight === coverDark) setCoverDark(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Entfernen</span>
                     </button>
                   </div>
@@ -1709,7 +1714,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
                 {coverDark ? (
                   <div className="relative h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10 group">
                     <img src={coverDark} alt="Dark Cover" className="w-full h-full object-cover" />
-                    <button onClick={() => setCoverDark(null)} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => { setCoverDark(null); if (coverLight === coverDark) setCoverLight(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Entfernen</span>
                     </button>
                   </div>
@@ -2123,9 +2128,9 @@ export default function App() {
     const fetchData = async () => {
       
       try {
-        const cachedBooks = localStorage.getItem('cache_books');
+        const cachedBooks = localStorage.getItem('cache_books_v2');
         if (cachedBooks) setBooks(JSON.parse(cachedBooks));
-        const cachedDecks = localStorage.getItem('cache_decks');
+        const cachedDecks = localStorage.getItem('cache_decks_v2');
         if (cachedDecks) setDecks(JSON.parse(cachedDecks));
       } catch (e) {}
       
@@ -2214,10 +2219,10 @@ try {
           }));
           setBooks(mappedBooks);
           try {
-            localStorage.setItem('cache_books', JSON.stringify(mappedBooks));
+            localStorage.setItem('cache_books_v2', JSON.stringify(mappedBooks));
           } catch(e) {
-            console.warn('Quota exceeded, clearing cache_books');
-            localStorage.removeItem('cache_books');
+            console.warn('Quota exceeded, clearing cache_books_v2');
+            localStorage.removeItem('cache_books_v2');
           }
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
@@ -2233,13 +2238,13 @@ try {
             await supabase.from('books').insert(lowercaseDefaults);
           }
           setBooks(defaultBooks);
-          try { localStorage.setItem('cache_books', JSON.stringify(defaultBooks)); } catch(e) { localStorage.removeItem('cache_books'); }
+          try { localStorage.setItem('cache_books_v2', JSON.stringify(defaultBooks)); } catch(e) { localStorage.removeItem('cache_books_v2'); }
         }
 
         if (decksRes.error) {
           console.error("Supabase Fetch Decks Error:", decksRes.error.message);
           // Only clear decks if we are sure it's not a network error, but for offline robustness, do NOT wipe cache.
-          if (!localStorage.getItem('cache_decks')) { setDecks([]); }
+          if (!localStorage.getItem('cache_decks_v2')) { setDecks([]); }
         } else if (decksRes.data) {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
           const enhancedDecks = decksRes.data.map((d: any) => ({
@@ -2253,10 +2258,10 @@ try {
           }));
           setDecks(enhancedDecks as Deck[]);
           try {
-            localStorage.setItem('cache_decks', JSON.stringify(enhancedDecks));
+            localStorage.setItem('cache_decks_v2', JSON.stringify(enhancedDecks));
           } catch(e) {
-            console.warn('Quota exceeded, clearing cache_decks');
-            localStorage.removeItem('cache_decks');
+            console.warn('Quota exceeded, clearing cache_decks_v2');
+            localStorage.removeItem('cache_decks_v2');
           }
         }
       } catch (err: any) {
