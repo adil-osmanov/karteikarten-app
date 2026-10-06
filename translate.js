@@ -1,0 +1,71 @@
+const fs = require('fs');
+let code = fs.readFileSync('src/app/page.tsx', 'utf8');
+
+const translations = [
+  ['Alle fälligen Karten wurden wiederholt.', 'Все запланированные карточки пройдены.'],
+  ['Du hast alle Karten in diesem Deck gemeistert.', 'Вы выучили все карточки в этой колоде.'],
+  ['Zurück zur Bibliothek', 'Вернуться в библиотеку'],
+  ['Buch bearbeiten', 'Редактировать книгу'],
+  ['Neues Buch', 'Новая книга'],
+  ['Titel', 'Название'],
+  ['Untertitel (optional)', 'Подзаголовок (необязательно)'],
+  ['Cover Fotos (Hell & Dunkel)', 'Обложки (Светлая и Темная)'],
+  ['Light Mode', 'Светлая тема'],
+  ['Dark Mode', 'Темная тема'],
+  ['Entfernen', 'Удалить'],
+  ['Kein Bild', 'Нет обложки'],
+  ['Tint Color (Akzent & Glow)', 'Цвет акцента (кнопки и свечение)'],
+  ['Akzeptierte Niveaus', 'Доступные уровни'],
+  ['Abbrechen', 'Отмена'],
+  ['Speichern', 'Сохранить'],
+  ['Bibliothek', 'Библиотека'],
+  ['Einstellungen', 'Настройки'],
+  ['Karten zu üben', 'карточек для повторения'],
+  ['Karten hinzufügen', 'Добавить карточки'],
+  ['Alle Karten gemeistert!', 'Все карточки выучены!'],
+  ['Karten', 'Карточки'],
+  ['Wörter', 'Слова'],
+  ['Grammatik', 'Грамматика'],
+  ['Laden', 'Загрузить'],
+  ['Neues Deck', 'Новая колода'],
+  ['Bearbeiten', 'Изменить'],
+  ['Löschen', 'Удалить'],
+  ['Karten Import', 'Импорт карточек'],
+  ['Level auswählen', 'Выберите уровень'],
+  ['Noch keine Decks in diesem Level.', 'В этом уровне пока нет колод.'],
+  ['No decks in this level yet.', 'В этом уровне пока нет колод.'],
+  ['Archived', 'В архиве'],
+  ['Archiv anzeigen', 'Показать архив'],
+  ['Verstecken', 'Скрыть'],
+  ['Hide', 'Скрыть'],
+  ['Löschen bestätigen', 'Подтверждение удаления'],
+  ['Möchtest du dieses Deck wirklich löschen? Alle Karten gehen verloren.', 'Вы уверены, что хотите удалить эту колоду? Все карточки будут потеряны.'],
+  ['Name des Decks', 'Название колоды'],
+  ['Deck umbenennen', 'Переименовать колоду'],
+  ['Umbenennen', 'Переименовать'],
+  ['Deck hinzufügen', 'Добавить колоду'],
+  ['Neues Deck Name', 'Название новой колоды'],
+  ['Zurück', 'Назад'],
+  ['Korrekt', 'Помню'],
+  ['Hilfe', 'Не помню'],
+  ['Zeige Antwort', 'Показать ответ'],
+  ['Super!', 'Отлично!'],
+  ['Korrekt übersetzt', 'Правильный перевод'],
+  ['Fast geschafft', 'Почти выучено'],
+  ['Wiederholung nötig', 'Нужно повторить'],
+  ['Schwer', 'Сложно'],
+  ['Gut', 'Хорошо'],
+  ['Einfach', 'Легко'],
+  ['Karten lernen', 'Учить карточки'],
+  ['Noch', 'Осталось'],
+  ['Heute gelernt', 'Изучено сегодня'],
+  ['Swipe Mode', 'Режим свайпов'],
+  ['Tippen zum Starten', 'Нажмите, чтобы начать']
+];
+
+translations.forEach(([de, ru]) => {
+  code = code.split(de).join(ru);
+});
+
+fs.writeFileSync('src/app/page.tsx', code);
+console.log('Translations applied.');

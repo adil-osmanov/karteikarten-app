@@ -4,8 +4,8 @@ import React, { useState, useEffect, useRef, useCallback, useTransition, useMemo
 import { 
   Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
-  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
-  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle
+  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Layers, Lock, Star, Plus,
+  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Crown, User, LogOut
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
@@ -15,14 +15,24 @@ import { persist } from "zustand/middleware";
 import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
+import { AuthScreen } from "@/components/auth/AuthScreen";
+import { AdminDashboard } from "@/components/admin/AdminDashboard";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder";
-const supabase = createClient(supabaseUrl, supabaseKey);
+function useLockBodyScroll() {
+  useEffect(() => {
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalStyle;
+    };
+  }, []);
+}
+
+import { supabase } from "@/lib/supabase";
 
 // --- AUDIO FEEDBACK ---
 
@@ -89,7 +99,7 @@ export type CEFRLevel = LanguageLevel; // Alias for existing code
 
 export interface BookMeta {
   id: string;
-  language: 'DE' | 'EN';
+  language: string;
   title: string;
   subtitle?: string;
   tintColor: string;
@@ -111,7 +121,14 @@ const useScrollLock = (lock: boolean) => {
   }, [lock]);
 };
 
-export interface Flashcard {
+export const SUPPORTED_LANGUAGES = [
+  { code: 'DE', name: 'Немецкий', icon: '🇩🇪' },
+  { code: 'EN', name: 'Английский', icon: '🇬🇧' },
+    { code: 'ES', name: 'Испанский', icon: '🇪🇸' }, // <--- Просто добавили эту строку
+  // { code: 'ES', name: 'Испанский', icon: '🇪🇸' }, // Добавьте любой новый язык сюда!
+];
+
+interface Flashcard {
   id: string;
   targetWord: string;
   sentence: string;
@@ -131,7 +148,7 @@ export interface Deck {
   category: string;
   level?: CEFRLevel;
   cards: Flashcard[];
-  language?: 'DE' | 'EN';
+  language?: string;
   bookId?: string;
 }
 
@@ -145,8 +162,8 @@ interface DeckState {
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: () => void;
-  appLanguage: 'DE' | 'EN';
-  setAppLanguage: (lang: 'DE' | 'EN') => void;
+  appLanguage: string;
+  setAppLanguage: (lang: string) => void;
   books: BookMeta[];
   setBooks: (books: BookMeta[]) => void;
   addBook: (book: BookMeta) => void;
@@ -158,9 +175,13 @@ interface DeckState {
   setDeckOrder: (order: string[]) => void;
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
+  isPaywallOpen: boolean;
+  setIsPaywallOpen: (val: boolean) => void;
 }
 
 const useStore = create<DeckState>()((set, get) => ({
+  isPaywallOpen: false,
+  setIsPaywallOpen: (val) => set({ isPaywallOpen: val }),
   decks: [],
   isLoaded: false,
   appLanguage: 'DE',
@@ -189,74 +210,73 @@ const useStore = create<DeckState>()((set, get) => ({
   setBooks: (books) => set({ books }),
   addBook: async (book) => {
     const previousBooks = get().books;
-    set({ books: [...previousBooks, book] }); // Restore Optimistic UI
+    const newBooks = [...previousBooks, book];
+    set({ books: newBooks });
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('cache_books_v2', JSON.stringify(newBooks)); } catch(e) {}
+    } // Restore Optimistic UI
     
     // Clean payload: remove legacy fields (accentColor, coverType, coverValue) that cause schema cache errors
     const payload = {
       id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
-      tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
-      activeLevels: book.activeLevels || ['A1']
+      tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
+      activelevels: book.activeLevels || ['A1']
     };
-    
-    let { error } = await supabase.from('books').insert(payload);
-    
-    if (error && error.message.includes('does not exist')) {
-       const fallbackPayload = {
-         id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
-         tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
-         activelevels: book.activeLevels || ['A1']
-       };
-       const fallbackRes = await supabase.from('books').insert(fallbackPayload);
-       error = fallbackRes.error;
-    }
+    const { error } = await supabase.from('kraft_books').insert(payload);
     
     if (error) {
       console.error("SUPABASE ERROR:", error);
-      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
-      set({ books: previousBooks }); // Rollback on failure
+      const msg = error?.message || error?.toString() || JSON.stringify(error);
+      if (typeof window !== 'undefined') alert("ERROR: " + msg + " | keys: " + Object.keys(error).join(','));
+      set({ books: previousBooks });
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem('cache_books_v2', JSON.stringify(previousBooks)); } catch(e) {}
+      }
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem('cache_books_v2', JSON.stringify(previousBooks)); } catch(e) {}
+      } // Rollback on failure
     }
   },
   updateBook: async (book) => {
     const previousBooks = get().books;
-    set({ books: previousBooks.map(b => b.id === book.id ? book : b) });
+    const newBooks = previousBooks.map(b => b.id === book.id ? book : b);
+    set({ books: newBooks });
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('cache_books_v2', JSON.stringify(newBooks)); } catch(e) {}
+    }
     
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
-      tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
-      activeLevels: book.activeLevels || ['A1']
+      tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
+      activelevels: book.activeLevels || ['A1']
     };
-    
-    let { error } = await supabase.from('books').update(payload).eq('id', book.id);
-    
-    if (error && error.message.includes('does not exist')) {
-       const fallbackPayload = {
-         language: book.language, title: book.title, subtitle: book.subtitle || null,
-         tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
-         activelevels: book.activeLevels || ['A1']
-       };
-       const fallbackRes = await supabase.from('books').update(fallbackPayload).eq('id', book.id);
-       error = fallbackRes.error;
-    }
+    const { error } = await supabase.from('kraft_books').update(payload).eq('id', book.id);
     
     if (error) {
       console.error("SUPABASE ERROR:", error);
-      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
+      const msg = error?.message || error?.toString() || JSON.stringify(error); if (typeof window !== 'undefined') alert("ERROR: " + msg + " | keys: " + Object.keys(error).join(','));
       set({ books: previousBooks });
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem('cache_books_v2', JSON.stringify(previousBooks)); } catch(e) {}
+      }
     }
   },
   deleteBook: async (id) => {
     const previousBooks = get().books;
     set({ books: previousBooks.filter(b => b.id !== id) });
     
-    const { error } = await supabase.from('books').delete().eq('id', id);
+    const { error } = await supabase.from('kraft_books').delete().eq('id', id);
     
     if (error) {
       console.error("SUPABASE ERROR:", error);
-      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
+      const msg = error?.message || error?.toString() || JSON.stringify(error); if (typeof window !== 'undefined') alert("ERROR: " + msg + " | keys: " + Object.keys(error).join(','));
       set({ books: previousBooks });
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem('cache_books_v2', JSON.stringify(previousBooks)); } catch(e) {}
+      }
     }
   },
-  incrementDailyProgress: () => {
+  incrementDailyProgress: async () => {
     if (typeof window !== 'undefined') {
       const { appLanguage } = get();
       const todayStr = new Date().toLocaleDateString('en-CA');
@@ -272,10 +292,14 @@ const useStore = create<DeckState>()((set, get) => ({
       localStorage.setItem(key, JSON.stringify(progress));
       window.dispatchEvent(new Event('storage-update'));
       
-      supabase.from('user_stats').upsert({
-        language: appLanguage,
-        daily_activity: progress
-      }, { onConflict: 'language' }).then(() => {});
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData?.session?.user) {
+        supabase.from('kraft_user_daily_activity').upsert({
+          user_id: sessionData.session.user.id,
+          swipes_today: currentCount + 1,
+          last_swipe_date: todayStr
+        }, { onConflict: 'user_id' }).then(() => {});
+      }
     }
   },
   
@@ -294,7 +318,20 @@ const useStore = create<DeckState>()((set, get) => ({
       language: deck.language
     };
     
-    let deckRes = await supabase.from('decks').insert(payload);
+    // Ensure book exists if bookId is provided to avoid FK violation
+    if (payload.book_id) {
+      const { data: bookCheck } = await supabase.from('kraft_books').select('id').eq('id', payload.book_id).single();
+      if (!bookCheck) {
+        await supabase.from('kraft_books').insert({
+          id: payload.book_id,
+          language: payload.language || 'DE',
+          title: payload.book_id === 'default-en' ? 'Basic English' : 'Basis Deutsch',
+          activelevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2']
+        });
+      }
+    }
+
+    let deckRes = await supabase.from('kraft_decks').insert(payload);
     
     if (deckRes.error && deckRes.error.message.includes('not exist')) {
         console.warn("Falling back to deck insert without book_id/language columns. Please run the SQL migration.");
@@ -304,36 +341,44 @@ const useStore = create<DeckState>()((set, get) => ({
           category: deck.category,
           level: deck.level || 'A1'
         };
-        deckRes = await supabase.from('decks').insert(fallbackPayload);
+        deckRes = await supabase.from('kraft_decks').insert(fallbackPayload);
     }
     
     if (deckRes.error) {
       console.error("Supabase Deck Insert Error:", deckRes.error.message);
-      alert(`Fehler beim Speichern des Decks in der Datenbank: ${deckRes.error.message}`);
-      set({ decks: previousDecks });
-      return;
+      
+      // If it STILL fails with FK, drop book_id and retry
+      if (deckRes.error.message.includes('foreign key constraint')) {
+         delete payload.book_id;
+         deckRes = await supabase.from('kraft_decks').insert(payload);
+      }
+      
+      if (deckRes.error) {
+        alert(`Ошибка при сохранении колоды: ${deckRes.error.message}`);
+        set({ decks: previousDecks });
+        return;
+      }
     }
     
     const cardsToInsert = deck.cards.map(c => ({
       id: c.id,
       deck_id: deck.id,
-      targetWord: c.targetWord,
+      targetword: c.targetWord,
       sentence: c.sentence,
       translation: c.translation,
-      options: c.options,
-      masteryLevel: c.masteryLevel,
-      isArchived: c.isArchived,
-      nextReviewDate: c.nextReviewDate,
+      options: { items: c.options || [], baseWordInfo: c.baseWordInfo || null },
+      masterylevel: c.masteryLevel,
+      isarchived: c.isArchived,
+      nextreviewdate: c.nextReviewDate ? new Date(c.nextReviewDate).toISOString() : null,
       interval: c.interval,
-      repetitions: c.repetitions,
-      baseWordInfo: c.baseWordInfo || null
+      repetitions: c.repetitions
     }));
     
-    let { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
+    let { error: cardsError } = await supabase.from('kraft_cards').insert(cardsToInsert);
     
     if (cardsError) {
       console.error("Supabase Cards Insert Error:", cardsError.message);
-      alert(`Fehler beim Speichern der Karten: ${cardsError.message}`);
+      alert(`Fehler beim Сохранить der Карточки: ${cardsError.message}`);
       set({ decks: previousDecks });
     }
   },
@@ -342,7 +387,7 @@ const useStore = create<DeckState>()((set, get) => ({
     const previousDecks = get().decks;
     set({ decks: previousDecks.filter(d => d.id !== deckId) });
     
-    const { error } = await supabase.from('decks').delete().eq('id', deckId);
+    const { error } = await supabase.from('kraft_decks').delete().eq('id', deckId);
     if (error) {
       console.error("Supabase Delete Deck Error:", error.message);
       set({ decks: previousDecks });
@@ -355,7 +400,7 @@ const useStore = create<DeckState>()((set, get) => ({
       decks: previousDecks.map(d => d.id === deckId ? { ...d, name: newName } : d)
     });
     
-    const { error } = await supabase.from('decks').update({ name: newName }).eq('id', deckId);
+    const { error } = await supabase.from('kraft_decks').update({ name: newName }).eq('id', deckId);
     if (error) {
       console.error("Supabase Rename Deck Error:", error.message);
       set({ decks: previousDecks });
@@ -427,7 +472,7 @@ const useStore = create<DeckState>()((set, get) => ({
             card.nextReviewDate = Date.now() + 86400000;
           }
         } else {
-          // Penalty: only drop 1 mastery level for any mistake (wrong option or Hilfe)
+          // Penalty: only drop 1 mastery level for any mistake (wrong option or Не помню)
           card.masteryLevel = Math.max(0, card.masteryLevel - 1);
         }
       }
@@ -439,16 +484,21 @@ const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (updatedCard) {
-      const { error } = await supabase.from('cards').update({
-        masteryLevel: updatedCard.masteryLevel,
-        isArchived: updatedCard.isArchived,
-        nextReviewDate: updatedCard.nextReviewDate,
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session?.user) return; // User must be logged in
+      
+      const { error } = await supabase.from('kraft_user_progress').upsert({
+        user_id: sessionData.session.user.id,
+        card_id: cardId,
+        efactor: updatedCard.masteryLevel, // mapping masteryLevel to efactor
+        is_correct: updatedCard.isArchived, // mapping isArchived to is_correct
+        due_date: updatedCard.nextReviewDate ? new Date(updatedCard.nextReviewDate).toISOString() : new Date().toISOString(),
         interval: updatedCard.interval,
-        repetitions: updatedCard.repetitions
-      }).eq('id', cardId);
+        repetition: updatedCard.repetitions
+      }, { onConflict: 'user_id,card_id' });
       
       if (error) {
-        console.error("Supabase Update Card Error:", error.message);
+        console.error("Supabase Update Progress Error:", error.message);
         set({ decks: previousDecks });
       }
     }
@@ -487,14 +537,16 @@ function StudyInterface({
   deckId, 
   onBack,
   reviewCards,
-  isDrillMode
+  isDrillMode,
+  profile
 }: { 
   deckId?: string, 
   onBack: () => void,
   reviewCards?: { deckId: string, card: Flashcard }[],
-  isDrillMode?: boolean
+  isDrillMode?: boolean,
+  profile?: any
 }) {
-  const { answerCard, decks } = useStore();
+  const { answerCard, decks, appLanguage } = useStore();
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -548,13 +600,54 @@ function StudyInterface({
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-4">Großartig!</h1>
           <p className="text-lg text-gray-500 mb-10">
-            {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
+            {reviewCards ? "Все запланированные карточки пройдены." : "Вы выучили все карточки в этой колоде."}
           </p>
           <button
             onClick={onBack}
             className="w-full md:w-auto bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]"
           >
-            Zurück zur Bibliothek
+            Вернуться в библиотеку
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
+  const progress = stored ? JSON.parse(stored) : {};
+  const rawCount = progress[todayStr];
+  const currentCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
+
+  if (profile && profile.tier === 'free' && currentCount >= 70) {
+    return (
+      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-gray-50 dark:bg-[#1C1C1E] px-6 text-center">
+        <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex flex-col items-center max-w-md w-full">
+          <div className="text-[72px] leading-none mb-6 select-none">🔒</div>
+          <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight text-gray-900 dark:text-white mb-4">
+            Дневной лимит исчерпан
+          </h1>
+          <p className="text-gray-500 dark:text-gray-400 text-[15px] mb-10 leading-relaxed px-4">
+            Ты отлично поработал! Сними ограничения, чтобы учить слова в своем темпе и подготовиться к экзамену быстрее.
+          </p>
+          <a
+            href={`https://t.me/adilosmanow?text=${encodeURIComponent("Привет! Хочу купить PRO в Kraft. Моя почта в приложении: " + (profile?.email || ""))}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => console.log('Paywall clicked')}
+            className="w-full flex items-center justify-center bg-blue-600 hover:bg-blue-700 dark:bg-white dark:text-black dark:hover:opacity-90 text-white py-4 rounded-2xl font-bold text-[17px] transition-all active:scale-[0.98] mb-3"
+          >
+            Открыть безлимит навсегда за 890 ₽
+          </a>
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 font-medium">
+            Разовая оплата. Никаких скрытых подписок
+          </p>
+          
+          <button
+            onClick={onBack}
+            className="mt-8 text-sm font-medium text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
+          >
+            Вернуться назад
           </button>
         </motion.div>
       </div>
@@ -1027,7 +1120,7 @@ const playAudio = useCallback(async (text: string) => {
               "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
               phase !== "Question" && "opacity-0 pointer-events-none"
             )}
-            title="Hilfe (H)"
+            title="Не помню (H)"
           >
             <HelpCircle className="w-5 h-5" />
           </button>
@@ -1231,9 +1324,10 @@ function DarkModeToggle() {
 
 
 
-function ActivityWidget() {
+function ActivityWidget({ profile }: { profile?: any }) {
   const { appLanguage } = useStore();
   const [daily, setDaily] = useState<Record<string, any>>({});
+  const [showPopup, setShowPopup] = useState(false);
 
   useEffect(() => {
     const loadProgress = () => {
@@ -1251,33 +1345,112 @@ function ActivityWidget() {
   const todayStr = new Date().toLocaleDateString('en-CA');
   const rawCount = daily[todayStr];
   const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
+  
+  const isFree = profile?.tier !== 'premium';
 
   return (
-    <div className="flex flex-col items-center justify-center px-2 mr-1">
-      <span className="text-[9px] uppercase tracking-[0.2em] font-medium text-gray-400 dark:text-gray-500 leading-none mb-1">Heute</span>
-      <span className="text-xl font-light tabular-nums text-gray-900 dark:text-white leading-none">{todayCount}</span>
+    <div className="relative">
+      <div 
+        onClick={() => setShowPopup(!showPopup)}
+        className="flex items-center gap-1.5 px-2 h-8 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer select-none"
+      >
+        <Layers className="w-4 h-4 text-blue-500 fill-blue-500/20" />
+        <span className="text-[15px] font-bold tabular-nums text-gray-900 dark:text-white leading-none">{todayCount}</span>
+      </div>
+      
+      <AnimatePresence>
+        {showPopup && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40" onClick={() => setShowPopup(false)} 
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.95, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: 10, scale: 0.95, filter: 'blur(4px)' }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              className="absolute top-full right-1/2 translate-x-1/2 mt-3 w-64 bg-white/90 dark:bg-[#1C1C1E]/90 backdrop-blur-2xl border border-black/5 dark:border-white/10 rounded-2xl shadow-xl p-5 z-50 text-center"
+            >
+              <div className="w-12 h-12 bg-blue-50 dark:bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner">
+                <Layers className="w-6 h-6 text-blue-500" />
+              </div>
+              <h4 className="text-[15px] font-semibold text-gray-900 dark:text-white tracking-tight mb-2">
+                Дневная активность
+              </h4>
+              <p className="text-[13px] text-gray-500 dark:text-gray-400 font-medium leading-snug mb-4">
+                Вы повторили <span className="text-gray-900 dark:text-white font-bold">{todayCount}</span> карточек за сегодня. Регулярные интервальные повторения помогают надежно закрепить слова в долговременной памяти.
+              </p>
+              {isFree ? (
+                <div className="text-[11px] font-bold uppercase tracking-wider text-blue-500 bg-blue-50 dark:bg-blue-500/10 py-1.5 rounded-lg">
+                  Лимит: {todayCount}/70 (Free)
+                </div>
+              ) : (
+                <div className="text-[11px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 dark:bg-amber-500/10 py-1.5 rounded-lg">
+                  Безлимит (Pro)
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 function LanguageSelector() {
   const { appLanguage, setAppLanguage } = useStore();
+  const [isOpen, setIsOpen] = useState(false);
+  const currentLang = SUPPORTED_LANGUAGES.find(l => l.code === appLanguage) || SUPPORTED_LANGUAGES[0];
+
   return (
-    <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50 flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] p-0.5 rounded-xl shadow-sm">
-      {(['DE', 'EN'] as const).map(lang => (
+    <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50">
+      <div className="relative">
         <button
-          key={lang}
-          onClick={() => setAppLanguage(lang)}
-          className={cn(
-            "text-xs font-semibold px-2.5 py-1 rounded-lg transition-colors",
-            appLanguage === lang 
-              ? "bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm" 
-              : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-          )}
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-2 bg-white/70 dark:bg-[#1C1C1E]/70 backdrop-blur-xl border border-black/5 dark:border-white/10 px-3 py-2 rounded-xl shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
         >
-          {lang}
+          <span className="text-base leading-none">{currentLang.icon}</span>
+          <span className="text-[13px] font-semibold text-gray-900 dark:text-white leading-none">{currentLang.code}</span>
+          <ChevronRight className={cn("w-3.5 h-3.5 text-gray-400 transition-transform", isOpen ? "rotate-90" : "")} />
         </button>
-      ))}
+
+        <AnimatePresence>
+          {isOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: 8, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 4, scale: 0.95 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              className="absolute top-full mt-2 left-0 w-[180px] bg-white dark:bg-[#1C1C1E] border border-black/5 dark:border-white/10 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.1)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] overflow-hidden"
+            >
+              {SUPPORTED_LANGUAGES.map(lang => (
+                <button
+                  key={lang.code}
+                  onClick={() => {
+                    setAppLanguage(lang.code);
+                    setIsOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors group"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg leading-none">{lang.icon}</span>
+                    <span className={cn(
+                      "text-[14px] font-medium transition-colors",
+                      appLanguage === lang.code ? "text-blue-600 dark:text-blue-400" : "text-gray-900 dark:text-white"
+                    )}>
+                      {lang.name}
+                    </span>
+                  </div>
+                  {appLanguage === lang.code && (
+                    <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  )}
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
@@ -1326,6 +1499,7 @@ export const exportToMarkdown = (bookId?: string) => {
 };
 
 function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?: BookMeta | null }) {
+  useLockBodyScroll();
   const { decks } = useStore();
   
   const stats = useMemo(() => {
@@ -1397,12 +1571,35 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
   );
 }
 
-function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, onBack?: () => void }) {
+function HeaderWidgets({ activeBook, onBack, profile, session, onSignOut }: { activeBook?: BookMeta | null, onBack?: () => void, profile?: any, session?: any, onSignOut?: () => void }) {
   const [adminOpen, setAdminOpen] = useState(false);
+  const [dbOpen, setDbOpen] = useState(false);
+  const { isPaywallOpen, setIsPaywallOpen } = useStore();
+  const isAdmin = profile?.role === 'admin';
+  const displayName = session?.user?.user_metadata?.display_name || profile?.email?.split('@')[0] || 'User';
+
+  useEffect(() => {
+    if (adminOpen || dbOpen || isPaywallOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'auto';
+    }
+    return () => { document.body.style.overflow = 'auto'; };
+  }, [adminOpen, dbOpen, isPaywallOpen]);
+
+  const handleChangeName = async () => {
+    const newName = prompt('Введите новое имя:', displayName);
+    if (newName && newName.trim()) {
+      await supabase.auth.updateUser({ data: { display_name: newName.trim() } });
+      window.location.reload();
+    }
+  };
+
   return (
     <>
       <AnimatePresence>
-        {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} activeBook={activeBook} />}
+        {adminOpen && isAdmin && <AdminDashboard onClose={() => setAdminOpen(false)} />}
+        {dbOpen && isAdmin && <AdminModal onClose={() => setDbOpen(false)} activeBook={activeBook} />}
       </AnimatePresence>
       {activeBook ? (
         <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50">
@@ -1413,24 +1610,92 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
       ) : (
         <LanguageSelector />
       )}
-      <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
-        <button 
-          onClick={() => setAdminOpen(true)}
-          className="w-8 h-8 flex items-center justify-center rounded-full bg-white/50 dark:bg-black/20 backdrop-blur-md border border-black/5 dark:border-white/10 text-gray-500 dark:text-white/70 hover:text-gray-900 dark:hover:text-white transition-colors cursor-pointer"
-          title="Admin Dashboard"
-        >
-          <Database className="w-4 h-4" />
-        </button>
-        <ActivityWidget />
+      <div className="absolute top-5 right-4 md:top-6 md:right-6 flex items-center gap-1.5 p-1.5 backdrop-blur-xl bg-white/60 dark:bg-[#1C1C1E]/60 border border-black/5 dark:border-white/10 rounded-full shadow-[0_4px_16px_rgba(0,0,0,0.04)] z-50 transition-colors">
+        
+        {/* 1. Admin Stuff (Left-most) */}
+        {isAdmin && (
+          <>
+            <button onClick={() => setAdminOpen(true)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 transition-colors" title="Admin Dashboard">
+              <LifeBuoy className="w-4 h-4" />
+            </button>
+            <button onClick={() => setDbOpen(true)} className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 transition-colors" title="Export Context">
+              <Database className="w-4 h-4" />
+            </button>
+            <div className="w-[1px] h-4 bg-black/10 dark:bg-white/10 mx-0.5" />
+          </>
+        )}
+
+        {/* 2. Counter */}
+        <ActivityWidget profile={profile} />
+
+        {/* 3. Theme */}
         <DarkModeToggle />
+
+        <div className="w-[1px] h-4 bg-black/10 dark:bg-white/10 mx-0.5" />
+
+        {/* 4. Pro/Free */}
+        {profile && (
+          profile.tier === 'premium' ? (
+            <div className="h-8 px-3 rounded-full flex items-center justify-center bg-gradient-to-r from-amber-200 to-amber-400 dark:from-amber-600 dark:to-amber-500 shadow-sm border border-amber-300 dark:border-amber-400/50 cursor-default">
+              <span className="text-[10px] font-bold text-amber-900 dark:text-white uppercase tracking-widest block mt-[1px]">PRO</span>
+            </div>
+          ) : (
+            <div onClick={() => setIsPaywallOpen(true)} className="cursor-pointer h-8 px-3 rounded-full flex items-center justify-center bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 transition-colors border border-transparent">
+              <span className="text-[10px] font-bold text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-white uppercase tracking-widest block mt-[1px]">FREE</span>
+            </div>
+          )
+        )}
+
+        {/* 5. Logout (Right-most) */}
+        {profile && (
+          <button onClick={onSignOut} className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors" title="Выйти">
+            <LogOut className="w-4 h-4" />
+          </button>
+        )}
       </div>
+
+      <AnimatePresence>
+        {isPaywallOpen && (
+          <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-[#1C1C1E] rounded-3xl p-8 max-w-[400px] w-full shadow-2xl border border-white/10 relative text-center"
+            >
+              <button onClick={() => setIsPaywallOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20">
+                <X className="w-4 h-4" />
+              </button>
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/20">
+                <Star className="w-8 h-8 text-white fill-white" />
+              </div>
+              <h2 className="text-xl font-bold text-white mb-2 tracking-tight">Откройте все возможности</h2>
+              <p className="text-[13px] text-gray-400 mb-8 font-medium leading-relaxed px-2">
+                Полный доступ ко всем темам и отсутствие дневных лимитов. Идеально для интенсивной подготовки к экзамену. Учитесь в своем ритме.
+              </p>
+              <a 
+                href={`https://t.me/adilosmanow?text=${encodeURIComponent("Привет! Хочу купить PRO в Kraft. Моя почта в приложении: " + (profile?.email || ""))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => console.log('Paywall clicked')} 
+                className="w-full flex items-center justify-center bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-2xl py-4 transition-colors active:scale-95 text-[15px]"
+              >
+                Открыть безлимит навсегда за 890 ₽
+              </a>
+              <p className="text-xs text-gray-500 mt-4 font-medium">
+                Разовая оплата. Никаких скрытых подписок.
+              </p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
 
 
 
-const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
+const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit?: (e:any)=>void, onDelete?: (e:any)=>void }) => {
   const initialCoverStr = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
   let lightCover = initialCoverStr;
   let darkCover = initialCoverStr;
@@ -1442,13 +1707,21 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
       darkCover = parsed.dark || null;
     } catch {}
   }
+
+  // Fallback for local public images missing absolute path
+  if (lightCover && !lightCover.startsWith('data:') && !lightCover.startsWith('http') && !lightCover.startsWith('/')) {
+    lightCover = '/' + lightCover;
+  }
+  if (darkCover && !darkCover.startsWith('data:') && !darkCover.startsWith('http') && !darkCover.startsWith('/')) {
+    darkCover = '/' + darkCover;
+  }
   
   const isImage = !!(lightCover || darkCover);
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
 
   return (
     <div className="relative group w-full h-full flex flex-col">
-      {/* Glow Behind (Dark Mode Only) */}
+      {/* Glow Behind (Темная тема Only) */}
       <div 
         className="absolute inset-0 opacity-0 dark:group-hover:opacity-60 transition-opacity duration-500 rounded-[20px] transform-gpu translate-z-0 will-change-transform" 
         style={{ boxShadow: `0 20px 60px -10px ${tintColor}` }} 
@@ -1458,25 +1731,49 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
       <div onClick={onClick} className="relative z-10 cursor-pointer w-full h-full rounded-[20px] overflow-hidden bg-white dark:bg-[#1C1C1E] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-none border border-black/[0.04] dark:border-white/10 hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 flex flex-col">
         
         {/* Cover Image Section */}
-        <div className="relative w-full aspect-[2/3] shrink-0" style={isImage ? {} : { backgroundColor: tintColor }}>
-          {lightCover && (
-            <img src={lightCover} className={cn("absolute inset-0 w-full h-full object-cover", darkCover ? "dark:hidden" : "")} alt="Light Cover" />
+        <div className="relative w-full aspect-[2/3] shrink-0" style={{ backgroundColor: tintColor }}>
+          {!lightCover && !darkCover ? (
+            <div className="absolute inset-0 flex flex-col justify-end p-5 z-20">
+              <h3 className="text-white font-bold text-xl leading-tight drop-shadow-md line-clamp-3">{book.title}</h3>
+            </div>
+          ) : (
+            <>
+              {/* Fallback skeleton layer */}
+              <div className="absolute inset-0 bg-black/10 dark:bg-white/5" />
+              {lightCover && (
+                <img 
+                  src={lightCover} 
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  className={cn("absolute inset-0 w-full h-full object-cover", lightCover !== darkCover ? "dark:hidden" : "")} 
+                  alt="Light Cover" 
+                />
+              )}
+              {darkCover && (
+                <img 
+                  src={darkCover} 
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  className={cn("absolute inset-0 w-full h-full object-cover", lightCover !== darkCover ? "hidden dark:block" : "")} 
+                  alt="Dark Cover" 
+                />
+              )}
+            </>
           )}
-          {darkCover && (
-            <img src={darkCover} className={cn("absolute inset-0 w-full h-full object-cover", lightCover ? "hidden dark:block" : "")} alt="Dark Cover" />
-          )}
-          
+
           {/* Inner Ring for Cover */}
           <div className="absolute inset-0 ring-1 ring-black/5 dark:ring-white/10 pointer-events-none z-30" />
           
           {/* Action Buttons */}
           <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-40">
-            <button onClick={onEdit} className="p-2 text-white/90 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
-              <Edit2 className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={onDelete} className="p-2 text-white/90 hover:text-red-400 bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+            {onEdit && (
+              <button onClick={onEdit} className="p-2 text-white/90 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {onDelete && (
+              <button onClick={onDelete} className="p-2 text-white/90 hover:text-red-400 bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
         
@@ -1494,12 +1791,12 @@ BookCard.displayName = "BookCard";
 
 
 const DeckCard = React.memo(({ 
-  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onEditTheory, onViewTheory, onStartDictation, onStartShadowing
+  deck, isCompleted, activeTab, isLocked, onLockClick, onCardClick, onRename, onDelete, onEditTheory, onViewTheory, onStartDictation, onStartShadowing
 }: { 
-  deck: Deck; isCompleted: boolean; activeTab: string; 
-  onCardClick: (id: string) => void; onRename: (id: string, name: string) => void; 
-  onDelete: (id: string, name: string) => void; 
-  onEditTheory: (id: string) => void; onViewTheory: (id: string) => void; 
+  deck: Deck; isCompleted: boolean; activeTab: string; isLocked?: boolean; onLockClick?: () => void;
+  onCardClick: (id: string) => void; onRename?: (id: string, name: string) => void; 
+  onDelete?: (id: string, name: string) => void; 
+  onEditTheory?: (id: string) => void; onViewTheory: (id: string) => void; 
   onStartDictation: (id: string) => void;
   onStartShadowing: (id: string) => void;
 }) => {
@@ -1509,25 +1806,52 @@ const DeckCard = React.memo(({
 
   return (
     <div 
-      onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
+      onClick={(e) => {
+        if (isLocked) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (onLockClick) onLockClick();
+          return;
+        }
+        initAudioCtx(); 
+        onCardClick(deck.id); 
+      }}
       className={cn(
-        "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative will-change-transform transform-gpu translate-z-0",
-        isCompleted && "opacity-60 hover:opacity-100"
+        "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative will-change-transform transform-gpu translate-z-0 overflow-hidden",
+        isCompleted && "opacity-60 hover:opacity-100",
+        isLocked && "opacity-90"
       )}
     >
+      {isLocked && (
+        <div className="absolute inset-0 z-20 bg-white/60 dark:bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center border border-black/5 dark:border-white/10 rounded-[28px]">
+          <div className="w-12 h-12 bg-white dark:bg-white/10 rounded-full flex items-center justify-center shadow-sm mb-3">
+            <Lock className="w-5 h-5 text-gray-500 dark:text-gray-300" />
+          </div>
+          <span className="text-[13px] font-semibold text-gray-900 dark:text-white leading-tight">
+            Сначала пройдите предыдущие колоды
+          </span>
+          <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-1 cursor-pointer hover:opacity-80 transition-opacity">
+            Нажмите, чтобы открыть <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-500 to-amber-600 dark:from-amber-400 dark:to-amber-500">PRO</span>
+          </span>
+        </div>
+      )}
       <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button 
-          onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-          className="p-2.5 text-gray-300 hover:text-blue-600 dark:text-blue-500 transition-all duration-100 active:scale-[0.98] rounded-full"
-        >
-          <Edit2 className="w-4 h-4" />
-        </button>
-        <button 
-          onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
-          className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+        {onRename && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
+            className="p-2.5 text-gray-300 hover:text-blue-600 dark:text-blue-500 transition-all duration-100 active:scale-[0.98] rounded-full"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+        )}
+        {onDelete && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
+            className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <div className="mb-6 flex items-start min-h-[3em] leading-[1.35]">
@@ -1540,10 +1864,10 @@ const DeckCard = React.memo(({
       <div className="mt-auto">
         <div className="flex items-center justify-between w-full text-sm font-bold mb-3">
           <div className="flex items-center gap-2">
-            {activeTab === 'Grammatik' && (
+            {activeTab === 'Грамматика' && (
               <DeckTheoryIndicator 
                 deckId={deck.id} 
-                onOpenEdit={(e) => { e.stopPropagation(); onEditTheory(deck.id); }} 
+                onOpenEdit={onEditTheory ? (e) => { e.stopPropagation(); onEditTheory(deck.id); } : undefined} 
                 onOpenView={(e) => { e.stopPropagation(); onViewTheory(deck.id); }} 
               />
             )}
@@ -1580,6 +1904,7 @@ const DeckCard = React.memo(({
 DeckCard.displayName = "DeckCard";
 
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
+  useLockBodyScroll();
   useScrollLock(true);
   const { appLanguage } = useStore();
   const [title, setTitle] = useState(book?.title || "");
@@ -1614,7 +1939,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_HEIGHT = 800;
+        const MAX_HEIGHT = 400;
         let width = img.width;
         let height = img.height;
         
@@ -1628,13 +1953,11 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
           if (type === 'light') {
             setCoverLight(dataUrl);
-            if (coverLight === coverDark) setCoverDark(dataUrl);
           } else {
             setCoverDark(dataUrl);
-            if (coverLight === coverDark) setCoverLight(dataUrl);
           }
         }
       };
@@ -1674,53 +1997,53 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} onClick={e => e.stopPropagation()} className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-5 max-h-[85vh] overflow-y-auto custom-scrollbar">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{book ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
+        <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{book ? 'Редактировать книгу' : 'Новая книга'}</h2>
         
         <div className="space-y-3">
-          <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
-          <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
+          <input type="text" placeholder="Название" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
+          <input type="text" placeholder="Подзаголовок (необязательно)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
         </div>
         
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Cover Fotos (Hell & Dunkel)</label>
+            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Обложки (Светлая и Темная)</label>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Light Mode</span>
-                  <button onClick={() => fileInputLightRef.current?.click()} className="text-[11px] font-medium text-blue-600 dark:text-blue-500 hover:text-[#0056b3]">+ Laden</button>
+                  <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Светлая тема</span>
+                  <button onClick={() => fileInputLightRef.current?.click()} className="text-[11px] font-medium text-blue-600 dark:text-blue-500 hover:text-[#0056b3]">+ Загрузить</button>
                   <input type="file" accept="image/*" className="hidden" ref={fileInputLightRef} onChange={(e) => handleImageUpload(e, 'light')} />
                 </div>
                 {coverLight ? (
                   <div className="relative h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10 group">
                     <img src={coverLight} alt="Light Cover" className="w-full h-full object-cover" />
-                    <button onClick={() => { setCoverLight(null); if (coverLight === coverDark) setCoverDark(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Entfernen</span>
+                    <button onClick={() => { setCoverLight(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Удалить</span>
                     </button>
                   </div>
                 ) : (
                   <div className="h-24 rounded-xl border-2 border-dashed border-gray-200 dark:border-white/10 flex items-center justify-center text-gray-400 text-[10px]">
-                    Kein Bild
+                    Нет обложки
                   </div>
                 )}
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Dark Mode</span>
-                  <button onClick={() => fileInputDarkRef.current?.click()} className="text-[11px] font-medium text-blue-600 dark:text-blue-500 hover:text-[#0056b3]">+ Laden</button>
+                  <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Темная тема</span>
+                  <button onClick={() => fileInputDarkRef.current?.click()} className="text-[11px] font-medium text-blue-600 dark:text-blue-500 hover:text-[#0056b3]">+ Загрузить</button>
                   <input type="file" accept="image/*" className="hidden" ref={fileInputDarkRef} onChange={(e) => handleImageUpload(e, 'dark')} />
                 </div>
                 {coverDark ? (
                   <div className="relative h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10 group">
                     <img src={coverDark} alt="Dark Cover" className="w-full h-full object-cover" />
-                    <button onClick={() => { setCoverDark(null); if (coverLight === coverDark) setCoverLight(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Entfernen</span>
+                    <button onClick={() => { setCoverDark(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Удалить</span>
                     </button>
                   </div>
                 ) : (
                   <div className="h-24 rounded-xl border-2 border-dashed border-gray-200 dark:border-white/10 flex items-center justify-center text-gray-400 text-[10px]">
-                    Kein Bild
+                    Нет обложки
                   </div>
                 )}
               </div>
@@ -1728,7 +2051,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
           </div>
           
           <div>
-            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Tint Color (Akzent & Glow)</label>
+            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Цвет акцента (кнопки и свечение)</label>
             <div className="flex gap-2 flex-wrap items-center">
               {['#1C1C1E', '#FFFFFF', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6', '#AF52DE'].map(c => {
                 const isActive = tintColor.toUpperCase() === c.toUpperCase();
@@ -1784,15 +2107,15 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
         </div>
 
         <div className="flex gap-3 mt-2">
-          <button onClick={onClose} className="flex-1 py-3.5 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">Abbrechen</button>
-          <button onClick={handleSave} className="flex-1 py-3.5 font-semibold text-white bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 rounded-xl transition-colors shadow-sm">Speichern</button>
+          <button onClick={onClose} className="flex-1 py-3.5 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">Отмена</button>
+          <button onClick={handleSave} className="flex-1 py-3.5 font-semibold text-white bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 rounded-xl transition-colors shadow-sm">Сохранить</button>
         </div>
       </motion.div>
     </div>
   );
 }
 
-function DeckTheoryIndicator({ deckId, onOpenEdit, onOpenView }: { deckId: string, onOpenEdit: (e:any)=>void, onOpenView: (e:any)=>void }) {
+function DeckTheoryIndicator({ deckId, onOpenEdit, onOpenView }: { deckId: string, onOpenEdit?: (e:any)=>void, onOpenView: (e:any)=>void }) {
   const [hasTheory, setHasTheory] = useState(false);
   useEffect(() => {
     const check = () => setHasTheory(!!localStorage.getItem(`deck_theory_${deckId}`));
@@ -1809,6 +2132,7 @@ function DeckTheoryIndicator({ deckId, onOpenEdit, onOpenView }: { deckId: strin
       </button>
     );
   }
+  if (!onOpenEdit) return null;
   return (
     <button onClick={onOpenEdit} className="text-xs font-medium text-gray-400 dark:text-white/30 hover:text-gray-600 dark:hover:text-white/80 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-white/5 transition-all">
       + Theorie
@@ -1875,15 +2199,15 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
         </div>
         <div className="flex gap-3 mt-auto">
           <button onClick={onClose} className="flex-1 py-3 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">
-            Abbrechen
+            Отмена
           </button>
           {text && (
             <button onClick={handleDelete} className="flex-1 py-3 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors">
-              Löschen
+              Удалить
             </button>
           )}
           <button onClick={handleSave} className="flex-1 py-3 font-semibold text-white bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 rounded-xl transition-colors">
-            Speichern
+            Сохранить
           </button>
         </div>
       </motion.div>
@@ -2050,7 +2374,7 @@ export const syncAppStateToCloud = async () => {
     }
   }
   
-  await supabase.from('user_stats').upsert({
+  await supabase.from('kraft_user_stats').upsert({
     language: 'GLOBAL_APP_STATE',
     daily_activity: state
   }, { onConflict: 'language' });
@@ -2058,15 +2382,55 @@ export const syncAppStateToCloud = async () => {
 
 export default function App() {
   const [isPending, startTransition] = useTransition();
-  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder } = useStore();
+  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, setIsPaywallOpen } = useStore();
   const [isMounted, setIsMounted] = useState(false);
+  
+  // --- AUTH STATE ---
+  const [session, setSession] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) fetchProfile(session.user.id);
+      else setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'INITIAL_SESSION') return;
+      setSession(session);
+      if (session) fetchProfile(session.user.id);
+      else {
+        setProfile(null);
+        setAuthLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchProfile = async (userId: string) => {
+    const { data, error } = await supabase.from('kraft_profiles').select('*').eq('id', userId).single();
+    if (!error && data) {
+      setProfile(data);
+    }
+    setAuthLoading(false);
+  };
+  // ------------------
+
   const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [dictationDeckId, setDictationDeckId] = useState<string | null>(null);
   const [shadowingDeckId, setShadowingDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [drillCards, setDrillCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
-  const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
+  const [activeTab, setActiveTab] = useState<"Грамматика" | "Слова">("Грамматика");
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [bookModal, setBookModal] = useState<{ id?: string } | null>(null);
   
@@ -2136,9 +2500,9 @@ export default function App() {
       
 try {
         const [booksRes, decksRes, statsRes] = await Promise.all([
-          supabase.from('books').select('*').order('created_at', { ascending: true }),
-          supabase.from('decks').select('*, cards(*)').order('created_at', { ascending: true }),
-          supabase.from('user_stats').select('*')
+          supabase.from('kraft_books').select('*').order('created_at', { ascending: true }),
+          supabase.from('kraft_decks').select('*, kraft_cards(*)').order('created_at', { ascending: true }),
+          supabase.from('kraft_user_stats').select('*')
         ]);
 
         if (statsRes && !statsRes.error && statsRes.data) {
@@ -2175,7 +2539,7 @@ try {
               window.dispatchEvent(new Event('storage-update'));
             }
             if (cloudChanged) {
-              supabase.from('user_stats').upsert({
+              supabase.from('kraft_user_stats').upsert({
                 language: lang,
                 daily_activity: cloudDaily
               }, { onConflict: 'language' }).then(() => {});
@@ -2226,16 +2590,16 @@ try {
           }
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
-            { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
+            { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Грамматика & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
             { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
           ];
-          const res = await supabase.from('books').insert(defaultBooks);
+          const res = await supabase.from('kraft_books').insert(defaultBooks);
           if (res.error && res.error.message.includes('does not exist')) {
             const lowercaseDefaults = defaultBooks.map(b => ({
               id: b.id, language: b.language, title: b.title, subtitle: b.subtitle,
               tintcolor: b.tintColor, coverimage: b.coverImage, activelevels: b.activeLevels
             }));
-            await supabase.from('books').insert(lowercaseDefaults);
+            await supabase.from('kraft_books').insert(lowercaseDefaults);
           }
           setBooks(defaultBooks);
           try { localStorage.setItem('cache_books_v2', JSON.stringify(defaultBooks)); } catch(e) { localStorage.removeItem('cache_books_v2'); }
@@ -2243,16 +2607,47 @@ try {
 
         if (decksRes.error) {
           console.error("Supabase Fetch Decks Error:", decksRes.error.message);
-          // Only clear decks if we are sure it's not a network error, but for offline robustness, do NOT wipe cache.
           if (!localStorage.getItem('cache_decks_v2')) { setDecks([]); }
         } else if (decksRes.data) {
+          // Fetch user progress for current user
+          const { data: sessionData } = await supabase.auth.getSession();
+          let userProgressMap: Record<string, any> = {};
+          if (sessionData?.session?.user) {
+            const { data: progressData } = await supabase.from('kraft_user_progress').select('*').eq('user_id', sessionData.session.user.id);
+            
+            // Sync daily activity from DB to prevent bypass
+            const todayStr = new Date().toLocaleDateString('en-CA');
+            const { data: dailyActivity } = await supabase.from('kraft_user_daily_activity').select('*').eq('user_id', sessionData.session.user.id).single();
+            if (dailyActivity && dailyActivity.last_swipe_date === todayStr) {
+               const progressObj = { [todayStr]: dailyActivity.swipes_today };
+               localStorage.setItem('daily_activity_DE', JSON.stringify(progressObj));
+               localStorage.setItem('daily_activity_EN', JSON.stringify(progressObj));
+            }
+
+            if (progressData) {
+              progressData.forEach(p => {
+                userProgressMap[p.card_id] = p;
+              });
+            }
+          }
+
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
           const enhancedDecks = decksRes.data.map((d: any) => ({
             ...d,
-            cards: d.cards ? d.cards.map((c: any) => ({
-              ...c,
-              baseWordInfo: c.baseWordInfo || null
-            })) : [],
+            cards: (d.cards || d.kraft_cards) ? (d.cards || d.kraft_cards).map((c: any) => {
+              const p = userProgressMap[c.id];
+              return {
+                ...c,
+                targetWord: c.targetWord || c.targetword || '',
+                baseWordInfo: c.options?.baseWordInfo || c.baseWordInfo || null,
+                options: Array.isArray(c.options) ? c.options : (c.options?.items || (c.options && typeof c.options === 'object' ? Object.keys(c.options).filter(k => !isNaN(Number(k))).sort((a,b) => Number(a) - Number(b)).map(k => c.options[k]) : [])),
+                masteryLevel: p ? p.efactor : (c.masteryLevel ?? c.masterylevel ?? 0),
+                isArchived: p ? p.is_correct : (c.isArchived ?? c.isarchived ?? false),
+                nextReviewDate: p ? new Date(p.due_date).getTime() : (c.nextReviewDate ? new Date(c.nextReviewDate).getTime() : (c.nextreviewdate ? new Date(c.nextreviewdate).getTime() : null)),
+                interval: p ? p.interval : (c.interval ?? 0),
+                repetitions: p ? p.repetition : (c.repetitions ?? 0)
+              }
+            }) : [],
             language: d.language || langMap[d.id] || 'DE',
             bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
           }));
@@ -2279,7 +2674,7 @@ try {
     });
   }, [decks, activeBookId, appLanguage]);
 
-  const handleGlobalDrill = useCallback((level: LanguageLevel, category: "Grammatik" | "Wörter") => {
+  const handleGlobalDrill = useCallback((level: LanguageLevel, category: "Грамматика" | "Слова") => {
     initAudioCtx();
     const drillCards: { deckId: string, card: Flashcard }[] = [];
     
@@ -2300,7 +2695,7 @@ try {
       }
       setDrillCards(drillCards);
     } else {
-      alert(`Keine aktiven Karten für Level ${level} (${category}) gefunden.`);
+      alert(`Keine aktiven Карточки für Level ${level} (${category}) gefunden.`);
     }
   }, [filteredDecksList]);
 
@@ -2308,7 +2703,10 @@ try {
   const groupedDecks = useMemo(() => {
     const map: Record<string, Deck[]> = {};
     filteredDecksList.forEach(d => {
-      const key = `${d.category}-${d.level || 'A1'}`;
+      let cat = d.category;
+      if (cat === 'Grammatik') cat = 'Грамматика';
+      if (cat === 'Wörter') cat = 'Слова';
+      const key = `${cat}-${d.level || 'A1'}`;
       if (!map[key]) map[key] = [];
       map[key].push(d);
     });
@@ -2326,12 +2724,16 @@ try {
     return map;
   }, [filteredDecksList, deckOrder]);
 
-  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
+  if (!isMounted || !isLoaded || authLoading) return <main className="min-h-screen bg-[#FBFBFD] dark:bg-black animate-pulse" />;
+
+  if (!session) {
+    return <AuthScreen onAuthSuccess={() => {}} />;
+  }
 
   if (activeDeckId) {
     return (
       <>
-        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
+        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} profile={profile} />
       </>
     );
   }
@@ -2339,7 +2741,7 @@ try {
   if (reviewCards) {
     return (
       <>
-        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
+        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} profile={profile} />
       </>
     );
   }
@@ -2347,7 +2749,7 @@ try {
   if (drillCards) {
     return (
       <>
-        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} />
+        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} profile={profile} />
       </>
     );
   }
@@ -2406,7 +2808,7 @@ try {
           bookId: activeBookId || (useStore.getState().appLanguage === 'EN' ? 'default-en' : 'default-de')
         });
       } else {
-        alert("Fehler: Keine gültigen Karten gefunden.");
+        alert("Fehler: Keine gültigen Карточки gefunden.");
       }
       
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -2469,7 +2871,7 @@ try {
 
   
 
-  const categories = ["Grammatik", "Wörter"];
+  const categories = ["Грамматика", "Слова"];
   
 
   
@@ -2493,6 +2895,7 @@ try {
 
   const activeBook = books.find(b => b.id === activeBookId);
   const activeBookColor = activeBook?.tintColor || activeBook?.accentColor || activeBook?.coverValue || 'transparent';
+  const isAdmin = profile?.role === 'admin';
 
   return (
       <>
@@ -2507,7 +2910,7 @@ try {
         </div>
       )}
         
-        <HeaderWidgets activeBook={activeBook} onBack={() => startTransition(() => setActiveBookId(null))} />
+        <HeaderWidgets activeBook={activeBook} onBack={() => startTransition(() => setActiveBookId(null))} profile={profile} session={session} onSignOut={() => supabase.auth.signOut()} />
 
       <AnimatePresence>
         {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
@@ -2528,7 +2931,7 @@ try {
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
-              <h3 className="text-xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-6">Deck umbenennen</h3>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-6">Переименовать колоду</h3>
               <input
                 type="text"
                 autoFocus
@@ -2539,10 +2942,10 @@ try {
               />
               <div className="flex gap-3">
                 <button onClick={() => setRenameModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
-                  Abbrechen
+                  Отмена
                 </button>
                 <button onClick={() => { if (renameInput.trim()) { renameDeck(renameModal.id, renameInput.trim()); setRenameModal(null); } }} className="flex-1 py-4 font-semibold text-white bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 rounded-2xl transition-colors active:scale-[0.98]">
-                  Speichern
+                  Сохранить
                 </button>
               </div>
             </motion.div>
@@ -2564,14 +2967,14 @@ try {
               <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
-              <h3 className="text-xl font-bold tracking-tight text-gray-900  mb-3">Deck löschen?</h3>
-              <p className="text-sm text-gray-500 font-medium mb-8">Bist du sicher, dass du "{deleteModal.name}" löschen möchtest? Dieser Vorgang kann nicht rückgängig gemacht werden.</p>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900  mb-3">Удалить колоду?</h3>
+              <p className="text-sm text-gray-500 font-medium mb-8">Вы уверены, что хотите удалить эту колоду? Это действие нельзя отменить.</p>
               <div className="flex gap-3">
                 <button onClick={() => setDeleteModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
-                  Abbrechen
+                  Отмена
                 </button>
                 <button onClick={() => { deleteDeck(deleteModal.id); setDeleteModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl transition-colors active:scale-[0.98]">
-                  Löschen
+                  Удалить
                 </button>
               </div>
             </motion.div>
@@ -2593,14 +2996,14 @@ try {
               <div className="w-16 h-16 bg-red-50 dark:bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
-              <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white mb-3">Buch löschen?</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-8">Bist du sicher, dass du "{deleteBookModal.title}" löschen möchtest? Alle zugehörigen Decks bleiben erhalten, aber das Buch wird entfernt.</p>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white mb-3">Удалить книгу?</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-8">Вы уверены, что хотите удалить эту книгу? Все связанные колоды останутся, но книга будет удалена.</p>
               <div className="flex gap-3">
                 <button onClick={() => setDeleteBookModal(null)} className="flex-1 py-4 font-semibold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] rounded-2xl transition-colors active:scale-[0.98]">
-                  Abbrechen
+                  Отмена
                 </button>
                 <button onClick={() => { deleteBook(deleteBookModal.id); setDeleteBookModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl transition-colors active:scale-[0.98] shadow-sm">
-                  Löschen
+                  Удалить
                 </button>
               </div>
             </motion.div>
@@ -2614,25 +3017,33 @@ try {
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="mb-6 mt-2">
-              <h1 className="text-[28px] md:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">Bibliothek</h1>
+              <h1 className="text-[28px] md:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">Библиотека</h1>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
               {books.filter(b => b.language === appLanguage).map(book => (
-                <BookCard key={book.id} book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                <BookCard 
+                  key={book.id} 
+                  book={book} 
+                  onClick={() => handleBookClick(book.id)} 
+                  onEdit={isAdmin ? (e) => { e.stopPropagation(); handleBookEdit(book.id); } : undefined} 
+                  onDelete={isAdmin ? (e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); } : undefined} 
+                />
               ))}
-              <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
-                <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
-                  <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
+              {isAdmin && (
+                <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
+                  <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
+                    <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
+                  </div>
+                  <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Новая книга</span>
                 </div>
-                <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
-              </div>
+              )}
             </div>
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
           <div className="flex justify-center mb-8 pt-2">
             <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.08]">
-              {(["Grammatik", "Wörter"] as const).map((tab) => (
+              {(["Грамматика", "Слова"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => startTransition(() => setActiveTab(tab))}
@@ -2659,7 +3070,7 @@ try {
                   <div className="w-8 h-8 rounded-full bg-blue-600/10 dark:bg-blue-500/10 flex items-center justify-center">
                     <RotateCw className="w-4 h-4 text-blue-600 dark:text-blue-500" />
                   </div>
-                  <span className="font-medium text-sm text-gray-900 dark:text-white">Heute wiederholen</span>
+                  <span className="font-medium text-sm text-gray-900 dark:text-white">Повторить сегодня</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="px-2.5 py-0.5 rounded-full bg-blue-600/10 dark:bg-blue-500/10 text-blue-600 dark:text-blue-500 text-xs font-semibold tabular-nums">
@@ -2682,6 +3093,26 @@ try {
                 'C1-C2': { label: 'C1-C2', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' }
               };
 
+              // Compute sequential locks for Free users
+              const isPremium = profile?.tier === 'premium';
+              const lockedDecks = new Set<string>();
+              if (!isPremium) {
+                let hasUncompleted = false;
+                cefrLevels.forEach(lvl => {
+                  const decks = groupedDecks[`${activeTab}-${lvl}`] || [];
+                  decks.forEach(d => {
+                    if (hasUncompleted) {
+                      lockedDecks.add(d.id);
+                    } else {
+                      const isCompleted = d.cards.length > 0 && d.cards.length === d.cards.filter(c => c.isArchived).length;
+                      if (!isCompleted) {
+                        hasUncompleted = true;
+                      }
+                    }
+                  });
+                });
+              }
+
               return cefrLevels.map(level => {
                 const sectionKey = `${activeTab}-${level}`;
                 const sortedDecks = groupedDecks[`${activeTab}-${level}`] || [];
@@ -2691,6 +3122,8 @@ try {
                 const inProgressDecks = visibleDecks.filter(d => d.cards.length === 0 || d.cards.length !== d.cards.filter(c => c.isArchived).length);
                 const completedDecks = visibleDecks.filter(d => d.cards.length > 0 && d.cards.length === d.cards.filter(c => c.isArchived).length);
                 const isExpanded = expandedCategories[sectionKey] || false;
+                
+
 
                 return (
                   <section key={sectionKey}>
@@ -2706,19 +3139,21 @@ try {
                         >
                           <Play className="w-3.5 h-3.5 fill-current" />
                         </button>
-                        <button 
-                          onClick={() => handlePlusClick(activeTab, level)}
-                          className="h-7 w-7 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
+                        {isAdmin && (
+                          <button 
+                            onClick={() => handlePlusClick(activeTab, level)}
+                            className="h-7 w-7 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                     
                     {sortedDecks.length === 0 ? (
                       <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px] shadow-sm">
                         <p className="text-gray-400 dark:text-[#8E8E93] text-sm font-medium">
-                          {appLanguage === 'EN' ? "No decks in this level yet." : "Noch keine Decks in diesem Level."}
+                          {appLanguage === 'EN' ? "В этом уровне пока нет колод." : "В этом уровне пока нет колод."}
                         </p>
                       </div>
                     ) : (
@@ -2728,23 +3163,25 @@ try {
                             {inProgressDecks.map(deck => (
                               <div
                                 key={deck.id}
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, deck.id)}
-                                onDragOver={handleDragOver}
-                                onDrop={(e) => handleDrop(e, deck.id)}
-                                onDragEnd={handleDragEnd}
+                                draggable={isAdmin}
+                                onDragStart={isAdmin ? (e) => handleDragStart(e, deck.id) : undefined}
+                                onDragOver={isAdmin ? handleDragOver : undefined}
+                                onDrop={isAdmin ? (e) => handleDrop(e, deck.id) : undefined}
+                                onDragEnd={isAdmin ? handleDragEnd : undefined}
                                 className={cn("transition-all duration-300", draggedDeckId === deck.id ? "opacity-30 scale-95" : "opacity-100")}
                               >
                                 <DeckCard 
                                   deck={deck} 
                                   isCompleted={false} 
                                   activeTab={activeTab} 
+                                  isLocked={lockedDecks.has(deck.id)}
+                                  onLockClick={() => setIsPaywallOpen(true)}
                                   onCardClick={handleDeckClick} 
-                                  onRename={handleRenameClick}
+                                  onRename={isAdmin ? handleRenameClick : undefined}
                                   onStartDictation={(id) => setDictationDeckId(id)}
                                   onStartShadowing={(id: string) => setShadowingDeckId(id)} 
-                                  onDelete={handleDeleteClick} 
-                                  onEditTheory={handleEditTheory} 
+                                  onDelete={isAdmin ? handleDeleteClick : undefined} 
+                                  onEditTheory={isAdmin ? handleEditTheory : undefined} 
                                   onViewTheory={handleViewTheory} 
                                 />
                               </div>
@@ -2758,7 +3195,7 @@ try {
                               className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mx-2 mb-4"
                             >
                               <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
-                              <span>{appLanguage === 'EN' ? 'Archived' : 'Archiv anzeigen'}</span>
+                              <span>{appLanguage === 'EN' ? 'В архиве' : 'Показать архив'}</span>
                               <span className="bg-black/5 dark:bg-white/10 text-gray-500 dark:text-gray-400 text-xs px-2 py-0.5 rounded-full ml-1">
                                 {completedDecks.length}
                               </span>
@@ -2780,12 +3217,14 @@ try {
                                           deck={deck} 
                                           isCompleted={true} 
                                           activeTab={activeTab} 
+                                          isLocked={lockedDecks.has(deck.id)}
+                                          onLockClick={() => setIsPaywallOpen(true)}
                                           onCardClick={handleDeckClick} 
-                                          onRename={handleRenameClick}
+                                          onRename={isAdmin ? handleRenameClick : undefined}
                                   onStartDictation={(id) => setDictationDeckId(id)}
                                   onStartShadowing={(id: string) => setShadowingDeckId(id)} 
-                                          onDelete={handleDeleteClick} 
-                                          onEditTheory={handleEditTheory} 
+                                          onDelete={isAdmin ? handleDeleteClick : undefined} 
+                                          onEditTheory={isAdmin ? handleEditTheory : undefined} 
                                           onViewTheory={handleViewTheory} 
                                         />
                                       </div>
