@@ -2136,12 +2136,10 @@ function VerbStudyCard({
     }
   }, []);
 
-  // Озвучиваем инфинитив при появлении
   useEffect(() => {
     playAudio(verbInfo.infinitiv?.replace('|', ''));
   }, [verbInfo.infinitiv, playAudio]);
 
-  // Стабильный ref для доступа в keydown без перерисовок и перебиндинга
   const stateRef = useRef({ inputs, activeInput, isSuccess, hasErrored, targets });
   stateRef.current = { inputs, activeInput, isSuccess, hasErrored, targets };
 
@@ -2149,9 +2147,8 @@ function VerbStudyCard({
     setIsSuccess(true);
     playFeedbackSound(true);
     onAnswer(correct, isHilfe);
-    // Проигрываем все три формы через паузы
     setTimeout(() => {
-       playAudio(`${verbInfo.praesens}. ${verbInfo.praeteritum}. ${verbInfo.perfekt}`);
+       playAudio(`er ${verbInfo.praesens}, ${verbInfo.praeteritum}, ${verbInfo.perfekt}.`);
     }, 100);
   }, [verbInfo, playAudio, onAnswer]);
 
@@ -2167,16 +2164,12 @@ function VerbStudyCard({
     const { inputs, activeInput, isSuccess, hasErrored, targets } = stateRef.current;
     if (isSuccess || activeInput > 2) return;
     
-    // Русская -> Немецкая раскладка
     const char = RUSSIAN_TO_QWERTZ[rawChar] || rawChar;
-    
-    playTockSound();
     
     const target = targets[activeInput];
     const currentVal = inputs[activeInput];
     let nextVal = currentVal + char;
     
-    // Автоматический пробел: если следующее ожидаемое слово начинается с пробела
     if (target[currentVal.length] === ' ' && char !== ' ') {
        if (char.toLowerCase() === target[currentVal.length + 1]?.toLowerCase()) {
            nextVal = currentVal + ' ' + char;
@@ -2190,6 +2183,7 @@ function VerbStudyCard({
     });
 
     if (target.toLowerCase().startsWith(nextVal.toLowerCase())) {
+      playTockSound();
       if (nextVal.toLowerCase() === target.toLowerCase()) {
          setInputs(prev => {
            const n = [...prev];
@@ -2206,7 +2200,6 @@ function VerbStudyCard({
              else handleNextPhase(false);
          }
       } else {
-         // Auto-append trailing spaces if they exist in target to save typing
          if (target[nextVal.length] === ' ') {
              setInputs(prev => {
                const n = [...prev];
@@ -2229,7 +2222,6 @@ function VerbStudyCard({
     setInputs(prev => {
       const n = [...prev];
       if (n[activeInput].length > 0) {
-        // If we are deleting a space, delete the char before it too
         let sliceLen = -1;
         if (n[activeInput].endsWith(' ') && n[activeInput].length > 1) {
             sliceLen = -2;
@@ -2242,42 +2234,26 @@ function VerbStudyCard({
     });
   }, []);
 
-  // Глобальный слушатель клавиатуры
   useEffect(() => {
     const handleNativeGlobalKeyDown = (e: KeyboardEvent) => {
       const { isSuccess } = stateRef.current;
-      
       if (e.key === "Enter" && isSuccess) {
          e.preventDefault();
          onNext();
          return;
       }
-      
       if (isSuccess) return;
-      
       const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
-      
       if (e.key === "Backspace") {
          e.preventDefault();
          handleBackspace();
          return;
       }
-      
-      if (e.key === 'h' || e.key === 'H' || e.key === 'р' || e.key === 'Р') {
-         if (!e.ctrlKey && !e.metaKey) {
-            // handleHilfe();
-            // Let's not auto-trigger Hilfe on H since 'h' is a valid character!
-            // Wait, we can't trigger hilfe on 'h' because German words have 'h' (e.g., hat).
-            // We'll ignore 'h' as shortcut here.
-         }
-      }
-      
       if (!isSpecialKey && e.key.length === 1) {
          e.preventDefault();
          handleKeyPress(e.key);
       }
     };
-    
     window.addEventListener('keydown', handleNativeGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
   }, [handleKeyPress, handleBackspace, onNext]);
@@ -2335,7 +2311,7 @@ function VerbStudyCard({
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-4 relative">
+      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
         <div className="text-center mb-8 w-full">
            <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
              {displayInfinitiv}
@@ -2350,9 +2326,16 @@ function VerbStudyCard({
              {labels.map((label, idx) => {
                  const target = targets[idx];
                  const currentVal = inputs[idx];
-                 const isMistake = currentVal.length > 0 && currentVal[currentVal.length - 1].toLowerCase() !== target[currentVal.length - 1]?.toLowerCase();
                  const isCompleted = currentVal === target && activeInput > idx || (isSuccess && activeInput >= idx);
                  const isActive = activeInput === idx && !isSuccess;
+                 
+                 let firstWrongIdx = target.length;
+                 for (let i = 0; i < currentVal.length; i++) {
+                     if (currentVal[i].toLowerCase() !== target[i]?.toLowerCase()) {
+                         firstWrongIdx = i;
+                         break;
+                     }
+                 }
                  
                  return (
                    <div key={idx} className={cn(
@@ -2365,10 +2348,14 @@ function VerbStudyCard({
                          </span>
                       )}
                       <div className="flex items-center justify-center relative z-10 w-full whitespace-pre">
-                         {currentVal.split('').map((char, i) => (
-                            <span key={i} className={cn("text-[17px] font-semibold tracking-wide", (i === currentVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase()) ? "text-red-500 animate-dict-shake" : "text-gray-800 dark:text-white")}>{char}</span>
-                         ))}
-                         {isActive && <span className="inline-block w-[2px] h-[1.1em] bg-blue-500 ml-[1px] rounded-full animate-dict-pulse"></span>}
+                         {currentVal.split('').map((char, i) => {
+                            const isWrong = i >= firstWrongIdx;
+                            return (
+                              <span key={i} className={cn("text-[17px] font-semibold tracking-wide", isWrong ? "text-red-500" : "text-gray-800 dark:text-white", (isWrong && i === currentVal.length - 1) ? "animate-dict-shake" : "")}>
+                                {char}
+                              </span>
+                            );
+                         })}
                       </div>
                    </div>
                  )
@@ -2377,23 +2364,25 @@ function VerbStudyCard({
         </div>
       </div>
 
-      <AnimatePresence mode="wait">
-        {isSuccess && (
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="w-full flex justify-center mt-4 mb-2"
-          >
-            <button 
-              onClick={onNext}
-              className="bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-3 rounded-2xl font-semibold text-[15px] transition-all active:scale-[0.98] shadow-sm w-full max-w-[200px]"
+      <div className="w-full h-14 mt-6 flex justify-center shrink-0">
+        <AnimatePresence mode="wait">
+          {isSuccess && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="w-full flex justify-center"
             >
-              Weiter
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <button 
+                onClick={onNext}
+                className="bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-3 rounded-2xl font-semibold text-[15px] transition-all active:scale-[0.98] shadow-sm w-full max-w-[200px]"
+              >
+                Weiter
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {!isSuccess && (
          <div className="mt-6 md:hidden -mx-6 md:-mx-12 -mb-6 md:-mb-10 w-[calc(100%+48px)]">
