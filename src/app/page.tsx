@@ -2380,6 +2380,254 @@ export const syncAppStateToCloud = async () => {
   }, { onConflict: 'language' });
 };
 
+
+// --- VERB STUDY INTERFACE ---
+
+function VerbStudyInterface({ 
+  deckId, 
+  onBack,
+  reviewCards,
+  isDrillMode
+}: { 
+  deckId?: string, 
+  onBack: () => void,
+  reviewCards?: { deckId: string, card: Flashcard }[],
+  isDrillMode?: boolean
+}) {
+  const { answerCard, decks } = useStore();
+  
+  const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [roundCounter, setRoundCounter] = useState(0);
+  const [initialTotal, setInitialTotal] = useState(0);
+  const [masteredInSession, setMasteredInSession] = useState(0);
+
+  useEffect(() => {
+    if (reviewCards) {
+      setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
+      setInitialTotal(reviewCards.length);
+      setMasteredInSession(0);
+    } else if (deckId) {
+      const deck = useStore.getState().decks.find((d) => d.id === deckId);
+      if (deck) {
+        const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
+        setActiveCards(active.sort(() => Math.random() - 0.5));
+        setInitialTotal(active.length);
+        setMasteredInSession(0);
+      }
+    }
+  }, [deckId, reviewCards]);
+
+  const [phase, setPhase] = useState<"Question" | "Result">("Question");
+  const [isCorrect, setIsCorrect] = useState<boolean>(false);
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  
+  const [inputs, setInputs] = useState<string[]>(['', '', '']);
+  const [activeInput, setActiveInput] = useState<number>(0);
+
+  const currentOptions = useMemo(() => {
+    if (activeCards.length === 0 || currentIndex >= activeCards.length) return [];
+    const currentCard = activeCards[currentIndex].card;
+    if (currentCard.masteryLevel >= 2) return []; 
+    
+    let verbInfo: any = null;
+    try { verbInfo = JSON.parse(currentCard.baseWordInfo || '{}'); } catch {}
+    if (!verbInfo || !verbInfo.praesens) return [];
+    
+    const correctString = `${verbInfo.praesens} - ${verbInfo.praeteritum} - ${verbInfo.perfekt}`;
+    
+    const allCards = activeCards.map(c => c.card);
+    const otherStrings = allCards
+      .filter(c => c.id !== currentCard.id && c.baseWordInfo)
+      .map(c => {
+        try {
+          const info = JSON.parse(c.baseWordInfo!);
+          return `${info.praesens} - ${info.praeteritum} - ${info.perfekt}`;
+        } catch { return null; }
+      })
+      .filter(Boolean) as string[];
+      
+    const uniqueOthers = Array.from(new Set(otherStrings)).sort(() => Math.random() - 0.5);
+    const selectedOthers = uniqueOthers.slice(0, 3);
+    
+    while (selectedOthers.length < 3) {
+      selectedOthers.push(`dummy${Math.random()} - dummy - dummy`);
+    }
+    
+    return [correctString, ...selectedOthers].sort(() => Math.random() - 0.5);
+  }, [activeCards, currentIndex]);
+
+  if (activeCards.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#FBFBFD] dark:bg-[#000000] flex flex-col items-center justify-center p-6">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Keine Verben gefunden!</h2>
+        <button onClick={onBack} className="bg-blue-600 dark:bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold">Zurück</button>
+      </div>
+    );
+  }
+
+  if (currentIndex >= activeCards.length) {
+    return (
+      <div className="min-h-screen bg-[#FBFBFD] dark:bg-[#000000] flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
+        <div className="w-24 h-24 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
+          <CheckCircle2 className="w-12 h-12" />
+        </div>
+        <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white mb-3 tracking-tight">Geschafft!</h2>
+        <p className="text-gray-500 dark:text-gray-400 font-medium max-w-sm mb-10 text-lg">Du hast {masteredInSession} von {initialTotal} Verben gemeistert.</p>
+        <button onClick={onBack} className="w-full max-w-sm bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]">Zurück zur Bibliothek</button>
+      </div>
+    );
+  }
+
+  const { deckId: currentDeckId, card: currentCard } = activeCards[currentIndex];
+  let verbInfo: any = {};
+  try { verbInfo = JSON.parse(currentCard.baseWordInfo || '{}'); } catch {}
+  const isTypingMode = currentCard.masteryLevel >= 2;
+  const correctString = `${verbInfo.praesens} - ${verbInfo.praeteritum} - ${verbInfo.perfekt}`;
+
+  const handleNext = (correct: boolean) => {
+    setIsCorrect(correct);
+    setPhase("Result");
+    
+    if (!isDrillMode) {
+      answerCard(currentDeckId, currentCard.id, correct, false);
+      if (correct) setMasteredInSession(m => m + 1);
+    } else {
+      if (correct) setMasteredInSession(m => m + 1);
+    }
+    
+    setTimeout(() => {
+      setPhase("Question");
+      setInputs(['', '', '']);
+      setActiveInput(0);
+      setSelectedOption(null);
+      setCurrentIndex(prev => prev + 1);
+    }, 1500);
+  };
+
+  const handleOptionClick = (opt: string) => {
+    if (phase !== "Question") return;
+    setSelectedOption(opt);
+    handleNext(opt === correctString);
+  };
+
+  const handleKeyPress = (key: string) => {
+    if (phase !== "Question") return;
+    setInputs(prev => {
+      const next = [...prev];
+      next[activeInput] += key;
+      return next;
+    });
+  };
+
+  const handleBackspace = () => {
+    if (phase !== "Question") return;
+    setInputs(prev => {
+      const next = [...prev];
+      if (next[activeInput].length > 0) {
+        next[activeInput] = next[activeInput].slice(0, -1);
+      } else if (activeInput > 0) {
+        setActiveInput(activeInput - 1);
+      }
+      return next;
+    });
+  };
+
+  const handleTypingSubmit = () => {
+    if (phase !== "Question") return;
+    const isCorrectPraesens = inputs[0].trim().toLowerCase() === (verbInfo.praesens || '').toLowerCase();
+    const isCorrectPraeteritum = inputs[1].trim().toLowerCase() === (verbInfo.praeteritum || '').toLowerCase();
+    const isCorrectPerfekt = inputs[2].trim().toLowerCase() === (verbInfo.perfekt || '').toLowerCase();
+    
+    handleNext(isCorrectPraesens && isCorrectPraeteritum && isCorrectPerfekt);
+  };
+
+  const advanceInput = () => {
+    if (activeInput < 2) setActiveInput(activeInput + 1);
+    else handleTypingSubmit();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-[#FBFBFD] dark:bg-[#000000] z-50 flex flex-col">
+      <div className="px-6 py-5 flex items-center justify-between border-b border-black/5 dark:border-white/10 bg-white/80 dark:bg-[#1C1C1E]/80 backdrop-blur-md sticky top-0 z-20">
+        <button onClick={onBack} className="w-10 h-10 flex items-center justify-center bg-gray-100 dark:bg-black/50 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-full transition-colors">
+          <X className="w-5 h-5" />
+        </button>
+        <div className="flex flex-col items-center">
+          <span className="text-sm font-bold text-gray-900 dark:text-white tracking-wide">
+            Starke Verben
+          </span>
+          <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 tracking-wider uppercase">
+            {currentIndex + 1} / {initialTotal}
+          </span>
+        </div>
+        <div className="w-10" />
+      </div>
+
+      <div className="flex-1 flex flex-col px-4 py-6 max-w-2xl mx-auto w-full">
+        <div className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-8 shadow-sm border border-black/5 dark:border-white/10 mb-8 flex flex-col items-center text-center">
+          <div className="text-sm font-semibold text-blue-600 dark:text-blue-500 mb-2 uppercase tracking-widest">{verbInfo.level || 'A1'}</div>
+          <h1 className="text-4xl md:text-5xl font-extrabold text-gray-900 dark:text-white mb-4 tracking-tight">{verbInfo.infinitiv}</h1>
+          <p className="text-lg md:text-xl text-gray-500 dark:text-gray-400 font-medium">{currentCard.translation}</p>
+        </div>
+
+        <div className="flex-1 flex flex-col">
+          {phase === "Result" && (
+            <div className={cn("text-center mb-6 text-xl font-bold p-4 rounded-2xl", isCorrect ? "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400" : "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400")}>
+              {isCorrect ? "Richtig!" : `Falsch! Korrekt: ${correctString}`}
+            </div>
+          )}
+          
+          {!isTypingMode ? (
+            <div className="grid gap-3">
+              {currentOptions.map((opt, i) => {
+                let btnClass = "bg-white dark:bg-[#1C1C1E] border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300";
+                if (phase === "Result") {
+                  if (opt === correctString) btnClass = "bg-green-500 border-green-500 text-white shadow-md";
+                  else if (opt === selectedOption) btnClass = "bg-red-500 border-red-500 text-white shadow-md";
+                  else btnClass = "opacity-50 border-gray-200 dark:border-white/10";
+                }
+                
+                return (
+                  <button 
+                    key={i} 
+                    onClick={() => handleOptionClick(opt)}
+                    disabled={phase !== "Question"}
+                    className={cn("p-5 rounded-2xl border text-center font-medium text-lg transition-all active:scale-[0.98]", btnClass)}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-col flex-1 pb-4">
+              <div className="flex flex-col gap-4 mb-auto">
+                {['Präsens', 'Präteritum', 'Perfekt'].map((label, idx) => (
+                  <div key={idx} onClick={() => phase === "Question" && setActiveInput(idx)} className={cn("flex flex-col p-4 rounded-2xl border-2 transition-colors cursor-pointer", activeInput === idx ? "border-blue-500 bg-blue-50/50 dark:bg-blue-900/10" : "border-gray-200 dark:border-white/10 bg-white dark:bg-[#1C1C1E]", phase === "Result" && inputs[idx].trim().toLowerCase() !== (verbInfo[['praesens', 'praeteritum', 'perfekt'][idx]] || '').toLowerCase() ? "border-red-500 bg-red-50 dark:bg-red-900/10" : "", phase === "Result" && inputs[idx].trim().toLowerCase() === (verbInfo[['praesens', 'praeteritum', 'perfekt'][idx]] || '').toLowerCase() ? "border-green-500 bg-green-50 dark:bg-green-900/10" : "")}>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{label}</span>
+                    <span className="text-xl font-bold text-gray-900 dark:text-white min-h-[28px]">{inputs[idx] || (activeInput === idx ? <span className="animate-pulse">|</span> : '')}</span>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="mt-8 flex justify-end px-2 pb-4">
+                <button onClick={advanceInput} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold shadow-sm active:scale-95 transition-all">
+                  {activeInput < 2 ? "Weiter" : "Prüfen"}
+                </button>
+              </div>
+              
+              <div className="-mx-4 mt-auto">
+                <VirtualKeyboard onKeyPress={handleKeyPress} onBackspace={handleBackspace} />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [isPending, startTransition] = useTransition();
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, setIsPaywallOpen } = useStore();
@@ -2568,6 +2816,15 @@ try {
         if (booksRes.error) {
           useStore.getState().setSyncError("Fetch Books Error: " + booksRes.error.message);
         }
+        if (booksRes.data) {
+          const hasVerbs = booksRes.data.some((b: any) => b.id === 'verbs-de');
+          if (!hasVerbs && !booksRes.error) {
+            const verbsBook = { id: 'verbs-de', language: 'DE', title: 'Starke Verben', subtitle: 'A1-C1', tintcolor: '#FF2D55', activelevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] };
+            await supabase.from('books').insert([verbsBook]);
+            booksRes.data.push(verbsBook);
+          }
+        }
+        
         if (booksRes.data && booksRes.data.length > 0) {
           const mappedBooks = booksRes.data.map((b: any) => ({
             id: b.id,
@@ -2591,6 +2848,7 @@ try {
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Грамматика & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
+            { id: 'verbs-de', language: 'DE', title: 'Starke Verben', subtitle: 'A1-C1', tintColor: '#FF2D55', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
             { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
           ];
           const res = await supabase.from('kraft_books').insert(defaultBooks);
@@ -2731,25 +2989,40 @@ try {
   }
 
   if (activeDeckId) {
+    const isVerbBook = decks.find(d => d.id === activeDeckId)?.bookId === 'verbs-de';
     return (
       <>
-        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} profile={profile} />
+        {isVerbBook ? (
+          <VerbStudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
+        ) : (
+          <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} profile={profile} />
+        )}
       </>
     );
   }
 
   if (reviewCards) {
+    const isVerbBook = reviewCards.length > 0 && decks.find(d => d.id === reviewCards[0].deckId)?.bookId === 'verbs-de';
     return (
       <>
-        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} profile={profile} />
+        {isVerbBook ? (
+          <VerbStudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
+        ) : (
+          <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} profile={profile} />
+        )}
       </>
     );
   }
 
   if (drillCards) {
+    const isVerbBook = drillCards.length > 0 && decks.find(d => d.id === drillCards[0].deckId)?.bookId === 'verbs-de';
     return (
       <>
-        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} profile={profile} />
+        {isVerbBook ? (
+          <VerbStudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} />
+        ) : (
+          <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} profile={profile} />
+        )}
       </>
     );
   }
@@ -2767,22 +3040,47 @@ try {
       
       lines.forEach((line) => {
         const parts = line.split(';').map(p => p.trim());
-        if (parts.length >= 6) {
-          const targetWord = parts[0];
-          const options = [targetWord, parts[3], parts[4], parts[5]].sort(() => Math.random() - 0.5);
-          cards.push({
-            id: crypto.randomUUID(),
-            targetWord,
-            sentence: parts[1],
-            translation: parts[2],
-            options,
-            masteryLevel: 0,
-            isArchived: false,
-            nextReviewDate: null,
-            interval: 0,
-            repetitions: 0,
-            baseWordInfo: parts.length >= 7 ? parts[6] : null
-          });
+        if (activeBookId === 'verbs-de') {
+          if (parts.length >= 6) {
+            const infinitiv = parts[0];
+            const praesens = parts[1];
+            const praeteritum = parts[2];
+            const perfekt = parts[3];
+            const translation = parts[4];
+            const level = parts[5];
+            
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord: infinitiv,
+              sentence: "VERB_DRILL",
+              translation: translation,
+              options: [],
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0,
+              baseWordInfo: JSON.stringify({ infinitiv, praesens, praeteritum, perfekt, level })
+            });
+          }
+        } else {
+          if (parts.length >= 6) {
+            const targetWord = parts[0];
+            const options = [targetWord, parts[3], parts[4], parts[5]].sort(() => Math.random() - 0.5);
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord,
+              sentence: parts[1],
+              translation: parts[2],
+              options,
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0,
+              baseWordInfo: parts.length >= 7 ? parts[6] : null
+            });
+          }
         }
       });
 
