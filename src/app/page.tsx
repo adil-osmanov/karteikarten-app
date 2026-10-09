@@ -39,9 +39,14 @@ const FAIL_B64 = "data:audio/wav;base64,UklGRi6bAABXQVZFZm10IBAAAAABAAEARKwAAIhY
 
 const decodeBase64ToBuffer = async (ctx: AudioContext, b64: string) => {
   try {
-    const res = await fetch(b64);
-    const arrayBuffer = await res.arrayBuffer();
-    return await ctx.decodeAudioData(arrayBuffer);
+    const base64Data = b64.split(',')[1];
+    const binaryStr = window.atob(base64Data);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return await ctx.decodeAudioData(bytes.buffer);
   } catch (e) {
     return null;
   }
@@ -2262,8 +2267,6 @@ function VerbStudyCard({
             sliceLen = -2;
         }
         n[activeInput] = n[activeInput].slice(0, sliceLen);
-      } else if (activeInput > 0) {
-        setActiveInput(activeInput - 1);
       }
       return n;
     });
@@ -2320,21 +2323,6 @@ function VerbStudyCard({
           </button>
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex gap-1.5 mr-1">
-            {[0, 1, 2, 3].map((step) => (
-              <div 
-                key={step} 
-                className={cn(
-                  "w-2 h-2 rounded-full transition-all duration-300",
-                  step < card.masteryLevel 
-                    ? "bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
-                    : step === card.masteryLevel && !isSuccess
-                      ? "bg-blue-500/40 animate-pulse"
-                      : "bg-gray-200 dark:bg-white/10"
-                )}
-              />
-            ))}
-          </div>
           <AnimatePresence>
             {hasErrored && deckTitle && (
               <motion.span 
@@ -2351,13 +2339,28 @@ function VerbStudyCard({
             onClick={handleHilfe}
             disabled={isSuccess}
             className={cn(
-              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
+              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors mr-1",
               isSuccess && "opacity-0 pointer-events-none"
             )}
             title="Ich weiß nicht"
           >
             <HelpCircle className="w-5 h-5" />
           </button>
+          <div className="flex gap-1.5">
+            {[0, 1, 2, 3].map((step) => (
+              <div 
+                key={step} 
+                className={cn(
+                  "w-2 h-2 rounded-full transition-all duration-300",
+                  step < card.masteryLevel 
+                    ? "bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
+                    : step === card.masteryLevel && !isSuccess
+                      ? "bg-blue-500/40 animate-pulse"
+                      : "bg-gray-200 dark:bg-white/10"
+                )}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
