@@ -2082,7 +2082,17 @@ export const syncAppStateToCloud = async () => {
 
 
 
+
 // --- VERB STUDY CARD ---
+const RUSSIAN_TO_QWERTZ: Record<string, string> = {
+  'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'z', 'г': 'u', 'ш': 'i', 'щ': 'o', 'з': 'p', 'х': 'ü', 'ъ': '+',
+  'ф': 'a', 'ы': 's', 'в': 'd', 'а': 'f', 'п': 'g', 'р': 'h', 'о': 'j', 'л': 'k', 'д': 'l', 'ж': 'ö', 'э': 'ä',
+  'я': 'y', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n', 'ь': 'm', 'б': ',', 'ю': '.',
+  'Й': 'Q', 'Ц': 'W', 'У': 'E', 'К': 'R', 'Е': 'T', 'Н': 'Z', 'Г': 'U', 'Ш': 'I', 'Щ': 'O', 'З': 'P', 'Х': 'Ü', 'Ъ': '*',
+  'Ф': 'A', 'Ы': 'S', 'В': 'D', 'А': 'F', 'П': 'G', 'Р': 'H', 'О': 'J', 'Л': 'K', 'Д': 'L', 'Ж': 'Ö', 'Э': 'Ä',
+  'Я': 'Y', 'Ч': 'X', 'С': 'C', 'М': 'V', 'И': 'B', 'Т': 'N', 'Ь': 'M', 'Б': ';', 'Ю': ':'
+};
+
 function VerbStudyCard({ 
   card, 
   deckTitle, 
@@ -2105,7 +2115,6 @@ function VerbStudyCard({
   const [isSuccess, setIsSuccess] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   
-
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const playAudio = useCallback(async (text: string) => {
     setIsPlayingAudio(true);
@@ -2127,56 +2136,53 @@ function VerbStudyCard({
     }
   }, []);
 
-
-  // Focus trap for desktop
+  // Озвучиваем инфинитив при появлении
   useEffect(() => {
-    const handleNativeGlobalKeyDown = (e: KeyboardEvent) => {
-      if (isSuccess) return;
-      const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
-      if (e.key === "Backspace") {
-         e.preventDefault();
-         handleBackspace();
-         return;
-      }
-      if (e.key === 'h' || e.key === 'H') {
-         // handleHilfe already bound? wait, we'll bind it here
-         if (e.ctrlKey || e.metaKey) return; // let native shortcuts pass
-      }
-      
-      if (!isSpecialKey && e.key.length === 1) {
-         e.preventDefault();
-         handleKeyPress(e.key);
-      }
-    };
-    
-    window.addEventListener('keydown', handleNativeGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
-  }, [inputs, activeInput, isSuccess]);
+    playAudio(verbInfo.infinitiv?.replace('|', ''));
+  }, [verbInfo.infinitiv, playAudio]);
 
-  const handleNext = (correct: boolean, isHilfe: boolean = false) => {
+  // Стабильный ref для доступа в keydown без перерисовок и перебиндинга
+  const stateRef = useRef({ inputs, activeInput, isSuccess, hasErrored, targets });
+  stateRef.current = { inputs, activeInput, isSuccess, hasErrored, targets };
+
+  const handleNextPhase = useCallback((correct: boolean, isHilfe: boolean = false) => {
     setIsSuccess(true);
     playFeedbackSound(true);
     onAnswer(correct, isHilfe);
+    // Проигрываем все три формы через паузы
     setTimeout(() => {
-      onNext();
-    }, 1500);
-  };
+       playAudio(`${verbInfo.praesens}. ${verbInfo.praeteritum}. ${verbInfo.perfekt}`);
+    }, 100);
+  }, [verbInfo, playAudio, onAnswer]);
 
-  const handleHilfe = () => {
-    setInputs([...targets]);
+  const handleHilfe = useCallback(() => {
+    if (stateRef.current.isSuccess) return;
+    setInputs([...stateRef.current.targets]);
     setActiveInput(3);
     setHasErrored(true);
-    handleNext(false, true);
-  };
+    handleNextPhase(false, true);
+  }, [handleNextPhase]);
 
-  const handleKeyPress = (char: string) => {
+  const handleKeyPress = useCallback((rawChar: string) => {
+    const { inputs, activeInput, isSuccess, hasErrored, targets } = stateRef.current;
     if (isSuccess || activeInput > 2) return;
+    
+    // Русская -> Немецкая раскладка
+    const char = RUSSIAN_TO_QWERTZ[rawChar] || rawChar;
+    
     playTockSound();
     
     const target = targets[activeInput];
     const currentVal = inputs[activeInput];
-    const nextVal = currentVal + char;
+    let nextVal = currentVal + char;
     
+    // Автоматический пробел: если следующее ожидаемое слово начинается с пробела
+    if (target[currentVal.length] === ' ' && char !== ' ') {
+       if (char.toLowerCase() === target[currentVal.length + 1]?.toLowerCase()) {
+           nextVal = currentVal + ' ' + char;
+       }
+    }
+
     setInputs(prev => {
       const n = [...prev];
       n[activeInput] = nextVal;
@@ -2196,8 +2202,17 @@ function VerbStudyCard({
          if (activeInput < 2) {
              setActiveInput(activeInput + 1);
          } else {
-             if (!hasErrored) handleNext(true);
-             else handleNext(false);
+             if (!hasErrored) handleNextPhase(true);
+             else handleNextPhase(false);
+         }
+      } else {
+         // Auto-append trailing spaces if they exist in target to save typing
+         if (target[nextVal.length] === ' ') {
+             setInputs(prev => {
+               const n = [...prev];
+               n[activeInput] = nextVal + ' ';
+               return n;
+             });
          }
       }
     } else {
@@ -2205,21 +2220,67 @@ function VerbStudyCard({
       playFeedbackSound(false);
       if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
     }
-  };
+  }, [handleNextPhase]);
 
-  const handleBackspace = () => {
+  const handleBackspace = useCallback(() => {
+    const { inputs, activeInput, isSuccess } = stateRef.current;
     if (isSuccess || activeInput > 2) return;
     playTockSound();
     setInputs(prev => {
       const n = [...prev];
       if (n[activeInput].length > 0) {
-        n[activeInput] = n[activeInput].slice(0, -1);
+        // If we are deleting a space, delete the char before it too
+        let sliceLen = -1;
+        if (n[activeInput].endsWith(' ') && n[activeInput].length > 1) {
+            sliceLen = -2;
+        }
+        n[activeInput] = n[activeInput].slice(0, sliceLen);
       } else if (activeInput > 0) {
         setActiveInput(activeInput - 1);
       }
       return n;
     });
-  };
+  }, []);
+
+  // Глобальный слушатель клавиатуры
+  useEffect(() => {
+    const handleNativeGlobalKeyDown = (e: KeyboardEvent) => {
+      const { isSuccess } = stateRef.current;
+      
+      if (e.key === "Enter" && isSuccess) {
+         e.preventDefault();
+         onNext();
+         return;
+      }
+      
+      if (isSuccess) return;
+      
+      const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
+      
+      if (e.key === "Backspace") {
+         e.preventDefault();
+         handleBackspace();
+         return;
+      }
+      
+      if (e.key === 'h' || e.key === 'H' || e.key === 'р' || e.key === 'Р') {
+         if (!e.ctrlKey && !e.metaKey) {
+            // handleHilfe();
+            // Let's not auto-trigger Hilfe on H since 'h' is a valid character!
+            // Wait, we can't trigger hilfe on 'h' because German words have 'h' (e.g., hat).
+            // We'll ignore 'h' as shortcut here.
+         }
+      }
+      
+      if (!isSpecialKey && e.key.length === 1) {
+         e.preventDefault();
+         handleKeyPress(e.key);
+      }
+    };
+    
+    window.addEventListener('keydown', handleNativeGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
+  }, [handleKeyPress, handleBackspace, onNext]);
 
   const displayInfinitiv = (verbInfo.infinitiv || "").split('|').map((part: string, i: number, arr: string[]) => (
      <React.Fragment key={i}>
@@ -2235,12 +2296,12 @@ function VerbStudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[340px] transition-colors duration-200"
     >
-      <div className="w-full flex items-center justify-between mb-8">
+      <div className="w-full flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => playAudio(verbInfo.infinitiv)}
+            onClick={() => playAudio(verbInfo.infinitiv?.replace('|', ''))}
             disabled={isPlayingAudio}
             className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
           >
@@ -2267,56 +2328,78 @@ function VerbStudyCard({
               "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
               isSuccess && "opacity-0 pointer-events-none"
             )}
-            title="Hilfe"
+            title="Ich weiß nicht"
           >
             <HelpCircle className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-lg mb-8 relative">
-        <div className="text-center mb-10 w-full">
-           <h2 className="text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-2 tracking-wide flex items-center justify-center gap-0.5">
+      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-4 relative">
+        <div className="text-center mb-8 w-full">
+           <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
              {displayInfinitiv}
            </h2>
-           <p className="text-sm font-medium text-gray-500 dark:text-[#8E8E93]">{card.translation}</p>
+           <p className="text-[13px] font-medium text-gray-500 dark:text-[#8E8E93]">{card.translation}</p>
         </div>
         
-        <div className="flex items-center gap-2 sm:gap-4 w-full px-2 sm:px-0">
-           <span className="text-[13px] font-semibold text-gray-400 dark:text-gray-500 w-4 sm:w-6 text-right shrink-0">er</span>
+        <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4 w-full px-2 sm:px-0">
+           <span className="text-[14px] font-medium text-gray-400 dark:text-[#8E8E93] sm:w-6 sm:text-right shrink-0 self-start sm:self-center mt-2 sm:mt-0">er</span>
            
-           {labels.map((label, idx) => {
-               const target = targets[idx];
-               const currentVal = inputs[idx];
-               const isMistake = currentVal.length > 0 && currentVal[currentVal.length - 1].toLowerCase() !== target[currentVal.length - 1]?.toLowerCase();
-               const isCompleted = currentVal === target && activeInput > idx || (isSuccess && activeInput >= idx);
-               const isActive = activeInput === idx && !isSuccess;
-               
-               return (
-                 <div key={idx} className={cn(
-                     "flex-1 relative h-10 border-b-2 flex items-center justify-center transition-colors", 
-                     isActive ? "border-blue-500" : (isCompleted ? "border-green-500" : "border-black/10 dark:border-white/10")
-                 )}>
-                    {currentVal.length === 0 && (
-                       <span className="absolute inset-0 flex items-center justify-center text-[10px] sm:text-[11px] font-semibold text-black/20 dark:text-white/20 uppercase tracking-widest pointer-events-none">
-                          {label}
-                       </span>
-                    )}
-                    <div className="flex items-center justify-center relative z-10 w-full">
-                       {currentVal.split('').map((char, i) => (
-                          <span key={i} className={cn("text-base sm:text-lg font-bold tracking-wide", (i === currentVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase()) ? "text-red-500 animate-dict-shake" : "text-gray-800 dark:text-white")}>{char}</span>
-                       ))}
-                       {isActive && <span className="inline-block w-[2px] h-[1em] bg-blue-500 ml-[1px] rounded-full animate-dict-pulse"></span>}
-                    </div>
-                 </div>
-               )
-           })}
+           <div className="flex items-center gap-2 w-full">
+             {labels.map((label, idx) => {
+                 const target = targets[idx];
+                 const currentVal = inputs[idx];
+                 const isMistake = currentVal.length > 0 && currentVal[currentVal.length - 1].toLowerCase() !== target[currentVal.length - 1]?.toLowerCase();
+                 const isCompleted = currentVal === target && activeInput > idx || (isSuccess && activeInput >= idx);
+                 const isActive = activeInput === idx && !isSuccess;
+                 
+                 return (
+                   <div key={idx} className={cn(
+                       "flex-1 relative h-11 border-b-[1.5px] flex items-center justify-center transition-colors overflow-hidden", 
+                       isActive ? "border-blue-500" : (isCompleted ? "border-green-500" : "border-black/10 dark:border-white/10")
+                   )}>
+                      {currentVal.length === 0 && (
+                         <span className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold text-black/20 dark:text-white/20 tracking-wider pointer-events-none">
+                            {label}
+                         </span>
+                      )}
+                      <div className="flex items-center justify-center relative z-10 w-full whitespace-pre">
+                         {currentVal.split('').map((char, i) => (
+                            <span key={i} className={cn("text-[17px] font-semibold tracking-wide", (i === currentVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase()) ? "text-red-500 animate-dict-shake" : "text-gray-800 dark:text-white")}>{char}</span>
+                         ))}
+                         {isActive && <span className="inline-block w-[2px] h-[1.1em] bg-blue-500 ml-[1px] rounded-full animate-dict-pulse"></span>}
+                      </div>
+                   </div>
+                 )
+             })}
+           </div>
         </div>
       </div>
 
-      <div className="mt-8 md:hidden -mx-6 md:-mx-12 -mb-6 md:-mb-12 w-[calc(100%+48px)]">
-         <VirtualKeyboard onKeyPress={handleKeyPress} onBackspace={handleBackspace} />
-      </div>
+      <AnimatePresence mode="wait">
+        {isSuccess && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="w-full flex justify-center mt-4 mb-2"
+          >
+            <button 
+              onClick={onNext}
+              className="bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-3 rounded-2xl font-semibold text-[15px] transition-all active:scale-[0.98] shadow-sm w-full max-w-[200px]"
+            >
+              Weiter
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {!isSuccess && (
+         <div className="mt-6 md:hidden -mx-6 md:-mx-12 -mb-6 md:-mb-10 w-[calc(100%+48px)]">
+           <VirtualKeyboard onKeyPress={handleKeyPress} onBackspace={handleBackspace} />
+         </div>
+      )}
     </motion.div>
   );
 }
