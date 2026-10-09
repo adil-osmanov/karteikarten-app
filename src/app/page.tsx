@@ -2838,6 +2838,20 @@ try {
             coverValue: b.coverValue || b.covervalue,
             accentColor: b.accentColor || b.accentcolor
           }));
+          if (!mappedBooks.some(b => b.id === 'verbs-de')) {
+            mappedBooks.push({
+              id: 'verbs-de',
+              language: 'DE',
+              title: 'Starke Verben',
+              subtitle: 'A1-C1',
+              tintColor: '#FF2D55',
+              activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'],
+              coverType: undefined,
+              coverValue: undefined,
+              coverImage: null,
+              accentColor: undefined
+            });
+          }
           setBooks(mappedBooks);
           try {
             localStorage.setItem('cache_books_v2', JSON.stringify(mappedBooks));
