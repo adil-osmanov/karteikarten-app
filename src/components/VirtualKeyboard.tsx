@@ -8,7 +8,7 @@ interface VirtualKeyboardProps {
   className?: string;
 }
 
-export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualKeyboardProps) {
+export const VirtualKeyboard = React.memo(function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualKeyboardProps) {
   const [isShifted, setIsShifted] = useState(false);
 
   const rows = [
@@ -101,4 +101,4 @@ export function VirtualKeyboard({ onKeyPress, onBackspace, className }: VirtualK
       ))}
     </div>
   );
-}
+});
