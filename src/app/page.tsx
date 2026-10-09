@@ -487,12 +487,14 @@ function StudyInterface({
   deckId, 
   onBack,
   reviewCards,
-  isDrillMode
+  isDrillMode,
+  isVerbBook
 }: { 
   deckId?: string, 
   onBack: () => void,
   reviewCards?: { deckId: string, card: Flashcard }[],
-  isDrillMode?: boolean
+  isDrillMode?: boolean,
+  isVerbBook?: boolean
 }) {
   const { answerCard, decks } = useStore();
   
@@ -608,6 +610,25 @@ function StudyInterface({
 
       <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
+          {isVerbBook ? (
+            <VerbStudyCard
+              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              card={liveCard}
+              deckTitle={reviewCards ? currentDeckTitle : undefined}
+              onAnswer={(correct, isHilfe) => {
+                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
+                if (correct && !isHilfe) {
+                  setMasteredInSession(prev => prev + 1);
+                } else {
+                  if (!isDrillMode) {
+                    setInitialTotal(prev => prev + 1);
+                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
+                  }
+                }
+              }}
+              onNext={handleNext}
+            />
+          ) : (
           <StudyCard
             key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
             card={liveCard}
@@ -623,6 +644,7 @@ function StudyInterface({
             }}
             onNext={handleNext}
           />
+          )}
         </AnimatePresence>
       </div>
     </div>
@@ -2058,92 +2080,85 @@ export const syncAppStateToCloud = async () => {
 
 
 
-// --- VERB DRILL MODE ---
 
-function VerbStudyInterface({ 
-  deckId, 
-  onBack,
-  reviewCards,
-  isDrillMode
+
+// --- VERB STUDY CARD ---
+function VerbStudyCard({ 
+  card, 
+  deckTitle, 
+  onAnswer, 
+  onNext 
 }: { 
-  deckId?: string, 
-  onBack: () => void,
-  reviewCards?: { deckId: string, card: Flashcard }[],
-  isDrillMode?: boolean
+  card: Flashcard, 
+  deckTitle?: string, 
+  onAnswer: (correct: boolean, isHilfe: boolean) => void, 
+  onNext: () => void 
 }) {
-  const { answerCard, incrementDailyProgress } = useStore();
+  let verbInfo: any = {};
+  try { verbInfo = JSON.parse(card.baseWordInfo || '{}'); } catch {}
   
-  const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [initialTotal, setInitialTotal] = useState(0);
-  const [masteredInSession, setMasteredInSession] = useState(0);
-
-  useEffect(() => {
-    if (reviewCards) {
-      setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
-      setInitialTotal(reviewCards.length);
-      setMasteredInSession(0);
-    } else if (deckId) {
-      const deck = useStore.getState().decks.find((d) => d.id === deckId);
-      if (deck) {
-        const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
-        setActiveCards(active.sort(() => Math.random() - 0.5));
-        setInitialTotal(active.length);
-        setMasteredInSession(0);
-      }
-    }
-  }, [deckId, reviewCards]);
+  const targets = [verbInfo.praesens || '', verbInfo.praeteritum || '', verbInfo.perfekt || ''];
+  const labels = ['Präsens', 'Präteritum', 'Perfekt'];
 
   const [inputs, setInputs] = useState<string[]>(['', '', '']);
   const [activeInput, setActiveInput] = useState<number>(0);
   const [isSuccess, setIsSuccess] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
-
-  if (activeCards.length === 0) {
-    return (
-      <div className="min-h-screen bg-[#000000] flex flex-col items-center justify-center p-6">
-        <h2 className="text-2xl font-bold text-white mb-2">Keine Verben gefunden!</h2>
-        <button onClick={onBack} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-semibold">Zurück</button>
-      </div>
-    );
-  }
-
-  if (currentIndex >= activeCards.length) {
-    return (
-      <div className="min-h-screen bg-[#000000] flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-500">
-        <div className="w-24 h-24 bg-green-900/30 text-green-400 rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm border border-green-500/20">
-          <CheckCircle2 className="w-12 h-12 text-green-500" />
-        </div>
-        <h2 className="text-3xl font-extrabold text-white mb-3 tracking-tight">Geschafft!</h2>
-        <p className="text-gray-400 font-medium max-w-sm mb-10 text-lg">Du hast {masteredInSession} von {initialTotal} Verben gemeistert.</p>
-        <button onClick={onBack} className="w-full max-w-sm bg-blue-600 hover:bg-blue-500 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]">Zurück zur Bibliothek</button>
-      </div>
-    );
-  }
-
-  const { deckId: currentDeckId, card: currentCard } = activeCards[currentIndex];
-  let verbInfo: any = {};
-  try { verbInfo = JSON.parse(currentCard.baseWordInfo || '{}'); } catch {}
   
-  const targets = [verbInfo.praesens || '', verbInfo.praeteritum || '', verbInfo.perfekt || ''];
-  const labels = ['er / sie / es', 'Präteritum', 'Perfekt'];
+
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const playAudio = useCallback(async (text: string) => {
+    setIsPlayingAudio(true);
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      if (!response.ok) throw new Error("TTS API Error");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => setIsPlayingAudio(false);
+      audio.onerror = () => setIsPlayingAudio(false);
+      await audio.play();
+    } catch (e) {
+      setIsPlayingAudio(false);
+    }
+  }, []);
+
+
+  // Focus trap for desktop
+  useEffect(() => {
+    const handleNativeGlobalKeyDown = (e: KeyboardEvent) => {
+      if (isSuccess) return;
+      const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
+      if (e.key === "Backspace") {
+         e.preventDefault();
+         handleBackspace();
+         return;
+      }
+      if (e.key === 'h' || e.key === 'H') {
+         // handleHilfe already bound? wait, we'll bind it here
+         if (e.ctrlKey || e.metaKey) return; // let native shortcuts pass
+      }
+      
+      if (!isSpecialKey && e.key.length === 1) {
+         e.preventDefault();
+         handleKeyPress(e.key);
+      }
+    };
+    
+    window.addEventListener('keydown', handleNativeGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
+  }, [inputs, activeInput, isSuccess]);
 
   const handleNext = (correct: boolean, isHilfe: boolean = false) => {
     setIsSuccess(true);
     playFeedbackSound(true);
-    if (correct && !isHilfe) setMasteredInSession(m => m + 1);
-    incrementDailyProgress();
-    
-    if (!isDrillMode) {
-      answerCard(currentDeckId, currentCard.id, correct, isHilfe);
-    }
-    
+    onAnswer(correct, isHilfe);
     setTimeout(() => {
-      setInputs(['', '', '']);
-      setActiveInput(0);
-      setIsSuccess(false);
-      setHasErrored(false);
-      setCurrentIndex(prev => prev + 1);
+      onNext();
     }, 1500);
   };
 
@@ -2156,6 +2171,7 @@ function VerbStudyInterface({
 
   const handleKeyPress = (char: string) => {
     if (isSuccess || activeInput > 2) return;
+    playTockSound();
     
     const target = targets[activeInput];
     const currentVal = inputs[activeInput];
@@ -2168,7 +2184,6 @@ function VerbStudyInterface({
     });
 
     if (target.toLowerCase().startsWith(nextVal.toLowerCase())) {
-      // Correct letter, ensure original case is respected if matched fully
       if (nextVal.toLowerCase() === target.toLowerCase()) {
          setInputs(prev => {
            const n = [...prev];
@@ -2181,12 +2196,8 @@ function VerbStudyInterface({
          if (activeInput < 2) {
              setActiveInput(activeInput + 1);
          } else {
-             // Finished all 3
-             if (!hasErrored) {
-                 handleNext(true);
-             } else {
-                 handleNext(false); // They made mistakes but finished
-             }
+             if (!hasErrored) handleNext(true);
+             else handleNext(false);
          }
       }
     } else {
@@ -2198,6 +2209,7 @@ function VerbStudyInterface({
 
   const handleBackspace = () => {
     if (isSuccess || activeInput > 2) return;
+    playTockSound();
     setInputs(prev => {
       const n = [...prev];
       if (n[activeInput].length > 0) {
@@ -2209,70 +2221,103 @@ function VerbStudyInterface({
     });
   };
 
+  const displayInfinitiv = (verbInfo.infinitiv || "").split('|').map((part: string, i: number, arr: string[]) => (
+     <React.Fragment key={i}>
+        {part}
+        {i < arr.length - 1 && <span className="text-gray-300 dark:text-gray-600 mx-[1px] font-light">·</span>}
+     </React.Fragment>
+  ));
+
   return (
-    <div className="fixed inset-0 bg-[#000000] z-50 flex flex-col items-center">
-      <div className="w-full px-6 py-5 flex items-center justify-between border-b border-white/10 bg-[#1C1C1E]/80 backdrop-blur-md sticky top-0 z-20">
-        <button onClick={onBack} className="w-10 h-10 flex items-center justify-center bg-black/50 text-gray-400 hover:text-white rounded-full transition-colors">
-          <X className="w-5 h-5" />
-        </button>
-        <div className="flex flex-col items-center">
-          <span className="text-sm font-bold text-white tracking-wide">
-            Verb Drill
-          </span>
-          <span className="text-[11px] font-medium text-gray-400 tracking-wider uppercase">
-            {currentIndex + 1} / {initialTotal}
-          </span>
+    <motion.div 
+      key={card.id + (isSuccess ? 'success' : 'question')}
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.2 }}
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
+    >
+      <div className="w-full flex items-center justify-between mb-8">
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => playAudio(verbInfo.infinitiv)}
+            disabled={isPlayingAudio}
+            className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+          >
+            <Volume2 className={cn("w-5 h-5", isPlayingAudio && "animate-pulse text-blue-500")} />
+          </button>
         </div>
-        <div className="w-10" />
+        <div className="flex items-center gap-4">
+          <AnimatePresence>
+            {hasErrored && deckTitle && (
+              <motion.span 
+                initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
+                animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
+                exit={{ opacity: 0 }}
+                className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
+              >
+                {deckTitle}
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <button 
+            onClick={handleHilfe}
+            disabled={isSuccess}
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
+              isSuccess && "opacity-0 pointer-events-none"
+            )}
+            title="Hilfe"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 flex flex-col w-full max-w-xl mx-auto px-4 py-8 items-center overflow-y-auto">
-        <div className="bg-[#1C1C1E] rounded-3xl w-full p-8 shadow-xl border border-white/[0.05] flex flex-col items-center relative">
-          <div className="text-center mb-10 w-full">
-            <h2 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight mb-3">{verbInfo.infinitiv}</h2>
-            <p className="text-[#8E8E93] text-lg font-medium">{currentCard.translation}</p>
-          </div>
-          
-          <div className="flex flex-col gap-6 w-full max-w-sm">
-            {labels.map((label, idx) => {
+      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-lg mb-8 relative">
+        <div className="text-center mb-10 w-full">
+           <h2 className="text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-2 tracking-wide flex items-center justify-center gap-0.5">
+             {displayInfinitiv}
+           </h2>
+           <p className="text-sm font-medium text-gray-500 dark:text-[#8E8E93]">{card.translation}</p>
+        </div>
+        
+        <div className="flex items-center gap-2 sm:gap-4 w-full px-2 sm:px-0">
+           <span className="text-[13px] font-semibold text-gray-400 dark:text-gray-500 w-4 sm:w-6 text-right shrink-0">er</span>
+           
+           {labels.map((label, idx) => {
                const target = targets[idx];
                const currentVal = inputs[idx];
                const isMistake = currentVal.length > 0 && currentVal[currentVal.length - 1].toLowerCase() !== target[currentVal.length - 1]?.toLowerCase();
                const isCompleted = currentVal === target && activeInput > idx || (isSuccess && activeInput >= idx);
+               const isActive = activeInput === idx && !isSuccess;
                
                return (
-                 <div key={idx} className="flex items-center gap-4 w-full">
-                    <div className="w-[100px] shrink-0 text-right text-[12px] sm:text-[13px] font-bold text-[#8E8E93] uppercase tracking-wider">{label}</div>
-                    <div className={cn("flex-1 h-12 border-b-2 flex items-center", 
-                       activeInput === idx ? "border-blue-500" : (isCompleted ? "border-green-500" : "border-white/10")
-                    )}>
-                       <div className="flex w-full items-center">
-                         {currentVal.split('').map((char, i) => (
-                            <span key={i} className={cn("text-xl sm:text-2xl font-bold tracking-wide", (i === currentVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase()) ? "text-red-500 animate-dict-shake" : "text-white")}>{char}</span>
-                         ))}
-                         {activeInput === idx && !isSuccess && <span className="inline-block w-[3px] h-[1.1em] bg-blue-500 ml-1 rounded-full animate-dict-pulse"></span>}
-                       </div>
+                 <div key={idx} className={cn(
+                     "flex-1 relative h-10 border-b-2 flex items-center justify-center transition-colors", 
+                     isActive ? "border-blue-500" : (isCompleted ? "border-green-500" : "border-black/10 dark:border-white/10")
+                 )}>
+                    {currentVal.length === 0 && (
+                       <span className="absolute inset-0 flex items-center justify-center text-[10px] sm:text-[11px] font-semibold text-black/20 dark:text-white/20 uppercase tracking-widest pointer-events-none">
+                          {label}
+                       </span>
+                    )}
+                    <div className="flex items-center justify-center relative z-10 w-full">
+                       {currentVal.split('').map((char, i) => (
+                          <span key={i} className={cn("text-base sm:text-lg font-bold tracking-wide", (i === currentVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase()) ? "text-red-500 animate-dict-shake" : "text-gray-800 dark:text-white")}>{char}</span>
+                       ))}
+                       {isActive && <span className="inline-block w-[2px] h-[1em] bg-blue-500 ml-[1px] rounded-full animate-dict-pulse"></span>}
                     </div>
                  </div>
                )
-            })}
-          </div>
-
-          {!isSuccess && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleHilfe(); }}
-              className="mt-12 text-[#8E8E93] hover:text-white text-sm font-medium transition-colors"
-            >
-              Ich weiß nicht
-            </button>
-          )}
-        </div>
-
-        <div className="mt-auto pt-6 w-full pb-4">
-          <VirtualKeyboard onKeyPress={handleKeyPress} onBackspace={handleBackspace} />
+           })}
         </div>
       </div>
-    </div>
+
+      <div className="mt-8 md:hidden -mx-6 md:-mx-12 -mb-6 md:-mb-12 w-[calc(100%+48px)]">
+         <VirtualKeyboard onKeyPress={handleKeyPress} onBackspace={handleBackspace} />
+      </div>
+    </motion.div>
   );
 }
 
@@ -2564,11 +2609,7 @@ try {
     const isVerbBook = decks.find(d => d.id === activeDeckId)?.bookId === 'verbs-de';
     return (
       <>
-        {isVerbBook ? (
-          <VerbStudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
-        ) : (
-          <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} />
-        )}
+        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)}  isVerbBook={isVerbBook} />
       </>
     );
   }
@@ -2577,11 +2618,7 @@ try {
     const isVerbBook = reviewCards.length > 0 && decks.find(d => d.id === reviewCards[0].deckId)?.bookId === 'verbs-de';
     return (
       <>
-        {isVerbBook ? (
-          <VerbStudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
-        ) : (
-          <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
-        )}
+        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)}  isVerbBook={isVerbBook} />
       </>
     );
   }
@@ -2590,11 +2627,7 @@ try {
     const isVerbBook = drillCards.length > 0 && decks.find(d => d.id === drillCards[0].deckId)?.bookId === 'verbs-de';
     return (
       <>
-        {isVerbBook ? (
-          <VerbStudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} />
-        ) : (
-          <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} />
-        )}
+        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)}  isVerbBook={isVerbBook} />
       </>
     );
   }
