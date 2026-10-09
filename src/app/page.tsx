@@ -2103,6 +2103,14 @@ const RUSSIAN_TO_QWERTZ: Record<string, string> = {
   'Я': 'Y', 'Ч': 'X', 'С': 'C', 'М': 'V', 'И': 'B', 'Т': 'N', 'Ь': 'M', 'Б': ';', 'Ю': ':'
 };
 
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState(false);
+  React.useEffect(() => {
+    setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  }, []);
+  return isMobile;
+}
 function VerbStudyCard({ 
   card, 
   deckTitle, 
@@ -2114,6 +2122,7 @@ function VerbStudyCard({
   onAnswer: (correct: boolean, isHilfe: boolean) => void, 
   onNext: () => void 
 }) {
+  const isMobile = useIsMobile();
   let verbInfo: any = {};
   try { verbInfo = JSON.parse(card.baseWordInfo || '{}'); } catch {}
   
@@ -2175,14 +2184,12 @@ function VerbStudyCard({
     if (isSuccess || activeInput > 2) return;
     
     const char = RUSSIAN_TO_QWERTZ[rawChar] || rawChar;
-    
     const target = targets[activeInput];
     const currentVal = inputs[activeInput];
-    let nextVal = currentVal + char;
     
-    if (char === ' ' && currentVal.endsWith(' ')) {
-        return;
-    }
+    if (char === ' ' && currentVal.endsWith(' ')) return;
+    
+    let nextVal = currentVal + char;
     
     if (target[currentVal.length] === ' ' && char !== ' ') {
        if (char.toLowerCase() === target[currentVal.length + 1]?.toLowerCase()) {
@@ -2190,21 +2197,22 @@ function VerbStudyCard({
        }
     }
 
-    setInputs(prev => {
-      const n = [...prev];
-      n[activeInput] = nextVal;
-      return n;
-    });
-
-    if (target.toLowerCase().startsWith(nextVal.toLowerCase())) {
+    const isCorrect = target.toLowerCase().startsWith(nextVal.toLowerCase());
+    
+    if (isCorrect) {
       playTockSound();
+      
       if (nextVal.toLowerCase() === target.toLowerCase()) {
-         setInputs(prev => {
-           const n = [...prev];
-           n[activeInput] = target;
-           return n;
-         });
+         nextVal = target; // Fix casing
+      } else if (target[nextVal.length] === ' ') {
+         nextVal = nextVal + ' '; // Auto-append space
       }
+      
+      setInputs(prev => {
+         const n = [...prev];
+         n[activeInput] = nextVal;
+         return n;
+      });
       
       if (nextVal.length === target.length) {
          if (activeInput < 2) {
@@ -2213,19 +2221,17 @@ function VerbStudyCard({
              if (!hasErrored) handleNextPhase(true);
              else handleNextPhase(false);
          }
-      } else {
-         if (target[nextVal.length] === ' ') {
-             setInputs(prev => {
-               const n = [...prev];
-               n[activeInput] = nextVal + ' ';
-               return n;
-             });
-         }
       }
     } else {
-      setHasErrored(true);
       playFeedbackSound(false);
       if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+      
+      setHasErrored(true);
+      setInputs(prev => {
+         const n = [...prev];
+         n[activeInput] = nextVal;
+         return n;
+      });
     }
   }, [handleNextPhase]);
 
@@ -2411,8 +2417,8 @@ function VerbStudyCard({
         </AnimatePresence>
       </div>
 
-      {!isSuccess && (
-         <div className="mt-6 md:hidden -mx-6 md:-mx-12 -mb-6 md:-mb-10 w-[calc(100%+48px)]">
+      {!isSuccess && isMobile && (
+         <div className="mt-6 -mx-6 md:-mx-12 -mb-6 md:-mb-10 w-[calc(100%+48px)]">
            <VirtualKeyboard onKeyPress={handleKeyPress} onBackspace={handleBackspace} />
          </div>
       )}
@@ -3237,6 +3243,7 @@ const RU_TO_DE: Record<string, string> = {
 };
 
 function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void }) {
+  const isMobile = useIsMobile();
   useScrollLock(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [inputText, setInputText] = useState("");
