@@ -1572,27 +1572,31 @@ const DeckCard = React.memo(({
       <div className="mt-auto">
         <div className="flex items-center justify-between w-full text-sm font-bold mb-3">
           <div className="flex items-center gap-2">
-            {activeTab === 'Grammatik' && (
+            {!isVerbBook && activeTab === 'Grammatik' && (
               <DeckTheoryIndicator 
                 deckId={deck.id} 
                 onOpenEdit={(e) => { e.stopPropagation(); onEditTheory(deck.id); }} 
                 onOpenView={(e) => { e.stopPropagation(); onViewTheory(deck.id); }} 
               />
             )}
-            <button
-              onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
-              className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
-              title="Dictation Mode"
-            >
-              <Keyboard className="w-4 h-4" />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
-              className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
-              title="Shadowing Mode"
-            >
-              <Mic className="w-4 h-4" />
-            </button>
+            {!isVerbBook && (
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
+                  className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
+                  title="Dictation Mode"
+                >
+                  <Keyboard className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
+                  className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
+                  title="Shadowing Mode"
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+              </>
+            )}
           </div>
           <span className={cn("ml-auto", isCompleted ? "text-green-600" : "text-gray-400")}>{mastered} / {total}</span>
         </div>
@@ -2327,19 +2331,21 @@ function VerbStudyCard({
             <HelpCircle className="w-5 h-5" />
           </button>
           <div className="flex gap-1.5">
-            {[0, 1, 2, 3].map((step) => (
+            {[0, 1, 2, 3].map((step) => {
+              const visualMastery = (isSuccess && !hasErrored) ? card.masteryLevel + 1 : card.masteryLevel;
+              return (
               <div 
                 key={step} 
                 className={cn(
-                  "w-2 h-2 rounded-full transition-all duration-300",
-                  step < card.masteryLevel 
-                    ? "bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
-                    : step === card.masteryLevel && !isSuccess
+                  "w-2.5 h-2.5 rounded-full transition-all duration-300",
+                  (card.isArchived || visualMastery > step) 
+                    ? "bg-blue-600 dark:bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
+                    : step === visualMastery && !isSuccess
                       ? "bg-blue-500/40 animate-pulse"
                       : "bg-gray-200 dark:bg-white/10"
                 )}
               />
-            ))}
+            )})}
           </div>
         </div>
       </div>
