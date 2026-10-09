@@ -2637,7 +2637,8 @@ try {
       const cards: Flashcard[] = [];
       
       lines.forEach((line) => {
-        const parts = line.split(';').map(p => p.trim());
+        const delimiter = line.includes(';') ? ';' : ',';
+        const parts = line.split(delimiter).map(p => p.trim());
         if (activeBookId === 'verbs-de') {
           if (parts.length >= 5) {
             const infinitiv = parts[0];
@@ -2927,6 +2928,7 @@ try {
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
+          {activeBookId !== 'verbs-de' && (
           <div className="flex justify-center mb-8 pt-2">
             <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.08]">
               {(["Grammatik", "Wörter"] as const).map((tab) => (
@@ -2945,6 +2947,7 @@ try {
               ))}
             </div>
           </div>
+          )}
 
           {dueCards.length > 0 && (
             <div className="mb-10">
