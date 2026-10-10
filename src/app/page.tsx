@@ -65,38 +65,30 @@ const initAudioCtx = () => {
 
 const playTockSound = () => {
   if (typeof window === 'undefined') return;
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      try {
-        const audio = tockPool[tockIdx];
-        tockIdx = (tockIdx + 1) % tockPool.length;
-        audio.currentTime = 0;
-        const p = audio.play();
-        if (p !== undefined) p.catch(() => {});
-      } catch (e) {}
-    }, 0);
-  });
+  try {
+    const audio = tockPool[tockIdx];
+    tockIdx = (tockIdx + 1) % tockPool.length;
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p !== undefined) p.catch(() => {});
+  } catch (e) {}
 };
 
 const playFeedbackSound = (isCorrect: boolean) => {
   if (typeof window === 'undefined') return;
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      try {
-        let audio: HTMLAudioElement;
-        if (isCorrect) {
-           audio = successPool[successIdx];
-           successIdx = (successIdx + 1) % successPool.length;
-        } else {
-           audio = failPool[failIdx];
-           failIdx = (failIdx + 1) % failPool.length;
-        }
-        audio.currentTime = 0;
-        const p = audio.play();
-        if (p !== undefined) p.catch(() => {});
-      } catch(e) {}
-    }, 0);
-  });
+  try {
+    let audio: HTMLAudioElement;
+    if (isCorrect) {
+       audio = successPool[successIdx];
+       successIdx = (successIdx + 1) % successPool.length;
+    } else {
+       audio = failPool[failIdx];
+       failIdx = (failIdx + 1) % failPool.length;
+    }
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p !== undefined) p.catch(() => {});
+  } catch(e) {}
 };
 
 // --- STORE & TYPES ---
@@ -2238,7 +2230,7 @@ const VerbSlot = React.memo(({
           {label}
         </span>
       )}
-      <div className="flex items-center justify-center flex-wrap gap-x-[1px] text-base sm:text-lg font-medium tracking-wide relative z-10">
+      <div className="flex items-center justify-center flex-nowrap whitespace-nowrap gap-x-[1px] text-[15px] sm:text-[17px] font-medium tracking-wide relative z-10">
         {displayVal.split('').map((char, i) => {
           const isErrorChar = !isSlotSuccess && i === displayVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase();
           return (
