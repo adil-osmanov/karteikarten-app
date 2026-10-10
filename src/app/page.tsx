@@ -7,7 +7,7 @@ import {
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle
 } from "lucide-react";
-import { motion, AnimatePresence, Reorder } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { create } from "zustand";
@@ -163,6 +163,8 @@ interface DeckState {
   setSyncError: (msg: string | null) => void;
   deckOrder: string[];
   setDeckOrder: (order: string[]) => void;
+  bookOrder: string[];
+  setBookOrder: (order: string[]) => void;
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
 }
@@ -185,6 +187,14 @@ const useStore = create<DeckState>()((set, get) => ({
       syncAppStateToCloud();
     }
     set({ deckOrder: order });
+  },
+  bookOrder: [],
+  setBookOrder: (order) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('book_order', JSON.stringify(order));
+      syncAppStateToCloud();
+    }
+    set({ bookOrder: order });
   },
   playbackSpeed: 1,
   setPlaybackSpeed: (speed) => {
@@ -504,9 +514,12 @@ if (typeof window !== 'undefined') {
 // --- RAPID FLASHCARD MODE ---
 import { Howl } from 'howler';
 
-const makePaperFlipWav = (): string => {
+const hasCyrillic = (s: string) => /[\u0400-\u04FF]/.test(s);
+
+// Very soft, short "tick" (low-passed sine with gentle pitch drop) - Apple-like subtle UI feedback
+const makeSoftFlipWav = (): string => {
   const sr = 22050;
-  const n = Math.floor(sr * 0.14);
+  const n = Math.floor(sr * 0.09);
   const buf = new ArrayBuffer(44 + n * 2);
   const v = new DataView(buf);
   const wr = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
@@ -514,13 +527,13 @@ const makePaperFlipWav = (): string => {
   v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
   v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
   wr(36, 'data'); v.setUint32(40, n * 2, true);
-  let lp = 0;
+  let phase = 0;
   for (let i = 0; i < n; i++) {
     const t = i / n;
-    const env = Math.min(1, t * 25) * Math.pow(1 - t, 2.2);
-    const x = Math.random() * 2 - 1;
-    lp += 0.3 * (x - lp);
-    const sample = (x - lp) * env * 0.8;
+    const freq = 640 - 220 * t;
+    phase += (2 * Math.PI * freq) / sr;
+    const env = Math.min(1, i / (sr * 0.006)) * Math.exp(-t * 7);
+    const sample = Math.sin(phase) * env * 0.35;
     v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, sample)) * 32767, true);
   }
   const bytes = new Uint8Array(buf);
@@ -534,9 +547,9 @@ const getRapidSounds = () => {
   if (typeof window === 'undefined') return null;
   if (!rapidSounds) {
     rapidSounds = {
-      flip: new Howl({ src: [makePaperFlipWav()], format: ['wav'], volume: 0.5 }),
-      success: new Howl({ src: [SUCCESS_B64], format: ['wav'], volume: 0.6 }),
-      error: new Howl({ src: [FAIL_B64], format: ['wav'], volume: 0.6 }),
+      flip: new Howl({ src: [makeSoftFlipWav()], format: ['wav'], volume: 0.3 }),
+      success: new Howl({ src: [SUCCESS_B64], format: ['wav'], volume: 0.4 }),
+      error: new Howl({ src: [FAIL_B64], format: ['wav'], volume: 0.4 }),
     };
   }
   return rapidSounds;
@@ -554,25 +567,35 @@ function RapidFlashcardMode({
   onAnswer: (correct: boolean, wasFlipped: boolean) => void;
 }) {
   const [isFlipped, setIsFlipped] = useState(false);
-  const target = card.targetWord.replace(/\|/g, '');
-  const translation = card.translation;
-  const example = card.sentence && card.sentence !== '-' ? card.sentence : '';
+  // Rounds 1-2 (progress 0,1): DE -> RU. Rounds 3-4 (progress 2,3): RU -> DE. Fixed for the lifetime of this card view.
+  const [reverse] = useState(progress >= 2);
+  const german = card.targetWord.replace(/\|/g, '');
+  let translation = card.translation || '';
+  let example = card.sentence && card.sentence !== '-' ? card.sentence : '';
+  if (!hasCyrillic(translation) && hasCyrillic(example)) {
+    [translation, example] = [example, translation];
+  }
 
   const speak = useCallback(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(target);
+      const u = new SpeechSynthesisUtterance(german);
       u.lang = 'de-DE';
       u.rate = 0.95;
       window.speechSynthesis.speak(u);
     } catch (e) {}
-  }, [target]);
+  }, [german]);
+
+  // DE -> RU: speak German when card appears. RU -> DE: speak German when revealed.
+  useEffect(() => {
+    if (!reverse) speak();
+    return () => { try { window.speechSynthesis?.cancel(); } catch (e) {} };
+  }, [reverse, speak]);
 
   useEffect(() => {
-    speak();
-    return () => { try { window.speechSynthesis?.cancel(); } catch (e) {} };
-  }, [speak]);
+    if (reverse && isFlipped) speak();
+  }, [reverse, isFlipped, speak]);
 
   const flip = useCallback(() => {
     if (locked) return;
@@ -582,11 +605,11 @@ function RapidFlashcardMode({
 
   const answer = useCallback((correct: boolean) => {
     if (locked) return;
+    if (!isFlipped) { flip(); return; }
     const s = getRapidSounds();
     if (correct) s?.success.play(); else s?.error.play();
-    if (!isFlipped) setIsFlipped(true);
-    onAnswer(correct, isFlipped);
-  }, [locked, isFlipped, onAnswer]);
+    onAnswer(correct, true);
+  }, [locked, isFlipped, flip, onAnswer]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -610,6 +633,10 @@ function RapidFlashcardMode({
   const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-12 rounded-[32px] border bg-white border-zinc-200 text-black shadow-xl dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-white dark:shadow-2xl";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
+  const frontText = reverse ? translation : german;
+  const backFirst = reverse ? german : translation;
+  const backSecond = reverse ? translation : german;
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 40 }}
@@ -618,18 +645,7 @@ function RapidFlashcardMode({
       transition={{ duration: 0.25, ease: 'easeOut' }}
       className="w-full flex flex-col items-center"
     >
-      <div className="w-full flex justify-between items-center mb-6 px-2">
-        <button onClick={speak} className="w-10 h-10 rounded-full flex items-center justify-center bg-white dark:bg-[#1c1c1e] border border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white transition-colors" title="R">
-          <Volume2 className="w-5 h-5" />
-        </button>
-        <div className="flex items-center gap-2">
-          {[0, 1, 2, 3].map(i => (
-            <div key={i} className={cn("w-2.5 h-2.5 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-800")} />
-          ))}
-        </div>
-      </div>
-
-      <div className="w-full" style={{ perspective: '1200px' }}>
+      <div className="w-full relative" style={{ perspective: '1200px' }}>
         <motion.div
           className="relative w-full min-h-[360px] md:min-h-[400px] cursor-pointer select-none"
           style={{ transformStyle: 'preserve-3d' }}
@@ -638,21 +654,37 @@ function RapidFlashcardMode({
           onClick={flip}
         >
           <div className={faceBase} style={faceStyle}>
-            <h2 className="text-4xl md:text-5xl font-bold text-center leading-tight">{target}</h2>
-            <span className="absolute bottom-8 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase hidden md:block">Space</span>
-            <span className="absolute bottom-8 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase md:hidden">Tap</span>
+            <h2 className="text-4xl md:text-5xl font-bold text-center leading-tight">{frontText}</h2>
+            <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase hidden md:block">Space</span>
+            <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase md:hidden">Tap</span>
           </div>
 
           <div className={faceBase} style={{ ...faceStyle, transform: 'rotateY(180deg)' }}>
-            <h2 className="text-4xl font-bold mb-4 text-center">{target}</h2>
-            <p className="text-xl text-zinc-500 mb-8 text-center">{translation}</p>
+            <h2 className="text-4xl font-bold mb-3 text-center leading-tight">{backFirst}</h2>
+            <p className="text-xl text-zinc-500 mb-8 text-center">{backSecond}</p>
             {example && (
               <div className="border-t border-zinc-200 dark:border-zinc-800/60 w-3/4 pt-6 flex justify-center">
-                <p className="text-base italic text-zinc-400 text-center leading-relaxed">{example}</p>
+                <p className="text-sm italic text-zinc-400 text-center leading-relaxed">{example}</p>
               </div>
             )}
           </div>
         </motion.div>
+
+        {/* Fixed overlay on the card: sound button + round dots */}
+        <div className="absolute top-5 left-5 right-5 flex justify-between items-center pointer-events-none z-10">
+          <button
+            onClick={(e) => { e.stopPropagation(); speak(); }}
+            className="pointer-events-auto w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
+            title="R"
+          >
+            <Volume2 className="w-[18px] h-[18px]" />
+          </button>
+          <div className="flex items-center gap-2 pr-1">
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700")} />
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="md:hidden flex justify-center gap-6 mt-8">
@@ -2434,6 +2466,8 @@ export const syncAppStateToCloud = async () => {
   
   const order = localStorage.getItem('deck_order');
   if (order) state.deckOrder = JSON.parse(order);
+  const bOrder = localStorage.getItem('book_order');
+  if (bOrder) state.bookOrder = JSON.parse(bOrder);
   
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
@@ -3089,6 +3123,8 @@ export default function App() {
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
+  const [draggedBookId, setDraggedBookId] = useState<string | null>(null);
+  const [dragOverBookId, setDragOverBookId] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [dictationDeckId, setDictationDeckId] = useState<string | null>(null);
   const [shadowingDeckId, setShadowingDeckId] = useState<string | null>(null);
@@ -3141,6 +3177,13 @@ export default function App() {
     if (savedLang === 'DE' || savedLang === 'EN') {
       setAppLanguage(savedLang);
     }
+    try {
+      const savedBookOrder = localStorage.getItem('book_order');
+      if (savedBookOrder) {
+        const parsedB = JSON.parse(savedBookOrder);
+        if (Array.isArray(parsedB)) useStore.setState({ bookOrder: parsedB });
+      }
+    } catch (e) {}
     const savedOrder = localStorage.getItem('deck_order');
     if (savedOrder) {
       try {
@@ -3222,6 +3265,10 @@ try {
             if (state.deckOrder && Array.isArray(state.deckOrder)) {
               localStorage.setItem('deck_order', JSON.stringify(state.deckOrder));
               useStore.getState().setDeckOrder(state.deckOrder);
+            }
+            if (state.bookOrder && Array.isArray(state.bookOrder)) {
+              localStorage.setItem('book_order', JSON.stringify(state.bookOrder));
+              useStore.setState({ bookOrder: state.bookOrder });
             }
             if (state.theory) {
               for (const [key, val] of Object.entries(state.theory)) {
@@ -3510,11 +3557,15 @@ try {
              // If exactly 2 parts: Word;Translation
              // If 3+ parts: Word;Sentence;Translation
              const hasSentence = parts.length >= 3;
+             const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
+             let rTranslation = hasSentence ? parts[1] : parts[1];
+             let rExample = hasSentence ? parts[2] : '-';
+             if (hasSentence && !cyr(rTranslation) && cyr(rExample)) { [rTranslation, rExample] = [rExample, rTranslation]; }
              cards.push({
                 id: crypto.randomUUID(),
                 targetWord: parts[0],
-                sentence: hasSentence ? parts[1] : '-',
-                translation: hasSentence ? parts[2] : parts[1],
+                sentence: rExample,
+                translation: rTranslation,
                 options: [],
                 masteryLevel: 0,
                 isArchived: false,
@@ -3621,6 +3672,22 @@ try {
 
   const handleDragEnd = () => {
     setDraggedDeckId(null);
+  };
+
+  const handleBookDrop = (targetId: string) => {
+    const draggedId = draggedBookId;
+    setDraggedBookId(null);
+    setDragOverBookId(null);
+    if (!draggedId || draggedId === targetId) return;
+    const { books: allBooks, bookOrder: curOrder, setBookOrder: saveOrder } = useStore.getState();
+    const base = (curOrder && curOrder.length > 0) ? [...curOrder] : [];
+    allBooks.forEach(b => { if (!base.includes(b.id)) base.push(b.id); });
+    const from = base.indexOf(draggedId);
+    const to = base.indexOf(targetId);
+    if (from === -1 || to === -1) return;
+    base.splice(from, 1);
+    base.splice(to, 0, draggedId);
+    saveOrder(base);
   };
 
   const handleLoadMore = (cat: string) => {
@@ -3773,18 +3840,21 @@ try {
       <main className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 pt-20 pb-12 md:pt-24 md:pb-24">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <Reorder.Group 
-              axis="y"
-              values={displayBooks}
-              onReorder={(newOrder) => setBookOrder(newOrder.map(b => b.id))}
-              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10 mt-12 pb-16"
-            >
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10 mt-12 pb-16">
               {displayBooks.map(book => (
-                <Reorder.Item key={book.id} value={book} className="w-full h-full relative cursor-grab active:cursor-grabbing">
-                  <div className="w-full h-full min-h-[250px] relative pointer-events-auto">
+                <div
+                  key={book.id}
+                  draggable
+                  onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
+                  onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id); }}
+                  onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
+                  className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
+                >
+                  <div className="w-full h-full min-h-[250px] relative">
                     <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
                   </div>
-                </Reorder.Item>
+                </div>
               ))}
               <div className="w-full h-full min-h-[250px]">
                 <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
@@ -3794,7 +3864,7 @@ try {
                   <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
                 </div>
               </div>
-            </Reorder.Group>
+            </div>
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
