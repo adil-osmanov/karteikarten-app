@@ -65,32 +65,30 @@ const initAudioCtx = () => {
 
 const playTockSound = () => {
   if (typeof window === 'undefined') return;
-  setTimeout(() => {
-    try {
-      const audio = tockPool[tockIdx];
-      tockIdx = (tockIdx + 1) % tockPool.length;
-      audio.currentTime = 0;
-      audio.play().catch(() => {});
-    } catch (e) {}
-  }, 0);
+  try {
+    const audio = tockPool[tockIdx];
+    tockIdx = (tockIdx + 1) % tockPool.length;
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p !== undefined) p.catch(() => {});
+  } catch (e) {}
 };
 
 const playFeedbackSound = (isCorrect: boolean) => {
   if (typeof window === 'undefined') return;
-  setTimeout(() => {
-    try {
-      let audio: HTMLAudioElement;
-      if (isCorrect) {
-         audio = successPool[successIdx];
-         successIdx = (successIdx + 1) % successPool.length;
-      } else {
-         audio = failPool[failIdx];
-         failIdx = (failIdx + 1) % failPool.length;
-      }
-      audio.currentTime = 0;
-      audio.play().catch(() => {});
-    } catch(e) {}
-  }, 0);
+  try {
+    let audio: HTMLAudioElement;
+    if (isCorrect) {
+       audio = successPool[successIdx];
+       successIdx = (successIdx + 1) % successPool.length;
+    } else {
+       audio = failPool[failIdx];
+       failIdx = (failIdx + 1) % failPool.length;
+    }
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p !== undefined) p.catch(() => {});
+  } catch(e) {}
 };
 
 // --- STORE & TYPES ---
@@ -2152,12 +2150,21 @@ const VerbSlot = React.memo(({
         return prev;
       }
 
-      const char = RUSSIAN_TO_QWERTZ[rawChar] || rawChar;
+      let char = RUSSIAN_TO_QWERTZ[rawChar] || rawChar;
       const expectedChar = target[prev.length];
+      
+      if (char === ' ' && prev.endsWith(' ')) {
+         return prev; // ignore redundant manual spaces if we auto-appended
+      }
 
       if (char.toLowerCase() === expectedChar.toLowerCase()) {
         playTockSound();
-        return prev + expectedChar; // keep target casing
+        let nextVal = prev + expectedChar;
+        // Auto-append subsequent spaces
+        while (nextVal.length < target.length && target[nextVal.length] === ' ') {
+          nextVal += ' ';
+        }
+        return nextVal;
       } else {
         playFeedbackSound(false);
         if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
@@ -2217,11 +2224,11 @@ const VerbSlot = React.memo(({
           {label}
         </span>
       )}
-      <div className="flex items-center justify-center flex-wrap gap-x-[1px] text-xl sm:text-2xl font-medium tracking-wide relative z-10">
+      <div className="flex items-center justify-center flex-wrap gap-x-[1px] text-lg sm:text-xl font-medium tracking-wide relative z-10">
         {displayVal.split('').map((char, i) => {
           const isErrorChar = !isSlotSuccess && i === displayVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase();
           return (
-            <span key={i} className={cn(isErrorChar ? "text-red-500" : "text-gray-900 dark:text-white")}>
+            <span key={i} className={cn(isErrorChar ? "text-red-500" : "text-gray-900 dark:text-white", char === ' ' && "whitespace-pre")}>
               {char}
             </span>
           );
@@ -2262,11 +2269,11 @@ function VerbStudyCard({
   const virtualBackspaceRef = useRef<(() => void) | undefined>(undefined);
 
   const targets = [
-    verbInfo.prasens || "",
-    verbInfo.prateritum || "",
+    verbInfo.praesens || "",
+    verbInfo.praeteritum || "",
     verbInfo.perfekt || ""
   ];
-  const labels = ["er / sie / es", "Präteritum", "Perfekt"];
+  const labels = ["Präsens", "Präteritum", "Perfekt"];
 
   const playAudio = useCallback(() => {
     const fullSentence = `er ${targets[0]}, ${targets[1]}, ${targets[2]}.`;
@@ -2379,9 +2386,7 @@ function VerbStudyCard({
                   "w-2.5 h-2.5 rounded-full transition-all duration-300",
                   (card.isArchived || visualMastery > step) 
                     ? "bg-blue-600 dark:bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
-                    : step === visualMastery && !isSuccess && !isHilfe
-                      ? "bg-blue-500/40 animate-pulse"
-                      : "bg-gray-200 dark:bg-white/10"
+                    : "bg-gray-200 dark:bg-white/10"
                 )}
               />
             )})}
@@ -2400,7 +2405,6 @@ function VerbStudyCard({
         </div>
 
         <div className="flex flex-row items-center justify-center gap-3 sm:gap-6 w-full max-w-lg mb-8">
-          <span className="text-[14px] font-medium text-gray-400 dark:text-gray-500 mr-1 sm:mr-2">er</span>
           {targets.map((target, idx) => (
             <VerbSlot
               key={`${card.id}-${idx}`}
