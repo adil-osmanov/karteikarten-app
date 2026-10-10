@@ -4127,7 +4127,9 @@ try {
 
           <div className="space-y-16">
             {(() => {
-              const cefrLevels: CEFRLevel[] = activeBook?.activeLevels?.length ? activeBook.activeLevels : ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
+              const ORDERED_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
+              const rawLevels: CEFRLevel[] = activeBook?.activeLevels?.length ? activeBook.activeLevels : ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
+              const cefrLevels = [...rawLevels].sort((a, b) => ORDERED_LEVELS.indexOf(a) - ORDERED_LEVELS.indexOf(b));
               const levelConfig: Record<CEFRLevel, { label: string, badgeClass: string }> = {
                 'A1': { label: 'A1', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
                 'A2': { label: 'A2', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' },
