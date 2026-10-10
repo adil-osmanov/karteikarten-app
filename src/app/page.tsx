@@ -1671,10 +1671,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
           const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
           if (type === 'light') {
             setCoverLight(dataUrl);
-            if (coverLight === coverDark) setCoverDark(dataUrl);
           } else {
             setCoverDark(dataUrl);
-            if (coverLight === coverDark) setCoverLight(dataUrl);
           }
         }
       };
@@ -1734,7 +1732,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
                 {coverLight ? (
                   <div className="relative h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10 group">
                     <img src={coverLight} alt="Light Cover" className="w-full h-full object-cover" />
-                    <button onClick={() => { setCoverLight(null); if (coverLight === coverDark) setCoverDark(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => { setCoverLight(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Entfernen</span>
                     </button>
                   </div>
@@ -1754,7 +1752,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
                 {coverDark ? (
                   <div className="relative h-24 rounded-xl overflow-hidden border border-gray-200 dark:border-white/10 group">
                     <img src={coverDark} alt="Dark Cover" className="w-full h-full object-cover" />
-                    <button onClick={() => { setCoverDark(null); if (coverLight === coverDark) setCoverLight(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => { setCoverDark(null); }} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded-full shadow-sm">Entfernen</span>
                     </button>
                   </div>
@@ -2210,29 +2208,31 @@ const VerbSlot = React.memo(({
   const isSlotSuccess = displayVal === target;
 
   return (
-    <div className="flex flex-col items-center">
-      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{label}</span>
-      <div className={cn(
-        "relative min-h-[36px] flex items-center justify-center border-b-2 pb-1 px-2 min-w-[100px] sm:min-w-[120px] transition-colors duration-300",
-        isSlotSuccess ? "border-green-500" : isActive ? "border-blue-500" : "border-gray-200 dark:border-gray-700"
-      )}>
-        <div className="flex items-center justify-center flex-wrap gap-x-[1px] text-xl sm:text-2xl font-medium tracking-wide">
-          {displayVal.split('').map((char, i) => {
-            const isErrorChar = !isSlotSuccess && i === displayVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase();
-            return (
-              <span key={i} className={cn(isErrorChar ? "text-red-500" : "text-gray-900 dark:text-white")}>
-                {char}
-              </span>
-            );
-          })}
-          {isActive && !isSuccess && !isHilfe && (
-            <motion.span
-              animate={{ opacity: [1, 0] }}
-              transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
-              className="w-[2px] h-[1em] bg-blue-500 ml-[1px]"
-            />
-          )}
-        </div>
+    <div className={cn(
+      "relative min-h-[40px] flex items-center justify-center border-b-2 pb-1 px-1 min-w-[90px] sm:min-w-[130px] transition-colors duration-300",
+      isSlotSuccess ? "border-green-500" : isActive ? "border-blue-500" : "border-gray-200 dark:border-gray-700"
+    )}>
+      {displayVal.length === 0 && (
+        <span className="absolute text-[11px] sm:text-[13px] font-medium text-gray-300 dark:text-gray-600 tracking-wide pointer-events-none transition-opacity duration-300">
+          {label}
+        </span>
+      )}
+      <div className="flex items-center justify-center flex-wrap gap-x-[1px] text-xl sm:text-2xl font-medium tracking-wide relative z-10">
+        {displayVal.split('').map((char, i) => {
+          const isErrorChar = !isSlotSuccess && i === displayVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase();
+          return (
+            <span key={i} className={cn(isErrorChar ? "text-red-500" : "text-gray-900 dark:text-white")}>
+              {char}
+            </span>
+          );
+        })}
+        {isActive && !isSuccess && !isHilfe && (
+          <motion.span
+            animate={{ opacity: [1, 0] }}
+            transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
+            className="w-[2px] h-[1em] bg-blue-500 ml-[1px]"
+          />
+        )}
       </div>
     </div>
   );
@@ -2327,7 +2327,13 @@ function VerbStudyCard({
   ));
 
   return (
-    <div className="w-full flex flex-col items-center justify-center relative min-h-[400px]">
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.2 }}
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
+    >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
           onClick={playAudio}
@@ -2393,8 +2399,8 @@ function VerbStudyCard({
           </p>
         </div>
 
-        <div className="flex items-end justify-center gap-2 sm:gap-6 w-full max-w-lg mb-8">
-          <span className="text-[10px] font-semibold text-gray-400 mr-2 sm:mr-4 mb-2">er</span>
+        <div className="flex flex-row items-center justify-center gap-3 sm:gap-6 w-full max-w-lg mb-8">
+          <span className="text-[14px] font-medium text-gray-400 dark:text-gray-500 mr-1 sm:mr-2">er</span>
           {targets.map((target, idx) => (
             <VerbSlot
               key={`${card.id}-${idx}`}
@@ -2438,7 +2444,7 @@ function VerbStudyCard({
            />
          </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 export default function App() {
