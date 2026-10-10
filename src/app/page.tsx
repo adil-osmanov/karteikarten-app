@@ -3654,7 +3654,7 @@ try {
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
-          {(!activeBook?.training_mode || activeBook.training_mode === 'standard_cloze') {activeBookId !== 'verbs-de' && ({activeBookId !== 'verbs-de' && ( (
+          {(!activeBook?.training_mode || activeBook.training_mode === 'standard_cloze') && (
           <div className="flex justify-center mb-8 pt-2">
             <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.08]">
               {(["Grammatik", "Wörter"] as const).map((tab) => (
