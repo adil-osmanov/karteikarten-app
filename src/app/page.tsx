@@ -502,19 +502,49 @@ if (typeof window !== 'undefined') {
 
 
 // --- RAPID FLASHCARD MODE ---
+import { Howl } from 'howler';
+
 function RapidFlashcardMode({
   card,
+  score,
+  playbackSpeed,
+  onSpeedChange,
   onAnswer
 }: {
   card: Flashcard;
-  onAnswer: (correct: boolean, isHilfe: boolean) => void;
+  score: number;
+  playbackSpeed: number;
+  onSpeedChange: (speed: number) => void;
+  onAnswer: (correct: boolean) => void;
 }) {
   const [isFlipped, setIsFlipped] = useState(false);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
   const target = card.targetWord.replace(/\|/g, ''); 
   const translation = card.translation;
 
+  const playAudio = useCallback(async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setIsAudioLoading(true);
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: target, speed: playbackSpeed })
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const sound = new Howl({ src: [url], format: ['mp3'], html5: true });
+        sound.play();
+      }
+    } catch(e) {} finally {
+      setIsAudioLoading(false);
+    }
+  }, [target, playbackSpeed]);
+
   useEffect(() => {
     setIsFlipped(false);
+    playAudio();
   }, [card]);
 
   useEffect(() => {
@@ -524,10 +554,10 @@ function RapidFlashcardMode({
         setIsFlipped(prev => !prev);
       } else if (e.key === 'ArrowRight') {
         if (!isFlipped) setIsFlipped(true);
-        else onAnswer(true, false);
+        else onAnswer(true);
       } else if (e.key === 'ArrowLeft') {
         if (!isFlipped) setIsFlipped(true);
-        else onAnswer(false, false);
+        else onAnswer(false);
       }
     };
     window.addEventListener('keydown', handleKey);
@@ -535,37 +565,75 @@ function RapidFlashcardMode({
   }, [isFlipped, onAnswer]);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mx-auto px-4" style={{ perspective: '1000px' }}>
+    <div className="flex-1 flex flex-col items-center justify-center w-full max-w-2xl mx-auto px-4" style={{ perspective: '1200px' }}>
+      {/* 4 Rounds Header inside component */}
+      <div className="w-full flex justify-between items-center mb-6 px-2">
+        <div className="flex items-center gap-3">
+          <button onClick={playAudio} className={cn("w-10 h-10 rounded-full flex items-center justify-center bg-[#1c1c1e] border border-zinc-800 text-zinc-400 hover:text-white transition-colors", isAudioLoading && "animate-pulse")} title="Listen">
+            <Volume2 className="w-5 h-5" />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onSpeedChange(playbackSpeed === 1 ? 0.75 : playbackSpeed === 0.75 ? 0.5 : 1); }} className="px-3 h-10 rounded-full flex items-center justify-center bg-[#1c1c1e] border border-zinc-800 text-zinc-400 hover:text-white text-sm font-semibold transition-colors" title="Speed">
+            {playbackSpeed}x
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < score ? "bg-blue-500" : "bg-zinc-800")} />
+          ))}
+        </div>
+      </div>
+
       <motion.div 
-        className="relative w-full h-[350px] sm:h-[400px] cursor-pointer"
+        className="relative w-full min-h-[360px] md:min-h-[400px] cursor-pointer"
         style={{ transformStyle: 'preserve-3d' }}
         animate={{ rotateY: isFlipped ? 180 : 0 }}
         transition={{ duration: 0.6, type: 'spring', stiffness: 260, damping: 20 }}
-        onClick={() => setIsFlipped(prev => !prev)}
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.6}
+        onDragEnd={(e, info) => {
+          const threshold = 80;
+          if (info.offset.x > threshold) {
+            if (!isFlipped) setIsFlipped(true);
+            else onAnswer(true);
+          } else if (info.offset.x < -threshold) {
+            if (!isFlipped) setIsFlipped(true);
+            else onAnswer(false);
+          }
+        }}
       >
         {/* Front */}
-        <div className="absolute inset-0 bg-white dark:bg-[#1C1C1E] border border-gray-100 dark:border-white/10 rounded-[32px] shadow-2xl flex flex-col items-center justify-center p-8" style={{ backfaceVisibility: 'hidden' }}>
-           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white text-center leading-tight">{target}</h2>
-           <span className="absolute bottom-6 text-xs sm:text-sm text-gray-400 font-medium tracking-widest uppercase">Tap or Space</span>
+        <div className="absolute inset-0 bg-[#1c1c1e] border border-zinc-800 rounded-[32px] shadow-2xl flex flex-col items-center justify-center p-8 md:p-12" style={{ backfaceVisibility: 'hidden' }}>
+           <h2 className="text-4xl md:text-5xl font-bold text-white text-center leading-tight">{target}</h2>
+           <span className="absolute bottom-8 text-xs sm:text-sm text-zinc-600 font-medium tracking-widest uppercase">Tap or Space</span>
         </div>
 
         {/* Back */}
-        <div className="absolute inset-0 bg-blue-600 dark:bg-blue-500 rounded-[32px] shadow-2xl flex flex-col items-center justify-center p-8" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
-           <h2 className="text-3xl md:text-4xl font-bold text-white text-center mb-6 leading-tight">{translation}</h2>
+        <div className="absolute inset-0 bg-[#1c1c1e] border border-zinc-800 rounded-[32px] shadow-2xl flex flex-col items-center justify-center p-8 md:p-12" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+           <h2 className="text-4xl font-bold text-white mb-2 text-center">{target}</h2>
+           <p className="text-xl text-zinc-400 mb-8 text-center">{translation}</p>
            {card.sentence && card.sentence !== '-' && (
-             <p className="text-lg sm:text-xl font-medium text-blue-100 text-center opacity-90">{card.sentence}</p>
+             <>
+               <div className="border-t border-zinc-800/60 w-3/4 pt-6" />
+               <p className="text-base text-zinc-500 italic text-center leading-relaxed">{card.sentence}</p>
+             </>
            )}
-           
-           <div className="absolute bottom-6 w-full px-6 sm:px-10 flex justify-between">
-             <button onClick={(e) => { e.stopPropagation(); onAnswer(false, false); }} className="w-14 h-14 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-95 text-white shadow-sm" title="Не помню (Arrow Left)">
-                <X className="w-6 h-6" />
-             </button>
-             <button onClick={(e) => { e.stopPropagation(); onAnswer(true, false); }} className="w-14 h-14 bg-white hover:bg-white/90 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 text-blue-600" title="Помню (Arrow Right)">
-                <Check className="w-6 h-6" />
-             </button>
-           </div>
         </div>
       </motion.div>
+
+      {/* Action Bar (Outside) */}
+      <AnimatePresence>
+        {isFlipped && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="flex justify-center gap-6 mt-8">
+            <button onClick={() => onAnswer(false)} className="w-16 h-16 rounded-full bg-zinc-800/80 backdrop-blur-md border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 flex justify-center items-center shadow-lg transition-all active:scale-95">
+              <X className="w-7 h-7" />
+            </button>
+            <button onClick={() => onAnswer(true)} className="w-16 h-16 rounded-full bg-zinc-800/80 backdrop-blur-md border border-zinc-700/50 text-blue-500 hover:bg-zinc-700 hover:border-zinc-600 hover:text-blue-400 flex justify-center items-center shadow-lg transition-all active:scale-95">
+              <Check className="w-7 h-7" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -703,15 +771,23 @@ function StudyInterface({
             <RapidFlashcardMode
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
-              onAnswer={(correct, isHilfe) => {
-                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (correct && !isHilfe) {
-                  setMasteredInSession(prev => prev + 1);
-                } else {
-                  if (!isDrillMode) {
-                    setInitialTotal(prev => prev + 1);
+              score={rapidScores[currentCardSnapshot.id] || 0}
+              playbackSpeed={playbackSpeed}
+              onSpeedChange={(s) => setPlaybackSpeed(s)}
+              onAnswer={(correct) => {
+                const s = rapidScores[currentCardSnapshot.id] || 0;
+                if (correct) {
+                  if (s + 1 >= 4) {
+                    answerCard(currentDeckId, currentCardSnapshot.id, true, false);
+                    setMasteredInSession(prev => prev + 1);
+                    setRapidScores(prev => { const n = {...prev}; delete n[currentCardSnapshot.id]; return n; });
+                  } else {
+                    setRapidScores(prev => ({ ...prev, [currentCardSnapshot.id]: s + 1 }));
                     setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
                   }
+                } else {
+                  setRapidScores(prev => ({ ...prev, [currentCardSnapshot.id]: 0 }));
+                  setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
                 }
                 handleNext();
               }}
