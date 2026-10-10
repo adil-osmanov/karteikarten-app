@@ -3789,27 +3789,43 @@ try {
     setDraggedDeckId(null);
   };
 
-  const handleBookDrop = async (targetId: string) => {
-    const draggedId = draggedBookId;
+  const handleBookDrop = async (targetId: string, e?: React.DragEvent) => {
+    // Надежно получаем draggedId из dataTransfer
+    const draggedId = e?.dataTransfer?.getData('bookId') || draggedBookId;
+    
     setDraggedBookId(null);
     setDragOverBookId(null);
+    
     if (!draggedId || draggedId === targetId) return;
 
     const { books: allBooks, bookOrder: curOrder, setBookOrder: saveOrder, updateBookSettings } = useStore.getState();
     const draggedBook = allBooks.find(b => b.id === draggedId);
     let targetBook = allBooks.find(b => b.id === targetId);
 
-    let newCategory: string | null = null;
+    if (!draggedBook) return;
+
+    // Определяем источник и назначение (эмуляция библиотеки DnD для строгости)
+    const sourceDroppableId = draggedBook.category === 'coursebook' || draggedBook.category === 'book' ? 'coursebook' : 'flashcards';
+    let destinationDroppableId = sourceDroppableId;
+
     if (targetId.startsWith('section-')) {
-      newCategory = targetId.replace('section-', '');
+      const secCat = targetId.replace('section-', '');
+      destinationDroppableId = secCat === 'coursebook' ? 'coursebook' : 'flashcards';
       targetBook = undefined;
-    } else if (draggedBook && targetBook) {
-      const draggedCat = draggedBook.category === 'coursebook' || draggedBook.category === 'book' ? 'coursebook' : 'deck';
-      const targetCat = targetBook.category === 'coursebook' || targetBook.category === 'book' ? 'coursebook' : 'deck';
-      if (draggedCat !== targetCat) {
-        newCategory = targetBook.category || 'deck';
-      }
+    } else if (targetBook) {
+      destinationDroppableId = targetBook.category === 'coursebook' || targetBook.category === 'book' ? 'coursebook' : 'flashcards';
     }
+
+    const result = {
+      draggedId,
+      targetId,
+      source: { droppableId: sourceDroppableId },
+      destination: { droppableId: destinationDroppableId }
+    };
+    console.log('Drop Result:', result);
+
+    const isCrossListDrop = sourceDroppableId !== destinationDroppableId;
+    const newCategoryToSave = destinationDroppableId === 'coursebook' ? 'coursebook' : 'deck';
 
     // 1) ОПТИМИСТИЧНЫЙ UI: Сразу переставляем карточку в массиве сортировки
     const base = (curOrder && curOrder.length > 0) ? [...curOrder] : [];
@@ -3822,29 +3838,29 @@ try {
       base.splice(from, 1);
       base.splice(to, 0, draggedId);
       saveOrder(base);
-    } else if (from !== -1 && newCategory) {
+    } else if (from !== -1 && isCrossListDrop) {
        base.splice(from, 1);
        base.push(draggedId);
        saveOrder(base);
     }
 
-    // 2) АСИНХРОННЫЙ ЗАПРОС К SUPABASE С ОБРАБОТКОЙ ОШИБОК И ИНВАЛИДАЦИЕЙ КЭША
-    if (newCategory && draggedBook) {
-      const prevCategory = draggedBook.category;
+    // 2) АСИНХРОННЫЙ ЗАПРОС К SUPABASE
+    if (isCrossListDrop) {
       try {
-        const ok = await updateBookSettings(draggedId, { category: newCategory });
+        // Оптимистично обновляем стейт category в UI ДО завершения запроса (через updateBookSettings внутри)
+        const ok = await updateBookSettings(draggedId, { category: newCategoryToSave });
         if (ok) {
            toast.success('Verschoben!');
+           // ЖЕСТКАЯ ИНВАЛИДАЦИЯ КЭША
            router.refresh();
         } else {
            throw new Error('Supabase update returned false');
         }
-      } catch (e: any) {
-        console.error("DND Error:", e);
+      } catch (err: any) {
+        console.error("DND Database Error:", err);
         toast.error('Fehler beim Verschieben');
-        // Rollback state
+        // Откатываем порядок
         saveOrder(curOrder); 
-        // updateBookSettings inside already rolls back the book category state
       }
     }
   };
@@ -4007,7 +4023,7 @@ try {
                 // If dropped on the section container itself, and not on a specific book
                 if ((e.target as HTMLElement).closest('.cursor-grab')) return;
                 e.preventDefault();
-                handleBookDrop('section-coursebook');
+                handleBookDrop('section-coursebook', e);
               }}
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
@@ -4019,7 +4035,7 @@ try {
                     draggable
                     onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
-                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id); }}
+                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
                     onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
                     className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                   >
@@ -4037,7 +4053,7 @@ try {
               onDrop={(e) => {
                 if ((e.target as HTMLElement).closest('.cursor-grab')) return;
                 e.preventDefault();
-                handleBookDrop('section-deck');
+                handleBookDrop('section-deck', e);
               }}
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
@@ -4049,7 +4065,7 @@ try {
                     draggable
                     onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
-                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id); }}
+                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
                     onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
                     className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                   >
