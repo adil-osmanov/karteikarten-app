@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useTransition, useMemo } from "react";
 import { 
-  Trash2, BookOpen, Edit2, Upload, FileUp, 
+  Check, Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle
@@ -100,6 +100,8 @@ export interface BookMeta {
   tintColor: string;
   coverImage?: string | null;
   activeLevels: LanguageLevel[];
+  category?: 'book' | 'deck';
+  training_mode?: 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards';
   coverType?: 'color' | 'image';
   coverValue?: string;
   accentColor?: string;
@@ -200,6 +202,7 @@ const useStore = create<DeckState>()((set, get) => ({
     const payload = {
       id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
+      category: book.category || 'book', training_mode: book.training_mode || 'standard_cloze',
       activeLevels: book.activeLevels || ['A1']
     };
     
@@ -237,6 +240,7 @@ const useStore = create<DeckState>()((set, get) => ({
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
+      category: book.category || 'book', training_mode: book.training_mode || 'standard_cloze',
       activeLevels: book.activeLevels || ['A1']
     };
     
@@ -496,6 +500,76 @@ if (typeof window !== 'undefined') {
 }
 
 
+
+// --- RAPID FLASHCARD MODE ---
+function RapidFlashcardMode({
+  card,
+  onAnswer
+}: {
+  card: Flashcard;
+  onAnswer: (correct: boolean, isHilfe: boolean) => void;
+}) {
+  const [isFlipped, setIsFlipped] = useState(false);
+  const target = card.targetWord.replace(/\|/g, ''); 
+  const translation = card.translation;
+
+  useEffect(() => {
+    setIsFlipped(false);
+  }, [card]);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === ' ') {
+        e.preventDefault();
+        setIsFlipped(prev => !prev);
+      } else if (e.key === 'ArrowRight') {
+        if (!isFlipped) setIsFlipped(true);
+        else onAnswer(true, false);
+      } else if (e.key === 'ArrowLeft') {
+        if (!isFlipped) setIsFlipped(true);
+        else onAnswer(false, false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isFlipped, onAnswer]);
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mx-auto px-4" style={{ perspective: '1000px' }}>
+      <motion.div 
+        className="relative w-full h-[350px] sm:h-[400px] cursor-pointer"
+        style={{ transformStyle: 'preserve-3d' }}
+        animate={{ rotateY: isFlipped ? 180 : 0 }}
+        transition={{ duration: 0.6, type: 'spring', stiffness: 260, damping: 20 }}
+        onClick={() => setIsFlipped(prev => !prev)}
+      >
+        {/* Front */}
+        <div className="absolute inset-0 bg-white dark:bg-[#1C1C1E] border border-gray-100 dark:border-white/10 rounded-[32px] shadow-2xl flex flex-col items-center justify-center p-8" style={{ backfaceVisibility: 'hidden' }}>
+           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white text-center leading-tight">{target}</h2>
+           <span className="absolute bottom-6 text-xs sm:text-sm text-gray-400 font-medium tracking-widest uppercase">Tap or Space</span>
+        </div>
+
+        {/* Back */}
+        <div className="absolute inset-0 bg-blue-600 dark:bg-blue-500 rounded-[32px] shadow-2xl flex flex-col items-center justify-center p-8" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+           <h2 className="text-3xl md:text-4xl font-bold text-white text-center mb-6 leading-tight">{translation}</h2>
+           {card.sentence && card.sentence !== '-' && (
+             <p className="text-lg sm:text-xl font-medium text-blue-100 text-center opacity-90">{card.sentence}</p>
+           )}
+           
+           <div className="absolute bottom-6 w-full px-6 sm:px-10 flex justify-between">
+             <button onClick={(e) => { e.stopPropagation(); onAnswer(false, false); }} className="w-14 h-14 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-95 text-white shadow-sm" title="Не помню (Arrow Left)">
+                <X className="w-6 h-6" />
+             </button>
+             <button onClick={(e) => { e.stopPropagation(); onAnswer(true, false); }} className="w-14 h-14 bg-white hover:bg-white/90 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 text-blue-600" title="Помню (Arrow Right)">
+                <Check className="w-6 h-6" />
+             </button>
+           </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // --- STUDY INTERFACE ---
 
 function StudyInterface({ 
@@ -503,15 +577,13 @@ function StudyInterface({
   onBack,
   reviewCards,
   isDrillMode,
-  isVerbBook,
-  isPrepBook
+  trainingMode
 }: { 
   deckId?: string, 
   onBack: () => void,
   reviewCards?: { deckId: string, card: Flashcard }[],
   isDrillMode?: boolean,
-  isVerbBook?: boolean,
-  isPrepBook?: boolean
+  trainingMode?: string
 }) {
   const { answerCard, decks } = useStore();
   
@@ -627,7 +699,24 @@ function StudyInterface({
 
       <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
-          {isPrepBook ? (
+          {trainingMode === 'rapid_flashcards' ? (
+            <RapidFlashcardMode
+              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              card={liveCard}
+              onAnswer={(correct, isHilfe) => {
+                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
+                if (correct && !isHilfe) {
+                  setMasteredInSession(prev => prev + 1);
+                } else {
+                  if (!isDrillMode) {
+                    setInitialTotal(prev => prev + 1);
+                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
+                  }
+                }
+                handleNext();
+              }}
+            />
+          ) : trainingMode === 'preposition_drill' ? (
             <PrepStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
@@ -645,7 +734,7 @@ function StudyInterface({
               }}
               onNext={handleNext}
             />
-          ) : isVerbBook ? (
+          ) : trainingMode === 'starke_verben' ? (
             <VerbStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
@@ -1646,6 +1735,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const { appLanguage } = useStore();
   const [title, setTitle] = useState(book?.title || "");
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
+  const [category, setCategory] = useState<'book' | 'deck'>(book?.category || 'book');
+  const [trainingMode, setTrainingMode] = useState<'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards'>(book?.training_mode || 'standard_cloze');
   const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue || "#1C1C1E");
   
   const initialCoverStr = book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null);
@@ -1725,6 +1816,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
       language: book?.language || appLanguage,
       title: title.trim(),
       subtitle: subtitle.trim(),
+      category,
+      training_mode: trainingMode,
       tintColor,
       coverImage: finalCoverImage,
       activeLevels: activeLevels.length ? activeLevels : ['A1']
@@ -1739,6 +1832,24 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
         <div className="space-y-3">
           <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
           <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
+          
+          <div className="flex flex-col gap-2 pt-2">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Kategorie</label>
+            <select value={category} onChange={e => setCategory(e.target.value as any)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
+              <option value="book">Bücher (Lehrbücher)</option>
+              <option value="deck">Grammatik & Decks</option>
+            </select>
+          </div>
+          
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Trainingsmodus</label>
+            <select value={trainingMode} onChange={e => setTrainingMode(e.target.value as any)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
+              <option value="standard_cloze">Standard Cloze (Lückentext)</option>
+              <option value="starke_verben">Starke Verben (3 Formen)</option>
+              <option value="preposition_drill">Verben mit Präpositionen</option>
+              <option value="rapid_flashcards">Rapid Flashcards (Neu)</option>
+            </select>
+          </div>
         </div>
         
         <div className="space-y-4">
@@ -2923,6 +3034,8 @@ try {
               language: b.language || lb?.language,
               title: b.title || lb?.title,
               subtitle: b.subtitle || lb?.subtitle,
+              category: b.category || lb?.category || 'book',
+              training_mode: b.training_mode || lb?.training_mode || 'standard_cloze',
               tintColor: b.tintColor || b.tintcolor || lb?.tintColor || '#007AFF',
               coverImage: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || lb?.coverImage || null,
               activeLevels: b.activeLevels || b.activelevels || lb?.activeLevels || ['A1'],
@@ -3051,36 +3164,48 @@ try {
 
   if (activeDeckId) {
     const currentBookId = decks.find(d => d.id === activeDeckId)?.bookId;
-    const isVerbBook = currentBookId === 'verbs-de';
-    const currentBookTitle = useStore.getState().books.find(b => b.id === currentBookId)?.title || '';
-    const isPrepBook = currentBookId === 'prep-verbs-de' || currentBookTitle.toLowerCase().includes('präposition');
+    const currentBook = useStore.getState().books.find(b => b.id === currentBookId);
+    let tm = currentBook?.training_mode;
+    if (!tm) {
+      if (currentBookId === 'verbs-de') tm = 'starke_verben';
+      else if (currentBookId === 'prep-verbs-de' || (currentBook?.title.toLowerCase().includes('präposition'))) tm = 'preposition_drill';
+      else tm = 'standard_cloze';
+    }
     return (
       <>
-        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)}  isVerbBook={isVerbBook} isPrepBook={isPrepBook} />
+        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} trainingMode={tm} />
       </>
     );
   }
 
   if (reviewCards) {
     const currentBookId = reviewCards.length > 0 ? decks.find(d => d.id === reviewCards[0].deckId)?.bookId : null;
-    const isVerbBook = currentBookId === 'verbs-de';
-    const currentBookTitle = useStore.getState().books.find(b => b.id === currentBookId)?.title || '';
-    const isPrepBook = currentBookId === 'prep-verbs-de' || currentBookTitle.toLowerCase().includes('präposition');
+    const currentBook = useStore.getState().books.find(b => b.id === currentBookId);
+    let tm = currentBook?.training_mode;
+    if (!tm) {
+      if (currentBookId === 'verbs-de') tm = 'starke_verben';
+      else if (currentBookId === 'prep-verbs-de' || (currentBook?.title.toLowerCase().includes('präposition'))) tm = 'preposition_drill';
+      else tm = 'standard_cloze';
+    }
     return (
       <>
-        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)}  isVerbBook={isVerbBook} isPrepBook={isPrepBook} />
+        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} trainingMode={tm} />
       </>
     );
   }
 
   if (drillCards) {
     const currentBookId = drillCards.length > 0 ? decks.find(d => d.id === drillCards[0].deckId)?.bookId : null;
-    const isVerbBook = currentBookId === 'verbs-de';
-    const currentBookTitle = useStore.getState().books.find(b => b.id === currentBookId)?.title || '';
-    const isPrepBook = currentBookId === 'prep-verbs-de' || currentBookTitle.toLowerCase().includes('präposition');
+    const currentBook = useStore.getState().books.find(b => b.id === currentBookId);
+    let tm = currentBook?.training_mode;
+    if (!tm) {
+      if (currentBookId === 'verbs-de') tm = 'starke_verben';
+      else if (currentBookId === 'prep-verbs-de' || (currentBook?.title.toLowerCase().includes('präposition'))) tm = 'preposition_drill';
+      else tm = 'standard_cloze';
+    }
     return (
       <>
-        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)}  isVerbBook={isVerbBook} isPrepBook={isPrepBook} />
+        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} trainingMode={tm} />
       </>
     );
   }
@@ -3391,17 +3516,40 @@ try {
             <div className="mb-6 mt-2">
               <h1 className="text-[28px] md:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">Bibliothek</h1>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
-              {books.filter(b => b.language === appLanguage).map(book => (
-                <BookCard key={book.id} book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
-              ))}
-              <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
-                <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
-                  <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
+            {/* Bücher Carousel */}
+            <div className="mb-12 relative">
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-6 tracking-tight">Lehrbücher</h2>
+              <div className="flex overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-5 sm:gap-6 pb-6 -mx-4 px-4 sm:mx-0 sm:px-0" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                {books.filter(b => b.language === appLanguage && (!b.category || b.category === 'book')).map(book => (
+                  <div key={book.id} className="snap-start shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
+                    <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                  </div>
+                ))}
+                
+                <div className="snap-start shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
+                  <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-[210px] sm:h-[240px] md:h-[270px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-sm hover:shadow-md hover:-translate-y-1">
+                    <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
+                      <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
+                    </div>
+                    <span className="font-semibold text-[13px] sm:text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
+                  </div>
                 </div>
-                <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
               </div>
             </div>
+
+            {/* Grammatik & Decks Carousel */}
+            {books.filter(b => b.language === appLanguage && b.category === 'deck').length > 0 && (
+              <div className="mb-10 relative">
+                <h2 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-6 tracking-tight">Grammatik & Decks</h2>
+                <div className="flex overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-5 sm:gap-6 pb-6 -mx-4 px-4 sm:mx-0 sm:px-0" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                  {books.filter(b => b.language === appLanguage && b.category === 'deck').map(book => (
+                    <div key={book.id} className="snap-start shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
+                      <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
