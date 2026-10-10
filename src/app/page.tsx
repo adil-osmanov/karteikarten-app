@@ -234,7 +234,9 @@ const useStore = create<DeckState>()((set, get) => ({
     
     if (error) {
       console.error("SUPABASE ERROR:", error);
-      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
+      if (typeof window !== 'undefined' && (window as any).toast) {
+        (window as any).toast.error("Fehler beim Erstellen des Buches.");
+      }
       set({ books: previousBooks }); // Rollback on failure
     }
   },
@@ -280,24 +282,36 @@ const useStore = create<DeckState>()((set, get) => ({
     };
     
     let { data, error } = await supabase.from('books').update(payload).eq('id', book.id).select();
+    
+    // If 0 rows updated, it means the book is missing in Supabase (e.g. fallback book verbs-de). Try to UPSERT it!
     if (!error && (!data || data.length === 0)) {
-       error = { message: 'RLS blocked update or row not found', code: '403', details: '' };
+       const upsertPayload = { id: book.id, ...payload };
+       const upsertRes = await supabase.from('books').upsert(upsertPayload).select();
+       error = upsertRes.error;
+       data = upsertRes.data;
+       
+       if (!error && (!data || data.length === 0)) {
+         error = { message: 'RLS blocked update/upsert', code: '403', details: '' } as any;
+       }
     }
     
     if (error && error.message.includes('does not exist')) {
+       // fallback for older schema
        const fallbackPayload = {
-         language: book.language, title: book.title, subtitle: book.subtitle || null,
+         id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
          tintcolor: book.tintColor || '#000000', 
          coverimage: book.coverImage || null,
          activelevels: book.activeLevels || ['A1']
        };
-       const fallbackRes = await supabase.from('books').update(fallbackPayload).eq('id', book.id);
+       const fallbackRes = await supabase.from('books').upsert(fallbackPayload).select();
        error = fallbackRes.error;
+       if (!error && (!fallbackRes.data || fallbackRes.data.length === 0)) {
+         error = { message: 'RLS blocked fallback upsert', code: '403', details: '' } as any;
+       }
     }
-    
     if (error) {
       console.error("SUPABASE ERROR:", error);
-      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
+      if (typeof window !== 'undefined') toast.error("Fehler: Buch konnte nicht gespeichert werden. (RLS oder ID fehlt)");
       set({ books: previousBooks });
     }
   },
@@ -309,7 +323,7 @@ const useStore = create<DeckState>()((set, get) => ({
     
     if (error) {
       console.error("SUPABASE ERROR:", error);
-      if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
+      if (typeof window !== 'undefined') toast.error("Fehler: Buch konnte nicht gespeichert werden. (RLS oder ID fehlt)");
       set({ books: previousBooks });
     }
   },
