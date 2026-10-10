@@ -502,13 +502,15 @@ function StudyInterface({
   onBack,
   reviewCards,
   isDrillMode,
-  isVerbBook
+  isVerbBook,
+  isPrepBook
 }: { 
   deckId?: string, 
   onBack: () => void,
   reviewCards?: { deckId: string, card: Flashcard }[],
   isDrillMode?: boolean,
-  isVerbBook?: boolean
+  isVerbBook?: boolean,
+  isPrepBook?: boolean
 }) {
   const { answerCard, decks } = useStore();
   
@@ -624,7 +626,25 @@ function StudyInterface({
 
       <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
-          {isVerbBook ? (
+          {isPrepBook ? (
+            <PrepStudyCard
+              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              card={liveCard}
+              deckTitle={reviewCards ? currentDeckTitle : undefined}
+              onAnswer={(id, correct, isHilfe) => {
+                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
+                if (correct && !isHilfe) {
+                  setMasteredInSession(prev => prev + 1);
+                } else {
+                  if (!isDrillMode) {
+                    setInitialTotal(prev => prev + 1);
+                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
+                  }
+                }
+              }}
+              onNext={handleNext}
+            />
+          ) : isVerbBook ? (
             <VerbStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
@@ -2240,6 +2260,216 @@ const VerbSlot = React.memo(({
     </div>
   );
 });
+
+// --- PREP STUDY CARD ---
+function PrepStudyCard({
+  card, 
+  deckTitle, 
+  onAnswer,
+  onNext
+}: {
+  card: Flashcard;
+  deckTitle?: string;
+  onAnswer: (cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
+  onNext: () => void;
+}) {
+  const [phase, setPhase] = useState<"Question" | "Answer">("Question");
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [isHilfe, setIsHilfe] = useState(false);
+  
+  const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
+  const verb = card.targetWord;
+  const translation = card.translation;
+  
+  const [activeSlot, setActiveSlot] = useState(0);
+
+  const virtualKeyRef0 = useRef<((c: string) => void) | undefined>(undefined);
+  const virtualBackspaceRef0 = useRef<(() => void) | undefined>(undefined);
+  const virtualKeyRef1 = useRef<((c: string) => void) | undefined>(undefined);
+  const virtualBackspaceRef1 = useRef<(() => void) | undefined>(undefined);
+
+  const handleVerbComplete = useCallback(() => setActiveSlot(1), []);
+  const handlePrepComplete = useCallback(() => setActiveSlot(2), []);
+
+  const [wrongKasus, setWrongKasus] = useState<string | null>(null);
+
+  const handleKasusSelect = useCallback((selected: string) => {
+    if (activeSlot !== 2 || isSuccess || isHilfe) return;
+    if (selected === kasusRaw) {
+       setIsSuccess(true);
+       setPhase("Answer");
+       playFeedbackSound(true);
+       onAnswer(card.id, !isHilfe, isHilfe);
+    } else {
+       playFeedbackSound(false);
+       setWrongKasus(selected);
+       setTimeout(() => setWrongKasus(null), 500);
+    }
+  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess]);
+
+  const onHilfe = useCallback(() => {
+    setIsHilfe(true);
+    setPhase("Answer");
+    setIsSuccess(true);
+    onAnswer(card.id, false, true);
+  }, [card.id, onAnswer]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((isSuccess || isHilfe) && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onNext();
+        return;
+      }
+      if (activeSlot === 2 && !isSuccess && !isHilfe && e.key.length === 1) {
+         const k = e.key.toLowerCase();
+         if (k === 'n') handleKasusSelect('NOM');
+         if (k === 'g') handleKasusSelect('GEN');
+         if (k === 'd') handleKasusSelect('DAT');
+         if (k === 'a') handleKasusSelect('AKK');
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isSuccess, isHilfe, activeSlot, onNext, handleKasusSelect]);
+
+  const handleVirtualKey = (char: string) => {
+    if (activeSlot === 0 && virtualKeyRef0.current) virtualKeyRef0.current(char);
+    if (activeSlot === 1 && virtualKeyRef1.current) virtualKeyRef1.current(char);
+  };
+  const handleVirtualBackspace = () => {
+    if (activeSlot === 0 && virtualBackspaceRef0.current) virtualBackspaceRef0.current();
+    if (activeSlot === 1 && virtualBackspaceRef1.current) virtualBackspaceRef1.current();
+  };
+
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const playbackSpeed = useStore(state => state.playbackSpeed);
+
+  const playAudio = useCallback(async () => {
+    // Disabled audio playback for PrepDrillMode as requested
+  }, []);
+
+  return (
+    <div className="flex flex-col h-[100dvh] bg-black text-white font-sans overflow-hidden w-[100vw] absolute inset-0 z-50">
+      <div className="flex-1 flex flex-col justify-center items-center px-4 pt-4 pb-24 md:pb-8 relative">
+        <div className="relative w-full max-w-3xl bg-[#1c1c1e] rounded-[32px] p-8 md:p-12 shadow-2xl flex flex-col items-center justify-center min-h-[300px]">
+          
+          <div className="absolute top-6 left-6 right-6 flex justify-between items-start w-[calc(100%-3rem)]">
+            <button 
+              onClick={playAudio}
+              className="p-2 rounded-full transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-white/5 opacity-50"
+            >
+              <Volume2 className="w-6 h-6" />
+            </button>
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={onHilfe}
+                disabled={isSuccess || isHilfe}
+                className={cn(
+                  "p-2 rounded-full transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-white/5",
+                  (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
+                )}
+                title="Ich weiß nicht"
+              >
+                <HelpCircle className="w-6 h-6" />
+              </button>
+              <div className="flex gap-1.5 pt-2">
+                {[0, 1, 2, 3].map((step) => {
+                  const visualMastery = card.masteryLevel;
+                  return (
+                    <div 
+                      key={step} 
+                      className={cn(
+                        "w-2.5 h-2.5 rounded-full transition-colors duration-300",
+                        step < visualMastery ? "bg-blue-500" : "bg-zinc-800"
+                      )}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="text-2xl md:text-3xl font-semibold text-white tracking-tight text-center mt-4 mb-12">
+            {translation}
+          </div>
+
+          <div className="flex flex-row items-end justify-center gap-6 w-full flex-wrap">
+            <VerbSlot 
+              label="Verb" 
+              target={verb} 
+              isActive={activeSlot === 0} 
+              isSuccess={isSuccess || isHilfe} 
+              isHilfe={isHilfe} 
+              onComplete={handleVerbComplete} 
+              onError={()=>{}} 
+              virtualKeyRef={virtualKeyRef0} 
+              virtualBackspaceRef={virtualBackspaceRef0} 
+            />
+            <VerbSlot 
+              label="Präposition" 
+              target={prep} 
+              isActive={activeSlot === 1} 
+              isSuccess={isSuccess || isHilfe} 
+              isHilfe={isHilfe} 
+              onComplete={handlePrepComplete} 
+              onError={()=>{}} 
+              virtualKeyRef={virtualKeyRef1} 
+              virtualBackspaceRef={virtualBackspaceRef1} 
+            />
+            
+            <div className="flex flex-row gap-2 items-center mb-1">
+              {[
+                { k: 'NOM', success: 'bg-zinc-500 text-white' },
+                { k: 'GEN', success: 'bg-purple-500 text-white' },
+                { k: 'DAT', success: 'bg-blue-500 text-white' },
+                { k: 'AKK', success: 'bg-orange-500 text-white' }
+              ].map(({ k, success }) => {
+                const isError = wrongKasus === k;
+                const isWinner = (isSuccess || isHilfe) && kasusRaw === k;
+                const isLoser = (isSuccess || isHilfe) && kasusRaw !== k;
+                const isActivePhase = activeSlot === 2 && !isSuccess && !isHilfe;
+                
+                return (
+                  <button
+                    key={k}
+                    onClick={() => handleKasusSelect(k)}
+                    disabled={!isActivePhase}
+                    className={cn(
+                      "px-4 py-2 rounded-full text-xs font-bold tracking-wider transition-all duration-200",
+                      !isActivePhase && !isSuccess && !isHilfe ? "bg-zinc-800 text-zinc-400 opacity-50 cursor-not-allowed" :
+                      isError ? "bg-red-500 text-white animate-shake" : 
+                      isWinner ? success :
+                      isLoser ? "bg-zinc-800 text-zinc-400 opacity-30" :
+                      "bg-zinc-800 text-zinc-400 hover:scale-105 hover:bg-zinc-700 hover:text-white cursor-pointer"
+                    )}
+                  >
+                    {k}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="w-full shrink-0">
+        {(isSuccess || isHilfe) ? (
+          <div className="w-full px-4 pb-6 pt-2 bg-black">
+             <button
+                onClick={onNext}
+                className="w-full h-14 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-2xl font-semibold text-[17px] tracking-wide transition-colors shadow-sm flex items-center justify-center"
+              >
+                Weiter
+             </button>
+          </div>
+        ) : activeSlot < 2 ? (
+          <VirtualKeyboard onKeyPress={handleVirtualKey} onBackspace={handleVirtualBackspace} />
+        ) : null}
+      </div>
+    </div>
+  );
+}
 function VerbStudyCard({
   card, 
   deckTitle, 
@@ -2652,6 +2882,7 @@ try {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
             { id: 'verbs-de', language: 'DE', title: 'Starke Verben A1-C1', subtitle: 'Grammatik', tintColor: '#FF2D55', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
+            { id: 'prep-verbs-de', language: 'DE', title: 'Verben mit Präpositionen', subtitle: 'Grammatik', tintColor: '#5856D6', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
             { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
           ];
           const res = await supabase.from('books').insert(defaultBooks);
@@ -2754,28 +2985,37 @@ try {
   if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
 
   if (activeDeckId) {
-    const isVerbBook = decks.find(d => d.id === activeDeckId)?.bookId === 'verbs-de';
+    const currentBookId = decks.find(d => d.id === activeDeckId)?.bookId;
+    const isVerbBook = currentBookId === 'verbs-de';
+    const currentBookTitle = useStore.getState().books.find(b => b.id === currentBookId)?.title || '';
+    const isPrepBook = currentBookId === 'prep-verbs-de' || currentBookTitle.toLowerCase().includes('präposition');
     return (
       <>
-        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)}  isVerbBook={isVerbBook} />
+        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)}  isVerbBook={isVerbBook} isPrepBook={isPrepBook} />
       </>
     );
   }
 
   if (reviewCards) {
-    const isVerbBook = reviewCards.length > 0 && decks.find(d => d.id === reviewCards[0].deckId)?.bookId === 'verbs-de';
+    const currentBookId = reviewCards.length > 0 ? decks.find(d => d.id === reviewCards[0].deckId)?.bookId : null;
+    const isVerbBook = currentBookId === 'verbs-de';
+    const currentBookTitle = useStore.getState().books.find(b => b.id === currentBookId)?.title || '';
+    const isPrepBook = currentBookId === 'prep-verbs-de' || currentBookTitle.toLowerCase().includes('präposition');
     return (
       <>
-        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)}  isVerbBook={isVerbBook} />
+        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)}  isVerbBook={isVerbBook} isPrepBook={isPrepBook} />
       </>
     );
   }
 
   if (drillCards) {
-    const isVerbBook = drillCards.length > 0 && decks.find(d => d.id === drillCards[0].deckId)?.bookId === 'verbs-de';
+    const currentBookId = drillCards.length > 0 ? decks.find(d => d.id === drillCards[0].deckId)?.bookId : null;
+    const isVerbBook = currentBookId === 'verbs-de';
+    const currentBookTitle = useStore.getState().books.find(b => b.id === currentBookId)?.title || '';
+    const isPrepBook = currentBookId === 'prep-verbs-de' || currentBookTitle.toLowerCase().includes('präposition');
     return (
       <>
-        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)}  isVerbBook={isVerbBook} />
+        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)}  isVerbBook={isVerbBook} isPrepBook={isPrepBook} />
       </>
     );
   }
@@ -2794,7 +3034,24 @@ try {
       lines.forEach((line) => {
         const delimiter = line.includes(';') ? ';' : ',';
         const parts = line.split(delimiter).map(p => p.trim());
-        if (activeBookId === 'verbs-de') {
+        const isPrepBookObj = activeBookId === 'prep-verbs-de' || (books.find(b => b.id === activeBookId)?.title || '').toLowerCase().includes('präposition');
+        
+        if (isPrepBookObj) {
+          if (parts.length >= 4) {
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord: parts[0],
+              sentence: `${parts[1]} | ${parts[2].toUpperCase()}`,
+              translation: parts[3],
+              options: [],
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0
+            });
+          }
+        } else if (activeBookId === 'verbs-de') {
           if (parts.length >= 5) {
             const infinitiv = parts[0];
             const praesens = parts[1];
