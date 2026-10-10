@@ -200,7 +200,6 @@ const useStore = create<DeckState>()((set, get) => ({
     const payload = {
       id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
-      cover_url_light: book.coverImage || null, cover_url_dark: book.coverImage || null,
       activeLevels: book.activeLevels || ['A1']
     };
     
@@ -210,7 +209,6 @@ const useStore = create<DeckState>()((set, get) => ({
        const fallbackPayload = {
          id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
          tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
-         cover_url_light: book.coverImage || null, cover_url_dark: book.coverImage || null,
          activelevels: book.activeLevels || ['A1']
        };
        const fallbackRes = await supabase.from('books').insert(fallbackPayload);
@@ -239,8 +237,6 @@ const useStore = create<DeckState>()((set, get) => ({
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
-      cover_url_light: book.coverImage || null,
-      cover_url_dark: book.coverImage || null,
       activeLevels: book.activeLevels || ['A1']
     };
     
@@ -251,8 +247,6 @@ const useStore = create<DeckState>()((set, get) => ({
          language: book.language, title: book.title, subtitle: book.subtitle || null,
          tintcolor: book.tintColor || '#000000', 
          coverimage: book.coverImage || null,
-         cover_url_light: book.coverImage || null,
-         cover_url_dark: book.coverImage || null,
          activelevels: book.activeLevels || ['A1']
        };
        const fallbackRes = await supabase.from('books').update(fallbackPayload).eq('id', book.id);
@@ -2251,11 +2245,11 @@ const VerbSlot = React.memo(({
       isSlotSuccess ? "border-green-500" : isActive ? "border-blue-500" : "border-gray-200 dark:border-gray-700"
     )}>
       {displayVal.length === 0 && (
-        <span className="absolute text-[11px] sm:text-[13px] font-medium text-gray-300 dark:text-gray-600 tracking-wide pointer-events-none transition-opacity duration-300">
+        <span className="absolute text-[13px] font-medium text-gray-300 dark:text-gray-600 tracking-wide pointer-events-none transition-opacity duration-300">
           {label}
         </span>
       )}
-      <div className="flex items-center justify-center flex-nowrap whitespace-nowrap gap-x-[1px] text-[15px] sm:text-[17px] font-medium tracking-wide relative z-10">
+      <div className="flex items-center justify-center flex-nowrap whitespace-nowrap gap-x-[1px] text-[17px] font-medium tracking-wide relative z-10">
         {displayVal.split('').map((char, i) => {
           const isErrorChar = !isSlotSuccess && i === displayVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase();
           return (
@@ -2360,7 +2354,8 @@ function PrepStudyCard({
         return;
       }
       if (activeSlot === 2 && !isSuccess && !isHilfe && e.key.length === 1) {
-         const k = e.key.toLowerCase();
+         const mapped = RUSSIAN_TO_QWERTZ[e.key] || e.key;
+         const k = mapped.toLowerCase();
          if (k === 'n') handleKasusSelect('NOM');
          if (k === 'g') handleKasusSelect('GEN');
          if (k === 'd') handleKasusSelect('DAT');
@@ -2480,10 +2475,10 @@ function PrepStudyCard({
           {/* Kasus Buttons on the Right in 2 rows */}
           <div className="grid grid-cols-2 gap-2 mt-4 sm:mt-0">
             {[
-              { k: 'NOM', hover: 'hover:bg-zinc-200 dark:hover:bg-zinc-600', success: 'bg-zinc-500 text-white border-zinc-500' },
-              { k: 'GEN', hover: 'hover:bg-purple-100 dark:hover:bg-purple-900', success: 'bg-purple-500 text-white border-purple-500' },
-              { k: 'DAT', hover: 'hover:bg-blue-100 dark:hover:bg-blue-900', success: 'bg-blue-500 text-white border-blue-500' },
-              { k: 'AKK', hover: 'hover:bg-orange-100 dark:hover:bg-[#FF9500]', success: 'bg-orange-500 dark:bg-[#FF9500] text-white border-orange-500 dark:border-[#FF9500]' }
+              { k: 'NOM', hover: 'hover:bg-zinc-200 dark:hover:bg-white/20', success: 'bg-zinc-500 text-white' },
+              { k: 'GEN', hover: 'hover:bg-purple-200 dark:hover:bg-purple-500/30', success: 'bg-purple-500 text-white' },
+              { k: 'DAT', hover: 'hover:bg-blue-200 dark:hover:bg-blue-500/30', success: 'bg-blue-500 text-white' },
+              { k: 'AKK', hover: 'hover:bg-orange-200 dark:hover:bg-[#FF9500]/30', success: 'bg-[#FF9500] text-white' }
             ].map(({ k, hover, success }) => {
               const isError = wrongKasus === k;
               const isWinner = (isSuccess || isHilfe) && kasusRaw === k;
@@ -2498,11 +2493,11 @@ function PrepStudyCard({
                   onClick={() => handleKasusSelect(k)}
                   disabled={!isActivePhase}
                   className={cn(
-                    "px-4 py-2 rounded-[10px] text-[10px] sm:text-[11px] font-bold tracking-widest transition-all duration-300 border shadow-sm",
-                    isInactive ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700" :
-                    isError ? "bg-red-500 text-white border-red-500 animate-shake" : 
+                    "px-5 py-2.5 rounded-[12px] text-[12px] font-bold tracking-widest transition-all duration-300 backdrop-blur-sm border border-transparent shadow-sm",
+                    isInactive ? "bg-black/5 dark:bg-white/5 text-black/30 dark:text-white/30 shadow-none" :
+                    isError ? "bg-red-500 text-white animate-shake" : 
                     isWinner ? success :
-                    `bg-zinc-100 dark:bg-zinc-800 text-zinc-300 dark:text-zinc-200 border-zinc-200 dark:border-zinc-600 ${hover} hover:text-zinc-900 dark:hover:text-white hover:scale-105 cursor-pointer`
+                    `bg-black/10 dark:bg-white/10 text-black/70 dark:text-white/80 ${hover} hover:scale-105 cursor-pointer`
                   )}
                 >
                   {k}
