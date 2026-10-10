@@ -65,28 +65,32 @@ const initAudioCtx = () => {
 
 const playTockSound = () => {
   if (typeof window === 'undefined') return;
-  try {
-    const audio = tockPool[tockIdx];
-    tockIdx = (tockIdx + 1) % tockPool.length;
-    audio.currentTime = 0;
-    audio.play().catch(() => {});
-  } catch (e) {}
+  setTimeout(() => {
+    try {
+      const audio = tockPool[tockIdx];
+      tockIdx = (tockIdx + 1) % tockPool.length;
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    } catch (e) {}
+  }, 0);
 };
 
 const playFeedbackSound = (isCorrect: boolean) => {
   if (typeof window === 'undefined') return;
-  try {
-    let audio: HTMLAudioElement;
-    if (isCorrect) {
-       audio = successPool[successIdx];
-       successIdx = (successIdx + 1) % successPool.length;
-    } else {
-       audio = failPool[failIdx];
-       failIdx = (failIdx + 1) % failPool.length;
-    }
-    audio.currentTime = 0;
-    audio.play().catch(() => {});
-  } catch(e) {}
+  setTimeout(() => {
+    try {
+      let audio: HTMLAudioElement;
+      if (isCorrect) {
+         audio = successPool[successIdx];
+         successIdx = (successIdx + 1) % successPool.length;
+      } else {
+         audio = failPool[failIdx];
+         failIdx = (failIdx + 1) % failPool.length;
+      }
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    } catch(e) {}
+  }, 0);
 };
 
 // --- STORE & TYPES ---
@@ -2115,197 +2119,223 @@ function useIsMobile() {
   }, []);
   return isMobile;
 }
-function VerbStudyCard({ 
-  card, 
-  deckTitle, 
-  onAnswer, 
-  onNext 
-}: { 
-  card: Flashcard, 
-  deckTitle?: string, 
-  onAnswer: (correct: boolean, isHilfe: boolean) => void, 
-  onNext: () => void 
-}) {
-  const isMobile = useIsMobile();
-  let verbInfo: any = {};
-  try { verbInfo = JSON.parse(card.baseWordInfo || '{}'); } catch {}
-  
-  const targets = [verbInfo.praesens || '', verbInfo.praeteritum || '', verbInfo.perfekt || ''];
-  const labels = ['Präsens', 'Präteritum', 'Perfekt'];
 
-  const [inputs, setInputs] = useState<string[]>(['', '', '']);
-  const [activeInput, setActiveInput] = useState<number>(0);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [hasErrored, setHasErrored] = useState(false);
-  
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const playAudio = useCallback(async (text: string) => {
-    setIsPlayingAudio(true);
-    try {
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
-      if (!response.ok) throw new Error("TTS API Error");
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.onended = () => setIsPlayingAudio(false);
-      audio.onerror = () => setIsPlayingAudio(false);
-      await audio.play();
-    } catch (e) {
-      setIsPlayingAudio(false);
-    }
-  }, []);
+const VerbSlot = React.memo(({
+  label,
+  target,
+  isActive,
+  isSuccess,
+  isHilfe,
+  onComplete,
+  onError,
+  virtualKeyRef,
+  virtualBackspaceRef
+}: {
+  label: string;
+  target: string;
+  isActive: boolean;
+  isSuccess: boolean;
+  isHilfe: boolean;
+  onComplete: () => void;
+  onError: () => void;
+  virtualKeyRef: React.MutableRefObject<((char: string) => void) | undefined>;
+  virtualBackspaceRef: React.MutableRefObject<(() => void) | undefined>;
+}) => {
+  const [val, setVal] = useState("");
 
-  useEffect(() => {
-    playAudio(verbInfo.infinitiv?.replace('|', ''));
-  }, [verbInfo.infinitiv, playAudio]);
-
-  const stateRef = useRef({ inputs, activeInput, isSuccess, hasErrored, targets });
-  stateRef.current = { inputs, activeInput, isSuccess, hasErrored, targets };
-
-  const handleNextPhase = useCallback((correct: boolean, isHilfe: boolean = false) => {
-    setIsSuccess(true);
-    playFeedbackSound(true);
-    onAnswer(correct, isHilfe);
-    setTimeout(() => {
-       playAudio(`er ${verbInfo.praesens}, ${verbInfo.praeteritum}, ${verbInfo.perfekt}.`);
-    }, 100);
-  }, [verbInfo, playAudio, onAnswer]);
-
-  const handleHilfe = useCallback(() => {
-    if (stateRef.current.isSuccess) return;
-    setInputs([...stateRef.current.targets]);
-    setActiveInput(3);
-    setHasErrored(true);
-    handleNextPhase(false, true);
-  }, [handleNextPhase]);
-
-  const handleKeyPress = useCallback((rawChar: string) => {
-    const { inputs, activeInput, isSuccess, hasErrored, targets } = stateRef.current;
-    if (isSuccess || activeInput > 2) return;
-    
-    const char = RUSSIAN_TO_QWERTZ[rawChar] || rawChar;
-    const target = targets[activeInput];
-    const currentVal = inputs[activeInput];
-    
-    if (char === ' ' && currentVal.endsWith(' ')) return;
-    
-    let nextVal = currentVal + char;
-    
-    if (target[currentVal.length] === ' ' && char !== ' ') {
-       if (char.toLowerCase() === target[currentVal.length + 1]?.toLowerCase()) {
-           nextVal = currentVal + ' ' + char;
-       }
-    }
-
-    const isCorrect = target.toLowerCase().startsWith(nextVal.toLowerCase());
-    
-    if (isCorrect) {
-      playTockSound();
+  const handleInputChar = useCallback((rawChar: string) => {
+    setVal(prev => {
+      if (prev.length >= target.length) return prev;
       
-      if (nextVal.toLowerCase() === target.toLowerCase()) {
-         nextVal = target; // Fix casing
-      } else if (target[nextVal.length] === ' ') {
-         nextVal = nextVal + ' '; // Auto-append space
+      // Block if already has an error
+      if (prev.length > 0 && prev[prev.length - 1].toLowerCase() !== target[prev.length - 1].toLowerCase()) {
+        playFeedbackSound(false);
+        if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+        return prev;
       }
-      
-      setInputs(prev => {
-         const n = [...prev];
-         n[activeInput] = nextVal;
-         return n;
-      });
-      
-      if (nextVal.length === target.length) {
-         if (activeInput < 2) {
-             setActiveInput(activeInput + 1);
-         } else {
-             if (!hasErrored) handleNextPhase(true);
-             else handleNextPhase(false);
-         }
+
+      const char = RUSSIAN_TO_QWERTZ[rawChar] || rawChar;
+      const expectedChar = target[prev.length];
+
+      if (char.toLowerCase() === expectedChar.toLowerCase()) {
+        playTockSound();
+        return prev + expectedChar; // keep target casing
+      } else {
+        playFeedbackSound(false);
+        if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+        onError();
+        return prev + char; // allow ONE wrong character to show in red
       }
-    } else {
-      playFeedbackSound(false);
-      if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
-      
-      setHasErrored(true);
-      setInputs(prev => {
-         const n = [...prev];
-         n[activeInput] = nextVal;
-         return n;
-      });
-    }
-  }, [handleNextPhase]);
+    });
+  }, [target, onError]);
 
   const handleBackspace = useCallback(() => {
-    const { inputs, activeInput, isSuccess } = stateRef.current;
-    if (isSuccess || activeInput > 2) return;
-    playTockSound();
-    setInputs(prev => {
-      const n = [...prev];
-      if (n[activeInput].length > 0) {
-        let sliceLen = -1;
-        if (n[activeInput].endsWith(' ') && n[activeInput].length > 1) {
-            sliceLen = -2;
-        }
-        n[activeInput] = n[activeInput].slice(0, sliceLen);
-      }
-      return n;
-    });
+    setVal(prev => prev.slice(0, -1));
   }, []);
 
   useEffect(() => {
-    const handleNativeGlobalKeyDown = (e: KeyboardEvent) => {
-      const { isSuccess } = stateRef.current;
-      if (e.key === "Enter" && isSuccess) {
-         e.preventDefault();
-         onNext();
-         return;
+    if (isActive) {
+      virtualKeyRef.current = handleInputChar;
+      virtualBackspaceRef.current = handleBackspace;
+    }
+  }, [isActive, handleInputChar, handleBackspace, virtualKeyRef, virtualBackspaceRef]);
+
+  useEffect(() => {
+    if (!isActive || isSuccess || isHilfe) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab') {
+        if (e.key === 'Backspace') {
+          handleBackspace();
+        }
+        return;
       }
-      if (isSuccess) return;
-      const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
-      if (e.key === "Backspace") {
-         e.preventDefault();
-         handleBackspace();
-         return;
-      }
-      if (!isSpecialKey && e.key.length === 1) {
-         e.preventDefault();
-         handleKeyPress(e.key);
-      }
+      
+      if (e.key.length !== 1) return;
+      e.preventDefault();
+      handleInputChar(e.key);
     };
-    window.addEventListener('keydown', handleNativeGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
-  }, [handleKeyPress, handleBackspace, onNext]);
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isActive, isSuccess, isHilfe, handleInputChar, handleBackspace]);
+
+  useEffect(() => {
+    if (val === target) {
+      onComplete();
+    }
+  }, [val, target, onComplete]);
+
+  const displayVal = (isSuccess || isHilfe) ? target : val;
+  const isSlotSuccess = displayVal === target;
+
+  return (
+    <div className="flex flex-col items-center">
+      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{label}</span>
+      <div className={cn(
+        "relative min-h-[36px] flex items-center justify-center border-b-2 pb-1 px-2 min-w-[100px] sm:min-w-[120px] transition-colors duration-300",
+        isSlotSuccess ? "border-green-500" : isActive ? "border-blue-500" : "border-gray-200 dark:border-gray-700"
+      )}>
+        <div className="flex items-center justify-center flex-wrap gap-x-[1px] text-xl sm:text-2xl font-medium tracking-wide">
+          {displayVal.split('').map((char, i) => {
+            const isErrorChar = !isSlotSuccess && i === displayVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase();
+            return (
+              <span key={i} className={cn(isErrorChar ? "text-red-500" : "text-gray-900 dark:text-white")}>
+                {char}
+              </span>
+            );
+          })}
+          {isActive && !isSuccess && !isHilfe && (
+            <motion.span
+              animate={{ opacity: [1, 0] }}
+              transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
+              className="w-[2px] h-[1em] bg-blue-500 ml-[1px]"
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+function VerbStudyCard({
+  card, 
+  deckTitle, 
+  onAnswer,
+  onNext
+}: {
+  card: Flashcard;
+  deckTitle?: string;
+  onAnswer: (correct: boolean, isHilfe: boolean) => void;
+  onNext: () => void;
+}) {
+  const isMobile = useIsMobile();
+  const verbInfo = useMemo(() => {
+    try { return JSON.parse(card.baseWordInfo || "{}"); } catch(e) { return {}; }
+  }, [card.baseWordInfo]);
+
+  const [activeInput, setActiveInput] = useState(0);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [hasErrored, setHasErrored] = useState(false);
+  const [isHilfe, setIsHilfe] = useState(false);
+
+  const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
+  const virtualBackspaceRef = useRef<(() => void) | undefined>(undefined);
+
+  const targets = [
+    verbInfo.prasens || "",
+    verbInfo.prateritum || "",
+    verbInfo.perfekt || ""
+  ];
+  const labels = ["er / sie / es", "Präteritum", "Perfekt"];
+
+  const playAudio = useCallback(() => {
+    const fullSentence = `er ${targets[0]}, ${targets[1]}, ${targets[2]}.`;
+    fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: fullSentence })
+    })
+    .then(res => { if (res.ok) return res.blob(); throw new Error(); })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      new Audio(url).play().catch(() => {});
+    })
+    .catch(() => {});
+  }, [targets]);
+
+  useEffect(() => {
+    const inf = (verbInfo.infinitiv || "").replace(/\|/g, '');
+    fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: inf })
+    })
+    .then(res => { if (res.ok) return res.blob(); throw new Error(); })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      new Audio(url).play().catch(() => {});
+    })
+    .catch(() => {});
+  }, [verbInfo.infinitiv]);
+
+  const handleSlotComplete = useCallback((idx: number) => {
+    if (idx < 2) {
+      setActiveInput(idx + 1);
+    } else {
+      setIsSuccess(true);
+      playAudio();
+      onAnswer(!hasErrored, false);
+    }
+  }, [hasErrored, playAudio, onAnswer]);
+
+  const handleSlotError = useCallback(() => {
+    setHasErrored(true);
+  }, []);
+
+  const handleHilfe = useCallback(() => {
+    setIsHilfe(true);
+    setIsSuccess(true);
+    playAudio();
+    onAnswer(false, true);
+  }, [playAudio, onAnswer]);
 
   const displayInfinitiv = (verbInfo.infinitiv || "").split('|').map((part: string, i: number, arr: string[]) => (
-     <React.Fragment key={i}>
-        {part}
-        {i < arr.length - 1 && <span className="text-gray-300 dark:text-gray-600 mx-[1px] font-light">·</span>}
-     </React.Fragment>
+    <React.Fragment key={i}>
+      {part}
+      {i < arr.length - 1 && <span className="text-gray-300 dark:text-gray-600 mx-[1px] font-light">·</span>}
+    </React.Fragment>
   ));
 
   return (
-    <motion.div 
-      key={card.id + (isSuccess ? 'success' : 'question')}
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[340px] transition-colors duration-200"
-    >
-      <div className="w-full flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => playAudio(verbInfo.infinitiv?.replace('|', ''))}
-            disabled={isPlayingAudio}
-            className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
-          >
-            <Volume2 className={cn("w-5 h-5", isPlayingAudio && "animate-pulse text-blue-500")} />
-          </button>
-        </div>
+    <div className="w-full flex flex-col items-center justify-center relative min-h-[400px]">
+      <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
+        <button 
+          onClick={playAudio}
+          className="w-10 h-10 rounded-full bg-white dark:bg-[#2C2C2E] flex items-center justify-center text-gray-700 dark:text-[#E5E5EA] shadow-sm hover:scale-105 active:scale-95 transition-all border border-black/[0.05] dark:border-white/[0.05]"
+          title="Audio abspielen (A)"
+        >
+          <Volume2 className="w-5 h-5" />
+        </button>
         <div className="flex items-center gap-4">
           <AnimatePresence>
             {hasErrored && deckTitle && (
@@ -2321,10 +2351,10 @@ function VerbStudyCard({
           </AnimatePresence>
           <button 
             onClick={handleHilfe}
-            disabled={isSuccess}
+            disabled={isSuccess || isHilfe}
             className={cn(
               "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors mr-1",
-              isSuccess && "opacity-0 pointer-events-none"
+              (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
             )}
             title="Ich weiß nicht"
           >
@@ -2332,7 +2362,10 @@ function VerbStudyCard({
           </button>
           <div className="flex gap-1.5">
             {[0, 1, 2, 3].map((step) => {
-              const visualMastery = (isSuccess && !hasErrored) ? card.masteryLevel + 1 : card.masteryLevel;
+              const visualMastery = (isSuccess || isHilfe) 
+                 ? (hasErrored || isHilfe ? Math.max(0, card.masteryLevel - 1) : card.masteryLevel + 1)
+                 : card.masteryLevel;
+                 
               return (
               <div 
                 key={step} 
@@ -2340,7 +2373,7 @@ function VerbStudyCard({
                   "w-2.5 h-2.5 rounded-full transition-all duration-300",
                   (card.isArchived || visualMastery > step) 
                     ? "bg-blue-600 dark:bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
-                    : step === visualMastery && !isSuccess
+                    : step === visualMastery && !isSuccess && !isHilfe
                       ? "bg-blue-500/40 animate-pulse"
                       : "bg-gray-200 dark:bg-white/10"
                 )}
@@ -2351,87 +2384,63 @@ function VerbStudyCard({
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
-        <div className="text-center mb-8 w-full">
-           <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
-             {displayInfinitiv}
-           </h2>
-           <p className="text-[13px] font-medium text-gray-500 dark:text-[#8E8E93]">{card.translation}</p>
+        <div className="text-center mb-8 w-full mt-10">
+          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
+            {displayInfinitiv}
+          </h2>
+          <p className="text-[13px] sm:text-sm text-gray-400 dark:text-gray-500 font-medium">
+            {card.translation}
+          </p>
         </div>
-        
-        <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4 w-full px-2 sm:px-0">
-           <span className="text-[14px] font-medium text-gray-400 dark:text-[#8E8E93] sm:w-6 sm:text-right shrink-0 self-start sm:self-center mt-2 sm:mt-0">er</span>
-           
-           <div className="flex items-center gap-2 w-full">
-             {labels.map((label, idx) => {
-                 const target = targets[idx];
-                 const currentVal = inputs[idx];
-                 const isCompleted = currentVal === target && activeInput > idx || (isSuccess && activeInput >= idx);
-                 const isActive = activeInput === idx && !isSuccess;
-                 
-                 let firstWrongIdx = target.length;
-                 for (let i = 0; i < currentVal.length; i++) {
-                     if (currentVal[i].toLowerCase() !== target[i]?.toLowerCase()) {
-                         firstWrongIdx = i;
-                         break;
-                     }
-                 }
-                 
-                 return (
-                   <div key={idx} className={cn(
-                       "flex-1 relative h-11 border-b-[1.5px] flex items-center justify-center transition-colors overflow-hidden", 
-                       isActive ? "border-blue-500" : (isCompleted ? "border-green-500" : "border-black/10 dark:border-white/10")
-                   )}>
-                      {currentVal.length === 0 && (
-                         <span className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold text-black/20 dark:text-white/20 tracking-wider pointer-events-none">
-                            {label}
-                         </span>
-                      )}
-                      <div className="flex items-center justify-center relative z-10 w-full whitespace-pre">
-                         {currentVal.split('').map((char, i) => {
-                            const isWrong = i >= firstWrongIdx;
-                            return (
-                              <span key={i} className={cn("text-[17px] font-semibold tracking-wide", isWrong ? "text-red-500" : "text-gray-800 dark:text-white", (isWrong && i === currentVal.length - 1) ? "animate-dict-shake" : "")}>
-                                {char}
-                              </span>
-                            );
-                         })}
-                      </div>
-                   </div>
-                 )
-             })}
-           </div>
+
+        <div className="flex items-end justify-center gap-2 sm:gap-6 w-full max-w-lg mb-8">
+          <span className="text-[10px] font-semibold text-gray-400 mr-2 sm:mr-4 mb-2">er</span>
+          {targets.map((target, idx) => (
+            <VerbSlot
+              key={`${card.id}-${idx}`}
+              label={labels[idx]}
+              target={target}
+              isActive={activeInput === idx}
+              isSuccess={isSuccess}
+              isHilfe={isHilfe}
+              onComplete={() => handleSlotComplete(idx)}
+              onError={handleSlotError}
+              virtualKeyRef={virtualKeyRef}
+              virtualBackspaceRef={virtualBackspaceRef}
+            />
+          ))}
         </div>
       </div>
 
-      <div className="w-full h-14 mt-6 flex justify-center shrink-0">
-        <AnimatePresence mode="wait">
-          {isSuccess && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="w-full flex justify-center"
+      <div className="h-14 w-full flex justify-center mt-auto">
+        <AnimatePresence>
+          {(isSuccess || isHilfe) && (
+            <motion.button
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={onNext}
+              className="px-12 py-3.5 bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-500 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all"
             >
-              <button 
-                onClick={onNext}
-                className="bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-3 rounded-2xl font-semibold text-[15px] transition-all active:scale-[0.98] shadow-sm w-full max-w-[200px]"
-              >
-                Weiter
-              </button>
-            </motion.div>
+              Weiter
+            </motion.button>
           )}
         </AnimatePresence>
       </div>
-
-      {!isSuccess && isMobile && (
+      
+      {(!isSuccess && !isHilfe) && isMobile && (
          <div className="mt-6 -mx-6 md:-mx-12 -mb-6 md:-mb-10 w-[calc(100%+48px)]">
-           <VirtualKeyboard onKeyPress={handleKeyPress} onBackspace={handleBackspace} />
+           <VirtualKeyboard 
+             onKeyPress={(char) => virtualKeyRef.current?.(char)} 
+             onBackspace={() => virtualBackspaceRef.current?.()} 
+           />
          </div>
       )}
-    </motion.div>
+    </div>
   );
 }
-
 export default function App() {
   const [isPending, startTransition] = useTransition();
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder } = useStore();
