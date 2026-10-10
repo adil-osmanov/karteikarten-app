@@ -65,30 +65,38 @@ const initAudioCtx = () => {
 
 const playTockSound = () => {
   if (typeof window === 'undefined') return;
-  try {
-    const audio = tockPool[tockIdx];
-    tockIdx = (tockIdx + 1) % tockPool.length;
-    audio.currentTime = 0;
-    const p = audio.play();
-    if (p !== undefined) p.catch(() => {});
-  } catch (e) {}
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      try {
+        const audio = tockPool[tockIdx];
+        tockIdx = (tockIdx + 1) % tockPool.length;
+        audio.currentTime = 0;
+        const p = audio.play();
+        if (p !== undefined) p.catch(() => {});
+      } catch (e) {}
+    }, 0);
+  });
 };
 
 const playFeedbackSound = (isCorrect: boolean) => {
   if (typeof window === 'undefined') return;
-  try {
-    let audio: HTMLAudioElement;
-    if (isCorrect) {
-       audio = successPool[successIdx];
-       successIdx = (successIdx + 1) % successPool.length;
-    } else {
-       audio = failPool[failIdx];
-       failIdx = (failIdx + 1) % failPool.length;
-    }
-    audio.currentTime = 0;
-    const p = audio.play();
-    if (p !== undefined) p.catch(() => {});
-  } catch(e) {}
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      try {
+        let audio: HTMLAudioElement;
+        if (isCorrect) {
+           audio = successPool[successIdx];
+           successIdx = (successIdx + 1) % successPool.length;
+        } else {
+           audio = failPool[failIdx];
+           failIdx = (failIdx + 1) % failPool.length;
+        }
+        audio.currentTime = 0;
+        const p = audio.play();
+        if (p !== undefined) p.catch(() => {});
+      } catch(e) {}
+    }, 0);
+  });
 };
 
 // --- STORE & TYPES ---
@@ -2205,8 +2213,14 @@ const VerbSlot = React.memo(({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isActive, isSuccess, isHilfe, handleInputChar, handleBackspace]);
 
+  const hasCompleted = useRef(false);
   useEffect(() => {
-    if (val === target) {
+    hasCompleted.current = false;
+  }, [target]);
+
+  useEffect(() => {
+    if (val === target && !hasCompleted.current) {
+      hasCompleted.current = true;
       onComplete();
     }
   }, [val, target, onComplete]);
@@ -2224,7 +2238,7 @@ const VerbSlot = React.memo(({
           {label}
         </span>
       )}
-      <div className="flex items-center justify-center flex-wrap gap-x-[1px] text-lg sm:text-xl font-medium tracking-wide relative z-10">
+      <div className="flex items-center justify-center flex-wrap gap-x-[1px] text-base sm:text-lg font-medium tracking-wide relative z-10">
         {displayVal.split('').map((char, i) => {
           const isErrorChar = !isSlotSuccess && i === displayVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase();
           return (
@@ -2233,13 +2247,7 @@ const VerbSlot = React.memo(({
             </span>
           );
         })}
-        {isActive && !isSuccess && !isHilfe && (
-          <motion.span
-            animate={{ opacity: [1, 0] }}
-            transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
-            className="w-[2px] h-[1em] bg-blue-500 ml-[1px]"
-          />
-        )}
+
       </div>
     </div>
   );
@@ -2405,6 +2413,7 @@ function VerbStudyCard({
         </div>
 
         <div className="flex flex-row items-center justify-center gap-3 sm:gap-6 w-full max-w-lg mb-8">
+          <span className="text-[14px] font-medium text-gray-400 dark:text-gray-500 mr-1 sm:mr-2">er</span>
           {targets.map((target, idx) => (
             <VerbSlot
               key={`${card.id}-${idx}`}
