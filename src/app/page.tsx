@@ -653,7 +653,8 @@ function StudyInterface({
   isDrillMode?: boolean,
   trainingMode?: string
 }) {
-  const { answerCard, decks } = useStore();
+  const { answerCard, decks, playbackSpeed, setPlaybackSpeed } = useStore();
+  const [rapidScores, setRapidScores] = useState<Record<string, number>>({});
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -2965,7 +2966,10 @@ export default function App() {
   const handleEditTheory = useCallback((id: string) => setTheoryEditDeckId(id), []);
   const handleViewTheory = useCallback((id: string) => setTheoryViewDeckId(id), []);
   
-  const handleBookClick = useCallback((id: string) => startTransition(() => setActiveBookId(id)), []);
+  const handleBookClick = useCallback((id: string) => {
+    startTransition(() => setActiveBookId(id));
+    window.scrollTo({ top: 0 });
+  }, []);
   const handleBookEdit = useCallback((id: string) => setBookModal({ id }), []);
   const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
 
@@ -3650,7 +3654,7 @@ try {
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
-          {activeBookId !== 'verbs-de' && (
+          {(!activeBook?.training_mode || activeBook.training_mode === 'standard_cloze') {activeBookId !== 'verbs-de' && ({activeBookId !== 'verbs-de' && ( (
           <div className="flex justify-center mb-8 pt-2">
             <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.08]">
               {(["Grammatik", "Wörter"] as const).map((tab) => (
