@@ -3518,16 +3518,16 @@ try {
             </div>
             {/* Bücher Carousel */}
             <div className="mb-12 relative">
-              <h2 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-6 tracking-tight">Lehrbücher</h2>
-              <div className="flex overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-5 sm:gap-6 pb-6 -mx-4 px-4 sm:mx-0 sm:px-0" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <h2 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">Lehrbücher</h2>
+              <div className="flex flex-row overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-6 pb-16 pt-12 px-4 w-full -mx-4 sm:mx-0 sm:px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {books.filter(b => b.language === appLanguage && (!b.category || b.category === 'book')).map(book => (
-                  <div key={book.id} className="snap-start shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
+                  <div key={book.id} className="flex-shrink-0 snap-start w-[220px] md:w-[260px]">
                     <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
                   </div>
                 ))}
                 
-                <div className="snap-start shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
-                  <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-[210px] sm:h-[240px] md:h-[270px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-sm hover:shadow-md hover:-translate-y-1">
+                <div className="flex-shrink-0 snap-start w-[220px] md:w-[260px]">
+                  <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[330px] md:min-h-[390px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
                     <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
                       <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
                     </div>
@@ -3540,10 +3540,10 @@ try {
             {/* Grammatik & Decks Carousel */}
             {books.filter(b => b.language === appLanguage && b.category === 'deck').length > 0 && (
               <div className="mb-10 relative">
-                <h2 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-6 tracking-tight">Grammatik & Decks</h2>
-                <div className="flex overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-5 sm:gap-6 pb-6 -mx-4 px-4 sm:mx-0 sm:px-0" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                <h2 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">Grammatik & Decks</h2>
+                <div className="flex flex-row overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-6 pb-16 pt-12 px-4 w-full -mx-4 sm:mx-0 sm:px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                   {books.filter(b => b.language === appLanguage && b.category === 'deck').map(book => (
-                    <div key={book.id} className="snap-start shrink-0 w-[140px] sm:w-[160px] md:w-[180px]">
+                    <div key={book.id} className="flex-shrink-0 snap-start w-[220px] md:w-[260px]">
                       <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
                     </div>
                   ))}
