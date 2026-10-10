@@ -3793,15 +3793,45 @@ try {
     setDraggedBookId(null);
     setDragOverBookId(null);
     if (!draggedId || draggedId === targetId) return;
-    const { books: allBooks, bookOrder: curOrder, setBookOrder: saveOrder } = useStore.getState();
+    const { books: allBooks, bookOrder: curOrder, setBookOrder: saveOrder, updateBookSettings } = useStore.getState();
+    
+    // Check if we dropped it into a different category by dropping on a target book
+    const draggedBook = allBooks.find(b => b.id === draggedId);
+    let targetBook = allBooks.find(b => b.id === targetId);
+    
+    // If targetId is a special section dropzone (e.g. 'section-coursebook')
+    let newCategory = null;
+    if (targetId.startsWith('section-')) {
+      newCategory = targetId.replace('section-', '');
+      targetBook = undefined; // No target book
+    } else if (draggedBook && targetBook) {
+      const draggedCat = draggedBook.category === 'coursebook' || draggedBook.category === 'book' ? 'coursebook' : 'deck';
+      const targetCat = targetBook.category === 'coursebook' || targetBook.category === 'book' ? 'coursebook' : 'deck';
+      if (draggedCat !== targetCat) {
+        newCategory = targetBook.category || 'book';
+      }
+    }
+    
+    if (newCategory && draggedBook) {
+      updateBookSettings(draggedId, { category: newCategory });
+    }
+    
     const base = (curOrder && curOrder.length > 0) ? [...curOrder] : [];
     allBooks.forEach(b => { if (!base.includes(b.id)) base.push(b.id); });
+    
     const from = base.indexOf(draggedId);
-    const to = base.indexOf(targetId);
-    if (from === -1 || to === -1) return;
-    base.splice(from, 1);
-    base.splice(to, 0, draggedId);
-    saveOrder(base);
+    let to = base.indexOf(targetId);
+    
+    if (from !== -1 && to !== -1) {
+      base.splice(from, 1);
+      base.splice(to, 0, draggedId);
+      saveOrder(base);
+    } else if (from !== -1 && newCategory) {
+       // if we dropped on a section, move it to the end of that section's items in the order
+       base.splice(from, 1);
+       base.push(draggedId);
+       saveOrder(base);
+    }
   };
 
   const handleLoadMore = (cat: string) => {
@@ -3956,7 +3986,16 @@ try {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-12 pb-16 space-y-16">
             
             {/* Секция 1: Учебники */}
-            <section>
+            <section
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+              onDrop={(e) => {
+                // If dropped on the section container itself, and not on a specific book
+                if ((e.target as HTMLElement).closest('.cursor-grab')) return;
+                e.preventDefault();
+                handleBookDrop('section-coursebook');
+              }}
+              className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
+            >
               <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white px-2">Lehrbücher</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
                 {displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map(book => (
@@ -3978,7 +4017,15 @@ try {
             </section>
 
             {/* Секция 2: Тренировки и карточки */}
-            <section>
+            <section
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+              onDrop={(e) => {
+                if ((e.target as HTMLElement).closest('.cursor-grab')) return;
+                e.preventDefault();
+                handleBookDrop('section-deck');
+              }}
+              className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
+            >
               <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white px-2">Blitzkarten & Training</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
                 {displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).map(book => (
