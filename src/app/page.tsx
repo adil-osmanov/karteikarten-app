@@ -2293,26 +2293,51 @@ function PrepStudyCard({
 
   const [wrongKasus, setWrongKasus] = useState<string | null>(null);
 
+  const playGermanAudio = useCallback(async () => {
+    const textToRead = `er ${verb} ${prep}`;
+    try {
+      let audioUrl = audioCache.get(textToRead);
+      if (!audioUrl) {
+        const res = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textToRead })
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          audioUrl = URL.createObjectURL(blob);
+          audioCache.set(textToRead, audioUrl);
+        }
+      }
+      if (audioUrl) {
+        const audio = new Audio(audioUrl);
+        audio.play().catch(()=>{});
+      }
+    } catch (e) {}
+  }, [verb, prep]);
+
   const handleKasusSelect = useCallback((selected: string) => {
     if (activeSlot !== 2 || isSuccess || isHilfe) return;
     if (selected === kasusRaw) {
        setIsSuccess(true);
        setPhase("Answer");
        playFeedbackSound(true);
+       playGermanAudio();
        onAnswer(card.id, !isHilfe, isHilfe);
     } else {
        playFeedbackSound(false);
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
     }
-  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess]);
+  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playGermanAudio]);
 
   const onHilfe = useCallback(() => {
     setIsHilfe(true);
     setPhase("Answer");
     setIsSuccess(true);
+    playGermanAudio();
     onAnswer(card.id, false, true);
-  }, [card.id, onAnswer]);
+  }, [card.id, onAnswer, playGermanAudio]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -2342,22 +2367,38 @@ function PrepStudyCard({
     if (activeSlot === 1 && virtualBackspaceRef1.current) virtualBackspaceRef1.current();
   };
 
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const playbackSpeed = useStore(state => state.playbackSpeed);
+  // Play Russian Audio on Mount
+  useEffect(() => {
+    if (!translation || typeof window === 'undefined') return;
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.cancel(); const msg = new SpeechSynthesisUtterance(translation);
+      msg.lang = 'ru-RU';
+      msg.rate = 1.0;
+      window.speechSynthesis.speak(msg);
+    } catch(e) {}
+  }, [card.id, translation]);
 
-  const playAudio = useCallback(async () => {
-    // Disabled audio playback for PrepDrillMode as requested
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') {
+      setIsTouchDevice(navigator.maxTouchPoints > 0);
+    }
   }, []);
 
   return (
     <div className="flex flex-col h-[100dvh] bg-black text-white font-sans overflow-hidden w-[100vw] absolute inset-0 z-50">
       <div className="flex-1 flex flex-col justify-center items-center px-4 pt-4 pb-24 md:pb-8 relative">
-        <div className="relative w-full max-w-3xl bg-[#1c1c1e] rounded-[32px] p-8 md:p-12 shadow-2xl flex flex-col items-center justify-center min-h-[300px]">
+        <div className="relative w-full max-w-3xl bg-[#1c1c1e] rounded-[32px] border border-zinc-800 p-8 md:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center min-h-[300px]">
           
-          <div className="absolute top-6 left-6 right-6 flex justify-between items-start w-[calc(100%-3rem)]">
+          <div className="absolute top-6 left-6 right-6 flex justify-between items-start w-[calc(100%-3rem)] opacity-40 hover:opacity-100 transition-opacity">
             <button 
-              onClick={playAudio}
-              className="p-2 rounded-full transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-white/5 opacity-50"
+              onClick={() => {
+                window.speechSynthesis.cancel(); const msg = new SpeechSynthesisUtterance(translation);
+                msg.lang = 'ru-RU';
+                window.speechSynthesis.speak(msg);
+              }}
+              className="p-2 rounded-full transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
             >
               <Volume2 className="w-6 h-6" />
             </button>
@@ -2390,41 +2431,45 @@ function PrepStudyCard({
             </div>
           </div>
 
-          <div className="text-2xl md:text-3xl font-semibold text-white tracking-tight text-center mt-4 mb-12">
+          <div className="text-3xl font-semibold text-white tracking-tight text-center mt-4 mb-10">
             {translation}
           </div>
 
-          <div className="flex flex-row items-end justify-center gap-6 w-full flex-wrap">
-            <VerbSlot 
-              label="Verb" 
-              target={verb} 
-              isActive={activeSlot === 0} 
-              isSuccess={isSuccess || isHilfe} 
-              isHilfe={isHilfe} 
-              onComplete={handleVerbComplete} 
-              onError={()=>{}} 
-              virtualKeyRef={virtualKeyRef0} 
-              virtualBackspaceRef={virtualBackspaceRef0} 
-            />
-            <VerbSlot 
-              label="Präposition" 
-              target={prep} 
-              isActive={activeSlot === 1} 
-              isSuccess={isSuccess || isHilfe} 
-              isHilfe={isHilfe} 
-              onComplete={handlePrepComplete} 
-              onError={()=>{}} 
-              virtualKeyRef={virtualKeyRef1} 
-              virtualBackspaceRef={virtualBackspaceRef1} 
-            />
+          <div className="flex flex-col items-center w-full">
+            {/* ROW 1: Inputs */}
+            <div className="flex flex-row justify-center gap-8 w-full max-w-lg mx-auto">
+              <VerbSlot 
+                label="Verb" 
+                target={verb} 
+                isActive={activeSlot === 0} 
+                isSuccess={isSuccess || isHilfe} 
+                isHilfe={isHilfe} 
+                onComplete={handleVerbComplete} 
+                onError={()=>{}} 
+                virtualKeyRef={virtualKeyRef0} 
+                virtualBackspaceRef={virtualBackspaceRef0} 
+              />
+              <VerbSlot 
+                label="Präposition" 
+                target={prep} 
+                isActive={activeSlot === 1} 
+                isSuccess={isSuccess || isHilfe} 
+                isHilfe={isHilfe} 
+                onComplete={handlePrepComplete} 
+                onError={()=>{}} 
+                virtualKeyRef={virtualKeyRef1} 
+                virtualBackspaceRef={virtualBackspaceRef1} 
+              />
+            </div>
             
-            <div className="flex flex-row gap-2 items-center mb-1">
+            {/* ROW 2: Kasus Pills */}
+            <div className="mt-10 flex flex-row justify-center gap-4">
               {[
-                { k: 'NOM', success: 'bg-zinc-500 text-white' },
-                { k: 'GEN', success: 'bg-purple-500 text-white' },
-                { k: 'DAT', success: 'bg-blue-500 text-white' },
-                { k: 'AKK', success: 'bg-orange-500 text-white' }
-              ].map(({ k, success }) => {
+                { k: 'NOM', hover: 'hover:bg-zinc-600', success: 'bg-zinc-500 text-white border-zinc-500' },
+                { k: 'GEN', hover: 'hover:bg-purple-600', success: 'bg-purple-500 text-white border-purple-500' },
+                { k: 'DAT', hover: 'hover:bg-blue-600', success: 'bg-blue-500 text-white border-blue-500' },
+                { k: 'AKK', hover: 'hover:bg-orange-500', success: 'bg-orange-500 text-white border-orange-500' }
+              ].map(({ k, hover, success }) => {
                 const isError = wrongKasus === k;
                 const isWinner = (isSuccess || isHilfe) && kasusRaw === k;
                 const isLoser = (isSuccess || isHilfe) && kasusRaw !== k;
@@ -2436,12 +2481,12 @@ function PrepStudyCard({
                     onClick={() => handleKasusSelect(k)}
                     disabled={!isActivePhase}
                     className={cn(
-                      "px-4 py-2 rounded-full text-xs font-bold tracking-wider transition-all duration-200",
-                      !isActivePhase && !isSuccess && !isHilfe ? "bg-zinc-800 text-zinc-400 opacity-50 cursor-not-allowed" :
-                      isError ? "bg-red-500 text-white animate-shake" : 
+                      "px-6 py-3 rounded-full text-sm font-bold tracking-widest transition-all duration-200 border",
+                      !isActivePhase && !isSuccess && !isHilfe ? "border-zinc-800 bg-zinc-800/50 text-zinc-500 opacity-50 cursor-not-allowed" :
+                      isError ? "bg-red-500 text-white border-red-500 animate-shake" : 
                       isWinner ? success :
-                      isLoser ? "bg-zinc-800 text-zinc-400 opacity-30" :
-                      "bg-zinc-800 text-zinc-400 hover:scale-105 hover:bg-zinc-700 hover:text-white cursor-pointer"
+                      isLoser ? "border-zinc-800 bg-zinc-800/30 text-zinc-600 opacity-30" :
+                      `border-zinc-700 bg-zinc-800/80 text-white ${hover} hover:border-transparent hover:scale-105 cursor-pointer`
                     )}
                   >
                     {k}
@@ -2463,13 +2508,14 @@ function PrepStudyCard({
                 Weiter
              </button>
           </div>
-        ) : activeSlot < 2 ? (
+        ) : activeSlot < 2 && isTouchDevice ? (
           <VirtualKeyboard onKeyPress={handleVirtualKey} onBackspace={handleVirtualBackspace} />
         ) : null}
       </div>
     </div>
   );
 }
+
 function VerbStudyCard({
   card, 
   deckTitle, 
