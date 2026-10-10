@@ -778,10 +778,8 @@ function RapidFlashcardMode({
 
       return (
         <>
-          <span className="whitespace-nowrap">
-            <span className={`font-normal ${articleColor}`}>{article}{`\u00A0`}</span>
-            <span>{firstWord}</span>
-          </span>
+          <span className={`font-normal ${articleColor}`}>{article}{`\u00A0`}</span>
+          <span>{firstWord}</span>
           {remaining && <span> {remaining}</span>}
         </>
       );
@@ -793,7 +791,11 @@ function RapidFlashcardMode({
 
   const renderGermanBlock = () => (
     <div className="flex flex-col items-center justify-center w-full px-4 md:px-8">
-      <h2 className="text-[36px] sm:text-[40px] md:text-[54px] font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white break-words hyphens-auto w-full" lang="de">
+      <h2 
+        className="font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white break-words break-keep hyphens-none w-full"
+        style={{ fontSize: 'clamp(1.5rem, 6vw + 1rem, 2.5rem)', overflowWrap: 'break-word' }}
+        lang="de"
+      >
         {formatGermanWord(german)}
       </h2>
       {formattedForms && (
@@ -846,8 +848,8 @@ function RapidFlashcardMode({
               </div>
             </div>
             {example && (
-              <div className="mt-8 md:mt-10 w-full flex justify-center px-6 md:px-10">
-                <div className="border-l-2 border-zinc-200 dark:border-white/20 pl-3 py-1 text-left w-full max-w-sm sm:max-w-md">
+              <div className="mt-8 md:mt-10 w-full px-4">
+                <div className="border-l-2 border-zinc-200 dark:border-white/20 pl-4 py-1 text-left max-w-[90%] mx-auto">
                   <p className="text-[15px] sm:text-[16px] md:text-[18px] italic text-zinc-500 dark:text-zinc-500 leading-relaxed text-left">
                     {example}
                   </p>
