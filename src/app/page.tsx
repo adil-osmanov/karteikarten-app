@@ -3232,6 +3232,7 @@ function VerbStudyCard({
   );
 }
 export default function App() {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder } = useStore();
   const [isMounted, setIsMounted] = useState(false);
@@ -3788,34 +3789,29 @@ try {
     setDraggedDeckId(null);
   };
 
-  const handleBookDrop = (targetId: string) => {
+  const handleBookDrop = async (targetId: string) => {
     const draggedId = draggedBookId;
     setDraggedBookId(null);
     setDragOverBookId(null);
     if (!draggedId || draggedId === targetId) return;
+
     const { books: allBooks, bookOrder: curOrder, setBookOrder: saveOrder, updateBookSettings } = useStore.getState();
-    
-    // Check if we dropped it into a different category by dropping on a target book
     const draggedBook = allBooks.find(b => b.id === draggedId);
     let targetBook = allBooks.find(b => b.id === targetId);
-    
-    // If targetId is a special section dropzone (e.g. 'section-coursebook')
-    let newCategory = null;
+
+    let newCategory: string | null = null;
     if (targetId.startsWith('section-')) {
       newCategory = targetId.replace('section-', '');
-      targetBook = undefined; // No target book
+      targetBook = undefined;
     } else if (draggedBook && targetBook) {
       const draggedCat = draggedBook.category === 'coursebook' || draggedBook.category === 'book' ? 'coursebook' : 'deck';
       const targetCat = targetBook.category === 'coursebook' || targetBook.category === 'book' ? 'coursebook' : 'deck';
       if (draggedCat !== targetCat) {
-        newCategory = targetBook.category || 'book';
+        newCategory = targetBook.category || 'deck';
       }
     }
-    
-    if (newCategory && draggedBook) {
-      updateBookSettings(draggedId, { category: newCategory });
-    }
-    
+
+    // 1) ОПТИМИСТИЧНЫЙ UI: Сразу переставляем карточку в массиве сортировки
     const base = (curOrder && curOrder.length > 0) ? [...curOrder] : [];
     allBooks.forEach(b => { if (!base.includes(b.id)) base.push(b.id); });
     
@@ -3827,10 +3823,29 @@ try {
       base.splice(to, 0, draggedId);
       saveOrder(base);
     } else if (from !== -1 && newCategory) {
-       // if we dropped on a section, move it to the end of that section's items in the order
        base.splice(from, 1);
        base.push(draggedId);
        saveOrder(base);
+    }
+
+    // 2) АСИНХРОННЫЙ ЗАПРОС К SUPABASE С ОБРАБОТКОЙ ОШИБОК И ИНВАЛИДАЦИЕЙ КЭША
+    if (newCategory && draggedBook) {
+      const prevCategory = draggedBook.category;
+      try {
+        const ok = await updateBookSettings(draggedId, { category: newCategory });
+        if (ok) {
+           toast.success('Verschoben!');
+           router.refresh();
+        } else {
+           throw new Error('Supabase update returned false');
+        }
+      } catch (e: any) {
+        console.error("DND Error:", e);
+        toast.error('Fehler beim Verschieben');
+        // Rollback state
+        saveOrder(curOrder); 
+        // updateBookSettings inside already rolls back the book category state
+      }
     }
   };
 
