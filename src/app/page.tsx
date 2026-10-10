@@ -763,26 +763,26 @@ function RapidFlashcardMode({
   const formatGermanWord = (w: string) => {
     const trimmed = w.trim();
     if (trimmed.startsWith('der ')) {
-      return <><span className="text-[#007AFF] dark:text-[#0A84FF]">der </span>{trimmed.slice(4)}</>;
+      return <><span className="font-normal text-[#007AFF] dark:text-[#0A84FF]">der{`\u00A0`}</span><span>{trimmed.slice(4)}</span></>;
     }
     if (trimmed.startsWith('die ')) {
-      return <><span className="text-[#FF3B30] dark:text-[#FF453A]">die </span>{trimmed.slice(4)}</>;
+      return <><span className="font-normal text-[#FF3B30] dark:text-[#FF453A]">die{`\u00A0`}</span><span>{trimmed.slice(4)}</span></>;
     }
     if (trimmed.startsWith('das ')) {
-      return <><span className="text-[#34C759] dark:text-[#30D158]">das </span>{trimmed.slice(4)}</>;
+      return <><span className="font-normal text-[#34C759] dark:text-[#30D158]">das{`\u00A0`}</span><span>{trimmed.slice(4)}</span></>;
     }
-    return trimmed;
+    return <span>{trimmed}</span>;
   };
 
   const formattedForms = formatForms(card.forms);
 
   const renderGermanBlock = () => (
     <div className="flex flex-col items-center justify-center">
-      <h2 className="text-[40px] md:text-[54px] font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white">
+      <h2 className="text-[36px] sm:text-[40px] md:text-[54px] font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white break-words hyphens-auto w-full px-2" lang="de">
         {formatGermanWord(german)}
       </h2>
       {formattedForms && (
-        <div className="text-[15px] md:text-[17px] text-zinc-500 dark:text-zinc-400 mt-1 md:mt-2 font-normal tracking-wide">
+        <div className="text-[14px] md:text-[16px] text-zinc-500 dark:text-zinc-400 mt-0.5 md:mt-1 font-normal tracking-wide">
           {formattedForms}
         </div>
       )}
@@ -817,8 +817,8 @@ function RapidFlashcardMode({
                 renderGermanBlock()
               )}
             </div>
-            <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase hidden md:block">Space</span>
-            <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase md:hidden">Tap</span>
+            <span className="absolute bottom-6 text-[11px] text-zinc-300 dark:text-zinc-700 font-medium tracking-widest uppercase hidden md:block opacity-30">Space</span>
+            <span className="absolute bottom-6 text-[11px] text-zinc-300 dark:text-zinc-700 font-medium tracking-widest uppercase md:hidden opacity-30">Tap</span>
           </div>
 
           {/* BACK FACE */}
@@ -826,15 +826,17 @@ function RapidFlashcardMode({
             {cardHeader}
             <div className="flex-1 flex flex-col items-center justify-center w-full pt-4">
               {renderGermanBlock()}
-              <div className="text-2xl md:text-[28px] font-semibold text-zinc-800 dark:text-zinc-200 mt-6 md:mt-8 text-center leading-snug">
+              <div className="text-[20px] sm:text-[22px] md:text-[26px] font-normal text-zinc-600 dark:text-white/85 mt-8 md:mt-10 text-center leading-snug">
                 {translation}
               </div>
             </div>
             {example && (
-              <div className="mt-6 md:mt-8 pt-6 border-t border-zinc-200 dark:border-zinc-800/60 w-full flex justify-center">
-                <p className="text-[17px] md:text-[19px] italic text-zinc-600 dark:text-zinc-400 text-center leading-relaxed">
-                  {example}
-                </p>
+              <div className="mt-8 md:mt-10 w-full flex justify-center px-2 sm:px-4">
+                <div className="border-l-[3px] border-zinc-200 dark:border-zinc-700 pl-4 py-1 text-left w-full max-w-sm sm:max-w-md">
+                  <p className="text-[15px] sm:text-[16px] md:text-[18px] italic text-zinc-500 dark:text-zinc-500 leading-relaxed">
+                    {example}
+                  </p>
+                </div>
               </div>
             )}
           </div>
