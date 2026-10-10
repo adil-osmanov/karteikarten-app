@@ -241,24 +241,17 @@ const useStore = create<DeckState>()((set, get) => ({
   updateBookSettings: async (bookId, updates) => {
     const previousBooks = get().books;
     const book = previousBooks.find(b => b.id === bookId);
-    if (!book) return false;
+    if (!book) throw new Error("Book not found");
     
     const updatedBook = { ...book, ...updates };
     const newBooks = previousBooks.map(b => b.id === bookId ? updatedBook : b);
     set({ books: newBooks });
     
-    try {
-      localStorage.setItem('cache_books_v2', JSON.stringify(newBooks));
-    } catch(e) {}
-    
     const { error } = await supabase.from('books').update(updates).eq('id', bookId);
     if (error) {
-      console.error("Supabase updateBookSettings error:", error.message);
+      console.error("Supabase updateBookSettings error:", error);
       set({ books: previousBooks });
-      try {
-        localStorage.setItem('cache_books_v2', JSON.stringify(previousBooks));
-      } catch(e) {}
-      return false;
+      throw error;
     }
     return true;
   },
@@ -266,14 +259,6 @@ const useStore = create<DeckState>()((set, get) => ({
     const previousBooks = get().books;
     const newBooks = previousBooks.map(b => b.id === book.id ? book : b);
     set({ books: newBooks });
-    
-    try {
-      localStorage.setItem('cache_books_v2', JSON.stringify(newBooks));
-    } catch(e) {}
-    try {
-      if (book.coverImage) localStorage.setItem(`book_cover_${book.id}`, book.coverImage);
-      else localStorage.removeItem(`book_cover_${book.id}`);
-    } catch(e) {}
     
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
@@ -559,14 +544,6 @@ const useStore = create<DeckState>()((set, get) => ({
 if (typeof window !== 'undefined') {
   useStore.subscribe((state, prevState) => {
     try {
-      if (!prevState || state.books !== prevState.books) {
-        try {
-          localStorage.setItem('cache_books_v2', JSON.stringify(state.books));
-        } catch (e) {
-          console.warn('Failed to save books cache, clearing it to prevent stale data:', e);
-          localStorage.removeItem('cache_books_v2');
-        }
-      }
       if (!prevState || state.decks !== prevState.decks) {
         try {
           localStorage.setItem('cache_decks_v2', JSON.stringify(state.decks));
@@ -3316,8 +3293,8 @@ export default function App() {
     const fetchData = async () => {
       
       try {
-        const cachedBooks = localStorage.getItem('cache_books_v2');
-        if (cachedBooks) setBooks(JSON.parse(cachedBooks));
+        
+        
         const cachedDecks = localStorage.getItem('cache_decks_v2');
         if (cachedDecks) setDecks(JSON.parse(cachedDecks));
       } catch (e) {}
@@ -3407,40 +3384,34 @@ try {
           }
         }
         
+        // CLEAR CACHE TO AVOID QUOTA EXCEEDED
+        try {
+          localStorage.removeItem('cache_books_v2');
+          // Also clear book_cover keys
+          Object.keys(localStorage).forEach(k => {
+             if (k.startsWith('book_cover_')) localStorage.removeItem(k);
+          });
+        } catch(e) {}
+
         if (booksRes.data && booksRes.data.length > 0) {
-          const localStr = localStorage.getItem('cache_books_v2');
-          const localBooks = localStr ? JSON.parse(localStr) : [];
-          
           const mappedBooks = booksRes.data.map((b: any) => {
-            const lb = localBooks.find((local: any) => local.id === b.id);
-            const dedicatedCover = localStorage.getItem(`book_cover_${b.id}`);
             return {
               id: b.id,
-              language: b.language || lb?.language,
-              title: b.title || lb?.title,
-              subtitle: b.subtitle || lb?.subtitle,
-              category: b.category || lb?.category || 'book',
-              training_mode: b.training_mode || lb?.training_mode || 'standard_cloze',
-              tintColor: b.tintColor || b.tintcolor || lb?.tintColor || '#007AFF',
-              coverImage: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || lb?.coverImage || null,
-              activeLevels: b.activeLevels || b.activelevels || lb?.activeLevels || ['A1'],
-              coverType: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover ? 'image' : (b.coverType || b.covertype || lb?.coverType),
-              coverValue: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || b.coverValue || b.covervalue || lb?.coverValue,
-              accentColor: b.accentColor || b.accentcolor || lb?.accentColor
+              language: b.language,
+              title: b.title,
+              subtitle: b.subtitle,
+              category: b.category || 'book',
+              training_mode: b.training_mode || 'standard_cloze',
+              tintColor: b.tintColor || b.tintcolor || '#007AFF',
+              coverImage: b.cover_url_light || b.coverImage || b.coverimage || null,
+              activeLevels: b.activeLevels || b.activelevels || ['A1'],
+              coverType: b.cover_url_light || b.coverImage || b.coverimage ? 'image' : (b.coverType || b.covertype),
+              coverValue: b.cover_url_light || b.coverImage || b.coverimage || b.coverValue || b.covervalue,
+              accentColor: b.accentColor || b.accentcolor
             };
-          });
-          
-          localBooks.forEach((lb: any) => {
-            if (!mappedBooks.find((m: any) => m.id === lb.id)) mappedBooks.push(lb);
           });
 
           setBooks(mappedBooks);
-          try {
-            localStorage.setItem('cache_books_v2', JSON.stringify(mappedBooks));
-          } catch(e) {
-            console.warn('Quota exceeded, clearing cache_books_v2');
-            localStorage.removeItem('cache_books_v2');
-          }
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
@@ -3457,7 +3428,6 @@ try {
             await supabase.from('books').insert(lowercaseDefaults);
           }
           setBooks(defaultBooks);
-          try { localStorage.setItem('cache_books_v2', JSON.stringify(defaultBooks)); } catch(e) { localStorage.removeItem('cache_books_v2'); }
         }
 
         if (decksRes.error) {
@@ -3825,7 +3795,7 @@ try {
     console.log('Drop Result:', result);
 
     const isCrossListDrop = sourceDroppableId !== destinationDroppableId;
-    const newCategoryToSave = destinationDroppableId === 'coursebook' ? 'coursebook' : 'deck';
+    const newCategoryToSave = destinationDroppableId === 'coursebook' ? 'book' : 'deck'; // MAP TO DB ALLOWED VALUES
 
     // 1) ОПТИМИСТИЧНЫЙ UI: Сразу переставляем карточку в массиве сортировки
     const base = (curOrder && curOrder.length > 0) ? [...curOrder] : [];
@@ -3848,14 +3818,10 @@ try {
     if (isCrossListDrop) {
       try {
         // Оптимистично обновляем стейт category в UI ДО завершения запроса (через updateBookSettings внутри)
-        const ok = await updateBookSettings(draggedId, { category: newCategoryToSave });
-        if (ok) {
-           toast.success('Verschoben!');
-           // ЖЕСТКАЯ ИНВАЛИДАЦИЯ КЭША
-           router.refresh();
-        } else {
-           throw new Error('Supabase update returned false');
-        }
+        await updateBookSettings(draggedId, { category: newCategoryToSave });
+        toast.success('Verschoben!');
+        // ЖЕСТКАЯ ИНВАЛИДАЦИЯ КЭША
+        router.refresh();
       } catch (err: any) {
         console.error("DND Database Error:", err);
         toast.error('Fehler beim Verschieben');
