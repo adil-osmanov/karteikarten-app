@@ -33,63 +33,57 @@ const FAIL_B64 = "data:audio/wav;base64,UklGRi6bAABXQVZFZm10IBAAAAABAAEARKwAAIhY
 let cachedAudioCtx: AudioContext | null = null;
 const audioCache = new Map<string, string>();
 
-const tockPool: HTMLAudioElement[] = [];
-const successPool: HTMLAudioElement[] = [];
-const failPool: HTMLAudioElement[] = [];
+let audioCtx: AudioContext | null = null;
+let tockBuffer: AudioBuffer | null = null;
+let successBuffer: AudioBuffer | null = null;
+let failBuffer: AudioBuffer | null = null;
+let isAudioInitialized = false;
 
-let tockIdx = 0;
-let successIdx = 0;
-let failIdx = 0;
-
-if (typeof window !== 'undefined') {
-  for (let i = 0; i < 5; i++) {
-    tockPool.push(new Audio(TOCK_B64));
-    successPool.push(new Audio(SUCCESS_B64));
-    failPool.push(new Audio(FAIL_B64));
+const decodeBase64Audio = async (base64: string, ctx: AudioContext) => {
+  try {
+    const base64Data = base64.split(',')[1] || base64;
+    const binaryStr = window.atob(base64Data);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return await ctx.decodeAudioData(bytes.buffer);
+  } catch (e) {
+    return null;
   }
-}
+};
 
-const initAudioCtx = () => {
-  if (typeof window === 'undefined') return;
+export const initAudioCtx = async () => {
+  if (typeof window === 'undefined' || isAudioInitialized) return;
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
-    if (!cachedAudioCtx) {
-      cachedAudioCtx = new AudioContextClass();
-    }
-    if (cachedAudioCtx.state === 'suspended') {
-      cachedAudioCtx.resume().catch(() => {});
-    }
+    
+    if (!audioCtx) audioCtx = new AudioContextClass();
+    if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
+    
+    isAudioInitialized = true;
+    
+    if (!tockBuffer) tockBuffer = await decodeBase64Audio(TOCK_B64, audioCtx);
+    if (!successBuffer) successBuffer = await decodeBase64Audio(SUCCESS_B64, audioCtx);
+    if (!failBuffer) failBuffer = await decodeBase64Audio(FAIL_B64, audioCtx);
   } catch(e) {}
 };
 
-const playTockSound = () => {
-  if (typeof window === 'undefined') return;
+const playBuffer = (buffer: AudioBuffer | null) => {
+  if (!audioCtx || !buffer) return;
   try {
-    const audio = tockPool[tockIdx];
-    tockIdx = (tockIdx + 1) % tockPool.length;
-    audio.currentTime = 0;
-    const p = audio.play();
-    if (p !== undefined) p.catch(() => {});
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.start(0);
   } catch (e) {}
 };
 
-const playFeedbackSound = (isCorrect: boolean) => {
-  if (typeof window === 'undefined') return;
-  try {
-    let audio: HTMLAudioElement;
-    if (isCorrect) {
-       audio = successPool[successIdx];
-       successIdx = (successIdx + 1) % successPool.length;
-    } else {
-       audio = failPool[failIdx];
-       failIdx = (failIdx + 1) % failPool.length;
-    }
-    audio.currentTime = 0;
-    const p = audio.play();
-    if (p !== undefined) p.catch(() => {});
-  } catch(e) {}
-};
+export const playTockSound = () => playBuffer(tockBuffer);
+export const playFeedbackSound = (isCorrect: boolean) => playBuffer(isCorrect ? successBuffer : failBuffer);
 
 // --- STORE & TYPES ---
 
@@ -2262,7 +2256,8 @@ function VerbStudyCard({
 
   const [activeInput, setActiveInput] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [hasErrored, setHasErrored] = useState(false);
+  const [errorCount, setErrorCount] = useState(0);
+  const hasErrored = errorCount >= 3;
   const [isHilfe, setIsHilfe] = useState(false);
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
@@ -2316,7 +2311,7 @@ function VerbStudyCard({
   }, [hasErrored, playAudio, onAnswer]);
 
   const handleSlotError = useCallback(() => {
-    setHasErrored(true);
+    setErrorCount(prev => prev + 1);
   }, []);
 
   const handleHilfe = useCallback(() => {
