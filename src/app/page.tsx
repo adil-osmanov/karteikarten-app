@@ -150,6 +150,7 @@ interface DeckState {
   deleteDeck: (deckId: string) => void;
   renameDeck: (deckId: string, newName: string) => void;
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
+  setCardProgress: (deckId: string, cardId: string, score: number) => void;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: () => void;
   appLanguage: 'DE' | 'EN';
@@ -481,6 +482,50 @@ const useStore = create<DeckState>()((set, get) => ({
         set({ decks: previousDecks });
       }
     }
+  },
+
+  // Rapid flashcards: persist the 0-4 round score of a word. 4 => archived (learned).
+  setCardProgress: async (deckId, cardId, score) => {
+    const previousDecks = get().decks;
+    let updatedCard: any = null;
+    if (score >= 4) get().incrementDailyProgress();
+
+    set((state) => {
+      const di = state.decks.findIndex((d) => d.id === deckId);
+      if (di === -1) return state;
+      const deck = state.decks[di];
+      const ci = deck.cards.findIndex((c) => c.id === cardId);
+      if (ci === -1) return state;
+      const card = { ...deck.cards[ci] };
+      if (score >= 4) {
+        card.masteryLevel = 3;
+        card.isArchived = true;
+        card.repetitions = 1;
+        card.interval = 1;
+        card.nextReviewDate = Date.now() + 86400000;
+      } else {
+        card.masteryLevel = Math.max(0, Math.min(3, score));
+      }
+      updatedCard = card;
+      const newCards = deck.cards.map((c, i) => (i === ci ? card : c));
+      const newDecks = [...state.decks];
+      newDecks[di] = { ...deck, cards: newCards };
+      return { decks: newDecks };
+    });
+
+    if (updatedCard) {
+      const { error } = await supabase.from('cards').update({
+        masteryLevel: updatedCard.masteryLevel,
+        isArchived: updatedCard.isArchived,
+        nextReviewDate: updatedCard.nextReviewDate,
+        interval: updatedCard.interval,
+        repetitions: updatedCard.repetitions
+      }).eq('id', cardId);
+      if (error) {
+        console.error("Supabase Update Card Error:", error.message);
+        set({ decks: previousDecks });
+      }
+    }
   }
 }));
 
@@ -512,47 +557,29 @@ if (typeof window !== 'undefined') {
 
 
 // --- RAPID FLASHCARD MODE ---
-import { Howl } from 'howler';
+import { Howl, Howler } from 'howler';
 
 const hasCyrillic = (s: string) => /[\u0400-\u04FF]/.test(s);
 
-// Very soft, short "tick" (low-passed sine with gentle pitch drop) - Apple-like subtle UI feedback
-const makeSoftFlipWav = (): string => {
-  const sr = 22050;
-  const n = Math.floor(sr * 0.09);
-  const buf = new ArrayBuffer(44 + n * 2);
-  const v = new DataView(buf);
-  const wr = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-  wr(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); wr(8, 'WAVE'); wr(12, 'fmt ');
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-  wr(36, 'data'); v.setUint32(40, n * 2, true);
-  let phase = 0;
-  for (let i = 0; i < n; i++) {
-    const t = i / n;
-    const freq = 640 - 220 * t;
-    phase += (2 * Math.PI * freq) / sr;
-    const env = Math.min(1, i / (sr * 0.006)) * Math.exp(-t * 7);
-    const sample = Math.sin(phase) * env * 0.35;
-    v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, sample)) * 32767, true);
-  }
-  const bytes = new Uint8Array(buf);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return 'data:audio/wav;base64,' + btoa(bin);
-};
-
-let rapidSounds: { flip: Howl; success: Howl; error: Howl } | null = null;
+let rapidSounds: { success: Howl; error: Howl } | null = null;
 const getRapidSounds = () => {
   if (typeof window === 'undefined') return null;
   if (!rapidSounds) {
+    // html5:false => Web Audio API (avoids Safari HTML5 audio blocking)
     rapidSounds = {
-      flip: new Howl({ src: [makeSoftFlipWav()], format: ['wav'], volume: 0.3 }),
-      success: new Howl({ src: [SUCCESS_B64], format: ['wav'], volume: 0.4 }),
-      error: new Howl({ src: [FAIL_B64], format: ['wav'], volume: 0.4 }),
+      success: new Howl({ src: [SUCCESS_B64], format: ['wav'], volume: 0.4, preload: true, html5: false }),
+      error: new Howl({ src: [FAIL_B64], format: ['wav'], volume: 0.4, preload: true, html5: false }),
     };
   }
   return rapidSounds;
+};
+
+// Safari: the Web Audio context must be resumed synchronously inside a user gesture (click/keydown)
+const unlockRapidAudio = () => {
+  try {
+    const ctx = (Howler as any).ctx as AudioContext | undefined;
+    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+  } catch (e) {}
 };
 
 function RapidFlashcardMode({
@@ -599,13 +626,14 @@ function RapidFlashcardMode({
 
   const flip = useCallback(() => {
     if (locked) return;
-    getRapidSounds()?.flip.play();
     setIsFlipped(prev => !prev);
   }, [locked]);
 
   const answer = useCallback((correct: boolean) => {
     if (locked) return;
     if (!isFlipped) { flip(); return; }
+    // Synchronous playback inside the user-gesture handler (Safari)
+    unlockRapidAudio();
     const s = getRapidSounds();
     if (correct) s?.success.play(); else s?.error.play();
     onAnswer(correct, true);
@@ -633,6 +661,24 @@ function RapidFlashcardMode({
   const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-12 rounded-[32px] border bg-white border-zinc-200 text-black shadow-xl dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-white dark:shadow-2xl";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
+  // Header lives INSIDE each face so it rotates together with the card
+  const cardHeader = (
+    <div className="absolute top-5 left-5 right-5 flex justify-between items-center z-10">
+      <button
+        onClick={(e) => { e.stopPropagation(); speak(); }}
+        className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
+        title="R"
+      >
+        <Volume2 className="w-[18px] h-[18px]" />
+      </button>
+      <div className="flex items-center gap-2 pr-1">
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700")} />
+        ))}
+      </div>
+    </div>
+  );
+
   const frontText = reverse ? translation : german;
   const backFirst = reverse ? german : translation;
   const backSecond = reverse ? translation : german;
@@ -654,12 +700,14 @@ function RapidFlashcardMode({
           onClick={flip}
         >
           <div className={faceBase} style={faceStyle}>
+            {cardHeader}
             <h2 className="text-4xl md:text-5xl font-bold text-center leading-tight">{frontText}</h2>
             <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase hidden md:block">Space</span>
             <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase md:hidden">Tap</span>
           </div>
 
           <div className={faceBase} style={{ ...faceStyle, transform: 'rotateY(180deg)' }}>
+            {cardHeader}
             <h2 className="text-4xl font-bold mb-3 text-center leading-tight">{backFirst}</h2>
             <p className="text-xl text-zinc-500 mb-8 text-center">{backSecond}</p>
             {example && (
@@ -669,22 +717,6 @@ function RapidFlashcardMode({
             )}
           </div>
         </motion.div>
-
-        {/* Fixed overlay on the card: sound button + round dots */}
-        <div className="absolute top-5 left-5 right-5 flex justify-between items-center pointer-events-none z-10">
-          <button
-            onClick={(e) => { e.stopPropagation(); speak(); }}
-            className="pointer-events-auto w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
-            title="R"
-          >
-            <Volume2 className="w-[18px] h-[18px]" />
-          </button>
-          <div className="flex items-center gap-2 pr-1">
-            {[0, 1, 2, 3].map(i => (
-              <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700")} />
-            ))}
-          </div>
-        </div>
       </div>
 
       <div className="md:hidden flex justify-center gap-6 mt-8">
@@ -709,6 +741,7 @@ function RapidSession({
   onBack: () => void;
 }) {
   const answerCard = useStore(state => state.answerCard);
+  const setCardProgress = useStore(state => state.setCardProgress);
   const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [wordProgress, setWordProgress] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
@@ -718,6 +751,7 @@ function RapidSession({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    getRapidSounds(); // preload so Safari has decoded buffers before the first answer
     let list: { deckId: string, card: Flashcard }[] = [];
     if (reviewCards) {
       list = [...reviewCards];
@@ -729,10 +763,15 @@ function RapidSession({
       const j = Math.floor(Math.random() * (i + 1));
       [list[i], list[j]] = [list[j], list[i]];
     }
+    // Restore saved round progress (0-3) of not-yet-archived words
+    const initialProgress: Record<string, number> = {};
+    list.forEach(({ card }) => {
+      if (!card.isArchived) initialProgress[card.id] = Math.max(0, Math.min(3, card.masteryLevel || 0));
+    });
     setQueue(list);
     setTotal(list.length);
     setMastered(0);
-    setWordProgress({});
+    setWordProgress(initialProgress);
     setLocked(false);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [deckId, reviewCards]);
@@ -741,33 +780,36 @@ function RapidSession({
     if (locked || !queue || queue.length === 0) return;
     const current = queue[0];
     const id = current.card.id;
-    const next = correct ? Math.min(4, (wordProgress[id] || 0) + 1) : 0;
-    setWordProgress(prev => ({ ...prev, [id]: next }));
+    const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
+
+    const newScore = correct ? (wordProgress[id] || 0) + 1 : 0;
+    const learned = correct && newScore >= 4;
+
+    // 1) Persist immediately (store + Supabase)
+    if (liveCard.isArchived) {
+      // Spaced-repetition review of an already learned word
+      if (learned) answerCard(current.deckId, id, true, false);
+      else if (!correct) answerCard(current.deckId, id, false, false);
+    } else {
+      setCardProgress(current.deckId, id, newScore);
+    }
+
+    // 2) Update dots immediately
+    setWordProgress(prev => ({ ...prev, [id]: Math.min(4, newScore) }));
     setLocked(true);
 
+    // 3) After a short beat so the filled dot is visible: learned -> remove, otherwise -> end of queue
     timerRef.current = setTimeout(() => {
-      const done = correct && next >= 4;
-      if (done) {
-        const wasArchived = current.card.isArchived;
-        if (wasArchived) {
-          answerCard(current.deckId, id, true, false);
-        } else {
-          for (let i = 0; i < 4; i++) {
-            const live = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id);
-            if (!live || live.isArchived) break;
-            answerCard(current.deckId, id, true, false);
-          }
-        }
+      if (learned) {
         setMastered(m => m + 1);
-        setQueue(q => (q ? q.slice(1) : q));
+        setQueue(q => (q ? q.filter(item => item.card.id !== id) : q));
       } else {
-        if (!correct && current.card.isArchived) answerCard(current.deckId, id, false, false);
-        setQueue(q => (q ? [...q.slice(1), q[0]] : q));
+        setQueue(q => (q ? [...q.filter(item => item.card.id !== id), current] : q));
       }
       setTurn(t => t + 1);
       setLocked(false);
-    }, wasFlipped ? 450 : 900);
-  }, [locked, queue, wordProgress, answerCard]);
+    }, 450);
+  }, [locked, queue, wordProgress, answerCard, setCardProgress]);
 
   if (queue === null) return null;
 
@@ -794,8 +836,8 @@ function RapidSession({
   const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === current.card.id) || current.card;
 
   return (
-    <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50 min-h-screen bg-zinc-50 dark:bg-black">
-      <div className="w-full max-w-2xl mx-auto px-4 mb-6">
+    <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
+      <div className="w-full max-w-xl mx-auto px-2 mb-8">
         <div className="flex items-center justify-between mb-4">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
             <ArrowLeft className="w-5 h-5" />
@@ -807,7 +849,7 @@ function RapidSession({
         <div className="w-full h-1 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div
             className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
-            style={{ width: `${Math.max(3, total > 0 ? (mastered / total) * 100 : 0)}%` }}
+            style={{ width: `${Math.max(5, total > 0 ? (mastered / total) * 100 : 0)}%` }}
           />
         </div>
       </div>
