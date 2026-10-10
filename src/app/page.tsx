@@ -200,6 +200,7 @@ const useStore = create<DeckState>()((set, get) => ({
     const payload = {
       id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
+      cover_url_light: book.coverImage || null, cover_url_dark: book.coverImage || null,
       activeLevels: book.activeLevels || ['A1']
     };
     
@@ -209,6 +210,7 @@ const useStore = create<DeckState>()((set, get) => ({
        const fallbackPayload = {
          id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
          tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
+         cover_url_light: book.coverImage || null, cover_url_dark: book.coverImage || null,
          activelevels: book.activeLevels || ['A1']
        };
        const fallbackRes = await supabase.from('books').insert(fallbackPayload);
@@ -237,6 +239,8 @@ const useStore = create<DeckState>()((set, get) => ({
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
+      cover_url_light: book.coverImage || null,
+      cover_url_dark: book.coverImage || null,
       activeLevels: book.activeLevels || ['A1']
     };
     
@@ -245,7 +249,10 @@ const useStore = create<DeckState>()((set, get) => ({
     if (error && error.message.includes('does not exist')) {
        const fallbackPayload = {
          language: book.language, title: book.title, subtitle: book.subtitle || null,
-         tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
+         tintcolor: book.tintColor || '#000000', 
+         coverimage: book.coverImage || null,
+         cover_url_light: book.coverImage || null,
+         cover_url_dark: book.coverImage || null,
          activelevels: book.activeLevels || ['A1']
        };
        const fallbackRes = await supabase.from('books').update(fallbackPayload).eq('id', book.id);
@@ -2254,7 +2261,7 @@ const VerbSlot = React.memo(({
           return (
             <React.Fragment key={i}>
               {splitIndex === i && <span className="text-gray-300 dark:text-gray-600 mx-[2px] opacity-60 font-light text-[15px] mb-0.5">|</span>}
-              <span className={cn(isErrorChar ? "text-red-500" : "text-gray-900 dark:text-white", char === ' ' && "whitespace-pre")}>
+              <span className={cn(isErrorChar ? "text-red-500" : "text-zinc-900 dark:text-zinc-100", char === ' ' && "whitespace-pre")}>
                 {char}
               </span>
             </React.Fragment>
@@ -2441,63 +2448,68 @@ function PrepStudyCard({
           </h2>
         </div>
 
-        <div className="flex flex-row items-center justify-center gap-3 sm:gap-6 w-full max-w-lg mb-8">
-          <VerbSlot 
-            label="Verb" 
-            target={cleanVerb} 
-            splitIndex={splitIndex}
-            isActive={activeSlot === 0} 
-            isSuccess={isSuccess || isHilfe} 
-            isHilfe={isHilfe} 
-            onComplete={handleVerbComplete} 
-            onError={()=>{}} 
-            virtualKeyRef={virtualKeyRef0} 
-            virtualBackspaceRef={virtualBackspaceRef0} 
-          />
-          <VerbSlot 
-            label="Präposition" 
-            target={prep} 
-            isActive={activeSlot === 1} 
-            isSuccess={isSuccess || isHilfe} 
-            isHilfe={isHilfe} 
-            onComplete={handlePrepComplete} 
-            onError={()=>{}} 
-            virtualKeyRef={virtualKeyRef1} 
-            virtualBackspaceRef={virtualBackspaceRef1} 
-          />
-        </div>
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-10 w-full max-w-2xl mb-8">
+          
+          {/* Inputs on the Left */}
+          <div className="flex flex-row items-center justify-center gap-3 sm:gap-6">
+            <VerbSlot 
+              label="Verb" 
+              target={cleanVerb} 
+              splitIndex={splitIndex}
+              isActive={activeSlot === 0} 
+              isSuccess={isSuccess || isHilfe} 
+              isHilfe={isHilfe} 
+              onComplete={handleVerbComplete} 
+              onError={()=>{}} 
+              virtualKeyRef={virtualKeyRef0} 
+              virtualBackspaceRef={virtualBackspaceRef0} 
+            />
+            <VerbSlot 
+              label="Präposition" 
+              target={prep} 
+              isActive={activeSlot === 1} 
+              isSuccess={isSuccess || isHilfe} 
+              isHilfe={isHilfe} 
+              onComplete={handlePrepComplete} 
+              onError={()=>{}} 
+              virtualKeyRef={virtualKeyRef1} 
+              virtualBackspaceRef={virtualBackspaceRef1} 
+            />
+          </div>
 
-        {/* Kasus Buttons */}
-        <div className="flex flex-row items-center justify-center gap-2 sm:gap-4 mb-4">
-          {[
-            { k: 'NOM', hover: 'hover:bg-gray-200 dark:hover:bg-zinc-700', success: 'bg-zinc-500 text-white border-zinc-500' },
-            { k: 'GEN', hover: 'hover:bg-purple-100 dark:hover:bg-purple-900', success: 'bg-purple-500 text-white border-purple-500' },
-            { k: 'DAT', hover: 'hover:bg-blue-100 dark:hover:bg-blue-900', success: 'bg-blue-500 text-white border-blue-500' },
-            { k: 'AKK', hover: 'hover:bg-orange-100 dark:hover:bg-[#FF9500]', success: 'bg-orange-500 dark:bg-[#FF9500] text-white border-orange-500 dark:border-[#FF9500]' }
-          ].map(({ k, hover, success }) => {
-            const isError = wrongKasus === k;
-            const isWinner = (isSuccess || isHilfe) && kasusRaw === k;
-            const isLoser = (isSuccess || isHilfe) && kasusRaw !== k;
-            const isActivePhase = activeSlot === 2 && !isSuccess && !isHilfe;
-            
-            return (
-              <button
-                key={k}
-                onClick={() => handleKasusSelect(k)}
-                disabled={!isActivePhase}
-                className={cn(
-                  "px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[11px] sm:text-[13px] font-bold tracking-widest transition-all duration-300 border",
-                  !isActivePhase && !isSuccess && !isHilfe ? "border-transparent text-gray-300 dark:text-zinc-600 opacity-50 cursor-not-allowed" :
-                  isError ? "bg-red-500 text-white border-red-500 animate-shake" : 
-                  isWinner ? success :
-                  isLoser ? "border-transparent text-gray-300 dark:text-zinc-600 opacity-30" :
-                  `border-transparent text-gray-600 dark:text-zinc-400 bg-transparent ${hover} hover:text-gray-900 dark:hover:text-white hover:scale-105 cursor-pointer`
-                )}
-              >
-                {k}
-              </button>
-            );
-          })}
+          {/* Kasus Buttons on the Right in 2 rows */}
+          <div className="grid grid-cols-2 gap-2 mt-4 sm:mt-0">
+            {[
+              { k: 'NOM', hover: 'hover:bg-zinc-200 dark:hover:bg-zinc-600', success: 'bg-zinc-500 text-white border-zinc-500' },
+              { k: 'GEN', hover: 'hover:bg-purple-100 dark:hover:bg-purple-900', success: 'bg-purple-500 text-white border-purple-500' },
+              { k: 'DAT', hover: 'hover:bg-blue-100 dark:hover:bg-blue-900', success: 'bg-blue-500 text-white border-blue-500' },
+              { k: 'AKK', hover: 'hover:bg-orange-100 dark:hover:bg-[#FF9500]', success: 'bg-orange-500 dark:bg-[#FF9500] text-white border-orange-500 dark:border-[#FF9500]' }
+            ].map(({ k, hover, success }) => {
+              const isError = wrongKasus === k;
+              const isWinner = (isSuccess || isHilfe) && kasusRaw === k;
+              const isLoser = (isSuccess || isHilfe) && kasusRaw !== k;
+              const isActivePhase = activeSlot === 2 && !isSuccess && !isHilfe;
+              
+              const isInactive = !isActivePhase && !isWinner;
+              
+              return (
+                <button
+                  key={k}
+                  onClick={() => handleKasusSelect(k)}
+                  disabled={!isActivePhase}
+                  className={cn(
+                    "px-4 py-2 rounded-[10px] text-[10px] sm:text-[11px] font-bold tracking-widest transition-all duration-300 border shadow-sm",
+                    isInactive ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700" :
+                    isError ? "bg-red-500 text-white border-red-500 animate-shake" : 
+                    isWinner ? success :
+                    `bg-zinc-100 dark:bg-zinc-800 text-zinc-300 dark:text-zinc-200 border-zinc-200 dark:border-zinc-600 ${hover} hover:text-zinc-900 dark:hover:text-white hover:scale-105 cursor-pointer`
+                  )}
+                >
+                  {k}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -2913,15 +2925,15 @@ try {
             const dedicatedCover = localStorage.getItem(`book_cover_${b.id}`);
             return {
               id: b.id,
-              language: lb?.language || b.language,
-              title: lb?.title || b.title,
-              subtitle: lb?.subtitle || b.subtitle,
-              tintColor: lb?.tintColor || b.tintColor || b.tintcolor || '#007AFF',
-              coverImage: dedicatedCover || lb?.coverImage || b.coverImage || b.coverimage || null,
-              activeLevels: lb?.activeLevels || b.activeLevels || b.activelevels || ['A1'],
-              coverType: dedicatedCover ? 'image' : (lb?.coverType || b.coverType || b.covertype),
-              coverValue: dedicatedCover || lb?.coverValue || b.coverValue || b.covervalue,
-              accentColor: lb?.accentColor || b.accentColor || b.accentcolor
+              language: b.language || lb?.language,
+              title: b.title || lb?.title,
+              subtitle: b.subtitle || lb?.subtitle,
+              tintColor: b.tintColor || b.tintcolor || lb?.tintColor || '#007AFF',
+              coverImage: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || lb?.coverImage || null,
+              activeLevels: b.activeLevels || b.activelevels || lb?.activeLevels || ['A1'],
+              coverType: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover ? 'image' : (b.coverType || b.covertype || lb?.coverType),
+              coverValue: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || b.coverValue || b.covervalue || lb?.coverValue,
+              accentColor: b.accentColor || b.accentcolor || lb?.accentColor
             };
           });
           
