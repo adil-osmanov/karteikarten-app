@@ -762,14 +762,29 @@ function RapidFlashcardMode({
 
   const formatGermanWord = (w: string) => {
     const trimmed = w.trim();
-    if (trimmed.startsWith('der ')) {
-      return <><span className="font-normal text-[#007AFF] dark:text-[#0A84FF]">der{`\u00A0`}</span><span>{trimmed.slice(4)}</span></>;
-    }
-    if (trimmed.startsWith('die ')) {
-      return <><span className="font-normal text-[#FF3B30] dark:text-[#FF453A]">die{`\u00A0`}</span><span>{trimmed.slice(4)}</span></>;
-    }
-    if (trimmed.startsWith('das ')) {
-      return <><span className="font-normal text-[#34C759] dark:text-[#30D158]">das{`\u00A0`}</span><span>{trimmed.slice(4)}</span></>;
+    const match = trimmed.match(/^(der|die|das)\s+(.+)$/i);
+    if (match) {
+      const article = match[1];
+      const rest = match[2];
+      const restParts = rest.split(' ');
+      const firstWord = restParts[0];
+      const remaining = restParts.slice(1).join(' ');
+
+      let articleColor = '';
+      const lowerArticle = article.toLowerCase();
+      if (lowerArticle === 'der') articleColor = 'text-[#007AFF] dark:text-[#0A84FF]';
+      else if (lowerArticle === 'die') articleColor = 'text-[#FF3B30] dark:text-[#FF453A]';
+      else if (lowerArticle === 'das') articleColor = 'text-[#34C759] dark:text-[#30D158]';
+
+      return (
+        <>
+          <span className="whitespace-nowrap">
+            <span className={`font-normal ${articleColor}`}>{article}{`\u00A0`}</span>
+            <span>{firstWord}</span>
+          </span>
+          {remaining && <span> {remaining}</span>}
+        </>
+      );
     }
     return <span>{trimmed}</span>;
   };
@@ -777,12 +792,12 @@ function RapidFlashcardMode({
   const formattedForms = formatForms(card.forms);
 
   const renderGermanBlock = () => (
-    <div className="flex flex-col items-center justify-center">
-      <h2 className="text-[36px] sm:text-[40px] md:text-[54px] font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white break-words hyphens-auto w-full px-2" lang="de">
+    <div className="flex flex-col items-center justify-center w-full px-4 md:px-8">
+      <h2 className="text-[36px] sm:text-[40px] md:text-[54px] font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white break-words hyphens-auto w-full" lang="de">
         {formatGermanWord(german)}
       </h2>
       {formattedForms && (
-        <div className="text-[14px] md:text-[16px] text-zinc-500 dark:text-zinc-400 mt-0.5 md:mt-1 font-normal tracking-wide">
+        <div className="text-[14px] md:text-[16px] text-zinc-500 dark:text-zinc-400 mt-1 md:mt-2 font-normal tracking-wide text-center">
           {formattedForms}
         </div>
       )}
@@ -831,9 +846,9 @@ function RapidFlashcardMode({
               </div>
             </div>
             {example && (
-              <div className="mt-8 md:mt-10 w-full flex justify-center px-2 sm:px-4">
-                <div className="border-l-[3px] border-zinc-200 dark:border-zinc-700 pl-4 py-1 text-left w-full max-w-sm sm:max-w-md">
-                  <p className="text-[15px] sm:text-[16px] md:text-[18px] italic text-zinc-500 dark:text-zinc-500 leading-relaxed">
+              <div className="mt-8 md:mt-10 w-full flex justify-center px-6 md:px-10">
+                <div className="border-l-2 border-zinc-200 dark:border-white/20 pl-3 py-1 text-left w-full max-w-sm sm:max-w-md">
+                  <p className="text-[15px] sm:text-[16px] md:text-[18px] italic text-zinc-500 dark:text-zinc-500 leading-relaxed text-left">
                     {example}
                   </p>
                 </div>
