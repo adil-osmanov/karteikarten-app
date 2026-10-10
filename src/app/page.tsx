@@ -2256,8 +2256,7 @@ function VerbStudyCard({
 
   const [activeInput, setActiveInput] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [errorCount, setErrorCount] = useState(0);
-  const hasErrored = errorCount >= 3;
+  const hasErrored = false;
   const [isHilfe, setIsHilfe] = useState(false);
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
@@ -2311,7 +2310,7 @@ function VerbStudyCard({
   }, [hasErrored, playAudio, onAnswer]);
 
   const handleSlotError = useCallback(() => {
-    setErrorCount(prev => prev + 1);
+    // User requested infinite attempts without penalty
   }, []);
 
   const handleHilfe = useCallback(() => {
@@ -2370,9 +2369,7 @@ function VerbStudyCard({
           </button>
           <div className="flex gap-1.5">
             {[0, 1, 2, 3].map((step) => {
-              const visualMastery = (isSuccess || isHilfe) 
-                 ? (hasErrored || isHilfe ? Math.max(0, card.masteryLevel - 1) : card.masteryLevel + 1)
-                 : card.masteryLevel;
+              const visualMastery = card.masteryLevel;
                  
               return (
               <div 
