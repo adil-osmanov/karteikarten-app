@@ -734,7 +734,7 @@ function RapidFlashcardMode({
     return () => window.removeEventListener('keydown', handleKey);
   }, [flip, answer, speak]);
 
-  const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-12 rounded-[32px] border bg-white border-zinc-200 text-black shadow-xl dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-white dark:shadow-2xl [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
+  const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-6 md:p-10 rounded-2xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
   // Header lives INSIDE each face so it rotates together with the card
@@ -755,15 +755,39 @@ function RapidFlashcardMode({
     </div>
   );
 
-  const frontText = reverse ? translation : german;
-  const backFirst = reverse ? german : translation;
-  const backSecond = reverse ? translation : german;
-
-  const renderForms = () => {
-    return card.forms && card.forms !== '-' && (
-      <div className="text-sm text-zinc-500 italic mt-1">{card.forms}</div>
-    );
+  const formatForms = (f: string | undefined | null) => {
+    if (!f || f === '-') return null;
+    return f.replace(/,\s*/g, ' · ');
   };
+
+  const formatGermanWord = (w: string) => {
+    const trimmed = w.trim();
+    if (trimmed.startsWith('der ')) {
+      return <><span className="text-[#007AFF] dark:text-[#0A84FF]">der </span>{trimmed.slice(4)}</>;
+    }
+    if (trimmed.startsWith('die ')) {
+      return <><span className="text-[#FF3B30] dark:text-[#FF453A]">die </span>{trimmed.slice(4)}</>;
+    }
+    if (trimmed.startsWith('das ')) {
+      return <><span className="text-[#34C759] dark:text-[#30D158]">das </span>{trimmed.slice(4)}</>;
+    }
+    return trimmed;
+  };
+
+  const formattedForms = formatForms(card.forms);
+
+  const renderGermanBlock = () => (
+    <div className="flex flex-col items-center justify-center">
+      <h2 className="text-[40px] md:text-[54px] font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white">
+        {formatGermanWord(german)}
+      </h2>
+      {formattedForms && (
+        <div className="text-[15px] md:text-[17px] text-zinc-500 dark:text-zinc-400 mt-1 md:mt-2 font-normal tracking-wide">
+          {formattedForms}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <motion.div
@@ -775,34 +799,42 @@ function RapidFlashcardMode({
     >
       <div className="w-full relative" style={{ perspective: '1200px' }}>
         <motion.div
-          className="relative w-full min-h-[360px] md:min-h-[400px] cursor-pointer select-none"
+          className="relative w-full min-h-[420px] md:min-h-[480px] cursor-pointer select-none"
           style={{ transformStyle: 'preserve-3d' }}
           animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
           onClick={flip}
         >
+          {/* FRONT FACE */}
           <div className={`${faceBase} [transform:rotateY(0deg)]`} style={faceStyle}>
             {cardHeader}
-            <div className="flex flex-col items-center">
-              <h2 className="text-4xl md:text-5xl font-bold text-center leading-tight">{frontText}</h2>
+            <div className="flex-1 flex flex-col items-center justify-center w-full">
+              {reverse ? (
+                <h2 className="text-3xl md:text-4xl font-bold text-center leading-tight text-zinc-900 dark:text-white">
+                  {translation}
+                </h2>
+              ) : (
+                renderGermanBlock()
+              )}
             </div>
             <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase hidden md:block">Space</span>
             <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase md:hidden">Tap</span>
           </div>
 
+          {/* BACK FACE */}
           <div className={`${faceBase} [transform:rotateY(180deg)]`} style={faceStyle}>
             {cardHeader}
-            <div className="flex flex-col items-center mb-3">
-              <h2 className="text-4xl font-bold text-center leading-tight">{backFirst}</h2>
-              {reverse && renderForms()}
-            </div>
-            <div className="flex flex-col items-center mb-8">
-              <p className="text-xl text-zinc-500 text-center">{backSecond}</p>
-              {!reverse && renderForms()}
+            <div className="flex-1 flex flex-col items-center justify-center w-full pt-4">
+              {renderGermanBlock()}
+              <div className="text-2xl md:text-[28px] font-semibold text-zinc-800 dark:text-zinc-200 mt-6 md:mt-8 text-center leading-snug">
+                {translation}
+              </div>
             </div>
             {example && (
-              <div className="border-t border-zinc-200 dark:border-zinc-800/60 w-3/4 pt-6 flex justify-center">
-                <p className="text-sm italic text-zinc-400 text-center leading-relaxed">{example}</p>
+              <div className="mt-6 md:mt-8 pt-6 border-t border-zinc-200 dark:border-zinc-800/60 w-full flex justify-center">
+                <p className="text-[17px] md:text-[19px] italic text-zinc-600 dark:text-zinc-400 text-center leading-relaxed">
+                  {example}
+                </p>
               </div>
             )}
           </div>
