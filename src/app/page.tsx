@@ -100,7 +100,7 @@ export interface BookMeta {
   tintColor: string;
   coverImage?: string | null;
   activeLevels: LanguageLevel[];
-  category?: 'book' | 'deck';
+  category?: 'book' | 'deck' | 'coursebook' | 'flashcards' | string;
   training_mode?: 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards';
   coverType?: 'color' | 'image';
   coverValue?: string;
@@ -582,6 +582,22 @@ const unlockRapidAudio = () => {
   } catch (e) {}
 };
 
+let audioUnlocked = false;
+const globalAudioUnlock = () => {
+  if (audioUnlocked) return;
+  unlockRapidAudio();
+  audioUnlocked = true;
+  document.removeEventListener('click', globalAudioUnlock);
+  document.removeEventListener('keydown', globalAudioUnlock);
+  document.removeEventListener('touchstart', globalAudioUnlock);
+};
+
+if (typeof window !== 'undefined') {
+  document.addEventListener('click', globalAudioUnlock);
+  document.addEventListener('keydown', globalAudioUnlock);
+  document.addEventListener('touchstart', globalAudioUnlock);
+}
+
 function RapidFlashcardMode({
   card,
   progress,
@@ -658,7 +674,7 @@ function RapidFlashcardMode({
     return () => window.removeEventListener('keydown', handleKey);
   }, [flip, answer, speak]);
 
-  const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-12 rounded-[32px] border bg-white border-zinc-200 text-black shadow-xl dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-white dark:shadow-2xl";
+  const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-12 rounded-[32px] border bg-white border-zinc-200 text-black shadow-xl dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-white dark:shadow-2xl [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
   // Header lives INSIDE each face so it rotates together with the card
@@ -699,14 +715,14 @@ function RapidFlashcardMode({
           transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
           onClick={flip}
         >
-          <div className={faceBase} style={faceStyle}>
+          <div className={`${faceBase} [transform:rotateY(0deg)]`} style={faceStyle}>
             {cardHeader}
             <h2 className="text-4xl md:text-5xl font-bold text-center leading-tight">{frontText}</h2>
             <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase hidden md:block">Space</span>
             <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase md:hidden">Tap</span>
           </div>
 
-          <div className={faceBase} style={{ ...faceStyle, transform: 'rotateY(180deg)' }}>
+          <div className={`${faceBase} [transform:rotateY(180deg)]`} style={faceStyle}>
             {cardHeader}
             <h2 className="text-4xl font-bold mb-3 text-center leading-tight">{backFirst}</h2>
             <p className="text-xl text-zinc-500 mb-8 text-center">{backSecond}</p>
@@ -3881,32 +3897,61 @@ try {
 
       <main className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 pt-20 pb-12 md:pt-24 md:pb-24">
         {!activeBookId ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10 mt-12 pb-16">
-              {displayBooks.map(book => (
-                <div
-                  key={book.id}
-                  draggable
-                  onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
-                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
-                  onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id); }}
-                  onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
-                  className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
-                >
-                  <div className="w-full h-full min-h-[250px] relative">
-                    <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-12 pb-16 space-y-16">
+            
+            {/* Секция 1: Учебники */}
+            <section>
+              <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white px-2">Lehrbücher</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
+                {displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map(book => (
+                  <div
+                    key={book.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
+                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id); }}
+                    onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
+                    className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
+                  >
+                    <div className="w-full h-full min-h-[250px] relative">
+                      <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                    </div>
                   </div>
-                </div>
-              ))}
-              <div className="w-full h-full min-h-[250px]">
-                <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
-                  <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
-                    <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
+                ))}
+              </div>
+            </section>
+
+            {/* Секция 2: Тренировки и карточки */}
+            <section>
+              <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white px-2">Blitzkarten & Training</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
+                {displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).map(book => (
+                  <div
+                    key={book.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
+                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id); }}
+                    onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
+                    className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
+                  >
+                    <div className="w-full h-full min-h-[250px] relative">
+                      <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                    </div>
                   </div>
-                  <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
+                ))}
+                
+                <div className="w-full h-full min-h-[250px]">
+                  <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
+                    <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
+                      <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
+                    </div>
+                    <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            </section>
+
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
