@@ -229,6 +229,10 @@ const useStore = create<DeckState>()((set, get) => ({
     try {
       localStorage.setItem('cache_books_v2', JSON.stringify(newBooks));
     } catch(e) {}
+    try {
+      if (book.coverImage) localStorage.setItem(`book_cover_${book.id}`, book.coverImage);
+      else localStorage.removeItem(`book_cover_${book.id}`);
+    } catch(e) {}
     
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
@@ -2625,16 +2629,17 @@ try {
           
           const mappedBooks = booksRes.data.map((b: any) => {
             const lb = localBooks.find((local: any) => local.id === b.id);
+            const dedicatedCover = localStorage.getItem(`book_cover_${b.id}`);
             return {
               id: b.id,
               language: lb?.language || b.language,
               title: lb?.title || b.title,
               subtitle: lb?.subtitle || b.subtitle,
               tintColor: lb?.tintColor || b.tintColor || b.tintcolor || '#007AFF',
-              coverImage: lb?.coverImage || b.coverImage || b.coverimage || null,
+              coverImage: dedicatedCover || lb?.coverImage || b.coverImage || b.coverimage || null,
               activeLevels: lb?.activeLevels || b.activeLevels || b.activelevels || ['A1'],
-              coverType: lb?.coverType || b.coverType || b.covertype,
-              coverValue: lb?.coverValue || b.coverValue || b.covervalue,
+              coverType: dedicatedCover ? 'image' : (lb?.coverType || b.coverType || b.covertype),
+              coverValue: dedicatedCover || lb?.coverValue || b.coverValue || b.covervalue,
               accentColor: lb?.accentColor || b.accentColor || b.accentcolor
             };
           });
