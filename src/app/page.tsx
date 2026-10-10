@@ -2148,7 +2148,8 @@ const VerbSlot = React.memo(({
   onComplete,
   onError,
   virtualKeyRef,
-  virtualBackspaceRef
+  virtualBackspaceRef,
+  splitIndex
 }: {
   label: string;
   target: string;
@@ -2159,6 +2160,7 @@ const VerbSlot = React.memo(({
   onError: () => void;
   virtualKeyRef: React.MutableRefObject<((char: string) => void) | undefined>;
   virtualBackspaceRef: React.MutableRefObject<(() => void) | undefined>;
+  splitIndex?: number;
 }) => {
   const [val, setVal] = useState("");
 
@@ -2250,11 +2252,15 @@ const VerbSlot = React.memo(({
         {displayVal.split('').map((char, i) => {
           const isErrorChar = !isSlotSuccess && i === displayVal.length - 1 && char.toLowerCase() !== target[i]?.toLowerCase();
           return (
-            <span key={i} className={cn(isErrorChar ? "text-red-500" : "text-gray-900 dark:text-white", char === ' ' && "whitespace-pre")}>
-              {char}
-            </span>
+            <React.Fragment key={i}>
+              {splitIndex === i && <span className="text-gray-300 dark:text-gray-600 mx-[2px] opacity-60 font-light text-[15px] mb-0.5">|</span>}
+              <span className={cn(isErrorChar ? "text-red-500" : "text-gray-900 dark:text-white", char === ' ' && "whitespace-pre")}>
+                {char}
+              </span>
+            </React.Fragment>
           );
         })}
+        {splitIndex === displayVal.length && !isSlotSuccess && <span className="text-gray-300 dark:text-gray-600 mx-[2px] opacity-60 font-light text-[15px] mb-0.5">|</span>}
 
       </div>
     </div>
@@ -2273,12 +2279,14 @@ function PrepStudyCard({
   onAnswer: (cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
   onNext: () => void;
 }) {
-  const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [isSuccess, setIsSuccess] = useState(false);
   const [isHilfe, setIsHilfe] = useState(false);
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
-  const verb = card.targetWord;
+  const originalVerb = card.targetWord;
+  const cleanVerb = originalVerb.replace(/\|/g, '');
+  const splitIndex = originalVerb.indexOf('|') !== -1 ? originalVerb.indexOf('|') : undefined;
+  
   const translation = card.translation;
   
   const [activeSlot, setActiveSlot] = useState(0);
@@ -2293,8 +2301,8 @@ function PrepStudyCard({
 
   const [wrongKasus, setWrongKasus] = useState<string | null>(null);
 
-  const playGermanAudio = useCallback(async () => {
-    const textToRead = `er ${verb} ${prep}`;
+  const playAudio = useCallback(async () => {
+    const textToRead = `${cleanVerb} ${prep}`;
     try {
       let audioUrl = audioCache.get(textToRead);
       if (!audioUrl) {
@@ -2314,30 +2322,28 @@ function PrepStudyCard({
         audio.play().catch(()=>{});
       }
     } catch (e) {}
-  }, [verb, prep]);
+  }, [cleanVerb, prep]);
 
   const handleKasusSelect = useCallback((selected: string) => {
     if (activeSlot !== 2 || isSuccess || isHilfe) return;
     if (selected === kasusRaw) {
        setIsSuccess(true);
-       setPhase("Answer");
        playFeedbackSound(true);
-       playGermanAudio();
+       playAudio();
        onAnswer(card.id, !isHilfe, isHilfe);
     } else {
        playFeedbackSound(false);
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
     }
-  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playGermanAudio]);
+  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio]);
 
   const onHilfe = useCallback(() => {
     setIsHilfe(true);
-    setPhase("Answer");
     setIsSuccess(true);
-    playGermanAudio();
+    playAudio();
     onAnswer(card.id, false, true);
-  }, [card.id, onAnswer, playGermanAudio]);
+  }, [card.id, onAnswer, playAudio]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -2367,152 +2373,158 @@ function PrepStudyCard({
     if (activeSlot === 1 && virtualBackspaceRef1.current) virtualBackspaceRef1.current();
   };
 
-  // Play Russian Audio on Mount
-  useEffect(() => {
-    if (!translation || typeof window === 'undefined') return;
-    try {
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.cancel(); const msg = new SpeechSynthesisUtterance(translation);
-      msg.lang = 'ru-RU';
-      msg.rate = 1.0;
-      window.speechSynthesis.speak(msg);
-    } catch(e) {}
-  }, [card.id, translation]);
-
-  const [isTouchDevice, setIsTouchDevice] = useState(false);
-  useEffect(() => {
-    if (typeof navigator !== 'undefined') {
-      setIsTouchDevice(navigator.maxTouchPoints > 0);
-    }
-  }, []);
+  const isTouchDevice = useIsMobile();
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-black text-white font-sans overflow-hidden w-[100vw] absolute inset-0 z-50">
-      <div className="flex-1 flex flex-col justify-center items-center px-4 pt-4 pb-24 md:pb-8 relative">
-        <div className="relative w-full max-w-3xl bg-[#1c1c1e] rounded-[32px] border border-zinc-800 p-8 md:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center min-h-[300px]">
-          
-          <div className="absolute top-6 left-6 right-6 flex justify-between items-start w-[calc(100%-3rem)] opacity-40 hover:opacity-100 transition-opacity">
-            <button 
-              onClick={() => {
-                window.speechSynthesis.cancel(); const msg = new SpeechSynthesisUtterance(translation);
-                msg.lang = 'ru-RU';
-                window.speechSynthesis.speak(msg);
-              }}
-              className="p-2 rounded-full transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
-            >
-              <Volume2 className="w-6 h-6" />
-            </button>
-            <div className="flex items-center gap-4">
-              <button 
-                onClick={onHilfe}
-                disabled={isSuccess || isHilfe}
-                className={cn(
-                  "p-2 rounded-full transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-white/5",
-                  (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
-                )}
-                title="Ich weiß nicht"
+    <>
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.2 }}
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
+    >
+      <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
+        <button 
+          onClick={playAudio}
+          className="w-10 h-10 rounded-full bg-white dark:bg-[#2C2C2E] flex items-center justify-center text-gray-700 dark:text-[#E5E5EA] shadow-sm hover:scale-105 active:scale-95 transition-all border border-black/[0.05] dark:border-white/[0.05]"
+          title="Audio abspielen"
+        >
+          <Volume2 className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-4">
+          <AnimatePresence>
+             {deckTitle && (
+              <motion.span 
+                initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
+                animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
+                exit={{ opacity: 0 }}
+                className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
               >
-                <HelpCircle className="w-6 h-6" />
-              </button>
-              <div className="flex gap-1.5 pt-2">
-                {[0, 1, 2, 3].map((step) => {
-                  const visualMastery = card.masteryLevel;
-                  return (
-                    <div 
-                      key={step} 
-                      className={cn(
-                        "w-2.5 h-2.5 rounded-full transition-colors duration-300",
-                        step < visualMastery ? "bg-blue-500" : "bg-zinc-800"
-                      )}
-                    />
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="text-3xl font-semibold text-white tracking-tight text-center mt-4 mb-10">
-            {translation}
-          </div>
-
-          <div className="flex flex-col items-center w-full">
-            {/* ROW 1: Inputs */}
-            <div className="flex flex-row justify-center gap-8 w-full max-w-lg mx-auto">
-              <VerbSlot 
-                label="Verb" 
-                target={verb} 
-                isActive={activeSlot === 0} 
-                isSuccess={isSuccess || isHilfe} 
-                isHilfe={isHilfe} 
-                onComplete={handleVerbComplete} 
-                onError={()=>{}} 
-                virtualKeyRef={virtualKeyRef0} 
-                virtualBackspaceRef={virtualBackspaceRef0} 
+                {deckTitle}
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <button 
+            onClick={onHilfe}
+            disabled={isSuccess || isHilfe}
+            className={cn(
+              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors mr-1",
+              (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
+            )}
+            title="Ich weiß nicht"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
+          <div className="flex gap-1.5">
+            {[0, 1, 2, 3].map((step) => {
+              const visualMastery = card.masteryLevel;
+              return (
+              <div 
+                key={step} 
+                className={cn(
+                  "w-2.5 h-2.5 rounded-full transition-all duration-300",
+                  (card.isArchived || visualMastery > step) 
+                    ? "bg-blue-600 dark:bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
+                    : "bg-gray-200 dark:bg-white/10"
+                )}
               />
-              <VerbSlot 
-                label="Präposition" 
-                target={prep} 
-                isActive={activeSlot === 1} 
-                isSuccess={isSuccess || isHilfe} 
-                isHilfe={isHilfe} 
-                onComplete={handlePrepComplete} 
-                onError={()=>{}} 
-                virtualKeyRef={virtualKeyRef1} 
-                virtualBackspaceRef={virtualBackspaceRef1} 
-              />
-            </div>
-            
-            {/* ROW 2: Kasus Pills */}
-            <div className="mt-10 flex flex-row justify-center gap-4">
-              {[
-                { k: 'NOM', hover: 'hover:bg-zinc-600', success: 'bg-zinc-500 text-white border-zinc-500' },
-                { k: 'GEN', hover: 'hover:bg-purple-600', success: 'bg-purple-500 text-white border-purple-500' },
-                { k: 'DAT', hover: 'hover:bg-blue-600', success: 'bg-blue-500 text-white border-blue-500' },
-                { k: 'AKK', hover: 'hover:bg-orange-500', success: 'bg-orange-500 text-white border-orange-500' }
-              ].map(({ k, hover, success }) => {
-                const isError = wrongKasus === k;
-                const isWinner = (isSuccess || isHilfe) && kasusRaw === k;
-                const isLoser = (isSuccess || isHilfe) && kasusRaw !== k;
-                const isActivePhase = activeSlot === 2 && !isSuccess && !isHilfe;
-                
-                return (
-                  <button
-                    key={k}
-                    onClick={() => handleKasusSelect(k)}
-                    disabled={!isActivePhase}
-                    className={cn(
-                      "px-6 py-3 rounded-full text-sm font-bold tracking-widest transition-all duration-200 border",
-                      !isActivePhase && !isSuccess && !isHilfe ? "border-zinc-800 bg-zinc-800/50 text-zinc-500 opacity-50 cursor-not-allowed" :
-                      isError ? "bg-red-500 text-white border-red-500 animate-shake" : 
-                      isWinner ? success :
-                      isLoser ? "border-zinc-800 bg-zinc-800/30 text-zinc-600 opacity-30" :
-                      `border-zinc-700 bg-zinc-800/80 text-white ${hover} hover:border-transparent hover:scale-105 cursor-pointer`
-                    )}
-                  >
-                    {k}
-                  </button>
-                );
-              })}
-            </div>
+            )})}
           </div>
         </div>
       </div>
 
-      <div className="w-full shrink-0">
-        {(isSuccess || isHilfe) ? (
-          <div className="w-full px-4 pb-6 pt-2 bg-black">
-             <button
-                onClick={onNext}
-                className="w-full h-14 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-2xl font-semibold text-[17px] tracking-wide transition-colors shadow-sm flex items-center justify-center"
+      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
+        <div className="text-center mb-10 w-full mt-10">
+          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
+            {translation}
+          </h2>
+        </div>
+
+        <div className="flex flex-row items-center justify-center gap-3 sm:gap-6 w-full max-w-lg mb-8">
+          <VerbSlot 
+            label="Verb" 
+            target={cleanVerb} 
+            splitIndex={splitIndex}
+            isActive={activeSlot === 0} 
+            isSuccess={isSuccess || isHilfe} 
+            isHilfe={isHilfe} 
+            onComplete={handleVerbComplete} 
+            onError={()=>{}} 
+            virtualKeyRef={virtualKeyRef0} 
+            virtualBackspaceRef={virtualBackspaceRef0} 
+          />
+          <VerbSlot 
+            label="Präposition" 
+            target={prep} 
+            isActive={activeSlot === 1} 
+            isSuccess={isSuccess || isHilfe} 
+            isHilfe={isHilfe} 
+            onComplete={handlePrepComplete} 
+            onError={()=>{}} 
+            virtualKeyRef={virtualKeyRef1} 
+            virtualBackspaceRef={virtualBackspaceRef1} 
+          />
+        </div>
+
+        {/* Kasus Buttons */}
+        <div className="flex flex-row items-center justify-center gap-2 sm:gap-4 mb-4">
+          {[
+            { k: 'NOM', hover: 'hover:bg-gray-200 dark:hover:bg-zinc-700', success: 'bg-zinc-500 text-white border-zinc-500' },
+            { k: 'GEN', hover: 'hover:bg-purple-100 dark:hover:bg-purple-900', success: 'bg-purple-500 text-white border-purple-500' },
+            { k: 'DAT', hover: 'hover:bg-blue-100 dark:hover:bg-blue-900', success: 'bg-blue-500 text-white border-blue-500' },
+            { k: 'AKK', hover: 'hover:bg-orange-100 dark:hover:bg-[#FF9500]', success: 'bg-orange-500 dark:bg-[#FF9500] text-white border-orange-500 dark:border-[#FF9500]' }
+          ].map(({ k, hover, success }) => {
+            const isError = wrongKasus === k;
+            const isWinner = (isSuccess || isHilfe) && kasusRaw === k;
+            const isLoser = (isSuccess || isHilfe) && kasusRaw !== k;
+            const isActivePhase = activeSlot === 2 && !isSuccess && !isHilfe;
+            
+            return (
+              <button
+                key={k}
+                onClick={() => handleKasusSelect(k)}
+                disabled={!isActivePhase}
+                className={cn(
+                  "px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[11px] sm:text-[13px] font-bold tracking-widest transition-all duration-300 border",
+                  !isActivePhase && !isSuccess && !isHilfe ? "border-transparent text-gray-300 dark:text-zinc-600 opacity-50 cursor-not-allowed" :
+                  isError ? "bg-red-500 text-white border-red-500 animate-shake" : 
+                  isWinner ? success :
+                  isLoser ? "border-transparent text-gray-300 dark:text-zinc-600 opacity-30" :
+                  `border-transparent text-gray-600 dark:text-zinc-400 bg-transparent ${hover} hover:text-gray-900 dark:hover:text-white hover:scale-105 cursor-pointer`
+                )}
               >
-                Weiter
-             </button>
-          </div>
-        ) : activeSlot < 2 && isTouchDevice ? (
-          <VirtualKeyboard onKeyPress={handleVirtualKey} onBackspace={handleVirtualBackspace} />
-        ) : null}
+                {k}
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </div>
+
+      <div className="w-full h-[60px] flex items-center justify-center shrink-0">
+        <AnimatePresence>
+          {(isSuccess || isHilfe) && (
+            <motion.button
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={onNext}
+              className="px-12 py-3.5 bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-500 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all"
+            >
+              Weiter
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
+      {(!isSuccess && !isHilfe) && isTouchDevice && activeSlot < 2 && (
+         <div className="mt-6 -mx-6 md:-mx-12 -mb-6 md:-mb-10 w-[calc(100%+48px)]">
+           <VirtualKeyboard onKeyPress={handleVirtualKey} onBackspace={handleVirtualBackspace} />
+         </div>
+      )}
+    </motion.div>
+    </>
   );
 }
 
