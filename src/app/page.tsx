@@ -1213,17 +1213,7 @@ const playAudio = useCallback(async (text: string) => {
       audio.onerror = () => setIsPlayingAudio(false);
       await audio.play();
     } catch (e) {
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "de-DE";
-        utterance.rate = playbackSpeed * 0.9;
-        utterance.onend = () => setIsPlayingAudio(false);
-        utterance.onerror = () => setIsPlayingAudio(false);
-        window.speechSynthesis.speak(utterance);
-      } else {
-        setIsPlayingAudio(false);
-      }
+      setIsPlayingAudio(false);
     }
   }, [playbackSpeed]);
 
