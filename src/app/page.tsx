@@ -3648,9 +3648,33 @@ try {
       
       const cards: Flashcard[] = [];
       
+      const parseCSVLine = (line: string, delimiter: string) => {
+        const parts = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              current += '"';
+              i++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (char === delimiter && !inQuotes) {
+            parts.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        parts.push(current.trim());
+        return parts;
+      };
+
       lines.forEach((line) => {
         const delimiter = line.includes(';') ? ';' : ',';
-        const parts = line.split(delimiter).map(p => p.trim());
+        const parts = parseCSVLine(line, delimiter);
         const activeBook = books.find(b => b.id === activeBookId);
         const trainingMode = activeBook?.training_mode || 'standard_cloze';
         const isPrepBookObj = trainingMode === 'preposition_drill' || activeBookId === 'prep-verbs-de' || (activeBook?.title || '').toLowerCase().includes('präposition');
@@ -3696,19 +3720,19 @@ try {
           }
         } else if (isRapidMode) {
           if (parts.length >= 2) {
-             // To match the app's standard format (Word;Sentence;Translation):
-             // If exactly 2 parts: Word;Translation
-             // If 3+ parts: Word;Sentence;Translation
              const hasSentence = parts.length >= 3;
              const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
              let rTranslation = hasSentence ? parts[1] : parts[1];
              let rExample = hasSentence ? parts[2] : '-';
              if (hasSentence && !cyr(rTranslation) && cyr(rExample)) { [rTranslation, rExample] = [rExample, rTranslation]; }
+             
+             let forms = parts.length >= 4 ? parts[3] : undefined;
              cards.push({
                 id: crypto.randomUUID(),
                 targetWord: parts[0],
                 sentence: rExample,
                 translation: rTranslation,
+                forms: forms,
                 options: [],
                 masteryLevel: 0,
                 isArchived: false,
