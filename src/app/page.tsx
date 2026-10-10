@@ -504,138 +504,308 @@ if (typeof window !== 'undefined') {
 // --- RAPID FLASHCARD MODE ---
 import { Howl } from 'howler';
 
+const makePaperFlipWav = (): string => {
+  const sr = 22050;
+  const n = Math.floor(sr * 0.14);
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const wr = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  wr(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); wr(8, 'WAVE'); wr(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  wr(36, 'data'); v.setUint32(40, n * 2, true);
+  let lp = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / n;
+    const env = Math.min(1, t * 25) * Math.pow(1 - t, 2.2);
+    const x = Math.random() * 2 - 1;
+    lp += 0.3 * (x - lp);
+    const sample = (x - lp) * env * 0.8;
+    v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, sample)) * 32767, true);
+  }
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return 'data:audio/wav;base64,' + btoa(bin);
+};
+
+let rapidSounds: { flip: Howl; success: Howl; error: Howl } | null = null;
+const getRapidSounds = () => {
+  if (typeof window === 'undefined') return null;
+  if (!rapidSounds) {
+    rapidSounds = {
+      flip: new Howl({ src: [makePaperFlipWav()], format: ['wav'], volume: 0.5 }),
+      success: new Howl({ src: [SUCCESS_B64], format: ['wav'], volume: 0.6 }),
+      error: new Howl({ src: [FAIL_B64], format: ['wav'], volume: 0.6 }),
+    };
+  }
+  return rapidSounds;
+};
+
 function RapidFlashcardMode({
   card,
-  score,
-  playbackSpeed,
-  onSpeedChange,
+  progress,
+  locked,
   onAnswer
 }: {
   card: Flashcard;
-  score: number;
-  playbackSpeed: number;
-  onSpeedChange: (speed: number) => void;
-  onAnswer: (correct: boolean) => void;
+  progress: number;
+  locked: boolean;
+  onAnswer: (correct: boolean, wasFlipped: boolean) => void;
 }) {
   const [isFlipped, setIsFlipped] = useState(false);
-  const [isAudioLoading, setIsAudioLoading] = useState(false);
-  const target = card.targetWord.replace(/\|/g, ''); 
+  const target = card.targetWord.replace(/\|/g, '');
   const translation = card.translation;
+  const example = card.sentence && card.sentence !== '-' ? card.sentence : '';
 
-  const playAudio = useCallback(async (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setIsAudioLoading(true);
+  const speak = useCallback(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: target, speed: playbackSpeed })
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const sound = new Howl({ src: [url], format: ['mp3'], html5: true });
-        sound.play();
-      }
-    } catch(e) {} finally {
-      setIsAudioLoading(false);
-    }
-  }, [target, playbackSpeed]);
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(target);
+      u.lang = 'de-DE';
+      u.rate = 0.95;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }, [target]);
 
   useEffect(() => {
-    setIsFlipped(false);
-    playAudio();
-  }, [card]);
+    speak();
+    return () => { try { window.speechSynthesis?.cancel(); } catch (e) {} };
+  }, [speak]);
+
+  const flip = useCallback(() => {
+    if (locked) return;
+    getRapidSounds()?.flip.play();
+    setIsFlipped(prev => !prev);
+  }, [locked]);
+
+  const answer = useCallback((correct: boolean) => {
+    if (locked) return;
+    const s = getRapidSounds();
+    if (correct) s?.success.play(); else s?.error.play();
+    if (!isFlipped) setIsFlipped(true);
+    onAnswer(correct, isFlipped);
+  }, [locked, isFlipped, onAnswer]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === ' ') {
+      if (e.code === 'Space') {
         e.preventDefault();
-        setIsFlipped(prev => !prev);
+        flip();
       } else if (e.key === 'ArrowRight') {
-        if (!isFlipped) setIsFlipped(true);
-        else onAnswer(true);
+        e.preventDefault();
+        answer(true);
       } else if (e.key === 'ArrowLeft') {
-        if (!isFlipped) setIsFlipped(true);
-        else onAnswer(false);
+        e.preventDefault();
+        answer(false);
+      } else if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
+        speak();
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [isFlipped, onAnswer]);
+  }, [flip, answer, speak]);
+
+  const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-12 rounded-[32px] border bg-white border-zinc-200 text-black shadow-xl dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-white dark:shadow-2xl";
+  const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center w-full max-w-2xl mx-auto px-4" style={{ perspective: '1200px' }}>
-      {/* 4 Rounds Header inside component */}
+    <motion.div
+      initial={{ opacity: 0, x: 40 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -40 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+      className="w-full flex flex-col items-center"
+    >
       <div className="w-full flex justify-between items-center mb-6 px-2">
-        <div className="flex items-center gap-3">
-          <button onClick={playAudio} className={cn("w-10 h-10 rounded-full flex items-center justify-center bg-[#1c1c1e] border border-zinc-800 text-zinc-400 hover:text-white transition-colors", isAudioLoading && "animate-pulse")} title="Listen">
-            <Volume2 className="w-5 h-5" />
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); onSpeedChange(playbackSpeed === 1 ? 0.75 : playbackSpeed === 0.75 ? 0.5 : 1); }} className="px-3 h-10 rounded-full flex items-center justify-center bg-[#1c1c1e] border border-zinc-800 text-zinc-400 hover:text-white text-sm font-semibold transition-colors" title="Speed">
-            {playbackSpeed}x
-          </button>
-        </div>
-        <div className="flex items-center gap-1.5">
+        <button onClick={speak} className="w-10 h-10 rounded-full flex items-center justify-center bg-white dark:bg-[#1c1c1e] border border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white transition-colors" title="R">
+          <Volume2 className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-2">
           {[0, 1, 2, 3].map(i => (
-            <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < score ? "bg-blue-500" : "bg-zinc-800")} />
+            <div key={i} className={cn("w-2.5 h-2.5 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-800")} />
           ))}
         </div>
       </div>
 
-      <motion.div 
-        className="relative w-full min-h-[360px] md:min-h-[400px] cursor-pointer"
-        style={{ transformStyle: 'preserve-3d' }}
-        animate={{ rotateY: isFlipped ? 180 : 0 }}
-        transition={{ duration: 0.6, type: 'spring', stiffness: 260, damping: 20 }}
-        drag="x"
-        dragConstraints={{ left: 0, right: 0 }}
-        dragElastic={0.6}
-        onDragEnd={(e, info) => {
-          const threshold = 80;
-          if (info.offset.x > threshold) {
-            if (!isFlipped) setIsFlipped(true);
-            else onAnswer(true);
-          } else if (info.offset.x < -threshold) {
-            if (!isFlipped) setIsFlipped(true);
-            else onAnswer(false);
+      <div className="w-full" style={{ perspective: '1200px' }}>
+        <motion.div
+          className="relative w-full min-h-[360px] md:min-h-[400px] cursor-pointer select-none"
+          style={{ transformStyle: 'preserve-3d' }}
+          animate={{ rotateY: isFlipped ? 180 : 0 }}
+          transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+          onClick={flip}
+        >
+          <div className={faceBase} style={faceStyle}>
+            <h2 className="text-4xl md:text-5xl font-bold text-center leading-tight">{target}</h2>
+            <span className="absolute bottom-8 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase hidden md:block">Space</span>
+            <span className="absolute bottom-8 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase md:hidden">Tap</span>
+          </div>
+
+          <div className={faceBase} style={{ ...faceStyle, transform: 'rotateY(180deg)' }}>
+            <h2 className="text-4xl font-bold mb-4 text-center">{target}</h2>
+            <p className="text-xl text-zinc-500 mb-8 text-center">{translation}</p>
+            {example && (
+              <div className="border-t border-zinc-200 dark:border-zinc-800/60 w-3/4 pt-6 flex justify-center">
+                <p className="text-base italic text-zinc-400 text-center leading-relaxed">{example}</p>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </div>
+
+      <div className="md:hidden flex justify-center gap-6 mt-8">
+        <button onClick={() => answer(false)} className="w-14 h-14 rounded-full bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-zinc-200 dark:border-zinc-700/50 text-zinc-500 dark:text-zinc-400 flex justify-center items-center active:scale-95 transition-all">
+          <X className="w-6 h-6" />
+        </button>
+        <button onClick={() => answer(true)} className="w-14 h-14 rounded-full bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border border-zinc-200 dark:border-zinc-700/50 text-blue-500 flex justify-center items-center active:scale-95 transition-all">
+          <Check className="w-6 h-6" />
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+function RapidSession({
+  deckId,
+  reviewCards,
+  onBack
+}: {
+  deckId?: string;
+  reviewCards?: { deckId: string, card: Flashcard }[];
+  onBack: () => void;
+}) {
+  const answerCard = useStore(state => state.answerCard);
+  const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
+  const [wordProgress, setWordProgress] = useState<Record<string, number>>({});
+  const [total, setTotal] = useState(0);
+  const [mastered, setMastered] = useState(0);
+  const [turn, setTurn] = useState(0);
+  const [locked, setLocked] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let list: { deckId: string, card: Flashcard }[] = [];
+    if (reviewCards) {
+      list = [...reviewCards];
+    } else if (deckId) {
+      const deck = useStore.getState().decks.find(d => d.id === deckId);
+      if (deck) list = deck.cards.filter(c => !c.isArchived).map(c => ({ deckId, card: c }));
+    }
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+    setQueue(list);
+    setTotal(list.length);
+    setMastered(0);
+    setWordProgress({});
+    setLocked(false);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [deckId, reviewCards]);
+
+  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean) => {
+    if (locked || !queue || queue.length === 0) return;
+    const current = queue[0];
+    const id = current.card.id;
+    const next = correct ? Math.min(4, (wordProgress[id] || 0) + 1) : 0;
+    setWordProgress(prev => ({ ...prev, [id]: next }));
+    setLocked(true);
+
+    timerRef.current = setTimeout(() => {
+      const done = correct && next >= 4;
+      if (done) {
+        const wasArchived = current.card.isArchived;
+        if (wasArchived) {
+          answerCard(current.deckId, id, true, false);
+        } else {
+          for (let i = 0; i < 4; i++) {
+            const live = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id);
+            if (!live || live.isArchived) break;
+            answerCard(current.deckId, id, true, false);
           }
-        }}
-      >
-        {/* Front */}
-        <div className="absolute inset-0 bg-[#1c1c1e] border border-zinc-800 rounded-[32px] shadow-2xl flex flex-col items-center justify-center p-8 md:p-12" style={{ backfaceVisibility: 'hidden' }}>
-           <h2 className="text-4xl md:text-5xl font-bold text-white text-center leading-tight">{target}</h2>
-           <span className="absolute bottom-8 text-xs sm:text-sm text-zinc-600 font-medium tracking-widest uppercase">Tap or Space</span>
-        </div>
+        }
+        setMastered(m => m + 1);
+        setQueue(q => (q ? q.slice(1) : q));
+      } else {
+        if (!correct && current.card.isArchived) answerCard(current.deckId, id, false, false);
+        setQueue(q => (q ? [...q.slice(1), q[0]] : q));
+      }
+      setTurn(t => t + 1);
+      setLocked(false);
+    }, wasFlipped ? 450 : 900);
+  }, [locked, queue, wordProgress, answerCard]);
 
-        {/* Back */}
-        <div className="absolute inset-0 bg-[#1c1c1e] border border-zinc-800 rounded-[32px] shadow-2xl flex flex-col items-center justify-center p-8 md:p-12" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
-           <h2 className="text-4xl font-bold text-white mb-2 text-center">{target}</h2>
-           <p className="text-xl text-zinc-400 mb-8 text-center">{translation}</p>
-           {card.sentence && card.sentence !== '-' && (
-             <>
-               <div className="border-t border-zinc-800/60 w-3/4 pt-6" />
-               <p className="text-base text-zinc-500 italic text-center leading-relaxed">{card.sentence}</p>
-             </>
-           )}
-        </div>
-      </motion.div>
+  if (queue === null) return null;
 
-      {/* Action Bar (Outside) */}
-      <AnimatePresence>
-        {isFlipped && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="flex justify-center gap-6 mt-8">
-            <button onClick={() => onAnswer(false)} className="w-16 h-16 rounded-full bg-zinc-800/80 backdrop-blur-md border border-zinc-700/50 text-zinc-400 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 flex justify-center items-center shadow-lg transition-all active:scale-95">
-              <X className="w-7 h-7" />
-            </button>
-            <button onClick={() => onAnswer(true)} className="w-16 h-16 rounded-full bg-zinc-800/80 backdrop-blur-md border border-zinc-700/50 text-blue-500 hover:bg-zinc-700 hover:border-zinc-600 hover:text-blue-400 flex justify-center items-center shadow-lg transition-all active:scale-95">
-              <Check className="w-7 h-7" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+  if (queue.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col justify-center max-w-2xl mx-auto px-6 py-24 text-center">
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+          <div className="w-24 h-24 bg-green-50 dark:bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-8">
+            <CheckCircle2 className="w-12 h-12 text-green-500" />
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-4">Großartig!</h1>
+          <p className="text-lg text-gray-500 mb-10">
+            {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
+          </p>
+          <button onClick={onBack} className="w-full md:w-auto bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]">
+            Zurück zur Bibliothek
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const current = queue[0];
+  const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === current.card.id) || current.card;
+
+  return (
+    <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50 min-h-screen bg-zinc-50 dark:bg-black">
+      <div className="w-full max-w-2xl mx-auto px-4 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="text-xs font-mono tabular-nums text-gray-400 dark:text-gray-500">
+            {mastered} / {total}
+          </div>
+        </div>
+        <div className="w-full h-1 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
+            style={{ width: `${Math.max(3, total > 0 ? (mastered / total) * 100 : 0)}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+        <AnimatePresence mode="wait">
+          <RapidFlashcardMode
+            key={`${current.card.id}-${turn}`}
+            card={liveCard}
+            progress={wordProgress[current.card.id] || 0}
+            locked={locked}
+            onAnswer={handleAnswer}
+          />
+        </AnimatePresence>
+      </div>
     </div>
   );
+}
+
+function StudyEntry(props: {
+  deckId?: string;
+  onBack: () => void;
+  reviewCards?: { deckId: string, card: Flashcard }[];
+  isDrillMode?: boolean;
+  trainingMode?: string;
+}) {
+  if (props.trainingMode === 'rapid_flashcards') {
+    return <RapidSession deckId={props.deckId} reviewCards={props.reviewCards} onBack={props.onBack} />;
+  }
+  return <StudyInterface {...props} />;
 }
 
 // --- STUDY INTERFACE ---
@@ -653,8 +823,7 @@ function StudyInterface({
   isDrillMode?: boolean,
   trainingMode?: string
 }) {
-  const { answerCard, decks, playbackSpeed, setPlaybackSpeed } = useStore();
-  const [rapidScores, setRapidScores] = useState<Record<string, number>>({});
+  const { answerCard, decks } = useStore();
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -768,32 +937,7 @@ function StudyInterface({
 
       <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
-          {trainingMode === 'rapid_flashcards' ? (
-            <RapidFlashcardMode
-              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
-              card={liveCard}
-              score={rapidScores[currentCardSnapshot.id] || 0}
-              playbackSpeed={playbackSpeed}
-              onSpeedChange={(s) => setPlaybackSpeed(s)}
-              onAnswer={(correct) => {
-                const s = rapidScores[currentCardSnapshot.id] || 0;
-                if (correct) {
-                  if (s + 1 >= 4) {
-                    answerCard(currentDeckId, currentCardSnapshot.id, true, false);
-                    setMasteredInSession(prev => prev + 1);
-                    setRapidScores(prev => { const n = {...prev}; delete n[currentCardSnapshot.id]; return n; });
-                  } else {
-                    setRapidScores(prev => ({ ...prev, [currentCardSnapshot.id]: s + 1 }));
-                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
-                  }
-                } else {
-                  setRapidScores(prev => ({ ...prev, [currentCardSnapshot.id]: 0 }));
-                  setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
-                }
-                handleNext();
-              }}
-            />
-          ) : trainingMode === 'preposition_drill' ? (
+          {trainingMode === 'preposition_drill' ? (
             <PrepStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
@@ -3266,7 +3410,7 @@ try {
     }
     return (
       <>
-        <StudyInterface deckId={activeDeckId} onBack={() => setActiveDeckId(null)} trainingMode={tm} />
+        <StudyEntry deckId={activeDeckId} onBack={() => setActiveDeckId(null)} trainingMode={tm} />
       </>
     );
   }
@@ -3282,7 +3426,7 @@ try {
     }
     return (
       <>
-        <StudyInterface reviewCards={reviewCards} onBack={() => setReviewCards(null)} trainingMode={tm} />
+        <StudyEntry reviewCards={reviewCards} onBack={() => setReviewCards(null)} trainingMode={tm} />
       </>
     );
   }
@@ -3298,7 +3442,7 @@ try {
     }
     return (
       <>
-        <StudyInterface reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} trainingMode={tm} />
+        <StudyEntry reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} trainingMode={tm} />
       </>
     );
   }
