@@ -132,6 +132,7 @@ export interface Flashcard {
   interval: number;
   repetitions: number;
   baseWordInfo?: string | null;
+  forms?: string | null;
 }
 
 export interface Deck {
@@ -391,6 +392,7 @@ const useStore = create<DeckState>()((set, get) => ({
       targetWord: c.targetWord,
       sentence: c.sentence,
       translation: c.translation,
+      forms: c.forms || null,
       options: c.options,
       masteryLevel: c.masteryLevel,
       isArchived: c.isArchived,
@@ -401,6 +403,12 @@ const useStore = create<DeckState>()((set, get) => ({
     }));
     
     let { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
+    
+    if (cardsError && cardsError.message.includes('does not exist')) {
+      const fallbackCards = cardsToInsert.map(({ forms, ...rest }) => rest);
+      const fallbackRes = await supabase.from('cards').insert(fallbackCards);
+      cardsError = fallbackRes.error;
+    }
     
     if (cardsError) {
       console.error("Supabase Cards Insert Error:", cardsError.message);
@@ -751,6 +759,12 @@ function RapidFlashcardMode({
   const backFirst = reverse ? german : translation;
   const backSecond = reverse ? translation : german;
 
+  const renderForms = () => {
+    return card.forms && card.forms !== '-' && (
+      <div className="text-sm text-zinc-500 italic mt-1">{card.forms}</div>
+    );
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 40 }}
@@ -769,15 +783,23 @@ function RapidFlashcardMode({
         >
           <div className={`${faceBase} [transform:rotateY(0deg)]`} style={faceStyle}>
             {cardHeader}
-            <h2 className="text-4xl md:text-5xl font-bold text-center leading-tight">{frontText}</h2>
+            <div className="flex flex-col items-center">
+              <h2 className="text-4xl md:text-5xl font-bold text-center leading-tight">{frontText}</h2>
+            </div>
             <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase hidden md:block">Space</span>
             <span className="absolute bottom-6 text-xs text-zinc-400 dark:text-zinc-600 font-medium tracking-widest uppercase md:hidden">Tap</span>
           </div>
 
           <div className={`${faceBase} [transform:rotateY(180deg)]`} style={faceStyle}>
             {cardHeader}
-            <h2 className="text-4xl font-bold mb-3 text-center leading-tight">{backFirst}</h2>
-            <p className="text-xl text-zinc-500 mb-8 text-center">{backSecond}</p>
+            <div className="flex flex-col items-center mb-3">
+              <h2 className="text-4xl font-bold text-center leading-tight">{backFirst}</h2>
+              {reverse && renderForms()}
+            </div>
+            <div className="flex flex-col items-center mb-8">
+              <p className="text-xl text-zinc-500 text-center">{backSecond}</p>
+              {!reverse && renderForms()}
+            </div>
             {example && (
               <div className="border-t border-zinc-200 dark:border-zinc-800/60 w-3/4 pt-6 flex justify-center">
                 <p className="text-sm italic text-zinc-400 text-center leading-relaxed">{example}</p>
@@ -3698,19 +3720,23 @@ try {
         } else {
           if (parts.length >= 6) {
             const targetWord = parts[0];
-            const options = [targetWord, parts[3], parts[4], parts[5]].sort(() => Math.random() - 0.5);
+            const hasForms = parts.length >= 7;
+            const forms = hasForms ? parts[3] : undefined;
+            const optStart = hasForms ? 4 : 3;
+            const options = [targetWord, parts[optStart], parts[optStart+1], parts[optStart+2]].sort(() => Math.random() - 0.5);
             cards.push({
               id: crypto.randomUUID(),
               targetWord,
               sentence: parts[1],
               translation: parts[2],
+              forms: forms,
               options,
               masteryLevel: 0,
               isArchived: false,
               nextReviewDate: null,
               interval: 0,
               repetitions: 0,
-              baseWordInfo: parts.length >= 7 ? parts[6] : null
+              baseWordInfo: parts.length > (optStart+3) ? parts[optStart+3] : null
             });
           }
         }
