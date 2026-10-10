@@ -223,7 +223,12 @@ const useStore = create<DeckState>()((set, get) => ({
   },
   updateBook: async (book) => {
     const previousBooks = get().books;
-    set({ books: previousBooks.map(b => b.id === book.id ? book : b) });
+    const newBooks = previousBooks.map(b => b.id === book.id ? book : b);
+    set({ books: newBooks });
+    
+    try {
+      localStorage.setItem('cache_books_v2', JSON.stringify(newBooks));
+    } catch(e) {}
     
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
@@ -2285,6 +2290,17 @@ function VerbStudyCard({
   }, [targets]);
 
   useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((isSuccess || isHilfe) && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onNext();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isSuccess, isHilfe, onNext]);
+
+  useEffect(() => {
     const inf = (verbInfo.infinitiv || "").replace(/\|/g, '');
     fetch('/api/tts', {
       method: 'POST',
@@ -2604,18 +2620,29 @@ try {
         }
         
         if (booksRes.data && booksRes.data.length > 0) {
-          const mappedBooks = booksRes.data.map((b: any) => ({
-            id: b.id,
-            language: b.language,
-            title: b.title,
-            subtitle: b.subtitle,
-            tintColor: b.tintColor || b.tintcolor || '#007AFF',
-            coverImage: b.coverImage || b.coverimage || null,
-            activeLevels: b.activeLevels || b.activelevels || ['A1'],
-            coverType: b.coverType || b.covertype,
-            coverValue: b.coverValue || b.covervalue,
-            accentColor: b.accentColor || b.accentcolor
-          }));
+          const localStr = localStorage.getItem('cache_books_v2');
+          const localBooks = localStr ? JSON.parse(localStr) : [];
+          
+          const mappedBooks = booksRes.data.map((b: any) => {
+            const lb = localBooks.find((local: any) => local.id === b.id);
+            return {
+              id: b.id,
+              language: lb?.language || b.language,
+              title: lb?.title || b.title,
+              subtitle: lb?.subtitle || b.subtitle,
+              tintColor: lb?.tintColor || b.tintColor || b.tintcolor || '#007AFF',
+              coverImage: lb?.coverImage || b.coverImage || b.coverimage || null,
+              activeLevels: lb?.activeLevels || b.activeLevels || b.activelevels || ['A1'],
+              coverType: lb?.coverType || b.coverType || b.covertype,
+              coverValue: lb?.coverValue || b.coverValue || b.covervalue,
+              accentColor: lb?.accentColor || b.accentColor || b.accentcolor
+            };
+          });
+          
+          localBooks.forEach((lb: any) => {
+            if (!mappedBooks.find((m: any) => m.id === lb.id)) mappedBooks.push(lb);
+          });
+
           setBooks(mappedBooks);
           try {
             localStorage.setItem('cache_books_v2', JSON.stringify(mappedBooks));
