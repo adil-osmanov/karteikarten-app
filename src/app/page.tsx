@@ -3282,11 +3282,15 @@ try {
           }
         } else if (isRapidMode) {
           if (parts.length >= 2) {
+             // To match the app's standard format (Word;Sentence;Translation):
+             // If exactly 2 parts: Word;Translation
+             // If 3+ parts: Word;Sentence;Translation
+             const hasSentence = parts.length >= 3;
              cards.push({
                 id: crypto.randomUUID(),
                 targetWord: parts[0],
-                translation: parts[1],
-                sentence: parts[2] || '-', // Optional example sentence
+                sentence: hasSentence ? parts[1] : '-',
+                translation: hasSentence ? parts[2] : parts[1],
                 options: [],
                 masteryLevel: 0,
                 isArchived: false,
