@@ -2865,7 +2865,7 @@ function VerbStudyCard({
 }
 export default function App() {
   const [isPending, startTransition] = useTransition();
-  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder } = useStore();
+  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
@@ -3139,6 +3139,19 @@ try {
   }, [filteredDecksList]);
 
 
+  const displayBooks = useMemo(() => {
+    const filtered = books.filter(b => b.language === appLanguage);
+    if (bookOrder && bookOrder.length > 0) {
+      const map = new Map(bookOrder.map((id, index) => [id, index]));
+      return filtered.sort((a, b) => {
+        const idxA = map.has(a.id) ? map.get(a.id)! : 999;
+        const idxB = map.has(b.id) ? map.get(b.id)! : 999;
+        return idxA - idxB;
+      });
+    }
+    return filtered;
+  }, [books, appLanguage, bookOrder]);
+
   const groupedDecks = useMemo(() => {
     const map: Record<string, Deck[]> = {};
     filteredDecksList.forEach(d => {
@@ -3224,7 +3237,11 @@ try {
       lines.forEach((line) => {
         const delimiter = line.includes(';') ? ';' : ',';
         const parts = line.split(delimiter).map(p => p.trim());
-        const isPrepBookObj = activeBookId === 'prep-verbs-de' || (books.find(b => b.id === activeBookId)?.title || '').toLowerCase().includes('präposition');
+        const activeBook = books.find(b => b.id === activeBookId);
+        const trainingMode = activeBook?.training_mode || 'standard_cloze';
+        const isPrepBookObj = trainingMode === 'preposition_drill' || activeBookId === 'prep-verbs-de' || (activeBook?.title || '').toLowerCase().includes('präposition');
+        const isVerbBookObj = trainingMode === 'starke_verben' || activeBookId === 'verbs-de';
+        const isRapidMode = trainingMode === 'rapid_flashcards';
         
         if (isPrepBookObj) {
           if (parts.length >= 4) {
@@ -3241,7 +3258,7 @@ try {
               repetitions: 0
             });
           }
-        } else if (activeBookId === 'verbs-de') {
+        } else if (isVerbBookObj) {
           if (parts.length >= 5) {
             const infinitiv = parts[0];
             const praesens = parts[1];
@@ -3262,6 +3279,21 @@ try {
               repetitions: 0,
               baseWordInfo: JSON.stringify({ infinitiv, praesens, praeteritum, perfekt })
             });
+          }
+        } else if (isRapidMode) {
+          if (parts.length >= 2) {
+             cards.push({
+                id: crypto.randomUUID(),
+                targetWord: parts[0],
+                translation: parts[1],
+                sentence: parts[2] || '-', // Optional example sentence
+                options: [],
+                masteryLevel: 0,
+                isArchived: false,
+                nextReviewDate: null,
+                interval: 0,
+                repetitions: 0
+             });
           }
         } else {
           if (parts.length >= 6) {
@@ -3513,43 +3545,28 @@ try {
       <main className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 pt-20 pb-12 md:pt-24 md:pb-24">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="mb-6 mt-2">
-              <h1 className="text-[28px] md:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">Bibliothek</h1>
-            </div>
-            {/* Bücher Carousel */}
-            <div className="mb-12 relative">
-              <h2 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">Lehrbücher</h2>
-              <div className="flex flex-row overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-6 pb-16 pt-12 px-4 w-full -mx-4 sm:mx-0 sm:px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                {books.filter(b => b.language === appLanguage && (!b.category || b.category === 'book')).map(book => (
-                  <div key={book.id} className="flex-shrink-0 snap-start w-[220px] md:w-[260px]">
+            <Reorder.Group 
+              axis="y"
+              values={displayBooks}
+              onReorder={(newOrder) => setBookOrder(newOrder.map(b => b.id))}
+              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10 mt-12 pb-16"
+            >
+              {displayBooks.map(book => (
+                <Reorder.Item key={book.id} value={book} className="w-full h-full relative cursor-grab active:cursor-grabbing">
+                  <div className="w-full h-full min-h-[250px] relative pointer-events-auto">
                     <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
                   </div>
-                ))}
-                
-                <div className="flex-shrink-0 snap-start w-[220px] md:w-[260px]">
-                  <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[330px] md:min-h-[390px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
-                    <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
-                      <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
-                    </div>
-                    <span className="font-semibold text-[13px] sm:text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
+                </Reorder.Item>
+              ))}
+              <div className="w-full h-full min-h-[250px]">
+                <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
+                  <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
+                    <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
                   </div>
+                  <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
                 </div>
               </div>
-            </div>
-
-            {/* Grammatik & Decks Carousel */}
-            {books.filter(b => b.language === appLanguage && b.category === 'deck').length > 0 && (
-              <div className="mb-10 relative">
-                <h2 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">Grammatik & Decks</h2>
-                <div className="flex flex-row overflow-x-auto snap-x snap-mandatory hide-scrollbar gap-6 pb-16 pt-12 px-4 w-full -mx-4 sm:mx-0 sm:px-4" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                  {books.filter(b => b.language === appLanguage && b.category === 'deck').map(book => (
-                    <div key={book.id} className="flex-shrink-0 snap-start w-[220px] md:w-[260px]">
-                      <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            </Reorder.Group>
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
