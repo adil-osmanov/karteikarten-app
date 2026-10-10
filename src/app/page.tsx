@@ -247,11 +247,16 @@ const useStore = create<DeckState>()((set, get) => ({
     const newBooks = previousBooks.map(b => b.id === bookId ? updatedBook : b);
     set({ books: newBooks });
     
-    const { error } = await supabase.from('books').update(updates).eq('id', bookId);
+    const { data, error } = await supabase.from('books').update(updates).eq('id', bookId).select();
     if (error) {
       console.error("Supabase updateBookSettings error:", error);
       set({ books: previousBooks });
       throw error;
+    }
+    if (!data || data.length === 0) {
+      console.error("Supabase updateBookSettings silent failure (RLS blocked update): 0 rows affected.");
+      set({ books: previousBooks });
+      throw new Error("Update failed: Row Level Security blocked the operation, or book does not exist.");
     }
     return true;
   },
@@ -260,6 +265,13 @@ const useStore = create<DeckState>()((set, get) => ({
     const newBooks = previousBooks.map(b => b.id === book.id ? book : b);
     set({ books: newBooks });
     
+    try {
+      if (book.coverImage) localStorage.setItem(`book_cover_${book.id}`, book.coverImage);
+      else localStorage.removeItem(`book_cover_${book.id}`);
+    } catch(e) {
+      console.warn("Failed to save cover image to localStorage (quota likely exceeded):", e);
+    }
+    
     const payload = {
       language: book.language, title: book.title, subtitle: book.subtitle || null,
       tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
@@ -267,7 +279,10 @@ const useStore = create<DeckState>()((set, get) => ({
       activeLevels: book.activeLevels || ['A1']
     };
     
-    let { error } = await supabase.from('books').update(payload).eq('id', book.id);
+    let { data, error } = await supabase.from('books').update(payload).eq('id', book.id).select();
+    if (!error && (!data || data.length === 0)) {
+       error = { message: 'RLS blocked update or row not found', code: '403', details: '' };
+    }
     
     if (error && error.message.includes('does not exist')) {
        const fallbackPayload = {
@@ -3376,10 +3391,10 @@ try {
         if (booksRes.data) {
           const hasVerbs = booksRes.data.some((b: any) => b.id === 'verbs-de');
           if (!hasVerbs && !booksRes.error) {
-            const verbsBook = { id: 'verbs-de', language: 'DE', title: 'Starke Verben A1-C1', subtitle: 'Grammatik', tintcolor: '#FF2D55', activelevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] };
-            try {
-               await supabase.from('books').insert([verbsBook]);
-            } catch(e) {}
+            const verbsBook = { id: 'verbs-de', language: 'DE', title: 'Starke Verben A1-C1', subtitle: 'Grammatik', tintcolor: '#FF2D55', activelevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'], category: 'deck', training_mode: 'starke_verben' };
+            // Do NOT silently fail. Log it.
+            const { error } = await supabase.from('books').insert([verbsBook]);
+            if (error) console.error("Failed to insert verbs-de:", error);
             booksRes.data.push(verbsBook);
           }
         }
@@ -3387,14 +3402,12 @@ try {
         // CLEAR CACHE TO AVOID QUOTA EXCEEDED
         try {
           localStorage.removeItem('cache_books_v2');
-          // Also clear book_cover keys
-          Object.keys(localStorage).forEach(k => {
-             if (k.startsWith('book_cover_')) localStorage.removeItem(k);
-          });
         } catch(e) {}
 
         if (booksRes.data && booksRes.data.length > 0) {
           const mappedBooks = booksRes.data.map((b: any) => {
+            let dedicatedCover = null;
+            try { dedicatedCover = localStorage.getItem(`book_cover_${b.id}`); } catch(e) {}
             return {
               id: b.id,
               language: b.language,
@@ -3403,10 +3416,10 @@ try {
               category: b.category || 'book',
               training_mode: b.training_mode || 'standard_cloze',
               tintColor: b.tintColor || b.tintcolor || '#007AFF',
-              coverImage: b.cover_url_light || b.coverImage || b.coverimage || null,
+              coverImage: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || null,
               activeLevels: b.activeLevels || b.activelevels || ['A1'],
-              coverType: b.cover_url_light || b.coverImage || b.coverimage ? 'image' : (b.coverType || b.covertype),
-              coverValue: b.cover_url_light || b.coverImage || b.coverimage || b.coverValue || b.covervalue,
+              coverType: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover ? 'image' : (b.coverType || b.covertype),
+              coverValue: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || b.coverValue || b.covervalue,
               accentColor: b.accentColor || b.accentcolor
             };
           });
@@ -3414,10 +3427,10 @@ try {
           setBooks(mappedBooks);
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
-            { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
-            { id: 'verbs-de', language: 'DE', title: 'Starke Verben A1-C1', subtitle: 'Grammatik', tintColor: '#FF2D55', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
-            { id: 'prep-verbs-de', language: 'DE', title: 'Verben mit Präpositionen', subtitle: 'Grammatik', tintColor: '#5856D6', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] },
-            { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'] }
+            { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'], category: 'book', training_mode: 'standard_cloze' },
+            { id: 'verbs-de', language: 'DE', title: 'Starke Verben A1-C1', subtitle: 'Grammatik', tintColor: '#FF2D55', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'], category: 'deck', training_mode: 'starke_verben' },
+            { id: 'prep-verbs-de', language: 'DE', title: 'Verben mit Präpositionen', subtitle: 'Grammatik', tintColor: '#5856D6', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'], category: 'deck', training_mode: 'preposition_drill' },
+            { id: 'default-en', language: 'EN', title: 'Basic English', subtitle: 'Grammar & Vocabulary', tintColor: '#FF9500', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'], category: 'book', training_mode: 'standard_cloze' }
           ];
           const res = await supabase.from('books').insert(defaultBooks);
           if (res.error && res.error.message.includes('does not exist')) {
