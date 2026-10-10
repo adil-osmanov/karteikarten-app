@@ -2156,18 +2156,11 @@ const VerbSlot = React.memo(({
       let char = RUSSIAN_TO_QWERTZ[rawChar] || rawChar;
       const expectedChar = target[prev.length];
       
-      if (char === ' ' && prev.endsWith(' ')) {
-         return prev; // ignore redundant manual spaces if we auto-appended
-      }
+
 
       if (char.toLowerCase() === expectedChar.toLowerCase()) {
         playTockSound();
-        let nextVal = prev + expectedChar;
-        // Auto-append subsequent spaces
-        while (nextVal.length < target.length && target[nextVal.length] === ' ') {
-          nextVal += ' ';
-        }
-        return nextVal;
+        return prev + expectedChar;
       } else {
         playFeedbackSound(false);
         if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
