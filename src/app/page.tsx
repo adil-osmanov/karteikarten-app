@@ -652,21 +652,40 @@ function RapidFlashcardMode({
     [translation, example] = [example, translation];
   }
 
-  const speak = useCallback(() => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  const speakRef = useRef<HTMLAudioElement | null>(null);
+
+  const speak = useCallback(async () => {
+    if (typeof window === 'undefined') return;
     try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(german);
-      u.lang = 'de-DE';
-      u.rate = 0.95;
-      window.speechSynthesis.speak(u);
+      if (speakRef.current) {
+        speakRef.current.pause();
+        speakRef.current = null;
+      }
+      let audioUrl = audioCache.get(german);
+      if (!audioUrl) {
+        const res = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: german })
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          audioUrl = URL.createObjectURL(blob);
+          audioCache.set(german, audioUrl);
+        }
+      }
+      if (audioUrl) {
+        const audio = new Audio(audioUrl);
+        speakRef.current = audio;
+        audio.play().catch(()=>{});
+      }
     } catch (e) {}
   }, [german]);
 
   // DE -> RU: speak German when card appears. RU -> DE: speak German when revealed.
   useEffect(() => {
     if (!reverse) speak();
-    return () => { try { window.speechSynthesis?.cancel(); } catch (e) {} };
+    return () => { try { if (speakRef.current) speakRef.current.pause(); } catch (e) {} };
   }, [reverse, speak]);
 
   useEffect(() => {
