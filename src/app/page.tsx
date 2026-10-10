@@ -8,6 +8,8 @@ import {
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Toaster, toast } from 'sonner';
+import { useRouter } from 'next/navigation';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { create } from "zustand";
@@ -159,6 +161,7 @@ interface DeckState {
   setBooks: (books: BookMeta[]) => void;
   addBook: (book: BookMeta) => void;
   updateBook: (book: BookMeta) => void;
+  updateBookSettings: (bookId: string, updates: Partial<BookMeta>) => Promise<boolean>;
   deleteBook: (id: string) => void;
   syncError: string | null;
   setSyncError: (msg: string | null) => void;
@@ -234,6 +237,30 @@ const useStore = create<DeckState>()((set, get) => ({
       if (typeof window !== 'undefined') alert("ERROR: " + JSON.stringify(error));
       set({ books: previousBooks }); // Rollback on failure
     }
+  },
+  updateBookSettings: async (bookId, updates) => {
+    const previousBooks = get().books;
+    const book = previousBooks.find(b => b.id === bookId);
+    if (!book) return false;
+    
+    const updatedBook = { ...book, ...updates };
+    const newBooks = previousBooks.map(b => b.id === bookId ? updatedBook : b);
+    set({ books: newBooks });
+    
+    try {
+      localStorage.setItem('cache_books_v2', JSON.stringify(newBooks));
+    } catch(e) {}
+    
+    const { error } = await supabase.from('books').update(updates).eq('id', bookId);
+    if (error) {
+      console.error("Supabase updateBookSettings error:", error.message);
+      set({ books: previousBooks });
+      try {
+        localStorage.setItem('cache_books_v2', JSON.stringify(previousBooks));
+      } catch(e) {}
+      return false;
+    }
+    return true;
   },
   updateBook: async (book) => {
     const previousBooks = get().books;
@@ -2043,6 +2070,8 @@ DeckCard.displayName = "DeckCard";
 
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
   useScrollLock(true);
+  const router = useRouter();
+  const updateBookSettings = useStore(s => s.updateBookSettings);
   const { appLanguage } = useStore();
   const [title, setTitle] = useState(book?.title || "");
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
@@ -2146,7 +2175,20 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
           
           <div className="flex flex-col gap-2 pt-2">
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Kategorie</label>
-            <select value={category} onChange={e => setCategory(e.target.value as any)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
+            <select value={category} onChange={async e => {
+              const val = e.target.value as any;
+              setCategory(val);
+              if (book?.id) {
+                const ok = await updateBookSettings(book.id, { category: val });
+                if (ok) {
+                  toast.success('Gespeichert');
+                  router.refresh();
+                } else {
+                  toast.error('Fehler beim Speichern');
+                  setCategory(book.category || 'book'); // rollback
+                }
+              }
+            }} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
               <option value="book">Bücher (Lehrbücher)</option>
               <option value="deck">Grammatik & Decks</option>
             </select>
@@ -2154,7 +2196,20 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
           
           <div className="flex flex-col gap-2">
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Trainingsmodus</label>
-            <select value={trainingMode} onChange={e => setTrainingMode(e.target.value as any)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
+            <select value={trainingMode} onChange={async e => {
+              const val = e.target.value as any;
+              setTrainingMode(val);
+              if (book?.id) {
+                const ok = await updateBookSettings(book.id, { training_mode: val });
+                if (ok) {
+                  toast.success('Gespeichert');
+                  router.refresh();
+                } else {
+                  toast.error('Fehler beim Speichern');
+                  setTrainingMode(book.training_mode || 'standard_cloze'); // rollback
+                }
+              }
+            }} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
               <option value="standard_cloze">Standard Cloze (Lückentext)</option>
               <option value="starke_verben">Starke Verben (3 Formen)</option>
               <option value="preposition_drill">Verben mit Präpositionen</option>
@@ -3503,6 +3558,7 @@ try {
   }, [filteredDecksList, deckOrder]);
 
   if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
+
 
   if (activeDeckId) {
     const currentBookId = decks.find(d => d.id === activeDeckId)?.bookId;
