@@ -17,7 +17,7 @@ import { persist } from "zustand/middleware";
 import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
-import { AIDailyDashboard } from "@/components/AIDailyDashboard";
+import { DueCardsBadge } from "@/components/DueCardsBadge";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -4120,18 +4120,6 @@ try {
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-12 pb-16 space-y-16">
             
-            {/* AI Daily Dashboard */}
-            <AIDailyDashboard
-              decks={decks}
-              isDataLoaded={isLoaded}
-              appLanguage={appLanguage}
-              onStartTask={(type) => {
-                if (type === 'due_review' && dueCards.length > 0) {
-                  setReviewCards(dueCards);
-                }
-              }}
-            />
-
             {/* Секция 1: Учебники */}
             <section
               onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
@@ -4143,7 +4131,10 @@ try {
               }}
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
-              <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white px-2">Lehrbücher</h2>
+              <div className="flex items-center gap-3 mb-6 px-2">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Lehrbücher</h2>
+                <DueCardsBadge count={dueCards.length} onClick={() => dueCards.length > 0 && setReviewCards(dueCards)} />
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
                 {displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map(book => (
                   <div
