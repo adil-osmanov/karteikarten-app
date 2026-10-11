@@ -4121,7 +4121,16 @@ try {
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-12 pb-16 space-y-16">
             
             {/* AI Daily Dashboard */}
-            <AIDailyDashboard />
+            <AIDailyDashboard
+              decks={decks}
+              isDataLoaded={isLoaded}
+              appLanguage={appLanguage}
+              onStartTask={(type) => {
+                if (type === 'due_review' && dueCards.length > 0) {
+                  setReviewCards(dueCards);
+                }
+              }}
+            />
 
             {/* Секция 1: Учебники */}
             <section

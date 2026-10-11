@@ -20,9 +20,18 @@ export interface UserDebtStats {
   appLanguage?: 'DE' | 'EN';
 }
 
+interface RawStrategyTask {
+  id?: string;
+  title: string;
+  type: 'due_review' | 'weak_words' | 'new_words' | 'blitz';
+}
+
 /**
- * Server Action: Collects user debts and asks LLM (Groq / Gemini / OpenAI)
- * to construct a balanced, personalized Daily Plan according to Apple HIG standards.
+ * Server Action: Generates the AI Daily Plan.
+ * ARCHITECTURE RULE:
+ * 1. LLM acts SOLELY as a strategist (returning titles and types).
+ * 2. Server deterministic pipeline assigns 100% exact mathematical targets based on DB stats.
+ * 3. Server filters out any tasks where target === 0.
  */
 export async function generateAIDailyPlanAction(clientStats?: UserDebtStats): Promise<DailyTask[]> {
   try {
@@ -62,12 +71,20 @@ export async function generateAIDailyPlanAction(clientStats?: UserDebtStats): Pr
       }
     }
 
-    // Call server-side LLM (Groq, Gemini, OpenAI, or intelligent fallback)
-    const tasks = await callLLMForPlan(stats);
-    return tasks;
+    // 1. Call server-side LLM for strategy (titles and types only)
+    const strategyTasks = await callLLMForStrategy(stats);
+
+    // 2. Server deterministic pipeline: Assign exact numbers & filter out target === 0
+    return buildDeterministicTasks(strategyTasks, stats);
   } catch (error) {
     console.error('Failed to generate AI Daily Plan on server:', error);
-    return getFallbackPlan(clientStats || {
+    return buildDeterministicTasks(getFallbackStrategy(clientStats || {
+      dueReviewsCount: 5,
+      weakWordsCount: 5,
+      newWordsCount: 10,
+      totalLearnedToday: 0,
+      totalCards: 100,
+    }), clientStats || {
       dueReviewsCount: 5,
       weakWordsCount: 5,
       newWordsCount: 10,
@@ -78,38 +95,113 @@ export async function generateAIDailyPlanAction(clientStats?: UserDebtStats): Pr
 }
 
 /**
- * Server-side LLM caller with multi-provider support:
- * 1. Groq (Llama-3.3-70b-versatile)
- * 2. Gemini (gemini-1.5-flash / gemini-2.0-flash)
- * 3. OpenAI (gpt-4o-mini)
- * 4. Adaptive Heuristic Fallback
+ * Server Pipeline: Assigns 100% exact mathematical targets based on real user debt stats.
+ * - due_review -> target is STRICTLY equal to stats.dueReviewsCount (e.g. 150 overdue = 150 target).
+ * - weak_words -> target is Math.min(stats.weakWordsCount, 15).
+ * - new_words -> target is Math.min(stats.newWordsCount, 15).
+ * - blitz -> target is 10 (fluency drill).
+ * - Filters out ANY tasks where target === 0.
  */
-async function callLLMForPlan(stats: UserDebtStats): Promise<DailyTask[]> {
-  const prompt = `You are an intelligent language learning coach inside an iOS/Apple-style German vocabulary app.
-Analyze the user's current debt statistics:
-- Overdue cards needing review: ${stats.dueReviewsCount}
-- Weak/unmastered cards: ${stats.weakWordsCount}
-- Brand new cards waiting: ${stats.newWordsCount}
-- Completed cards today: ${stats.totalLearnedToday}
-- Total cards in library: ${stats.totalCards}
-- Learning language: ${stats.appLanguage || 'DE'}
+function buildDeterministicTasks(strategyTasks: RawStrategyTask[], stats: UserDebtStats): DailyTask[] {
+  const seenTypes = new Set<string>();
+  const finalTasks: DailyTask[] = [];
 
-Generate a crisp, balanced daily plan with 3 to 4 actionable tasks.
-Output strictly valid JSON with this exact schema:
+  for (const item of strategyTasks) {
+    const type = item.type;
+    if (seenTypes.has(type)) continue;
+    seenTypes.add(type);
+
+    let target = 0;
+    let title = item.title?.trim() || 'Ежедневная цель';
+
+    switch (type) {
+      case 'due_review':
+        // СТРОГО общее количество карточек с истекшим интервалом
+        target = stats.dueReviewsCount;
+        break;
+
+      case 'weak_words':
+        // Сложные слова, не более 15
+        target = Math.min(stats.weakWordsCount, 15);
+        break;
+
+      case 'new_words':
+        // Новые слова, не более 15, чтобы не перегружать пользователя
+        target = Math.min(stats.newWordsCount, 15);
+        break;
+
+      case 'blitz':
+        // Экспресс-раунд
+        target = 10;
+        break;
+
+      default:
+        target = 10;
+    }
+
+    // Фильтрация пустоты: исключаем любые задачи с target <= 0
+    if (target > 0) {
+      finalTasks.push({
+        id: item.id || `task_${type}_${Date.now()}`,
+        title,
+        target,
+        current: 0,
+        type: type as any,
+        is_completed: false,
+      });
+    }
+  }
+
+  // Если у пользователя вообще нет долгов (все target === 0), даем поддерживающий Blitz-раунд
+  if (finalTasks.length === 0) {
+    finalTasks.push({
+      id: 'task_maintenance_blitz',
+      title: 'Поддерживающий раунд Blitzkarten',
+      target: 10,
+      current: 0,
+      type: 'blitz',
+      is_completed: false,
+    });
+  }
+
+  return finalTasks;
+}
+
+/**
+ * Server-side LLM strategist.
+ * Requests ONLY strategic titles and types. Zero numbers/targets from the LLM.
+ */
+async function callLLMForStrategy(stats: UserDebtStats): Promise<RawStrategyTask[]> {
+  const prompt = `You are an expert language learning strategist for an Apple HIG minimalist German vocabulary app.
+The user's real debt profile:
+- Overdue cards needing review: ${stats.dueReviewsCount}
+- Weak unmastered cards: ${stats.weakWordsCount}
+- New fresh cards: ${stats.newWordsCount}
+- Total cards in library: ${stats.totalCards}
+- Language: ${stats.appLanguage || 'DE'}
+
+Suggest an optimal strategy by selecting relevant task types from:
+["due_review", "weak_words", "new_words", "blitz"].
+
+IMPORTANT RULES:
+1. DO NOT generate numbers or targets! The backend server will calculate all mathematical targets.
+2. Return only inspiring, concise Russian titles (e.g. "Повторить забытые карточки", "Закрепить сложные слова", "Изучить новые выражения", "Экспресс-раунд Blitzkarten").
+3. If overdue count is 0, DO NOT include "due_review".
+4. If weak count is 0, DO NOT include "weak_words".
+5. If new count is 0, DO NOT include "new_words".
+
+Output strictly valid JSON with this schema:
 {
   "tasks": [
     {
       "id": "task_1",
-      "title": "Short title in Russian (e.g. Повторить забытые карточки, Закрепить сложные слова, Освоить новые глаголы)",
-      "target": number (integer between 5 and 20),
-      "current": 0,
-      "type": "due_review" | "weak_words" | "new_words" | "blitz",
-      "is_completed": false
+      "title": "Short title in Russian",
+      "type": "due_review" | "weak_words" | "new_words" | "blitz"
     }
   ]
 }`;
 
-  // 1. Try Groq if GROQ_API_KEY is available
+  // 1. Try Groq with openai/gpt-oss-120b
   if (process.env.GROQ_API_KEY) {
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -121,8 +213,8 @@ Output strictly valid JSON with this exact schema:
         body: JSON.stringify({
           model: 'openai/gpt-oss-120b',
           messages: [
-            { role: 'system', content: 'You are an AI language learning coach. Respond strictly in JSON format.' },
-            { role: 'user', content: prompt }
+            { role: 'system', content: 'You are an AI language learning strategist. Output strictly JSON.' },
+            { role: 'user', content: prompt },
           ],
           response_format: { type: 'json_object' },
           temperature: 0.3,
@@ -131,12 +223,11 @@ Output strictly valid JSON with this exact schema:
 
       if (res.ok) {
         const data = await res.json();
-        let rawContent = data.choices?.[0]?.message?.content || "";
-        // Очищаем ответ от markdown-разметки
+        let rawContent = data.choices?.[0]?.message?.content || '';
         rawContent = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(rawContent);
         if (Array.isArray(parsed?.tasks) && parsed.tasks.length > 0) {
-          return sanitizeTasks(parsed.tasks);
+          return sanitizeStrategyTasks(parsed.tasks);
         }
       }
     } catch (e) {
@@ -154,25 +245,22 @@ Output strictly valid JSON with this exact schema:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.3,
-            },
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
           }),
         }
       );
 
       if (res.ok) {
         const data = await res.json();
-        let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
         text = text.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(text);
         if (Array.isArray(parsed?.tasks) && parsed.tasks.length > 0) {
-          return sanitizeTasks(parsed.tasks);
+          return sanitizeStrategyTasks(parsed.tasks);
         }
       }
     } catch (e) {
-      console.warn('Gemini call failed, trying next provider:', e);
+      console.warn('Gemini call failed:', e);
     }
   }
 
@@ -188,8 +276,8 @@ Output strictly valid JSON with this exact schema:
         body: JSON.stringify({
           model: 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: 'You are an AI language learning coach. Respond strictly in JSON format.' },
-            { role: 'user', content: prompt }
+            { role: 'system', content: 'You are an AI language learning strategist. Output strictly JSON.' },
+            { role: 'user', content: prompt },
           ],
           response_format: { type: 'json_object' },
           temperature: 0.3,
@@ -198,96 +286,65 @@ Output strictly valid JSON with this exact schema:
 
       if (res.ok) {
         const data = await res.json();
-        let content = data.choices?.[0]?.message?.content || "";
+        let content = data.choices?.[0]?.message?.content || '';
         content = content.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed?.tasks) && parsed.tasks.length > 0) {
-          return sanitizeTasks(parsed.tasks);
+          return sanitizeStrategyTasks(parsed.tasks);
         }
       }
     } catch (e) {
-      console.warn('OpenAI call failed, falling back to smart heuristics:', e);
+      console.warn('OpenAI call failed:', e);
     }
   }
 
-  // 4. Fallback heuristic generator (Calculated based on actual debts)
-  return getFallbackPlan(stats);
+  // 4. Default strategy generator
+  return getFallbackStrategy(stats);
 }
 
-function sanitizeTasks(rawTasks: any[]): DailyTask[] {
-  return rawTasks.map((t, index) => ({
-    id: t.id || `task_${index + 1}_${Date.now()}`,
-    title: t.title || 'Ежедневная цель',
-    target: Math.max(1, typeof t.target === 'number' ? Math.round(t.target) : 10),
-    current: 0,
-    type: (['due_review', 'weak_words', 'new_words', 'blitz', 'extra'].includes(t.type)
-      ? t.type
-      : 'due_review') as any,
-    is_completed: false,
-  }));
+function sanitizeStrategyTasks(rawTasks: any[]): RawStrategyTask[] {
+  const allowed = ['due_review', 'weak_words', 'new_words', 'blitz'];
+  return rawTasks
+    .filter((t) => t && allowed.includes(t.type))
+    .map((t, index) => ({
+      id: t.id || `strat_${t.type}_${index}`,
+      title: t.title || 'Ежедневная задача',
+      type: t.type,
+    }));
 }
 
-/**
- * Intelligent adaptive rule-based plan when LLM key is absent or offline.
- */
-function getFallbackPlan(stats: UserDebtStats): DailyTask[] {
-  const tasks: DailyTask[] = [];
+function getFallbackStrategy(stats: UserDebtStats): RawStrategyTask[] {
+  const strategy: RawStrategyTask[] = [];
 
-  // Task 1: Overdue reviews
   if (stats.dueReviewsCount > 0) {
-    const target = Math.min(Math.max(5, stats.dueReviewsCount), 15);
-    tasks.push({
-      id: 'task_due_reviews',
+    strategy.push({
+      id: 'strat_due',
       title: 'Повторить забытые карточки',
-      target,
-      current: 0,
       type: 'due_review',
-      is_completed: false,
-    });
-  } else {
-    tasks.push({
-      id: 'task_refresh',
-      title: 'Освежить активный словарный запас',
-      target: 10,
-      current: 0,
-      type: 'due_review',
-      is_completed: false,
     });
   }
 
-  // Task 2: Difficult or unmastered words
   if (stats.weakWordsCount > 0) {
-    const target = Math.min(Math.max(5, stats.weakWordsCount), 10);
-    tasks.push({
-      id: 'task_weak_words',
+    strategy.push({
+      id: 'strat_weak',
       title: 'Закрепить сложные слова',
-      target,
-      current: 0,
       type: 'weak_words',
-      is_completed: false,
     });
   }
 
-  // Task 3: New words intake
-  const newTarget = stats.newWordsCount > 0 ? Math.min(Math.max(5, stats.newWordsCount), 10) : 10;
-  tasks.push({
-    id: 'task_new_words',
-    title: 'Изучить новые выражения',
-    target: newTarget,
-    current: 0,
-    type: 'new_words',
-    is_completed: false,
-  });
+  if (stats.newWordsCount > 0) {
+    strategy.push({
+      id: 'strat_new',
+      title: 'Изучить новые выражения',
+      type: 'new_words',
+    });
+  }
 
-  // Task 4: Blitz round for fluency
-  tasks.push({
-    id: 'task_blitz_drill',
+  strategy.push({
+    id: 'strat_blitz',
     title: 'Экспресс-раунд Blitzkarten',
-    target: 12,
-    current: 0,
     type: 'blitz',
-    is_completed: false,
   });
 
-  return tasks;
+  return strategy;
 }
