@@ -616,28 +616,43 @@ const getRapidSounds = () => {
   return rapidSounds;
 };
 
-// Safari: the Web Audio context must be resumed synchronously inside a user gesture (click/keydown)
-const unlockRapidAudio = () => {
+// Safari / WebKit: Reusable singleton audio element to avoid media player limits (AVPlayer exhaustion)
+let sharedSpeechAudio: HTMLAudioElement | null = null;
+export const getSharedSpeechAudio = () => {
+  if (typeof window === 'undefined') return null;
+  if (!sharedSpeechAudio) {
+    sharedSpeechAudio = new Audio();
+    (sharedSpeechAudio as any).playsInline = true;
+    sharedSpeechAudio.preload = 'auto';
+  }
+  return sharedSpeechAudio;
+};
+
+// Safari: Unlock both Web Audio Context and HTML5 Audio pipeline synchronously inside user gestures
+export const unlockRapidAudio = () => {
   try {
     const ctx = (Howler as any).ctx as AudioContext | undefined;
     if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+
+    // Prime the HTML5 audio element so Safari marks it as user-activated for future async calls
+    const audio = getSharedSpeechAudio();
+    if (audio && !audio.src) {
+      audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      audio.play().then(() => audio.pause()).catch(() => {});
+    }
   } catch (e) {}
 };
 
 let audioUnlocked = false;
 const globalAudioUnlock = () => {
-  if (audioUnlocked) return;
   unlockRapidAudio();
   audioUnlocked = true;
-  document.removeEventListener('click', globalAudioUnlock);
-  document.removeEventListener('keydown', globalAudioUnlock);
-  document.removeEventListener('touchstart', globalAudioUnlock);
 };
 
 if (typeof window !== 'undefined') {
-  document.addEventListener('click', globalAudioUnlock);
-  document.addEventListener('keydown', globalAudioUnlock);
-  document.addEventListener('touchstart', globalAudioUnlock);
+  document.addEventListener('click', globalAudioUnlock, { passive: true });
+  document.addEventListener('keydown', globalAudioUnlock, { passive: true });
+  document.addEventListener('touchstart', globalAudioUnlock, { passive: true });
 }
 
 export function getCardSpeechText(card: Flashcard): string {
@@ -713,10 +728,6 @@ function RapidFlashcardMode({
   const speak = useCallback(async () => {
     if (typeof window === 'undefined') return;
     try {
-      if (speakRef.current) {
-        speakRef.current.pause();
-        speakRef.current = null;
-      }
       let audioUrl = audioCache.get(speechText);
       if (!audioUrl) {
         const res = await fetch('/api/tts', {
@@ -731,9 +742,15 @@ function RapidFlashcardMode({
         }
       }
       if (audioUrl) {
-        const audio = new Audio(audioUrl);
+        const audio = getSharedSpeechAudio() || new Audio();
         speakRef.current = audio;
-        audio.play().catch(()=>{});
+        audio.pause();
+        audio.src = audioUrl;
+        audio.currentTime = 0;
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(() => {});
+        }
       }
     } catch (e) {}
   }, [speechText]);
@@ -1350,12 +1367,18 @@ const playAudio = useCallback(async (text: string) => {
         audioUrl = URL.createObjectURL(blob);
         audioCache.set(text, audioUrl);
       }
-      const audio = new Audio(audioUrl);
+      const audio = getSharedSpeechAudio() || new Audio();
+      audio.pause();
+      audio.src = audioUrl;
+      audio.currentTime = 0;
       audio.playbackRate = playbackSpeed;
       
       audio.onended = () => setIsPlayingAudio(false);
       audio.onerror = () => setIsPlayingAudio(false);
-      await audio.play();
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        await playPromise.catch(() => {});
+      }
     } catch (e) {
       setIsPlayingAudio(false);
     }

@@ -12,22 +12,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
     }
 
-    // ConradNeural is an excellent, natural sounding German voice.
-    // KatjaNeural is a female option. Let's use ConradNeural.
-    const tts = new EdgeTTS({
-      voice: "de-DE-ConradNeural",
-      lang: "de-DE",
-      outputFormat: "audio-24khz-48kbitrate-mono-mp3",
-      rate: "-5%",
-    });
+    let audioBuffer: Buffer | null = null;
+    let lastError: any = null;
 
-    // Write to a temporary file, read it into buffer, then delete it.
-    const tempFilePath = path.join(os.tmpdir(), `tts-${Date.now()}-${Math.random().toString(36).substring(7)}.mp3`);
-    
-    await tts.ttsPromise(text, tempFilePath);
-    
-    const audioBuffer = fs.readFileSync(tempFilePath);
-    fs.unlinkSync(tempFilePath); // Cleanup
+    // Retry up to 2 times in case of intermittent Microsoft Edge TTS socket drops
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const tempFilePath = path.join(
+        os.tmpdir(),
+        `tts-${Date.now()}-${Math.random().toString(36).substring(7)}.mp3`
+      );
+
+      try {
+        const tts = new EdgeTTS({
+          voice: "de-DE-ConradNeural",
+          lang: "de-DE",
+          outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+          rate: "-5%",
+          timeout: 8000,
+        });
+
+        await tts.ttsPromise(text, tempFilePath);
+
+        if (fs.existsSync(tempFilePath)) {
+          audioBuffer = fs.readFileSync(tempFilePath);
+          try {
+            fs.unlinkSync(tempFilePath);
+          } catch {}
+          break;
+        }
+      } catch (err) {
+        lastError = err;
+        try {
+          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        } catch {}
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+
+    if (!audioBuffer) {
+      throw lastError || new Error("Failed to synthesize audio after retries");
+    }
 
     return new NextResponse(audioBuffer, {
       headers: {
