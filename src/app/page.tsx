@@ -640,6 +640,52 @@ if (typeof window !== 'undefined') {
   document.addEventListener('touchstart', globalAudioUnlock);
 }
 
+export function getCardSpeechText(card: Flashcard): string {
+  const cleanWord = (card.targetWord || '').replace(/\|/g, '').trim();
+  let forms = (card.forms && card.forms !== '-') ? card.forms.trim() : '';
+
+  // Fallback: check baseWordInfo for verbs or nouns if forms is not specified
+  if (!forms && card.baseWordInfo) {
+    try {
+      const info = JSON.parse(card.baseWordInfo);
+      if (info.praesens || info.praeteritum || info.perfekt) {
+        const parts = [info.praesens, info.praeteritum, info.perfekt].filter(Boolean);
+        if (parts.length > 0) {
+          forms = parts.join(', ');
+        }
+      }
+    } catch (e) {
+      const match = card.baseWordInfo.match(/\(([^)]+)\)/);
+      if (match) {
+        forms = match[1].trim();
+      }
+    }
+  }
+
+  if (!forms) return cleanWord;
+
+  // Normalize forms: replace middle dot or excess whitespace
+  let cleanForms = forms.replace(/·/g, ',').replace(/\s+/g, ' ').trim();
+
+  // If this is a noun (cleanWord starts with der/die/das):
+  const isNoun = /^(der|die|das)\s+/i.test(cleanWord);
+  if (isNoun) {
+    // If cleanForms doesn't start with an article and has no commas (just the plural noun, e.g. "Bedarfe")
+    if (!/^(die|der|das|kein|alle)\b/i.test(cleanForms) && !cleanForms.includes(',')) {
+      cleanForms = `die ${cleanForms}`;
+    }
+  }
+
+  // If cleanForms already begins with cleanWord, avoid repeating it
+  const cleanWordLower = cleanWord.toLowerCase();
+  const cleanFormsLower = cleanForms.toLowerCase();
+  if (cleanFormsLower.startsWith(cleanWordLower + ',') || cleanFormsLower === cleanWordLower) {
+    return cleanForms;
+  }
+
+  return `${cleanWord}, ${cleanForms}`;
+}
+
 function RapidFlashcardMode({
   card,
   progress,
@@ -655,6 +701,7 @@ function RapidFlashcardMode({
   // Rounds 1-2 (progress 0,1): DE -> RU. Rounds 3-4 (progress 2,3): RU -> DE. Fixed for the lifetime of this card view.
   const [reverse] = useState(progress >= 2);
   const german = card.targetWord.replace(/\|/g, '');
+  const speechText = useMemo(() => getCardSpeechText(card), [card]);
   let translation = card.translation || '';
   let example = card.sentence && card.sentence !== '-' ? card.sentence : '';
   if (!hasCyrillic(translation) && hasCyrillic(example)) {
@@ -670,17 +717,17 @@ function RapidFlashcardMode({
         speakRef.current.pause();
         speakRef.current = null;
       }
-      let audioUrl = audioCache.get(german);
+      let audioUrl = audioCache.get(speechText);
       if (!audioUrl) {
         const res = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: german })
+          body: JSON.stringify({ text: speechText })
         });
         if (res.ok) {
           const blob = await res.blob();
           audioUrl = URL.createObjectURL(blob);
-          audioCache.set(german, audioUrl);
+          audioCache.set(speechText, audioUrl);
         }
       }
       if (audioUrl) {
@@ -689,7 +736,7 @@ function RapidFlashcardMode({
         audio.play().catch(()=>{});
       }
     } catch (e) {}
-  }, [german]);
+  }, [speechText]);
 
   // DE -> RU: speak German when card appears. RU -> DE: speak German when revealed.
   useEffect(() => {
@@ -917,6 +964,29 @@ function RapidSession({
     setLocked(false);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [deckId, reviewCards]);
+
+  // Pre-fetch TTS audio for the top 2 cards in the queue for instantaneous playback
+  useEffect(() => {
+    if (!queue || queue.length === 0) return;
+    const nextCards = queue.slice(0, 2);
+    nextCards.forEach(({ card }) => {
+      const text = getCardSpeechText(card);
+      if (text && !audioCache.has(text)) {
+        fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        })
+          .then(res => res.ok ? res.blob() : null)
+          .then(blob => {
+            if (blob) {
+              audioCache.set(text, URL.createObjectURL(blob));
+            }
+          })
+          .catch(() => {});
+      }
+    });
+  }, [queue]);
 
   const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean) => {
     if (locked || !queue || queue.length === 0) return;
