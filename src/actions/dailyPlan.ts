@@ -119,7 +119,7 @@ Output strictly valid JSON with this exact schema:
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
+          model: 'openai/gpt-oss-120b',
           messages: [
             { role: 'system', content: 'You are an AI language learning coach. Respond strictly in JSON format.' },
             { role: 'user', content: prompt }
@@ -131,8 +131,10 @@ Output strictly valid JSON with this exact schema:
 
       if (res.ok) {
         const data = await res.json();
-        const content = data.choices?.[0]?.message?.content;
-        const parsed = JSON.parse(content);
+        let rawContent = data.choices?.[0]?.message?.content || "";
+        // Очищаем ответ от markdown-разметки
+        rawContent = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(rawContent);
         if (Array.isArray(parsed?.tasks) && parsed.tasks.length > 0) {
           return sanitizeTasks(parsed.tasks);
         }
@@ -162,7 +164,8 @@ Output strictly valid JSON with this exact schema:
 
       if (res.ok) {
         const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        text = text.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(text);
         if (Array.isArray(parsed?.tasks) && parsed.tasks.length > 0) {
           return sanitizeTasks(parsed.tasks);
@@ -195,7 +198,8 @@ Output strictly valid JSON with this exact schema:
 
       if (res.ok) {
         const data = await res.json();
-        const content = data.choices?.[0]?.message?.content;
+        let content = data.choices?.[0]?.message?.content || "";
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed?.tasks) && parsed.tasks.length > 0) {
           return sanitizeTasks(parsed.tasks);
