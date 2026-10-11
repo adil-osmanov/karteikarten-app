@@ -17,6 +17,7 @@ import { persist } from "zustand/middleware";
 import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
+import { AIDailyDashboard } from "@/components/AIDailyDashboard";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -4119,6 +4120,9 @@ try {
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-12 pb-16 space-y-16">
             
+            {/* AI Daily Dashboard */}
+            <AIDailyDashboard />
+
             {/* Секция 1: Учебники */}
             <section
               onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
