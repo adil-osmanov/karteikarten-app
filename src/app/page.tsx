@@ -18,6 +18,7 @@ import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
+import { Howl, Howler } from 'howler';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -36,57 +37,82 @@ const FAIL_B64 = "data:audio/wav;base64,UklGRi6bAABXQVZFZm10IBAAAAABAAEARKwAAIhY
 let cachedAudioCtx: AudioContext | null = null;
 const audioCache = new Map<string, string>();
 
-let audioCtx: AudioContext | null = null;
-let tockBuffer: AudioBuffer | null = null;
-let successBuffer: AudioBuffer | null = null;
-let failBuffer: AudioBuffer | null = null;
-let isAudioInitialized = false;
+let uiSounds: {
+  tock: Howl;
+  success: Howl;
+  fail: Howl;
+} | null = null;
 
-const decodeBase64Audio = async (base64: string, ctx: AudioContext) => {
-  try {
-    const base64Data = base64.split(',')[1] || base64;
-    const binaryStr = window.atob(base64Data);
-    const len = binaryStr.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-    return await ctx.decodeAudioData(bytes.buffer);
-  } catch (e) {
-    return null;
+export const getUiSounds = () => {
+  if (typeof window === 'undefined') return null;
+  if (!uiSounds) {
+    uiSounds = {
+      tock: new Howl({
+        src: [TOCK_B64],
+        format: ['wav'],
+        volume: 0.3,
+        preload: true,
+        html5: false,
+      }),
+      success: new Howl({
+        src: [SUCCESS_B64],
+        format: ['wav'],
+        volume: 0.4,
+        preload: true,
+        html5: false,
+      }),
+      fail: new Howl({
+        src: [FAIL_B64],
+        format: ['wav'],
+        volume: 0.4,
+        preload: true,
+        html5: false,
+      }),
+    };
   }
+  return uiSounds;
 };
 
 export const initAudioCtx = async () => {
-  if (typeof window === 'undefined' || isAudioInitialized) return;
+  if (typeof window === 'undefined') return;
   try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    
-    if (!audioCtx) audioCtx = new AudioContextClass();
-    if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
-    
-    isAudioInitialized = true;
-    
-    if (!tockBuffer) tockBuffer = await decodeBase64Audio(TOCK_B64, audioCtx);
-    if (!successBuffer) successBuffer = await decodeBase64Audio(SUCCESS_B64, audioCtx);
-    if (!failBuffer) failBuffer = await decodeBase64Audio(FAIL_B64, audioCtx);
-  } catch(e) {}
-};
-
-const playBuffer = (buffer: AudioBuffer | null) => {
-  if (!audioCtx || !buffer) return;
-  try {
-    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-    const source = audioCtx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(audioCtx.destination);
-    source.start(0);
+    if (Howler.ctx && Howler.ctx.state === 'suspended') {
+      await Howler.ctx.resume().catch(() => {});
+    }
+    if (cachedAudioCtx && cachedAudioCtx.state === 'suspended') {
+      await cachedAudioCtx.resume().catch(() => {});
+    }
+    getUiSounds();
   } catch (e) {}
 };
 
-export const playTockSound = () => playBuffer(tockBuffer);
-export const playFeedbackSound = (isCorrect: boolean) => playBuffer(isCorrect ? successBuffer : failBuffer);
+export const playTockSound = () => {
+  try {
+    if (Howler.ctx && Howler.ctx.state === 'suspended') {
+      Howler.ctx.resume().catch(() => {});
+    }
+    const sounds = getUiSounds();
+    if (sounds) {
+      sounds.tock.play();
+    }
+  } catch (e) {}
+};
+
+export const playFeedbackSound = (isCorrect: boolean) => {
+  try {
+    if (Howler.ctx && Howler.ctx.state === 'suspended') {
+      Howler.ctx.resume().catch(() => {});
+    }
+    const sounds = getUiSounds();
+    if (sounds) {
+      if (isCorrect) {
+        sounds.success.play();
+      } else {
+        sounds.fail.play();
+      }
+    }
+  } catch (e) {}
+};
 
 // --- STORE & TYPES ---
 
@@ -599,21 +625,12 @@ if (typeof window !== 'undefined') {
 
 
 // --- RAPID FLASHCARD MODE ---
-import { Howl, Howler } from 'howler';
-
 const hasCyrillic = (s: string) => /[\u0400-\u04FF]/.test(s);
 
-let rapidSounds: { success: Howl; error: Howl } | null = null;
 const getRapidSounds = () => {
-  if (typeof window === 'undefined') return null;
-  if (!rapidSounds) {
-    // html5:false => Web Audio API (avoids Safari HTML5 audio blocking)
-    rapidSounds = {
-      success: new Howl({ src: [SUCCESS_B64], format: ['wav'], volume: 0.4, preload: true, html5: false }),
-      error: new Howl({ src: [FAIL_B64], format: ['wav'], volume: 0.4, preload: true, html5: false }),
-    };
-  }
-  return rapidSounds;
+  const ui = getUiSounds();
+  if (!ui) return null;
+  return { success: ui.success, error: ui.fail };
 };
 
 // Safari / WebKit: Reusable singleton audio element to avoid media player limits (AVPlayer exhaustion)
