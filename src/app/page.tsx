@@ -673,50 +673,9 @@ if (typeof window !== 'undefined') {
 }
 
 export function getCardSpeechText(card: Flashcard): string {
-  const cleanWord = (card.targetWord || '').replace(/\|/g, '').trim();
-  let forms = (card.forms && card.forms !== '-') ? card.forms.trim() : '';
-
-  // Fallback: check baseWordInfo for verbs or nouns if forms is not specified
-  if (!forms && card.baseWordInfo) {
-    try {
-      const info = JSON.parse(card.baseWordInfo);
-      if (info.praesens || info.praeteritum || info.perfekt) {
-        const parts = [info.praesens, info.praeteritum, info.perfekt].filter(Boolean);
-        if (parts.length > 0) {
-          forms = parts.join(', ');
-        }
-      }
-    } catch (e) {
-      const match = card.baseWordInfo.match(/\(([^)]+)\)/);
-      if (match) {
-        forms = match[1].trim();
-      }
-    }
-  }
-
-  if (!forms) return cleanWord;
-
-  // Normalize forms: replace middle dot or excess whitespace
-  let cleanForms = forms.replace(/·/g, ',').replace(/\s+/g, ' ').trim();
-
-  // If this is a noun (cleanWord starts with der/die/das):
-  const isNoun = /^(der|die|das)\s+/i.test(cleanWord);
-  if (isNoun) {
-    // If cleanForms doesn't start with an article and has no commas (just the plural noun, e.g. "Bedarfe")
-    if (!/^(die|der|das|kein|alle)\b/i.test(cleanForms) && !cleanForms.includes(',')) {
-      cleanForms = `die ${cleanForms}`;
-    }
-  }
-
-  // If cleanForms already begins with cleanWord, avoid repeating it
-  const cleanWordLower = cleanWord.toLowerCase();
-  const cleanFormsLower = cleanForms.toLowerCase();
-  if (cleanFormsLower.startsWith(cleanWordLower + ',') || cleanFormsLower === cleanWordLower) {
-    return cleanForms;
-  }
-
-  return `${cleanWord}, ${cleanForms}`;
+  return (card.targetWord || '').replace(/\|/g, '').trim();
 }
+
 
 function RapidFlashcardMode({
   card,
