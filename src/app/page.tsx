@@ -1104,28 +1104,8 @@ function AutoFitGermanHeading({
   const textRef = useRef<HTMLHeadingElement>(null);
   const [scale, setScale] = useState(1);
 
-  // Pick responsive clamp font size based on character length of the German word
-  const charLen = text.trim().length;
-  const baseFontSize = useMemo(() => {
-    if (charLen >= 32) {
-      // 32+ chars: ultra-long German words (e.g. Arbeitsunfähigkeitsbescheinigung)
-      return 'clamp(0.95rem, 2.7vw, 1.25rem)';
-    }
-    if (charLen >= 25) {
-      // 25-31 chars: long compounds (e.g. das Verantwortungsbewusstsein = 29 chars)
-      return 'clamp(1.1rem, 3.3vw, 1.5rem)';
-    }
-    if (charLen >= 19) {
-      // 19-24 chars: medium-long (e.g. die Sehenswürdigkeit = 22 chars)
-      return 'clamp(1.3rem, 4.2vw, 1.85rem)';
-    }
-    if (charLen >= 13) {
-      // 13-18 chars: medium (e.g. die Verbindung)
-      return 'clamp(1.5rem, 5.0vw, 2.2rem)';
-    }
-    // < 13 chars: short words (e.g. das Haus, der Hund, gehen)
-    return 'clamp(1.75rem, 6.0vw, 2.5rem)';
-  }, [charLen]);
+  // Large, bold, premium Apple SF Pro Display typography base size
+  const baseFontSize = 'clamp(2.1rem, 5.5vw, 2.85rem)';
 
   useIsomorphicLayoutEffect(() => {
     const measure = () => {
@@ -1135,8 +1115,8 @@ function AutoFitGermanHeading({
 
       if (containerWidth > 0 && textWidth > 0) {
         if (textWidth > containerWidth) {
-          // Extra 4px buffer to ensure no subpixel overflow or clipping
-          const targetScale = Math.max(0.55, Math.min(1, (containerWidth - 4) / textWidth));
+          // Scale down ONLY as much as mathematically necessary to fit the exact container width without wrapping
+          const targetScale = Math.min(1, Math.max(0.42, (containerWidth - 4) / textWidth));
           setScale(targetScale);
         } else {
           setScale(1);
@@ -1144,10 +1124,8 @@ function AutoFitGermanHeading({
       }
     };
 
-    // Measure initially
     measure();
 
-    // Re-measure when document fonts are loaded to avoid subpixel mismatch
     if (typeof document !== 'undefined' && (document as any).fonts?.ready) {
       (document as any).fonts.ready.then(measure).catch(() => {});
     }
@@ -1165,18 +1143,18 @@ function AutoFitGermanHeading({
       if (ro) ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [text, baseFontSize]);
+  }, [text]);
 
   return (
     <div
       ref={containerRef}
-      className="w-full flex items-center justify-center overflow-visible px-1"
-      style={{ minHeight: '3.2rem' }}
+      className="w-full flex items-center justify-center overflow-visible px-0.5"
+      style={{ minHeight: '3.6rem' }}
     >
       <h2
         ref={textRef}
         className={cn(
-          "font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white select-none whitespace-nowrap inline-block",
+          "font-bold text-center leading-none tracking-tight font-sans text-zinc-900 dark:text-white select-none whitespace-nowrap inline-block",
           className
         )}
         style={{
@@ -1362,12 +1340,12 @@ function RapidFlashcardMode({
   const formattedForms = formatForms(card.forms);
 
   const renderGermanBlock = () => (
-    <div className="flex flex-col items-center justify-center w-full px-2 sm:px-4">
+    <div className="flex flex-col items-center justify-center w-full px-0.5 sm:px-1">
       <AutoFitGermanHeading text={german}>
         {formatGermanWord(german)}
       </AutoFitGermanHeading>
       {formattedForms && (
-        <div className="text-[13px] md:text-[15px] text-zinc-500 dark:text-zinc-400 mt-1 md:mt-2 font-normal tracking-wide text-center">
+        <div className="text-[14px] md:text-[16px] text-zinc-500 dark:text-zinc-400 mt-2 font-normal tracking-wide text-center">
           {formattedForms}
         </div>
       )}
@@ -1395,9 +1373,11 @@ function RapidFlashcardMode({
             {cardHeader}
             <div className="flex-1 flex flex-col items-center justify-center w-full">
               {reverse ? (
-                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-center leading-tight text-zinc-900 dark:text-white px-2 break-normal hyphens-none">
-                  {translation}
-                </h2>
+                <div className="flex flex-col items-center justify-center w-full px-0.5 sm:px-1">
+                  <AutoFitGermanHeading text={translation}>
+                    {translation}
+                  </AutoFitGermanHeading>
+                </div>
               ) : (
                 renderGermanBlock()
               )}
