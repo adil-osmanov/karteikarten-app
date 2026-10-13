@@ -1214,7 +1214,15 @@ function RapidFlashcardMode({
 }) {
   const [isFlipped, setIsFlipped] = useState(false);
   // Rounds 1-2 (progress 0,1): DE -> RU. Rounds 3-4 (progress 2,3): RU -> DE. Fixed for the lifetime of this card view.
-  const [reverse] = useState(forcedReverse !== undefined ? forcedReverse : progress >= 2);
+  const [reverse, setReverse] = useState(forcedReverse !== undefined ? forcedReverse : progress >= 2);
+  const flippedAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    setIsFlipped(false);
+    setReverse(forcedReverse !== undefined ? forcedReverse : progress >= 2);
+    flippedAtRef.current = 0;
+  }, [card?.id, forcedReverse, progress]);
+
   const german = (card?.targetWord || '').replace(/\|/g, '');
   const speechText = useMemo(() => getCardSpeechText(card), [card]);
   let translation = card.translation || '';
@@ -1241,12 +1249,24 @@ function RapidFlashcardMode({
 
   const flip = useCallback(() => {
     if (locked) return;
-    setIsFlipped(prev => !prev);
+    setIsFlipped(prev => {
+      const next = !prev;
+      if (next) {
+        flippedAtRef.current = Date.now();
+      }
+      return next;
+    });
   }, [locked]);
 
   const answer = useCallback((correct: boolean) => {
     if (locked) return;
-    if (!isFlipped) { flip(); return; }
+    if (!isFlipped) {
+      flip();
+      return;
+    }
+    // Prevent accidental instant double-press (debounce 180ms after flip)
+    if (Date.now() - flippedAtRef.current < 180) return;
+
     // Synchronous playback inside the user-gesture handler (Safari)
     unlockRapidAudio();
     const s = getRapidSounds();
@@ -1256,22 +1276,33 @@ function RapidFlashcardMode({
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+      if (e.repeat) return;
+
+      if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
         e.preventDefault();
         flip();
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        answer(true);
+        if (!isFlipped) {
+          flip();
+        } else {
+          answer(true);
+        }
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        answer(false);
+        if (!isFlipped) {
+          flip();
+        } else {
+          answer(false);
+        }
       } else if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
         speak();
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [flip, answer, speak]);
+  }, [flip, answer, speak, isFlipped]);
 
   const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-6 md:p-10 rounded-2xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
@@ -1371,7 +1402,7 @@ function RapidFlashcardMode({
                 renderGermanBlock()
               )}
             </div>
-            <span className="absolute bottom-6 text-[11px] text-zinc-300 dark:text-zinc-700 font-medium tracking-widest uppercase hidden md:block opacity-30">Space</span>
+            <span className="absolute bottom-6 text-[11px] text-zinc-300 dark:text-zinc-700 font-medium tracking-widest uppercase hidden md:block opacity-30">Space / Enter</span>
             <span className="absolute bottom-6 text-[11px] text-zinc-300 dark:text-zinc-700 font-medium tracking-widest uppercase md:hidden opacity-30">Tap</span>
           </div>
 
@@ -1600,6 +1631,7 @@ function RapidStudyCard({
   return (
     <div className="w-full flex justify-center px-4">
       <RapidFlashcardMode
+        key={card.id}
         card={card}
         progress={progress}
         locked={locked}
