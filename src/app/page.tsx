@@ -737,6 +737,114 @@ export function getCardTrainingMode(
   return 'standard_cloze';
 }
 
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? React.useLayoutEffect : React.useEffect;
+
+function AutoFitGermanHeading({
+  text,
+  children,
+  className = "",
+}: {
+  text: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLHeadingElement>(null);
+  const [scale, setScale] = useState(1);
+
+  // Pick responsive clamp font size based on character length of the German word
+  const charLen = text.trim().length;
+  const baseFontSize = useMemo(() => {
+    if (charLen >= 32) {
+      // 32+ chars: ultra-long German words (e.g. Arbeitsunfähigkeitsbescheinigung)
+      return 'clamp(0.95rem, 2.7vw, 1.25rem)';
+    }
+    if (charLen >= 25) {
+      // 25-31 chars: long compounds (e.g. das Verantwortungsbewusstsein = 29 chars)
+      return 'clamp(1.1rem, 3.3vw, 1.5rem)';
+    }
+    if (charLen >= 19) {
+      // 19-24 chars: medium-long (e.g. die Sehenswürdigkeit = 22 chars)
+      return 'clamp(1.3rem, 4.2vw, 1.85rem)';
+    }
+    if (charLen >= 13) {
+      // 13-18 chars: medium (e.g. die Verbindung)
+      return 'clamp(1.5rem, 5.0vw, 2.2rem)';
+    }
+    // < 13 chars: short words (e.g. das Haus, der Hund, gehen)
+    return 'clamp(1.75rem, 6.0vw, 2.5rem)';
+  }, [charLen]);
+
+  useIsomorphicLayoutEffect(() => {
+    const measure = () => {
+      if (!containerRef.current || !textRef.current) return;
+      const containerWidth = containerRef.current.clientWidth;
+      const textWidth = textRef.current.scrollWidth;
+
+      if (containerWidth > 0 && textWidth > 0) {
+        if (textWidth > containerWidth) {
+          // Extra 4px buffer to ensure no subpixel overflow or clipping
+          const targetScale = Math.max(0.55, Math.min(1, (containerWidth - 4) / textWidth));
+          setScale(targetScale);
+        } else {
+          setScale(1);
+        }
+      }
+    };
+
+    // Measure initially
+    measure();
+
+    // Re-measure when document fonts are loaded to avoid subpixel mismatch
+    if (typeof document !== 'undefined' && (document as any).fonts?.ready) {
+      (document as any).fonts.ready.then(measure).catch(() => {});
+    }
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      ro = new ResizeObserver(() => {
+        measure();
+      });
+      ro.observe(containerRef.current);
+    }
+
+    window.addEventListener('resize', measure);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [text, baseFontSize]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full flex items-center justify-center overflow-visible px-1"
+      style={{ minHeight: '3.2rem' }}
+    >
+      <h2
+        ref={textRef}
+        className={cn(
+          "font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white select-none whitespace-nowrap inline-block",
+          className
+        )}
+        style={{
+          fontSize: baseFontSize,
+          transform: scale < 1 ? `scale(${scale})` : undefined,
+          transformOrigin: 'center center',
+          whiteSpace: 'nowrap',
+          wordBreak: 'keep-all',
+          overflowWrap: 'normal',
+          hyphens: 'none',
+          WebkitHyphens: 'none',
+        }}
+        lang="de"
+      >
+        {children}
+      </h2>
+    </div>
+  );
+}
+
 function RapidFlashcardMode({
   card,
   progress,
@@ -884,29 +992,25 @@ function RapidFlashcardMode({
       else if (lowerArticle === 'das') articleColor = 'text-[#34C759] dark:text-[#30D158]';
 
       return (
-        <>
+        <span className="inline-flex items-baseline justify-center whitespace-nowrap">
           <span className={`font-normal ${articleColor}`}>{article}{`\u00A0`}</span>
-          <span>{firstWord}</span>
-          {remaining && <span> {remaining}</span>}
-        </>
+          <span className="whitespace-nowrap">{firstWord}</span>
+          {remaining && <span className="whitespace-nowrap">&nbsp;{remaining}</span>}
+        </span>
       );
     }
-    return <span>{trimmed}</span>;
+    return <span className="whitespace-nowrap">{trimmed}</span>;
   };
 
   const formattedForms = formatForms(card.forms);
 
   const renderGermanBlock = () => (
-    <div className="flex flex-col items-center justify-center w-full px-4 md:px-8">
-      <h2 
-        className="font-bold text-center leading-tight tracking-tight font-sans text-zinc-900 dark:text-white break-words break-keep hyphens-none w-full"
-        style={{ fontSize: 'clamp(1.5rem, 6vw + 1rem, 2.5rem)', overflowWrap: 'break-word' }}
-        lang="de"
-      >
+    <div className="flex flex-col items-center justify-center w-full px-2 sm:px-4">
+      <AutoFitGermanHeading text={german}>
         {formatGermanWord(german)}
-      </h2>
+      </AutoFitGermanHeading>
       {formattedForms && (
-        <div className="text-[14px] md:text-[16px] text-zinc-500 dark:text-zinc-400 mt-1 md:mt-2 font-normal tracking-wide text-center">
+        <div className="text-[13px] md:text-[15px] text-zinc-500 dark:text-zinc-400 mt-1 md:mt-2 font-normal tracking-wide text-center">
           {formattedForms}
         </div>
       )}
@@ -934,7 +1038,7 @@ function RapidFlashcardMode({
             {cardHeader}
             <div className="flex-1 flex flex-col items-center justify-center w-full">
               {reverse ? (
-                <h2 className="text-3xl md:text-4xl font-bold text-center leading-tight text-zinc-900 dark:text-white">
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-center leading-tight text-zinc-900 dark:text-white px-2 break-normal hyphens-none">
                   {translation}
                 </h2>
               ) : (
@@ -3729,7 +3833,7 @@ function VerbStudyCard({
 
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
         <div className="text-center mb-8 w-full mt-10">
-          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
+          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5 whitespace-nowrap select-none">
             {displayInfinitiv}
           </h2>
           <p className="text-[13px] sm:text-sm text-gray-400 dark:text-gray-500 font-medium">
