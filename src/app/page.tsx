@@ -813,6 +813,225 @@ export function getCardSpeechText(card: Flashcard): string {
   return (card.targetWord || '').replace(/\|/g, '').trim();
 }
 
+// ==========================================
+// RESILIENT GERMAN SPEECH ENGINE
+// (Edge TTS -> Client Cache -> Native Web Speech API Fallback)
+// ==========================================
+
+let activeSpeechUtterance: SpeechSynthesisUtterance | null = null;
+let cachedGermanVoice: SpeechSynthesisVoice | null = null;
+
+function getBestGermanVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+  if (cachedGermanVoice) return cachedGermanVoice;
+
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) return null;
+
+  const germanVoices = voices.filter(v => v.lang && (v.lang.startsWith('de') || v.lang.startsWith('DE')));
+  if (germanVoices.length === 0) return null;
+
+  // Prioritize high-quality natural voices
+  const preferred = germanVoices.find(v => 
+    /neural|natural|siri|google|microsoft|katja|conrad|anna|markus|yannick/i.test(v.name)
+  );
+  cachedGermanVoice = preferred || germanVoices[0];
+  return cachedGermanVoice;
+}
+
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    cachedGermanVoice = null;
+    getBestGermanVoice();
+  };
+}
+
+export function speakNative(
+  text: string,
+  rate: number = 1.0,
+  onStart?: () => void,
+  onEnded?: () => void
+): boolean {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
+
+  try {
+    const clean = text.replace(/\|/g, '').replace(/___+/g, '').trim();
+    if (!clean) {
+      if (onEnded) onEnded();
+      return false;
+    }
+
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = 'de-DE';
+    const voice = getBestGermanVoice();
+    if (voice) utterance.voice = voice;
+    utterance.rate = Math.max(0.6, Math.min(1.4, rate));
+
+    let hasEnded = false;
+    const finish = () => {
+      if (hasEnded) return;
+      hasEnded = true;
+      activeSpeechUtterance = null;
+      if (onEnded) onEnded();
+    };
+
+    utterance.onstart = () => {
+      if (onStart) onStart();
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+
+    // Prevent garbage collection in WebKit/Safari by holding reference
+    activeSpeechUtterance = utterance;
+    window.speechSynthesis.speak(utterance);
+    return true;
+  } catch (err) {
+    if (onEnded) onEnded();
+    return false;
+  }
+}
+
+export interface PlaySpeechOptions {
+  rate?: number;
+  onStart?: () => void;
+  onEnd?: () => void;
+  forceAudioEl?: HTMLAudioElement | null;
+}
+
+let activeSpeechAbortCtrl: AbortController | null = null;
+
+export async function playGermanSpeech(text: string, options?: PlaySpeechOptions) {
+  if (typeof window === 'undefined') return;
+
+  const cleanText = text.replace(/\|/g, '').trim();
+  if (!cleanText) {
+    if (options?.onEnd) options.onEnd();
+    return;
+  }
+
+  const rate = options?.rate ?? 1.0;
+
+  // 1. Check client memory cache
+  const cachedUrl = audioCache.get(cleanText);
+  if (cachedUrl) {
+    const audio = options?.forceAudioEl || getSharedSpeechAudio() || new Audio();
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.src = cachedUrl;
+      audio.playbackRate = rate;
+
+      audio.onplay = () => {
+        if (options?.onStart) options.onStart();
+      };
+      audio.onended = () => {
+        if (options?.onEnd) options.onEnd();
+      };
+      audio.onerror = () => {
+        speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+      };
+
+      const p = audio.play();
+      if (p !== undefined) {
+        p.catch(() => {
+          speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+        });
+      }
+      return;
+    } catch (e) {
+      speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+      return;
+    }
+  }
+
+  // 2. Fetch /api/tts with 3500ms timeout
+  if (activeSpeechAbortCtrl) {
+    activeSpeechAbortCtrl.abort();
+  }
+  const abortCtrl = new AbortController();
+  activeSpeechAbortCtrl = abortCtrl;
+  const timeoutId = setTimeout(() => abortCtrl.abort(), 3500);
+
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: cleanText }),
+      signal: abortCtrl.signal,
+    });
+    clearTimeout(timeoutId);
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok || !contentType.includes('audio')) {
+      throw new Error(`TTS server returned non-audio status: ${res.status}`);
+    }
+
+    const blob = await res.blob();
+    if (blob.size < 100) {
+      throw new Error('TTS returned empty audio');
+    }
+
+    const audioUrl = URL.createObjectURL(blob);
+    setCachedAudioUrl(cleanText, audioUrl);
+
+    const audio = options?.forceAudioEl || getSharedSpeechAudio() || new Audio();
+    audio.pause();
+    audio.currentTime = 0;
+    audio.src = audioUrl;
+    audio.playbackRate = rate;
+
+    audio.onplay = () => {
+      if (options?.onStart) options.onStart();
+    };
+    audio.onended = () => {
+      if (options?.onEnd) options.onEnd();
+    };
+    audio.onerror = () => {
+      speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+    };
+
+    const p = audio.play();
+    if (p !== undefined) {
+      p.catch(() => {
+        speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+      });
+    }
+  } catch (err) {
+    clearTimeout(timeoutId);
+    // Instant seamless fallback to native browser Speech Synthesis (zero silence!)
+    speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+  }
+}
+
+export function prefetchGermanSpeech(text: string) {
+  if (typeof window === 'undefined') return;
+  const clean = text.replace(/\|/g, '').trim();
+  if (!clean || audioCache.has(clean)) return;
+
+  fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: clean }),
+  })
+    .then((res) => {
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('audio')) return res.blob();
+      return null;
+    })
+    .then((blob) => {
+      if (blob && blob.size > 100) {
+        setCachedAudioUrl(clean, URL.createObjectURL(blob));
+      }
+    })
+    .catch(() => {});
+}
+
+
 export function getCardTrainingMode(
   card?: Flashcard,
   deckId?: string,
@@ -1006,34 +1225,8 @@ function RapidFlashcardMode({
 
   const speakRef = useRef<HTMLAudioElement | null>(null);
 
-  const speak = useCallback(async () => {
-    if (typeof window === 'undefined') return;
-    try {
-      let audioUrl = audioCache.get(speechText);
-      if (!audioUrl) {
-        const res = await fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: speechText })
-        });
-        if (res.ok) {
-          const blob = await res.blob();
-          audioUrl = URL.createObjectURL(blob);
-          audioCache.set(speechText, audioUrl);
-        }
-      }
-      if (audioUrl) {
-        const audio = getSharedSpeechAudio() || new Audio();
-        speakRef.current = audio;
-        audio.pause();
-        audio.src = audioUrl;
-        audio.currentTime = 0;
-        const playPromise = audio.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(() => {});
-        }
-      }
-    } catch (e) {}
+  const speak = useCallback(() => {
+    playGermanSpeech(speechText, { forceAudioEl: speakRef.current || getSharedSpeechAudio() });
   }, [speechText]);
 
   // DE -> RU: speak German when card appears. RU -> DE: speak German when revealed.
@@ -1272,19 +1465,8 @@ function RapidSession({
     const nextCards = queue.slice(0, 2);
     nextCards.forEach(({ card }) => {
       const text = getCardSpeechText(card);
-      if (text && !audioCache.has(text)) {
-        fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
-        })
-          .then(res => res.ok ? res.blob() : null)
-          .then(blob => {
-            if (blob) {
-              audioCache.set(text, URL.createObjectURL(blob));
-            }
-          })
-          .catch(() => {});
+      if (text) {
+        prefetchGermanSpeech(text);
       }
     });
   }, [queue]);
@@ -1605,18 +1787,8 @@ function StudyInterface({
         }
       }
 
-      if (textToPreload && !audioCache.has(textToPreload)) {
-        fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: textToPreload })
-        })
-        .then(res => { if (res.ok) return res.blob(); throw new Error(); })
-        .then(blob => {
-          const url = URL.createObjectURL(blob);
-          audioCache.set(textToPreload, url);
-        })
-        .catch(() => {});
+      if (textToPreload) {
+        prefetchGermanSpeech(textToPreload);
       }
     }
   }, [currentIndex, activeCards, decks, books, trainingMode]);
@@ -1996,36 +2168,12 @@ function StudyCard({
     }
   }, [isMultipleChoice, phase]);
 
-  const playAudio = useCallback(async (text: string) => {
+  const playAudio = useCallback((text: string) => {
     setIsPlayingAudio(true);
-    try {
-      let audioUrl = audioCache.get(text);
-      if (!audioUrl) {
-        const response = await fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
-        });
-        if (!response.ok) throw new Error("TTS API Error");
-        const blob = await response.blob();
-        audioUrl = URL.createObjectURL(blob);
-        audioCache.set(text, audioUrl);
-      }
-      const audio = getSharedSpeechAudio() || new Audio();
-      audio.pause();
-      audio.src = audioUrl;
-      audio.currentTime = 0;
-      audio.playbackRate = playbackSpeed;
-      
-      audio.onended = () => setIsPlayingAudio(false);
-      audio.onerror = () => setIsPlayingAudio(false);
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        await playPromise.catch(() => {});
-      }
-    } catch (e) {
-      setIsPlayingAudio(false);
-    }
+    playGermanSpeech(text, {
+      rate: playbackSpeed,
+      onEnd: () => setIsPlayingAudio(false),
+    });
   }, [playbackSpeed]);
 
   const handleReveal = useCallback(() => {
@@ -3584,33 +3732,9 @@ function PrepStudyCard({
 
   const [wrongKasus, setWrongKasus] = useState<string | null>(null);
 
-  const playAudio = useCallback(async () => {
+  const playAudio = useCallback(() => {
     const textToRead = `${cleanVerb} ${prep}`;
-    try {
-      let audioUrl = audioCache.get(textToRead);
-      if (!audioUrl) {
-        const res = await fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: textToRead })
-        });
-        if (res.ok) {
-          const blob = await res.blob();
-          audioUrl = URL.createObjectURL(blob);
-          setCachedAudioUrl(textToRead, audioUrl);
-        }
-      }
-      if (audioUrl) {
-        const audio = getSharedSpeechAudio() || new Audio();
-        audio.pause();
-        audio.currentTime = 0;
-        audio.src = audioUrl;
-        const playPromise = audio.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(() => {});
-        }
-      }
-    } catch (e) {}
+    playGermanSpeech(textToRead);
   }, [cleanVerb, prep]);
 
   const handleKasusSelect = useCallback((selected: string) => {
@@ -3844,33 +3968,7 @@ function VerbStudyCard({
 
   const playAudio = useCallback(() => {
     const fullSentence = `er ${targets[0]}, ${targets[1]}, ${targets[2]}.`;
-    const playSrc = (url: string) => {
-      const audio = getSharedSpeechAudio() || new Audio();
-      audio.pause();
-      audio.currentTime = 0;
-      audio.src = url;
-      const playPromise = audio.play();
-      if (playPromise !== undefined) playPromise.catch(() => {});
-    };
-
-    const cached = audioCache.get(fullSentence);
-    if (cached) {
-      playSrc(cached);
-      return;
-    }
-
-    fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: fullSentence })
-    })
-    .then(res => { if (res.ok) return res.blob(); throw new Error(); })
-    .then(blob => {
-      const url = URL.createObjectURL(blob);
-      setCachedAudioUrl(fullSentence, url);
-      playSrc(url);
-    })
-    .catch(() => {});
+    playGermanSpeech(fullSentence);
   }, [targets]);
 
   useEffect(() => {
@@ -3887,33 +3985,7 @@ function VerbStudyCard({
   useEffect(() => {
     const inf = (verbInfo.infinitiv || "").replace(/\|/g, '');
     if (!inf) return;
-    const playSrc = (url: string) => {
-      const audio = getSharedSpeechAudio() || new Audio();
-      audio.pause();
-      audio.currentTime = 0;
-      audio.src = url;
-      const playPromise = audio.play();
-      if (playPromise !== undefined) playPromise.catch(() => {});
-    };
-
-    const cached = audioCache.get(inf);
-    if (cached) {
-      playSrc(cached);
-      return;
-    }
-
-    fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: inf })
-    })
-    .then(res => { if (res.ok) return res.blob(); throw new Error(); })
-    .then(blob => {
-      const url = URL.createObjectURL(blob);
-      setCachedAudioUrl(inf, url);
-      playSrc(url);
-    })
-    .catch(() => {});
+    playGermanSpeech(inf);
   }, [verbInfo.infinitiv]);
 
   const handleSlotComplete = useCallback((idx: number) => {
@@ -5163,7 +5235,9 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     setInputText(startText);
   }, [targetSentence, currentIndex]);
 
-  const playMicrosoftAudio = useCallback(async (rate: number = 1.0, force: boolean = false) => {
+  const resetIdleTimerRef = useRef<() => void>(() => {});
+
+  const playMicrosoftAudio = useCallback((rate: number = 1.0, force: boolean = false) => {
     if (!targetSentence) return;
     if (isPlayingRef.current && !force) return;
     
@@ -5177,37 +5251,19 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
     }
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     
-    try {
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: targetSentence })
-      });
-      if (!res.ok) throw new Error();
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = getSharedSpeechAudio() || new Audio();
-      audio.pause();
-      audio.currentTime = 0;
-      audio.src = url;
-      audio.playbackRate = rate;
-      audioRef.current = audio;
-      
-      audio.onended = () => {
+    playGermanSpeech(targetSentence, {
+      rate,
+      forceAudioEl: audioRef.current || getSharedSpeechAudio(),
+      onStart: () => {
+        isPlayingRef.current = true;
+        setIsPlayingAudio(true);
+      },
+      onEnd: () => {
         isPlayingRef.current = false;
         setIsPlayingAudio(false);
-        resetIdleTimer();
-      };
-      audio.onerror = () => {
-        isPlayingRef.current = false;
-        setIsPlayingAudio(false);
-      };
-      
-      await audio.play();
-    } catch (e) {
-      isPlayingRef.current = false;
-      setIsPlayingAudio(false);
-    }
+        resetIdleTimerRef.current();
+      },
+    });
   }, [targetSentence]);
 
   const resetIdleTimer = useCallback(() => {
@@ -5219,6 +5275,10 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
       }
     }, 1000);
   }, [playMicrosoftAudio]);
+
+  useEffect(() => {
+    resetIdleTimerRef.current = resetIdleTimer;
+  }, [resetIdleTimer]);
 
   useEffect(() => {
     playMicrosoftAudio(1.0);
@@ -5603,48 +5663,22 @@ function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
        setMicStatus('playing-tts');
     }
 
-    const runFlow = async () => {
-      try {
-        const res = await fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: targetSentence })
-        });
-        if (!res.ok) throw new Error();
-        const blob = await res.blob();
-        if (!isSubscribed) return;
-        
-        const url = URL.createObjectURL(blob);
-        const audio = getSharedSpeechAudio() || new Audio();
-        audio.pause();
-        audio.currentTime = 0;
-        audio.src = url;
-        audioRef.current = audio;
-        
-        // СИНХРОННЫЙ СТАРТ: Микрофон включается вместе с началом аудио!
-        audio.onplay = () => {
+    const runFlow = () => {
+      playGermanSpeech(targetSentence, {
+        forceAudioEl: audioRef.current || getSharedSpeechAudio(),
+        onStart: () => {
           if (!isSubscribed) return;
           if (hasGrantedMicPermission.current) {
             startListening();
           }
-        };
-
-        // Мы больше не включаем микрофон в onended, и не останавливаем его принудительно.
-        audio.onended = () => {
+        },
+        onEnd: () => {
           if (!isSubscribed) return;
-          // Если юзер еще не кликал первый раз, просто вернем статус в idle
           if (!hasGrantedMicPermission.current) {
             setMicStatus('idle');
           }
-        };
-        
-        await audio.play();
-      } catch (e) {
-        if (isSubscribed) {
-           if (hasGrantedMicPermission.current) startListening();
-           else setMicStatus('idle');
-        }
-      }
+        },
+      });
     };
 
     runFlow();
