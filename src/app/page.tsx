@@ -677,15 +677,17 @@ export function getCardSpeechText(card: Flashcard): string {
 }
 
 export function getCardTrainingMode(
-  card: Flashcard,
-  deckId: string,
-  decks: Deck[],
-  books: BookMeta[],
+  card?: Flashcard,
+  deckId?: string,
+  decks: Deck[] = [],
+  books: BookMeta[] = [],
   fallbackMode?: string
 ): 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' {
-  const deck = decks.find(d => d.id === deckId);
+  if (!card) return 'standard_cloze';
+
+  const deck = deckId ? decks?.find(d => d.id === deckId) : undefined;
   const bookId = deck?.bookId;
-  const book = books.find(b => b.id === bookId);
+  const book = bookId ? books?.find(b => b.id === bookId) : undefined;
 
   // 1. Explicit training mode configured on the book
   if (book?.training_mode) {
@@ -697,21 +699,30 @@ export function getCardTrainingMode(
     return 'starke_verben';
   }
 
-  if (card.baseWordInfo) {
+  if (card.baseWordInfo && typeof card.baseWordInfo === 'string') {
     try {
       const parsed = JSON.parse(card.baseWordInfo);
-      if (parsed.praeteritum && parsed.perfekt) {
+      if (parsed && parsed.praeteritum && parsed.perfekt) {
         return 'starke_verben';
       }
     } catch (e) {}
   }
 
-  if (bookId === 'prep-verbs-de' || (book?.title && book.title.toLowerCase().includes('präposition'))) {
+  const bookTitleLower = (book?.title || '').toLowerCase();
+  if (bookId === 'prep-verbs-de' || bookTitleLower.includes('präposition')) {
     return 'preposition_drill';
   }
 
-  if (card.sentence && (card.sentence.includes('| Akkusativ') || card.sentence.includes('| Dativ') || card.sentence.includes('| Genitiv'))) {
+  if (typeof card.sentence === 'string' && (card.sentence.includes('| Akkusativ') || card.sentence.includes('| Dativ') || card.sentence.includes('| Genitiv'))) {
     return 'preposition_drill';
+  }
+
+  if (book?.category === 'flashcards' || book?.category === 'deck') {
+    return 'rapid_flashcards';
+  }
+
+  if (!card.sentence || card.sentence === '-' || card.sentence.trim() === '') {
+    return 'rapid_flashcards';
   }
 
   // 3. Fallback to passed fallbackMode or 'standard_cloze'
@@ -740,7 +751,7 @@ function RapidFlashcardMode({
   const [isFlipped, setIsFlipped] = useState(false);
   // Rounds 1-2 (progress 0,1): DE -> RU. Rounds 3-4 (progress 2,3): RU -> DE. Fixed for the lifetime of this card view.
   const [reverse] = useState(forcedReverse !== undefined ? forcedReverse : progress >= 2);
-  const german = card.targetWord.replace(/\|/g, '');
+  const german = (card?.targetWord || '').replace(/\|/g, '');
   const speechText = useMemo(() => getCardSpeechText(card), [card]);
   let translation = card.translation || '';
   let example = card.sentence && card.sentence !== '-' ? card.sentence : '';
@@ -995,7 +1006,12 @@ function RapidSession({
       list = [...reviewCards];
     } else if (deckId) {
       const deck = useStore.getState().decks.find(d => d.id === deckId);
-      if (deck) list = deck.cards.filter(c => !c.isArchived).map(c => ({ deckId, card: c }));
+      if (deck) {
+        list = deck.cards.filter(c => !c.isArchived).map(c => ({ deckId, card: c }));
+        if (list.length === 0 && deck.cards.length > 0) {
+          list = deck.cards.map(c => ({ deckId, card: c }));
+        }
+      }
     }
     for (let i = list.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -1207,10 +1223,35 @@ function StudyInterface({
 }) {
   const { answerCard, decks, books } = useStore();
   
-  const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
+  const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
+    if (reviewCards && reviewCards.length > 0) {
+      return [...reviewCards].sort(() => Math.random() - 0.5);
+    }
+    if (deckId) {
+      const deck = useStore.getState().decks.find((d) => d.id === deckId);
+      if (deck) {
+        const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
+        if (active.length > 0) {
+          return active.sort(() => Math.random() - 0.5);
+        }
+        return deck.cards.map(c => ({ deckId, card: c })).sort(() => Math.random() - 0.5);
+      }
+    }
+    return [];
+  });
   const [currentIndex, setCurrentIndex] = useState(0);
   const [roundCounter, setRoundCounter] = useState(0);
-  const [initialTotal, setInitialTotal] = useState(0);
+  const [initialTotal, setInitialTotal] = useState(() => {
+    if (reviewCards && reviewCards.length > 0) return reviewCards.length;
+    if (deckId) {
+      const deck = useStore.getState().decks.find((d) => d.id === deckId);
+      if (deck) {
+        const active = deck.cards.filter((c) => !c.isArchived);
+        return active.length > 0 ? active.length : deck.cards.length;
+      }
+    }
+    return 0;
+  });
   const [masteredInSession, setMasteredInSession] = useState(0);
 
   useEffect(() => {
@@ -1218,16 +1259,60 @@ function StudyInterface({
       setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
       setInitialTotal(reviewCards.length);
       setMasteredInSession(0);
+      setCurrentIndex(0);
     } else if (deckId) {
       const deck = useStore.getState().decks.find((d) => d.id === deckId);
       if (deck) {
         const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
-        setActiveCards(active.sort(() => Math.random() - 0.5));
-        setInitialTotal(active.length);
+        const list = active.length > 0 ? active : deck.cards.map(c => ({ deckId, card: c }));
+        setActiveCards(list.sort(() => Math.random() - 0.5));
+        setInitialTotal(list.length);
         setMasteredInSession(0);
+        setCurrentIndex(0);
       }
     }
   }, [deckId, reviewCards]);
+
+  const currentItem = activeCards[currentIndex];
+  const currentDeckId = currentItem?.deckId;
+  const currentCardSnapshot = currentItem?.card;
+
+  // Get live card to instantly reflect masteryLevel updates (blue dots)
+  const liveCard = useMemo(() => {
+    if (!currentDeckId || !currentCardSnapshot) return currentCardSnapshot;
+    return decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
+  }, [decks, currentDeckId, currentCardSnapshot]);
+
+  const currentDeckTitle = useMemo(() => {
+    if (!currentDeckId) return undefined;
+    return decks.find(d => d.id === currentDeckId)?.name;
+  }, [decks, currentDeckId]);
+
+  const currentCardTrainingMode = useMemo(() => {
+    if (!currentCardSnapshot) return 'standard_cloze';
+    return getCardTrainingMode(currentCardSnapshot, currentDeckId, decks, books, trainingMode);
+  }, [currentCardSnapshot, currentDeckId, decks, books, trainingMode]);
+  
+  const handleNext = useCallback(() => {
+    if (currentIndex < activeCards.length - 1) {
+      setCurrentIndex((prev) => prev + 1);
+    } else {
+      if (reviewCards) {
+        onBack(); // End of review mode
+      } else {
+        const deck = useStore.getState().decks.find((d) => d.id === deckId);
+        if (deck) {
+          const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c }));
+          const list = active.length > 0 ? active : deck.cards.map(c => ({ deckId, card: c }));
+          setActiveCards(list.sort(() => Math.random() - 0.5));
+          setCurrentIndex(0);
+          setRoundCounter(prev => prev + 1);
+          setInitialTotal(list.length);
+          setMasteredInSession(0);
+        }
+      }
+    }
+  }, [currentIndex, activeCards.length, reviewCards, onBack, deckId]);
 
   // PRELOAD NEXT AUDIO
   useEffect(() => {
@@ -1276,14 +1361,14 @@ function StudyInterface({
     }
   }, [currentIndex, activeCards, decks, books, trainingMode]);
 
-  if (activeCards.length === 0) {
+  if (activeCards.length === 0 || !currentCardSnapshot || !liveCard) {
     return (
       <div className="flex-1 flex flex-col justify-center max-w-2xl mx-auto px-6 py-24 text-center">
         <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-          <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-8">
+          <div className="w-24 h-24 bg-green-50 dark:bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-8">
             <CheckCircle2 className="w-12 h-12 text-green-500" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-4">Großartig!</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-4">Großartig!</h1>
           <p className="text-lg text-gray-500 mb-10">
             {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
           </p>
@@ -1297,36 +1382,6 @@ function StudyInterface({
       </div>
     );
   }
-
-  const { deckId: currentDeckId, card: currentCardSnapshot } = activeCards[currentIndex];
-  // Get live card to instantly reflect masteryLevel updates (blue dots)
-  const liveCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
-  const currentDeckTitle = decks.find(d => d.id === currentDeckId)?.name;
-
-  const currentCardTrainingMode = useMemo(() => {
-    if (!currentCardSnapshot) return 'standard_cloze';
-    return getCardTrainingMode(currentCardSnapshot, currentDeckId, decks, books, trainingMode);
-  }, [currentCardSnapshot, currentDeckId, decks, books, trainingMode]);
-  
-  const handleNext = () => {
-    if (currentIndex < activeCards.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    } else {
-      if (reviewCards) {
-        onBack(); // End of review mode
-      } else {
-        const deck = useStore.getState().decks.find((d) => d.id === deckId);
-        if (deck) {
-          const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c }));
-          setActiveCards(active.sort(() => Math.random() - 0.5));
-          setCurrentIndex(0);
-          setRoundCounter(prev => prev + 1);
-          setInitialTotal(active.length);
-          setMasteredInSession(0);
-        }
-      }
-    }
-  };
 
   return (
       <>
@@ -4033,18 +4088,19 @@ try {
 
 
   if (activeDeckId) {
-    const currentBookId = decks.find(d => d.id === activeDeckId)?.bookId;
-    const currentBook = useStore.getState().books.find(b => b.id === currentBookId);
+    const currentDeck = decks.find(d => d.id === activeDeckId);
+    const currentBookId = currentDeck?.bookId;
+    const currentBook = books.find(b => b.id === currentBookId);
     let tm = currentBook?.training_mode;
     if (!tm) {
+      const bookTitleLower = (currentBook?.title || '').toLowerCase();
       if (currentBookId === 'verbs-de') tm = 'starke_verben';
-      else if (currentBookId === 'prep-verbs-de' || (currentBook?.title.toLowerCase().includes('präposition'))) tm = 'preposition_drill';
+      else if (currentBookId === 'prep-verbs-de' || bookTitleLower.includes('präposition')) tm = 'preposition_drill';
+      else if (currentBook?.category === 'flashcards' || currentBook?.category === 'deck') tm = 'rapid_flashcards';
       else tm = 'standard_cloze';
     }
     return (
-      <>
-        <StudyEntry deckId={activeDeckId} onBack={() => setActiveDeckId(null)} trainingMode={tm} />
-      </>
+      <StudyEntry deckId={activeDeckId} onBack={() => setActiveDeckId(null)} trainingMode={tm} />
     );
   }
 
