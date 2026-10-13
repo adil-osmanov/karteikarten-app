@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       throw lastError || new Error("Failed to synthesize audio after retries");
     }
 
-    return new NextResponse(audioBuffer, {
+    return new NextResponse(audioBuffer as unknown as BodyInit, {
       headers: {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "public, max-age=31536000, immutable",
