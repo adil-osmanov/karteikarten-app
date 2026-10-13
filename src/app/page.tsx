@@ -77,6 +77,8 @@ function createFallbackAudio(src: string, vol: number): HTMLAudioElement | null 
   }
 }
 
+let lastDecodedCtx: AudioContext | null = null;
+
 export const getAudioContext = (): AudioContext | null => {
   if (typeof window === 'undefined') return null;
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -85,6 +87,10 @@ export const getAudioContext = (): AudioContext | null => {
   if (!globalAudioCtx || globalAudioCtx.state === 'closed') {
     try {
       globalAudioCtx = new AudioCtx();
+      lastDecodedCtx = null;
+      tockBuffer = null;
+      successBuffer = null;
+      failBuffer = null;
     } catch (e) {
       return null;
     }
@@ -128,6 +134,13 @@ export async function loadAudioBuffers() {
   const ctx = getAudioContext();
   if (!ctx) return;
 
+  if (lastDecodedCtx !== ctx) {
+    tockBuffer = null;
+    successBuffer = null;
+    failBuffer = null;
+    lastDecodedCtx = ctx;
+  }
+
   isDecodingBuffers = true;
   try {
     if (!tockBuffer) {
@@ -170,24 +183,17 @@ function playBufferDirect(buffer: AudioBuffer | null, volume: number): boolean {
 function playFallback(type: 'tock' | 'success' | 'fail', volume: number) {
   if (typeof window === 'undefined') return;
   try {
-    let el: HTMLAudioElement | null = null;
-    if (type === 'tock') {
-      if (!fallbackTock) fallbackTock = createFallbackAudio(TOCK_B64, 0.3);
-      el = fallbackTock;
-    } else if (type === 'success') {
-      if (!fallbackSuccess) fallbackSuccess = createFallbackAudio(SUCCESS_B64, 0.4);
-      el = fallbackSuccess;
-    } else if (type === 'fail') {
-      if (!fallbackFail) fallbackFail = createFallbackAudio(FAIL_B64, 0.4);
-      el = fallbackFail;
+    const src = type === 'tock' ? TOCK_B64 : type === 'success' ? SUCCESS_B64 : FAIL_B64;
+    const a = new Audio(src);
+    (a as any).playsInline = true;
+    a.volume = volume;
+    const p = a.play();
+    if (p !== undefined) {
+      p.catch(() => {});
     }
-
-    if (el) {
-      el.volume = volume;
-      el.currentTime = 0;
-      const p = el.play();
-      if (p !== undefined) p.catch(() => {});
-    }
+    a.onended = () => {
+      a.src = '';
+    };
   } catch (e) {}
 }
 
@@ -852,7 +858,10 @@ export function speakNative(
   onStart?: () => void,
   onEnded?: () => void
 ): boolean {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    if (onEnded) onEnded();
+    return false;
+  }
 
   try {
     const clean = text.replace(/\|/g, '').replace(/___+/g, '').trim();
@@ -864,21 +873,29 @@ export function speakNative(
     if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     }
-    window.speechSynthesis.cancel();
+    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+      window.speechSynthesis.cancel();
+    }
 
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.lang = 'de-DE';
     const voice = getBestGermanVoice();
     if (voice) utterance.voice = voice;
-    utterance.rate = Math.max(0.6, Math.min(1.4, rate));
+    utterance.rate = Math.max(0.7, Math.min(1.3, rate));
 
     let hasEnded = false;
+    let timeoutId: any = null;
+
     const finish = () => {
       if (hasEnded) return;
       hasEnded = true;
+      if (timeoutId) clearTimeout(timeoutId);
       activeSpeechUtterance = null;
       if (onEnded) onEnded();
     };
+
+    // Watchdog: guarantee onEnded fires even if browser speech engine drops the callback
+    timeoutId = setTimeout(finish, 6000);
 
     utterance.onstart = () => {
       if (onStart) onStart();
@@ -886,9 +903,18 @@ export function speakNative(
     utterance.onend = finish;
     utterance.onerror = finish;
 
-    // Prevent garbage collection in WebKit/Safari by holding reference
     activeSpeechUtterance = utterance;
-    window.speechSynthesis.speak(utterance);
+
+    // Small delay after cancel() prevents IPC deadlocks on WebKit/macOS
+    setTimeout(() => {
+      try {
+        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        finish();
+      }
+    }, 20);
+
     return true;
   } catch (err) {
     if (onEnded) onEnded();
@@ -938,12 +964,14 @@ export async function playGermanSpeech(text: string, options?: PlaySpeechOptions
 
       const p = audio.play();
       if (p !== undefined) {
-        p.catch(() => {
+        p.catch((err) => {
+          if (err?.name === 'AbortError' || err?.name === 'NotAllowedError') return;
           speakNative(cleanText, rate, options?.onStart, options?.onEnd);
         });
       }
       return;
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
       speakNative(cleanText, rate, options?.onStart, options?.onEnd);
       return;
     }
@@ -997,13 +1025,14 @@ export async function playGermanSpeech(text: string, options?: PlaySpeechOptions
 
     const p = audio.play();
     if (p !== undefined) {
-      p.catch(() => {
+      p.catch((err) => {
+        if (err?.name === 'AbortError' || err?.name === 'NotAllowedError') return;
         speakNative(cleanText, rate, options?.onStart, options?.onEnd);
       });
     }
-  } catch (err) {
+  } catch (err: any) {
     clearTimeout(timeoutId);
-    // Instant seamless fallback to native browser Speech Synthesis (zero silence!)
+    if (err?.name === 'AbortError') return;
     speakNative(cleanText, rate, options?.onStart, options?.onEnd);
   }
 }
@@ -1191,14 +1220,23 @@ function RapidFlashcardMode({
   reverse?: boolean;
 }) {
   const [isFlipped, setIsFlipped] = useState(false);
-  // Rounds 1-2 (progress 0,1): DE -> RU. Rounds 3-4 (progress 2,3): RU -> DE. Fixed for the lifetime of this card view.
-  const [reverse, setReverse] = useState(forcedReverse !== undefined ? forcedReverse : progress >= 2);
-  const flippedAtRef = useRef<number>(0);
+  const isFlippedRef = useRef(false);
+  isFlippedRef.current = isFlipped;
 
+  const [reverse, setReverse] = useState(forcedReverse !== undefined ? forcedReverse : progress >= 2);
+  const lastFlipTimeRef = useRef<number>(0);
+  const cardIdRef = useRef(card?.id);
+
+  // ONLY reset flipped state when card?.id changes (new card)
+  // NEVER reset when progress changes! That was causing the card to flip back while leaving.
   useEffect(() => {
-    setIsFlipped(false);
-    setReverse(forcedReverse !== undefined ? forcedReverse : progress >= 2);
-    flippedAtRef.current = 0;
+    if (cardIdRef.current !== card?.id) {
+      cardIdRef.current = card?.id;
+      setIsFlipped(false);
+      isFlippedRef.current = false;
+      setReverse(forcedReverse !== undefined ? forcedReverse : progress >= 2);
+      lastFlipTimeRef.current = 0;
+    }
   }, [card?.id, forcedReverse, progress]);
 
   const german = (card?.targetWord || '').replace(/\|/g, '');
@@ -1227,30 +1265,29 @@ function RapidFlashcardMode({
 
   const flip = useCallback(() => {
     if (locked) return;
+    lastFlipTimeRef.current = Date.now();
     setIsFlipped(prev => {
       const next = !prev;
-      if (next) {
-        flippedAtRef.current = Date.now();
-      }
+      isFlippedRef.current = next;
       return next;
     });
   }, [locked]);
 
   const answer = useCallback((correct: boolean) => {
     if (locked) return;
-    if (!isFlipped) {
+    if (!isFlippedRef.current) {
       flip();
       return;
     }
-    // Prevent accidental instant double-press (debounce 180ms after flip)
-    if (Date.now() - flippedAtRef.current < 180) return;
+    // Prevent accidental instant double-press (debounce 220ms after flip)
+    if (Date.now() - lastFlipTimeRef.current < 220) return;
 
     // Synchronous playback inside the user-gesture handler (Safari)
     unlockRapidAudio();
     const s = getRapidSounds();
     if (correct) s?.success.play(); else s?.error.play();
     onAnswer(correct, true);
-  }, [locked, isFlipped, flip, onAnswer]);
+  }, [locked, flip, onAnswer]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -1262,14 +1299,14 @@ function RapidFlashcardMode({
         flip();
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        if (!isFlipped) {
+        if (!isFlippedRef.current) {
           flip();
         } else {
           answer(true);
         }
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        if (!isFlipped) {
+        if (!isFlippedRef.current) {
           flip();
         } else {
           answer(false);
@@ -1280,7 +1317,7 @@ function RapidFlashcardMode({
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [flip, answer, speak, isFlipped]);
+  }, [flip, answer, speak]);
 
   const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-6 md:p-10 rounded-2xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
