@@ -605,16 +605,20 @@ const useStore = create<DeckState>()((set, get) => ({
   }
 }));
 
+let cacheDecksTimer: ReturnType<typeof setTimeout> | null = null;
 if (typeof window !== 'undefined') {
   useStore.subscribe((state, prevState) => {
     try {
       if (!prevState || state.decks !== prevState.decks) {
-        try {
-          localStorage.setItem('cache_decks_v2', JSON.stringify(state.decks));
-        } catch (e) {
-          console.warn('Failed to save decks cache, clearing it to prevent stale data:', e);
-          localStorage.removeItem('cache_decks_v2');
-        }
+        if (cacheDecksTimer) clearTimeout(cacheDecksTimer);
+        cacheDecksTimer = setTimeout(() => {
+          try {
+            localStorage.setItem('cache_decks_v2', JSON.stringify(state.decks));
+          } catch (e) {
+            console.warn('Failed to save decks cache, clearing it to prevent stale data:', e);
+            try { localStorage.removeItem('cache_decks_v2'); } catch(err) {}
+          }
+        }, 800);
       }
     } catch (e) {
       console.warn('Failed in Zustand subscriber:', e);
@@ -849,11 +853,6 @@ function RapidFlashcardMode({
         >
           <Volume2 className="w-[18px] h-[18px]" />
         </button>
-        {deckTitle && (
-          <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider truncate max-w-[130px] sm:max-w-[200px]">
-            {deckTitle}
-          </span>
-        )}
       </div>
       <div className="flex items-center gap-2 pr-1">
         {[0, 1, 2, 3].map(i => (
@@ -1273,6 +1272,17 @@ function StudyInterface({
     }
   }, [deckId, reviewCards]);
 
+  const isInitialArchivedDeckRef = useRef<boolean | null>(null);
+  if (isInitialArchivedDeckRef.current === null) {
+    if (deckId && !reviewCards) {
+      const d = useStore.getState().decks.find(item => item.id === deckId);
+      isInitialArchivedDeckRef.current = !!(d && d.cards.length > 0 && d.cards.every(c => c.isArchived));
+    } else {
+      isInitialArchivedDeckRef.current = false;
+    }
+  }
+  const isInitialArchivedDeck = isInitialArchivedDeckRef.current;
+
   const currentItem = activeCards[currentIndex];
   const currentDeckId = currentItem?.deckId;
   const currentCardSnapshot = currentItem?.card;
@@ -1282,11 +1292,6 @@ function StudyInterface({
     if (!currentDeckId || !currentCardSnapshot) return currentCardSnapshot;
     return decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
   }, [decks, currentDeckId, currentCardSnapshot]);
-
-  const currentDeckTitle = useMemo(() => {
-    if (!currentDeckId) return undefined;
-    return decks.find(d => d.id === currentDeckId)?.name;
-  }, [decks, currentDeckId]);
 
   const currentCardTrainingMode = useMemo(() => {
     if (!currentCardSnapshot) return 'standard_cloze';
@@ -1302,17 +1307,35 @@ function StudyInterface({
       } else {
         const deck = useStore.getState().decks.find((d) => d.id === deckId);
         if (deck) {
-          const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c }));
-          const list = active.length > 0 ? active : deck.cards.map(c => ({ deckId, card: c }));
-          setActiveCards(list.sort(() => Math.random() - 0.5));
-          setCurrentIndex(0);
-          setRoundCounter(prev => prev + 1);
-          setInitialTotal(list.length);
-          setMasteredInSession(0);
+          if (isInitialArchivedDeck) {
+            // Already mastered deck: complete exactly 4 review rounds (round 0, 1, 2, 3)
+            if (roundCounter >= 3) {
+              setActiveCards([]); // Ends session and displays completion screen!
+            } else {
+              const list = deck.cards.map(c => ({ deckId: deck.id, card: c }));
+              setActiveCards(list.sort(() => Math.random() - 0.5));
+              setCurrentIndex(0);
+              setRoundCounter(prev => prev + 1);
+              setInitialTotal(list.length);
+              setMasteredInSession(0);
+            }
+          } else {
+            // Normal deck learning: check if unarchived cards remain
+            const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c }));
+            if (active.length === 0 || roundCounter >= 3) {
+              setActiveCards([]); // Ends session and displays completion screen!
+            } else {
+              setActiveCards(active.sort(() => Math.random() - 0.5));
+              setCurrentIndex(0);
+              setRoundCounter(prev => prev + 1);
+              setInitialTotal(active.length);
+              setMasteredInSession(0);
+            }
+          }
         }
       }
     }
-  }, [currentIndex, activeCards.length, reviewCards, onBack, deckId]);
+  }, [currentIndex, activeCards.length, reviewCards, onBack, deckId, isInitialArchivedDeck, roundCounter]);
 
   // PRELOAD NEXT AUDIO
   useEffect(() => {
@@ -1370,7 +1393,11 @@ function StudyInterface({
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-4">Großartig!</h1>
           <p className="text-lg text-gray-500 mb-10">
-            {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
+            {reviewCards 
+              ? "Alle fälligen Karten wurden wiederholt." 
+              : isInitialArchivedDeck 
+                ? "Du hast alle 4 Runden abgeschlossen und die Wiederholung gemeistert!" 
+                : "Du hast alle Karten in diesem Deck gemeistert!"}
           </p>
           <button
             onClick={onBack}
@@ -1391,8 +1418,15 @@ function StudyInterface({
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="text-xs font-mono tabular-nums text-gray-400 dark:text-gray-500">
-            {currentIndex + 1} / {activeCards.length}
+          <div className="flex items-center gap-2.5">
+            {isInitialArchivedDeck && (
+              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                Runde {Math.min(4, roundCounter + 1)} / 4
+              </span>
+            )}
+            <div className="text-xs font-mono tabular-nums text-gray-400 dark:text-gray-500">
+              {currentIndex + 1} / {activeCards.length}
+            </div>
           </div>
         </div>
         <div className="w-full h-1 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
@@ -1409,7 +1443,6 @@ function StudyInterface({
             <PrepStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
-              deckTitle={reviewCards ? currentDeckTitle : undefined}
               onAnswer={(id, correct, isHilfe) => {
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (correct && !isHilfe) {
@@ -1426,7 +1459,6 @@ function StudyInterface({
             <VerbStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
-              deckTitle={reviewCards ? currentDeckTitle : undefined}
               onAnswer={(correct, isHilfe) => {
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (correct && !isHilfe) {
@@ -1443,7 +1475,6 @@ function StudyInterface({
             <RapidStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
-              deckTitle={reviewCards ? currentDeckTitle : undefined}
               onAnswer={(correct, isHilfe) => {
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (correct && !isHilfe) {
@@ -1460,7 +1491,6 @@ function StudyInterface({
             <StudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
-              deckTitle={reviewCards ? currentDeckTitle : undefined}
               forceInputMode={!!reviewCards && !isDrillMode}
               onAnswer={(correct, isHilfe) => {
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
@@ -1658,7 +1688,8 @@ function StudyCard({
   const [hasErrored, setHasErrored] = useState(false);
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const { playbackSpeed, setPlaybackSpeed } = useStore();
+  const playbackSpeed = useStore(state => state.playbackSpeed);
+  const setPlaybackSpeed = useStore(state => state.setPlaybackSpeed);
   const inputRef = useRef<HTMLInputElement>(null);
   const nextButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -3409,18 +3440,6 @@ function PrepStudyCard({
           <Volume2 className="w-5 h-5" />
         </button>
         <div className="flex items-center gap-4">
-          <AnimatePresence>
-             {deckTitle && (
-              <motion.span 
-                initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
-                animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
-                exit={{ opacity: 0 }}
-                className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
-              >
-                {deckTitle}
-              </motion.span>
-            )}
-          </AnimatePresence>
           <button 
             onClick={onHilfe}
             disabled={isSuccess || isHilfe}
@@ -4084,6 +4103,31 @@ try {
     return map;
   }, [filteredDecksList, deckOrder]);
 
+  const dueCards = useMemo(() => {
+    const list: { deckId: string, card: Flashcard }[] = [];
+    const now = Date.now();
+    filteredDecksList.forEach(deck => {
+      deck.cards.forEach(card => {
+        if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+          list.push({ deckId: deck.id, card });
+        }
+      });
+    });
+    return list;
+  }, [filteredDecksList]);
+
+  const archivedCards = useMemo(() => {
+    const list: { deckId: string, deckName: string, card: Flashcard }[] = [];
+    filteredDecksList.forEach(deck => {
+      deck.cards.forEach(card => {
+        if (card.isArchived) list.push({ deckId: deck.id, deckName: deck.name, card });
+      });
+    });
+    return list;
+  }, [filteredDecksList]);
+
+  const activeBook = useMemo(() => books.find(b => b.id === activeBookId), [books, activeBookId]);
+
   if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
 
 
@@ -4406,25 +4450,6 @@ try {
   
 
   
-  const dueCards: { deckId: string, card: Flashcard }[] = [];
-  filteredDecksList.forEach(deck => {
-    deck.cards.forEach(card => {
-      if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now()) {
-        dueCards.push({ deckId: deck.id, card });
-      }
-    });
-  });
-
-  const archivedCards: { deckId: string, deckName: string, card: Flashcard }[] = [];
-  filteredDecksList.forEach(deck => {
-    deck.cards.forEach(card => {
-      if (card.isArchived) archivedCards.push({ deckId: deck.id, deckName: deck.name, card });
-    });
-  });
-
-  
-
-  const activeBook = books.find(b => b.id === activeBookId);
   const activeBookColor = activeBook?.tintColor || activeBook?.accentColor || activeBook?.coverValue || 'transparent';
 
   return (
