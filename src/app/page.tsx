@@ -676,21 +676,70 @@ export function getCardSpeechText(card: Flashcard): string {
   return (card.targetWord || '').replace(/\|/g, '').trim();
 }
 
+export function getCardTrainingMode(
+  card: Flashcard,
+  deckId: string,
+  decks: Deck[],
+  books: BookMeta[],
+  fallbackMode?: string
+): 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' {
+  const deck = decks.find(d => d.id === deckId);
+  const bookId = deck?.bookId;
+  const book = books.find(b => b.id === bookId);
+
+  // 1. Explicit training mode configured on the book
+  if (book?.training_mode) {
+    return book.training_mode;
+  }
+
+  // 2. Built-in book IDs or content signatures
+  if (bookId === 'verbs-de' || card.sentence === 'VERB_DRILL') {
+    return 'starke_verben';
+  }
+
+  if (card.baseWordInfo) {
+    try {
+      const parsed = JSON.parse(card.baseWordInfo);
+      if (parsed.praeteritum && parsed.perfekt) {
+        return 'starke_verben';
+      }
+    } catch (e) {}
+  }
+
+  if (bookId === 'prep-verbs-de' || (book?.title && book.title.toLowerCase().includes('präposition'))) {
+    return 'preposition_drill';
+  }
+
+  if (card.sentence && (card.sentence.includes('| Akkusativ') || card.sentence.includes('| Dativ') || card.sentence.includes('| Genitiv'))) {
+    return 'preposition_drill';
+  }
+
+  // 3. Fallback to passed fallbackMode or 'standard_cloze'
+  if (fallbackMode && ['standard_cloze', 'starke_verben', 'preposition_drill', 'rapid_flashcards'].includes(fallbackMode)) {
+    return fallbackMode as 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards';
+  }
+
+  return 'standard_cloze';
+}
 
 function RapidFlashcardMode({
   card,
   progress,
   locked,
-  onAnswer
+  onAnswer,
+  deckTitle,
+  reverse: forcedReverse,
 }: {
   card: Flashcard;
   progress: number;
   locked: boolean;
   onAnswer: (correct: boolean, wasFlipped: boolean) => void;
+  deckTitle?: string;
+  reverse?: boolean;
 }) {
   const [isFlipped, setIsFlipped] = useState(false);
   // Rounds 1-2 (progress 0,1): DE -> RU. Rounds 3-4 (progress 2,3): RU -> DE. Fixed for the lifetime of this card view.
-  const [reverse] = useState(progress >= 2);
+  const [reverse] = useState(forcedReverse !== undefined ? forcedReverse : progress >= 2);
   const german = card.targetWord.replace(/\|/g, '');
   const speechText = useMemo(() => getCardSpeechText(card), [card]);
   let translation = card.translation || '';
@@ -781,13 +830,20 @@ function RapidFlashcardMode({
   // Header lives INSIDE each face so it rotates together with the card
   const cardHeader = (
     <div className="absolute top-5 left-5 right-5 flex justify-between items-center z-10">
-      <button
-        onClick={(e) => { e.stopPropagation(); speak(); }}
-        className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
-        title="R"
-      >
-        <Volume2 className="w-[18px] h-[18px]" />
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={(e) => { e.stopPropagation(); speak(); }}
+          className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
+          title="R"
+        >
+          <Volume2 className="w-[18px] h-[18px]" />
+        </button>
+        {deckTitle && (
+          <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider truncate max-w-[130px] sm:max-w-[200px]">
+            {deckTitle}
+          </span>
+        )}
+      </div>
       <div className="flex items-center gap-2 pr-1">
         {[0, 1, 2, 3].map(i => (
           <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700")} />
@@ -1074,6 +1130,53 @@ function RapidSession({
   );
 }
 
+function RapidStudyCard({
+  card,
+  deckTitle,
+  onAnswer,
+  onNext
+}: {
+  card: Flashcard;
+  deckTitle?: string;
+  onAnswer: (correct: boolean, isHilfe: boolean) => void;
+  onNext: () => void;
+}) {
+  const [locked, setLocked] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    getRapidSounds();
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const progress = card.isArchived ? 4 : Math.max(0, Math.min(3, card.masteryLevel || 0));
+
+  const handleAnswer = useCallback((correct: boolean) => {
+    if (locked) return;
+    setLocked(true);
+    onAnswer(correct, false);
+    timerRef.current = setTimeout(() => {
+      onNext();
+      setLocked(false);
+    }, 450);
+  }, [locked, onAnswer, onNext]);
+
+  return (
+    <div className="w-full flex justify-center px-4">
+      <RapidFlashcardMode
+        card={card}
+        progress={progress}
+        locked={locked}
+        onAnswer={handleAnswer}
+        deckTitle={deckTitle}
+        reverse={false}
+      />
+    </div>
+  );
+}
+
 function StudyEntry(props: {
   deckId?: string;
   onBack: () => void;
@@ -1081,8 +1184,8 @@ function StudyEntry(props: {
   isDrillMode?: boolean;
   trainingMode?: string;
 }) {
-  if (props.trainingMode === 'rapid_flashcards') {
-    return <RapidSession deckId={props.deckId} reviewCards={props.reviewCards} onBack={props.onBack} />;
+  if (props.deckId && !props.reviewCards && props.trainingMode === 'rapid_flashcards') {
+    return <RapidSession deckId={props.deckId} onBack={props.onBack} />;
   }
   return <StudyInterface {...props} />;
 }
@@ -1102,7 +1205,7 @@ function StudyInterface({
   isDrillMode?: boolean,
   trainingMode?: string
 }) {
-  const { answerCard, decks } = useStore();
+  const { answerCard, decks, books } = useStore();
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -1129,23 +1232,49 @@ function StudyInterface({
   // PRELOAD NEXT AUDIO
   useEffect(() => {
     if (activeCards.length > currentIndex + 1) {
-      const nextCard = activeCards[currentIndex + 1].card;
-      const fullSentence = nextCard.sentence.replace("___", nextCard.targetWord);
-      if (!audioCache.has(fullSentence)) {
+      const nextItem = activeCards[currentIndex + 1];
+      const nextCard = nextItem.card;
+      const mode = getCardTrainingMode(nextCard, nextItem.deckId, decks, books, trainingMode);
+
+      let textToPreload = '';
+      if (mode === 'rapid_flashcards') {
+        textToPreload = getCardSpeechText(nextCard);
+      } else if (mode === 'starke_verben') {
+        try {
+          const vInfo = JSON.parse(nextCard.baseWordInfo || '{}');
+          if (vInfo.praesens && vInfo.praeteritum && vInfo.perfekt) {
+            textToPreload = `er ${vInfo.praesens}, ${vInfo.praeteritum}, ${vInfo.perfekt}.`;
+          }
+        } catch(e) {}
+      } else if (mode === 'preposition_drill') {
+        const [prep = ""] = (nextCard.sentence || "").split('|').map(s => s.trim());
+        const cleanVerb = (nextCard.targetWord || '').replace(/\|/g, '');
+        if (cleanVerb && prep) textToPreload = `${cleanVerb} ${prep}`;
+      } else {
+        if (nextCard.sentence && nextCard.sentence !== 'VERB_DRILL' && nextCard.sentence !== '-') {
+          textToPreload = nextCard.sentence.includes('___') 
+            ? nextCard.sentence.replace('___', nextCard.targetWord)
+            : nextCard.sentence;
+        } else {
+          textToPreload = nextCard.targetWord;
+        }
+      }
+
+      if (textToPreload && !audioCache.has(textToPreload)) {
         fetch('/api/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: fullSentence })
+          body: JSON.stringify({ text: textToPreload })
         })
         .then(res => { if (res.ok) return res.blob(); throw new Error(); })
         .then(blob => {
           const url = URL.createObjectURL(blob);
-          audioCache.set(fullSentence, url);
+          audioCache.set(textToPreload, url);
         })
         .catch(() => {});
       }
     }
-  }, [currentIndex, activeCards]);
+  }, [currentIndex, activeCards, decks, books, trainingMode]);
 
   if (activeCards.length === 0) {
     return (
@@ -1173,6 +1302,11 @@ function StudyInterface({
   // Get live card to instantly reflect masteryLevel updates (blue dots)
   const liveCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
   const currentDeckTitle = decks.find(d => d.id === currentDeckId)?.name;
+
+  const currentCardTrainingMode = useMemo(() => {
+    if (!currentCardSnapshot) return 'standard_cloze';
+    return getCardTrainingMode(currentCardSnapshot, currentDeckId, decks, books, trainingMode);
+  }, [currentCardSnapshot, currentDeckId, decks, books, trainingMode]);
   
   const handleNext = () => {
     if (currentIndex < activeCards.length - 1) {
@@ -1216,7 +1350,7 @@ function StudyInterface({
 
       <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
         <AnimatePresence mode="wait">
-          {trainingMode === 'preposition_drill' ? (
+          {currentCardTrainingMode === 'preposition_drill' ? (
             <PrepStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
@@ -1227,14 +1361,13 @@ function StudyInterface({
                   setMasteredInSession(prev => prev + 1);
                 } else {
                   if (!isDrillMode) {
-                    setInitialTotal(prev => prev + 1);
                     setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
                   }
                 }
               }}
               onNext={handleNext}
             />
-          ) : trainingMode === 'starke_verben' ? (
+          ) : currentCardTrainingMode === 'starke_verben' ? (
             <VerbStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
@@ -1245,7 +1378,23 @@ function StudyInterface({
                   setMasteredInSession(prev => prev + 1);
                 } else {
                   if (!isDrillMode) {
-                    setInitialTotal(prev => prev + 1);
+                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
+                  }
+                }
+              }}
+              onNext={handleNext}
+            />
+          ) : currentCardTrainingMode === 'rapid_flashcards' ? (
+            <RapidStudyCard
+              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              card={liveCard}
+              deckTitle={reviewCards ? currentDeckTitle : undefined}
+              onAnswer={(correct, isHilfe) => {
+                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
+                if (correct && !isHilfe) {
+                  setMasteredInSession(prev => prev + 1);
+                } else {
+                  if (!isDrillMode) {
                     setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
                   }
                 }
@@ -1253,21 +1402,23 @@ function StudyInterface({
               onNext={handleNext}
             />
           ) : (
-          <StudyCard
-            key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
-            card={liveCard}
-            deckTitle={reviewCards ? currentDeckTitle : undefined}
-            forceInputMode={!!reviewCards && !isDrillMode}
-            onAnswer={(correct, isHilfe) => {
-              answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-              if (correct && !isHilfe) {
-                setMasteredInSession(prev => prev + 1);
-              } else {
-                setActiveCards(prev => [...prev, { deckId: currentDeckId, card: currentCardSnapshot }]);
-              }
-            }}
-            onNext={handleNext}
-          />
+            <StudyCard
+              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              card={liveCard}
+              deckTitle={reviewCards ? currentDeckTitle : undefined}
+              forceInputMode={!!reviewCards && !isDrillMode}
+              onAnswer={(correct, isHilfe) => {
+                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
+                if (correct && !isHilfe) {
+                  setMasteredInSession(prev => prev + 1);
+                } else {
+                  if (!isDrillMode) {
+                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: currentCardSnapshot }]);
+                  }
+                }
+              }}
+              onNext={handleNext}
+            />
           )}
         </AnimatePresence>
       </div>
@@ -3898,34 +4049,14 @@ try {
   }
 
   if (reviewCards) {
-    const currentBookId = reviewCards.length > 0 ? decks.find(d => d.id === reviewCards[0].deckId)?.bookId : null;
-    const currentBook = useStore.getState().books.find(b => b.id === currentBookId);
-    let tm = currentBook?.training_mode;
-    if (!tm) {
-      if (currentBookId === 'verbs-de') tm = 'starke_verben';
-      else if (currentBookId === 'prep-verbs-de' || (currentBook?.title.toLowerCase().includes('präposition'))) tm = 'preposition_drill';
-      else tm = 'standard_cloze';
-    }
     return (
-      <>
-        <StudyEntry reviewCards={reviewCards} onBack={() => setReviewCards(null)} trainingMode={tm} />
-      </>
+      <StudyEntry reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
     );
   }
 
   if (drillCards) {
-    const currentBookId = drillCards.length > 0 ? decks.find(d => d.id === drillCards[0].deckId)?.bookId : null;
-    const currentBook = useStore.getState().books.find(b => b.id === currentBookId);
-    let tm = currentBook?.training_mode;
-    if (!tm) {
-      if (currentBookId === 'verbs-de') tm = 'starke_verben';
-      else if (currentBookId === 'prep-verbs-de' || (currentBook?.title.toLowerCase().includes('präposition'))) tm = 'preposition_drill';
-      else tm = 'standard_cloze';
-    }
     return (
-      <>
-        <StudyEntry reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} trainingMode={tm} />
-      </>
+      <StudyEntry reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} />
     );
   }
 
