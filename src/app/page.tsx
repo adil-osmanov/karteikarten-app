@@ -4649,6 +4649,8 @@ export function RedemittelStudyCard({
     return data.shuffledChunks.filter(c => !placedChunks.some(p => p.id === c.id));
   }, [data.shuffledChunks, placedChunks]);
 
+  const showTranslation = placedChunks.length === 0 || status === 'success' || status === 'surrender';
+
   // Keyboard shortcut support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -4683,7 +4685,7 @@ export function RedemittelStudyCard({
         return;
       }
 
-      if (e.key === 'h' || e.key === 'H' || e.key === '?' || e.key === 'l' || e.key === 'L') {
+      if (e.key === 'h' || e.key === 'H' || e.key === '?') {
         e.preventDefault();
         handleSurrender();
         return;
@@ -4706,7 +4708,7 @@ export function RedemittelStudyCard({
           status === 'success'
             ? "border-emerald-500/30 dark:border-emerald-500/30"
             : status === 'surrender'
-            ? "border-amber-500/30 dark:border-amber-500/30"
+            ? "border-zinc-300 dark:border-zinc-600/70"
             : status === 'error'
             ? "border-rose-500/40 dark:border-rose-500/40"
             : "border-black/[0.08] dark:border-white/[0.08]"
@@ -4724,7 +4726,7 @@ export function RedemittelStudyCard({
             <Volume2 className={cn("w-5 h-5", isAudioPlaying && "animate-pulse text-blue-500")} />
           </button>
 
-          {/* Right: Reset (Zurücksetzen), Aufgeben (Lösung), 4 mastery round dots */}
+          {/* Right: Reset (Zurücksetzen), HelpCircle (?), 4 mastery round dots */}
           <div className="flex items-center gap-3">
             {placedChunks.length > 0 && status === 'idle' && (
               <button
@@ -4735,16 +4737,18 @@ export function RedemittelStudyCard({
                 <RotateCcw className="w-4 h-4" />
               </button>
             )}
-            {status !== 'success' && status !== 'surrender' && (
-              <button
-                onClick={handleSurrender}
-                className="text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 underline underline-offset-4 transition-colors cursor-pointer select-none px-1 py-0.5"
-                title="Lösung anzeigen (H)"
-              >
-                Lösung
-              </button>
-            )}
-            <div className="flex gap-1.5 items-center ml-1">
+            <button
+              onClick={handleSurrender}
+              disabled={status === 'success' || status === 'surrender'}
+              className={cn(
+                "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors cursor-pointer",
+                (status === 'success' || status === 'surrender') && "opacity-0 pointer-events-none"
+              )}
+              title="Hilfe (H)"
+            >
+              <HelpCircle className="w-5 h-5" />
+            </button>
+            <div className="flex gap-1.5 items-center">
               {[0, 1, 2, 3].map((step) => (
                 <div
                   key={step}
@@ -4760,8 +4764,11 @@ export function RedemittelStudyCard({
           </div>
         </div>
 
-        {/* 2. Заголовок-подсказка: Русский перевод по центру крупным чистым шрифтом */}
-        <div className="text-center mb-6 px-4">
+        {/* 2. Заголовок-подсказка: Русский перевод (плавно скрывается во время сборки) */}
+        <div className={cn(
+          "text-center mb-6 px-4 transition-opacity duration-300 min-h-[1.75rem] flex items-center justify-center",
+          showTranslation ? "opacity-100" : "opacity-0 pointer-events-none"
+        )}>
           <h2 className="text-lg md:text-xl font-medium text-zinc-900 dark:text-white tracking-tight select-none">
             {data.translation || "Русский перевод отсутствует"}
           </h2>
@@ -4776,7 +4783,7 @@ export function RedemittelStudyCard({
               "w-full min-h-[64px] p-4 rounded-2xl transition-all duration-200 relative flex flex-wrap items-center justify-center gap-2",
               "bg-black/[0.02] dark:bg-white/[0.03] border border-black/10 dark:border-white/10",
               status === 'success' && "border-emerald-500/30 bg-emerald-500/[0.04]",
-              status === 'surrender' && "border-amber-500/30 bg-amber-500/[0.05]",
+              status === 'surrender' && "border-zinc-300 dark:border-zinc-600/70 bg-zinc-100 dark:bg-zinc-800/90",
               status === 'error' && "border-rose-500/40 bg-rose-500/[0.05]"
             )}
           >
@@ -4801,7 +4808,7 @@ export function RedemittelStudyCard({
                     status === 'success'
                       ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30 cursor-default"
                       : status === 'surrender'
-                      ? "bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-500/30 cursor-default"
+                      ? "bg-zinc-100 dark:bg-zinc-800/90 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-600/70 cursor-default"
                       : status === 'error'
                       ? "bg-rose-500/15 text-rose-800 dark:text-rose-200 border border-rose-500/40 hover:bg-rose-500/25 cursor-pointer"
                       : "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-black/10 dark:border-white/10 hover:border-black/20 dark:hover:border-white/25 cursor-pointer"
@@ -4812,46 +4819,27 @@ export function RedemittelStudyCard({
                 </motion.button>
               ))}
             </AnimatePresence>
-
-            {data.exampleEnde && (
-              <span className="text-zinc-400 dark:text-zinc-500 italic text-base select-none self-center pointer-events-none">
-                {data.exampleEnde}
-              </span>
-            )}
           </motion.div>
-
-          {status === 'surrender' && (
-            <motion.p
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-xs text-amber-600/90 dark:text-amber-400/80 font-medium select-none text-center mt-2.5"
-            >
-              Lösung angezeigt — wird wiederholt
-            </motion.p>
-          )}
         </div>
 
         {/* 4. ПЛИТКИ ВЫБОРА (НИЗ КАРТОЧКИ) ИЛИ КНОПКА WEITER */}
-        <div className="mt-8 pt-5 border-t border-black/[0.05] dark:border-white/[0.06] min-h-[58px] flex items-center justify-center">
+        <div className="mt-8 pt-5 border-t border-black/[0.05] dark:border-white/[0.06] min-h-[58px] flex items-center justify-center w-full">
           <AnimatePresence mode="wait">
             {status === 'success' || status === 'surrender' ? (
               <motion.div
                 key="weiter-btn"
-                initial={{ opacity: 0, scale: 0.95, y: 6 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.15 }}
-                className="flex justify-center py-1"
+                className="w-full flex justify-center"
               >
                 <button
                   onClick={onNext}
                   autoFocus
-                  className="bg-white hover:bg-zinc-200 text-zinc-950 font-medium text-sm px-6 py-2.5 rounded-full shadow-lg transition-all duration-150 active:scale-95 flex items-center gap-2 cursor-pointer border border-black/5 dark:border-transparent select-none"
+                  className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-sm transition-transform duration-150 ease-out active:scale-[0.98] select-none cursor-pointer"
                 >
-                  <span>Weiter</span>
-                  <span className="text-[10px] bg-black/10 px-1.5 py-0.5 rounded text-zinc-700 font-mono">
-                    Space ␣
-                  </span>
+                  Weiter
                 </button>
               </motion.div>
             ) : (
