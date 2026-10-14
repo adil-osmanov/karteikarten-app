@@ -51,6 +51,7 @@ export const setCachedAudioUrl = (key: string, url: string) => {
 
 // ==========================================
 // BULLETPROOF NATIVE SOUND ENGINE
+// (Web Audio API direct buffers + Instant Oscillator synthesis + Safe Singletons)
 // ==========================================
 
 let globalAudioCtx: AudioContext | null = null;
@@ -58,8 +59,9 @@ let tockBuffer: AudioBuffer | null = null;
 let successBuffer: AudioBuffer | null = null;
 let failBuffer: AudioBuffer | null = null;
 let isDecodingBuffers = false;
+let lastDecodedCtx: AudioContext | null = null;
 
-// Pre-created HTML5 Audio elements for instant, guaranteed zero-failure fallback
+// Pre-created singletons for HTML5 fallback (strictly 3 elements, NEVER dynamically allocated)
 let fallbackTock: HTMLAudioElement | null = null;
 let fallbackSuccess: HTMLAudioElement | null = null;
 let fallbackFail: HTMLAudioElement | null = null;
@@ -76,8 +78,6 @@ function createFallbackAudio(src: string, vol: number): HTMLAudioElement | null 
     return null;
   }
 }
-
-let lastDecodedCtx: AudioContext | null = null;
 
 export const getAudioContext = (): AudioContext | null => {
   if (typeof window === 'undefined') return null;
@@ -102,6 +102,68 @@ export const getAudioContext = (): AudioContext | null => {
 
   return globalAudioCtx;
 };
+
+// Pure Web Audio API synthesizers — zero external files, zero latency, impossible to fail or exhaust
+function synthesizeTock(ctx: AudioContext, volume: number = 0.3) {
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1400, now);
+    osc.frequency.exponentialRampToValueAtTime(180, now + 0.025);
+    gain.gain.setValueAtTime(volume * 0.7, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.03);
+  } catch (e) {}
+}
+
+function synthesizeSuccess(ctx: AudioContext, volume: number = 0.4) {
+  try {
+    const now = ctx.currentTime;
+    [
+      { freq: 523.25, start: 0, dur: 0.22, vol: volume * 0.6 },
+      { freq: 783.99, start: 0.07, dur: 0.28, vol: volume * 0.75 },
+    ].forEach(({ freq, start, dur, vol }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + start);
+      gain.gain.setValueAtTime(0.001, now + start);
+      gain.gain.linearRampToValueAtTime(vol, now + start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.02);
+    });
+  } catch (e) {}
+}
+
+function synthesizeFail(ctx: AudioContext, volume: number = 0.4) {
+  try {
+    const now = ctx.currentTime;
+    [
+      { freq: 220, start: 0, dur: 0.12, vol: volume * 0.5 },
+      { freq: 164.81, start: 0.07, dur: 0.2, vol: volume * 0.6 },
+    ].forEach(({ freq, start, dur, vol }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + start);
+      gain.gain.setValueAtTime(0.001, now + start);
+      gain.gain.linearRampToValueAtTime(vol, now + start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.02);
+    });
+  } catch (e) {}
+}
 
 // Safe base64 -> ArrayBuffer -> AudioBuffer decode supporting all browser versions
 function decodeBase64Audio(ctx: AudioContext, base64: string): Promise<AudioBuffer | null> {
@@ -159,7 +221,6 @@ export async function loadAudioBuffers() {
 }
 
 function playBufferDirect(buffer: AudioBuffer | null, volume: number): boolean {
-  if (!buffer) return false;
   const ctx = getAudioContext();
   if (!ctx) return false;
 
@@ -167,6 +228,7 @@ function playBufferDirect(buffer: AudioBuffer | null, volume: number): boolean {
     if (ctx.state === 'suspended' || (ctx.state as any) === 'interrupted') {
       ctx.resume().catch(() => {});
     }
+    if (!buffer) return false;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     const gainNode = ctx.createGain();
@@ -183,36 +245,53 @@ function playBufferDirect(buffer: AudioBuffer | null, volume: number): boolean {
 function playFallback(type: 'tock' | 'success' | 'fail', volume: number) {
   if (typeof window === 'undefined') return;
   try {
-    const src = type === 'tock' ? TOCK_B64 : type === 'success' ? SUCCESS_B64 : FAIL_B64;
-    const a = new Audio(src);
-    (a as any).playsInline = true;
-    a.volume = volume;
-    const p = a.play();
-    if (p !== undefined) {
-      p.catch(() => {});
+    let el: HTMLAudioElement | null = null;
+    if (type === 'tock') {
+      if (!fallbackTock) fallbackTock = createFallbackAudio(TOCK_B64, volume);
+      el = fallbackTock;
+    } else if (type === 'success') {
+      if (!fallbackSuccess) fallbackSuccess = createFallbackAudio(SUCCESS_B64, volume);
+      el = fallbackSuccess;
+    } else {
+      if (!fallbackFail) fallbackFail = createFallbackAudio(FAIL_B64, volume);
+      el = fallbackFail;
     }
-    a.onended = () => {
-      a.src = '';
-    };
+    if (el) {
+      el.volume = volume;
+      el.currentTime = 0;
+      const p = el.play();
+      if (p !== undefined) p.catch(() => {});
+    }
   } catch (e) {}
 }
 
 export const playTockSound = () => {
-  const played = playBufferDirect(tockBuffer, 0.3);
-  if (!played) {
-    playFallback('tock', 0.3);
-    loadAudioBuffers();
+  const ctx = getAudioContext();
+  if (ctx) {
+    const played = playBufferDirect(tockBuffer, 0.3);
+    if (!played) {
+      synthesizeTock(ctx, 0.3);
+      loadAudioBuffers();
+    }
+    return;
   }
+  playFallback('tock', 0.3);
 };
 
 export const playFeedbackSound = (isCorrect: boolean) => {
+  const ctx = getAudioContext();
   const buffer = isCorrect ? successBuffer : failBuffer;
-  const type = isCorrect ? 'success' : 'fail';
-  const played = playBufferDirect(buffer, 0.4);
-  if (!played) {
-    playFallback(type, 0.4);
-    loadAudioBuffers();
+  const vol = 0.4;
+  if (ctx) {
+    const played = playBufferDirect(buffer, vol);
+    if (!played) {
+      if (isCorrect) synthesizeSuccess(ctx, vol);
+      else synthesizeFail(ctx, vol);
+      loadAudioBuffers();
+    }
+    return;
   }
+  playFallback(isCorrect ? 'success' : 'fail', vol);
 };
 
 export const initAudioCtx = async () => {
@@ -761,11 +840,26 @@ let sharedSpeechAudio: HTMLAudioElement | null = null;
 export const getSharedSpeechAudio = () => {
   if (typeof window === 'undefined') return null;
   if (!sharedSpeechAudio) {
-    sharedSpeechAudio = new Audio();
-    (sharedSpeechAudio as any).playsInline = true;
-    sharedSpeechAudio.preload = 'auto';
+    try {
+      sharedSpeechAudio = new Audio();
+      (sharedSpeechAudio as any).playsInline = true;
+      sharedSpeechAudio.preload = 'auto';
+    } catch (e) {
+      return null;
+    }
   }
   return sharedSpeechAudio;
+};
+
+export const resetSharedSpeechAudio = () => {
+  if (sharedSpeechAudio) {
+    try {
+      sharedSpeechAudio.pause();
+      sharedSpeechAudio.src = '';
+      sharedSpeechAudio.load();
+    } catch (e) {}
+    sharedSpeechAudio = null;
+  }
 };
 
 // Safari: Unlock both Web Audio Context and HTML5 Audio pipeline synchronously inside user gestures
@@ -804,6 +898,9 @@ if (typeof window !== 'undefined') {
       ctx.resume().catch(() => {});
     }
     loadAudioBuffers();
+    if ('speechSynthesis' in window && window.speechSynthesis.paused) {
+      try { window.speechSynthesis.resume(); } catch (e) {}
+    }
   };
 
   document.addEventListener('visibilitychange', () => {
@@ -929,6 +1026,7 @@ export interface PlaySpeechOptions {
   forceAudioEl?: HTMLAudioElement | null;
 }
 
+let activeSpeechRequestId = 0;
 let activeSpeechAbortCtrl: AbortController | null = null;
 
 export async function playGermanSpeech(text: string, options?: PlaySpeechOptions) {
@@ -941,49 +1039,65 @@ export async function playGermanSpeech(text: string, options?: PlaySpeechOptions
   }
 
   const rate = options?.rate ?? 1.0;
+  const thisRequestId = ++activeSpeechRequestId;
+
+  // Proactively wake up AudioContext & SpeechSynthesis
+  const ctx = getAudioContext();
+  if (ctx && ctx.state !== 'running') {
+    ctx.resume().catch(() => {});
+  }
+  if ('speechSynthesis' in window && window.speechSynthesis.paused) {
+    try { window.speechSynthesis.resume(); } catch (e) {}
+  }
 
   // 1. Check client memory cache
   const cachedUrl = audioCache.get(cleanText);
   if (cachedUrl) {
-    const audio = options?.forceAudioEl || getSharedSpeechAudio() || new Audio();
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-      audio.src = cachedUrl;
-      audio.playbackRate = rate;
+    const audio = options?.forceAudioEl || getSharedSpeechAudio();
+    if (audio) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.src = cachedUrl;
+        audio.playbackRate = rate;
 
-      audio.onplay = () => {
-        if (options?.onStart) options.onStart();
-      };
-      audio.onended = () => {
-        if (options?.onEnd) options.onEnd();
-      };
-      audio.onerror = () => {
-        speakNative(cleanText, rate, options?.onStart, options?.onEnd);
-      };
+        audio.onplay = () => {
+          if (thisRequestId === activeSpeechRequestId && options?.onStart) options.onStart();
+        };
+        audio.onended = () => {
+          if (thisRequestId === activeSpeechRequestId && options?.onEnd) options.onEnd();
+        };
+        audio.onerror = () => {
+          if (thisRequestId === activeSpeechRequestId) {
+            resetSharedSpeechAudio();
+            speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+          }
+        };
 
-      const p = audio.play();
-      if (p !== undefined) {
-        p.catch((err) => {
-          if (err?.name === 'AbortError' || err?.name === 'NotAllowedError') return;
+        const p = audio.play();
+        if (p !== undefined) {
+          p.catch((err) => {
+            if (thisRequestId !== activeSpeechRequestId) return;
+            speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+          });
+        }
+        return;
+      } catch (e: any) {
+        if (thisRequestId === activeSpeechRequestId) {
           speakNative(cleanText, rate, options?.onStart, options?.onEnd);
-        });
+        }
+        return;
       }
-      return;
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return;
-      speakNative(cleanText, rate, options?.onStart, options?.onEnd);
-      return;
     }
   }
 
-  // 2. Fetch /api/tts with 3500ms timeout
+  // 2. Fetch /api/tts with 5000ms timeout
   if (activeSpeechAbortCtrl) {
     activeSpeechAbortCtrl.abort();
   }
   const abortCtrl = new AbortController();
   activeSpeechAbortCtrl = abortCtrl;
-  const timeoutId = setTimeout(() => abortCtrl.abort(), 3500);
+  const timeoutId = setTimeout(() => abortCtrl.abort(), 5000);
 
   try {
     const res = await fetch('/api/tts', {
@@ -1007,32 +1121,52 @@ export async function playGermanSpeech(text: string, options?: PlaySpeechOptions
     const audioUrl = URL.createObjectURL(blob);
     setCachedAudioUrl(cleanText, audioUrl);
 
-    const audio = options?.forceAudioEl || getSharedSpeechAudio() || new Audio();
-    audio.pause();
-    audio.currentTime = 0;
-    audio.src = audioUrl;
-    audio.playbackRate = rate;
+    // If superseded by a newer card while awaiting network, don't play
+    if (thisRequestId !== activeSpeechRequestId) return;
 
-    audio.onplay = () => {
-      if (options?.onStart) options.onStart();
-    };
-    audio.onended = () => {
-      if (options?.onEnd) options.onEnd();
-    };
-    audio.onerror = () => {
+    const audio = options?.forceAudioEl || getSharedSpeechAudio();
+    if (!audio) {
       speakNative(cleanText, rate, options?.onStart, options?.onEnd);
-    };
+      return;
+    }
 
-    const p = audio.play();
-    if (p !== undefined) {
-      p.catch((err) => {
-        if (err?.name === 'AbortError' || err?.name === 'NotAllowedError') return;
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.src = audioUrl;
+      audio.playbackRate = rate;
+
+      audio.onplay = () => {
+        if (thisRequestId === activeSpeechRequestId && options?.onStart) options.onStart();
+      };
+      audio.onended = () => {
+        if (thisRequestId === activeSpeechRequestId && options?.onEnd) options.onEnd();
+      };
+      audio.onerror = () => {
+        if (thisRequestId === activeSpeechRequestId) {
+          resetSharedSpeechAudio();
+          speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+        }
+      };
+
+      const p = audio.play();
+      if (p !== undefined) {
+        p.catch((err) => {
+          if (thisRequestId !== activeSpeechRequestId) return;
+          speakNative(cleanText, rate, options?.onStart, options?.onEnd);
+        });
+      }
+    } catch (e) {
+      if (thisRequestId === activeSpeechRequestId) {
         speakNative(cleanText, rate, options?.onStart, options?.onEnd);
-      });
+      }
     }
   } catch (err: any) {
     clearTimeout(timeoutId);
-    if (err?.name === 'AbortError') return;
+    // If superseded by a newer card, don't speak this old one
+    if (thisRequestId !== activeSpeechRequestId) return;
+
+    // Guaranteed fallback: network timed out or failed, speak native immediately!
     speakNative(cleanText, rate, options?.onStart, options?.onEnd);
   }
 }
