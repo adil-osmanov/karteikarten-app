@@ -4373,6 +4373,49 @@ export interface RedemittelCardData {
   exampleEnde?: string;
 }
 
+const REDEMITTEL_DICTIONARY: { pattern: RegExp; translation: string; exampleEnde?: string }[] = [
+  {
+    pattern: /ich vertrete den standpunkt/i,
+    translation: "Я придерживаюсь точки зрения, что...",
+    exampleEnde: "...Homeoffice die Produktivität deutlich steigert."
+  },
+  {
+    pattern: /es l[aä]sst sich nicht leug/i,
+    translation: "Нельзя отрицать, что...",
+    exampleEnde: "...diese Maßnahme unvermeidbar ist."
+  },
+  {
+    pattern: /aus meiner sicht spricht vieles daf/i,
+    translation: "С моей точки зрения, многое говорит за то, что...",
+    exampleEnde: "...dieser Schritt langfristig sinnvoll ist."
+  },
+  {
+    pattern: /eine m[oö]gliche l[oö]sung besteht darin/i,
+    translation: "Возможное решение заключается в том, чтобы...",
+    exampleEnde: "...die internen Prozesse zu digitalisieren."
+  },
+  {
+    pattern: /es ist von entscheidender bedeutung/i,
+    translation: "Имеет решающее значение, чтобы...",
+    exampleEnde: "...alle Beteiligten rechtzeitig informiert werden."
+  },
+  {
+    pattern: /man darf dabei nicht au[sß]er acht lassen/i,
+    translation: "При этом нельзя упускать из виду, что...",
+    exampleEnde: "...die Kosten eine wichtige Rolle spielen."
+  },
+  {
+    pattern: /ich m[oö]chte nachdr[uü]cklich beton/i,
+    translation: "Я хотел бы подчеркнуть, что...",
+    exampleEnde: "...Qualität vor Quantität geht."
+  },
+  {
+    pattern: /dies f[uü]hrt zwangsl[aä]ufig zu der frage/i,
+    translation: "Это неизбежно приводит к вопросу о том,...",
+    exampleEnde: "...wir auf dem richtigen Weg sind."
+  }
+];
+
 export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
   let chunks: string[] = [];
   let fullText = '';
@@ -4400,7 +4443,7 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
     } catch (e) {}
   }
 
-  // 2. Determine translation
+  // 2. Determine translation from card.translation if Cyrillic
   if (!translation && card.translation) {
     if (cyr(card.translation)) {
       translation = card.translation.trim();
@@ -4460,6 +4503,25 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
       : chunks.join(' ').replace(/\s+([,;:\.\?!])/g, '$1').trim();
   }
 
+  // 5. If translation is still missing, lookup in REDEMITTEL_DICTIONARY
+  if (!translation) {
+    const textToMatch = `${card.targetWord || ''} ${card.sentence || ''} ${card.translation || ''} ${fullText}`;
+    for (const item of REDEMITTEL_DICTIONARY) {
+      if (item.pattern.test(textToMatch)) {
+        translation = item.translation;
+        if (!exampleEnde && item.exampleEnde) {
+          exampleEnde = item.exampleEnde;
+        }
+        break;
+      }
+    }
+  }
+
+  // 6. Last resort fallback
+  if (!translation && card.translation && !card.translation.includes('|')) {
+    translation = card.translation.trim();
+  }
+
   const chunkObjects: RedemittelChunk[] = chunks.map((text, idx) => ({
     id: `chunk-${card.id}-${idx}`,
     text,
@@ -4485,8 +4547,6 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
 export function RedemittelStudyCard({
   card,
   deckTitle,
-  cardIndex,
-  totalCards,
   onAnswer,
   onNext,
 }: {
@@ -4502,13 +4562,6 @@ export function RedemittelStudyCard({
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [isHilfe, setIsHilfe] = useState(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
 
   const handlePlayAudio = useCallback(() => {
     if (!data.fullText) return;
@@ -4537,10 +4590,6 @@ export function RedemittelStudyCard({
           onEnd: () => setIsAudioPlaying(false),
         });
         onAnswer(true, false);
-        // Transition after 0.8s
-        timerRef.current = setTimeout(() => {
-          onNext();
-        }, 800);
       } else {
         setStatus('error');
         playFeedbackSound(false);
@@ -4551,7 +4600,7 @@ export function RedemittelStudyCard({
         setStatus('idle');
       }
     }
-  }, [placedChunks, data.chunks.length, data.fullText, status, isHilfe, onAnswer, onNext]);
+  }, [placedChunks, data.chunks.length, data.fullText, status, isHilfe, onAnswer]);
 
   const handleRemoveChunk = useCallback((chunk: RedemittelChunk) => {
     if (status === 'success' || isHilfe) return;
@@ -4582,15 +4631,18 @@ export function RedemittelStudyCard({
       onEnd: () => setIsAudioPlaying(false),
     });
     onAnswer(false, true);
-    timerRef.current = setTimeout(() => {
-      onNext();
-    }, 1500);
-  }, [data.shuffledChunks, data.fullText, status, isHilfe, onAnswer, onNext]);
+  }, [data.shuffledChunks, data.fullText, status, isHilfe, onAnswer]);
 
   // Keyboard shortcut support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if ((status === 'success' || isHilfe) && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onNext();
+        return;
+      }
 
       if (e.key >= '1' && e.key <= '9') {
         const num = parseInt(e.key, 10);
@@ -4615,17 +4667,17 @@ export function RedemittelStudyCard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [data.shuffledChunks, placedChunks, status, isHilfe, handleSelectChunk, handleRemoveChunk, handlePlayAudio, handleHilfe]);
+  }, [data.shuffledChunks, placedChunks, status, isHilfe, onNext, handleSelectChunk, handleRemoveChunk, handlePlayAudio, handleHilfe]);
 
   return (
-    <div className="w-full flex justify-center px-4">
+    <div className="w-full flex flex-col items-center px-4">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.2 }}
         className={cn(
-          "relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-10 transition-colors duration-200 shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] border flex flex-col justify-between min-h-[420px] w-full max-w-2xl",
+          "relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-10 transition-colors duration-200 shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] border flex flex-col justify-between min-h-[400px] w-full max-w-2xl",
           status === 'success'
             ? "border-emerald-500/50 dark:border-emerald-500/50"
             : status === 'error'
@@ -4635,25 +4687,15 @@ export function RedemittelStudyCard({
       >
         {/* 1. Верхняя панель карточки */}
         <div className="w-full flex items-center justify-between mb-6 pb-2 border-b border-black/[0.05] dark:border-white/[0.06]">
-          {/* Left: Speaker icon, badge, card counter */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handlePlayAudio}
-              disabled={isAudioPlaying}
-              className="w-10 h-10 rounded-full bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-700 dark:text-[#E5E5EA] flex items-center justify-center transition-transform active:scale-[0.96] border border-black/[0.05] dark:border-white/[0.05] shadow-sm"
-              title="Satz anhören (R)"
-            >
-              <Volume2 className={cn("w-5 h-5", isAudioPlaying && "animate-pulse text-blue-500")} />
-            </button>
-            <span className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-              Redemittel
-            </span>
-            {cardIndex && totalCards && (
-              <span className="text-xs text-gray-400 dark:text-[#8E8E93] font-medium tabular-nums ml-1">
-                {cardIndex} / {totalCards}
-              </span>
-            )}
-          </div>
+          {/* Left: Speaker icon */}
+          <button
+            onClick={handlePlayAudio}
+            disabled={isAudioPlaying}
+            className="w-10 h-10 rounded-full bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-700 dark:text-[#E5E5EA] flex items-center justify-center transition-transform active:scale-[0.96] border border-black/[0.05] dark:border-white/[0.05] shadow-sm"
+            title="Satz anhören (R)"
+          >
+            <Volume2 className={cn("w-5 h-5", isAudioPlaying && "animate-pulse text-blue-500")} />
+          </button>
 
           {/* Right: Reset (Zurücksetzen), Help (?), 4 mastery round dots */}
           <div className="flex items-center gap-3">
@@ -4673,7 +4715,7 @@ export function RedemittelStudyCard({
                 "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
                 (status === 'success' || isHilfe) && "opacity-0 pointer-events-none"
               )}
-              title="Hilfe (H)"
+              title="Hilfe / Ich weiß nicht (H)"
             >
               <HelpCircle className="w-5 h-5" />
             </button>
@@ -4694,11 +4736,16 @@ export function RedemittelStudyCard({
         </div>
 
         {/* 2. ЗОНА ПЕРЕВОДА (ПОД ЗАГОЛОВКОМ) */}
-        {data.translation && (
-          <div className="text-sm text-zinc-500 dark:text-zinc-400 italic font-normal text-center mb-6 px-4 select-none min-h-[1.25rem]">
-            {data.translation}
-          </div>
-        )}
+        <div className="text-center mb-6 px-4">
+          <p className="text-base sm:text-lg text-zinc-700 dark:text-zinc-300 font-medium italic leading-relaxed select-none">
+            {data.translation || "Русский перевод отсутствует"}
+          </p>
+          {data.exampleEnde && (
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 italic mt-1.5 font-normal select-none">
+              {data.exampleEnde}
+            </p>
+          )}
+        </div>
 
         {/* 3. ЗОНА СБОРКИ (ЦЕНТР) */}
         <motion.div
@@ -4744,12 +4791,6 @@ export function RedemittelStudyCard({
           )}
         </motion.div>
 
-        {data.exampleEnde && (
-          <div className="text-xs text-zinc-400 dark:text-zinc-500 text-center mt-2.5 font-normal select-none italic">
-            {data.exampleEnde}
-          </div>
-        )}
-
         {/* 4. ПЛИТКИ ВЫБОРА (НИЗ КАРТОЧКИ) */}
         <div className="mt-8 pt-5 border-t border-black/[0.05] dark:border-white/[0.06]">
           <div className="flex flex-wrap items-center justify-center gap-2.5">
@@ -4779,6 +4820,26 @@ export function RedemittelStudyCard({
           </div>
         </div>
       </motion.div>
+
+      {/* 5. Кнопка Weiter */}
+      <div className="h-16 w-full max-w-2xl flex justify-center mt-6">
+        <AnimatePresence>
+          {(status === 'success' || isHilfe) && (
+            <motion.button
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={onNext}
+              autoFocus
+              className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-md transition-transform duration-150 ease-out active:scale-[0.98] select-none"
+            >
+              Weiter
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
