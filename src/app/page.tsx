@@ -2087,6 +2087,8 @@ function StudyInterface({
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
               deckTitle={decks.find(d => d.id === currentDeckId)?.name}
+              cardIndex={currentIndex + 1}
+              totalCards={activeCards.length}
               onAnswer={(correct, isHilfe) => {
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (correct && !isHilfe) {
@@ -4368,14 +4370,18 @@ export interface RedemittelCardData {
   shuffledChunks: RedemittelChunk[];
   translation: string;
   fullText: string;
+  exampleEnde?: string;
 }
 
 export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
   let chunks: string[] = [];
   let fullText = '';
-  const translation = card.translation || '';
+  let translation = '';
+  let exampleEnde: string | undefined = undefined;
 
-  // 1. Try reading baseWordInfo if it has precomputed chunks
+  const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
+
+  // 1. Try reading baseWordInfo if it has precomputed info
   if (card.baseWordInfo && typeof card.baseWordInfo === 'string') {
     try {
       const parsed = JSON.parse(card.baseWordInfo);
@@ -4385,29 +4391,42 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
       if (parsed?.fullText && typeof parsed.fullText === 'string') {
         fullText = parsed.fullText.trim();
       }
+      if (parsed?.exampleEnde && typeof parsed.exampleEnde === 'string') {
+        exampleEnde = parsed.exampleEnde.trim();
+      }
+      if (parsed?.translation && typeof parsed.translation === 'string' && cyr(parsed.translation)) {
+        translation = parsed.translation.trim();
+      }
     } catch (e) {}
   }
 
-  // 2. Check card.sentence or card.targetWord for pipe '|' or ' / ' or ';' delimiters
-  const rawSource = (card.sentence && card.sentence !== 'VERB_DRILL' && card.sentence !== '-') 
-    ? card.sentence 
-    : card.targetWord;
-
-  if (chunks.length === 0 && rawSource) {
-    if (rawSource.includes('|')) {
-      chunks = rawSource.split('|').map(s => s.trim()).filter(Boolean);
-    } else if (rawSource.includes(' / ')) {
-      chunks = rawSource.split(' / ').map(s => s.trim()).filter(Boolean);
-    } else if (rawSource.includes(';') && !rawSource.startsWith('{')) {
-      chunks = rawSource.split(';').map(s => s.trim()).filter(Boolean);
+  // 2. Determine translation
+  if (!translation && card.translation) {
+    if (cyr(card.translation)) {
+      translation = card.translation.trim();
     }
   }
 
-  // 3. Fallback: smart semantic chunking on sentences without explicit delimiters
-  if (chunks.length === 0 && rawSource) {
-    const cleanSentence = rawSource.replace(/___/g, card.targetWord || '').trim();
+  // 3. Determine chunks from card.sentence, card.targetWord or card.translation
+  if (chunks.length === 0) {
+    if (card.sentence && card.sentence !== 'VERB_DRILL' && card.sentence !== '-' && card.sentence.includes('|')) {
+      chunks = card.sentence.split('|').map(s => s.trim()).filter(Boolean);
+    } else if (card.targetWord && card.targetWord.includes('|')) {
+      chunks = card.targetWord.split('|').map(s => s.trim()).filter(Boolean);
+    } else if (card.translation && card.translation.includes('|') && !cyr(card.translation)) {
+      chunks = card.translation.split('|').map(s => s.trim()).filter(Boolean);
+    } else if (card.sentence && card.sentence.includes(' / ')) {
+      chunks = card.sentence.split(' / ').map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  // 4. Smart chunking fallback for non-delimited sentences
+  if (chunks.length === 0) {
+    const rawSource = (card.sentence && card.sentence !== 'VERB_DRILL' && card.sentence !== '-') 
+      ? card.sentence 
+      : card.targetWord;
+    const cleanSentence = (rawSource || '').replace(/___/g, card.targetWord || '').trim();
     if (cleanSentence) {
-      // Split on clauses / punctuation while preserving punctuation with the preceding phrase
       const clauses = cleanSentence.split(/(?<=[,;:\.\?!])\s+/).filter(Boolean);
       const resultChunks: string[] = [];
       for (const clause of clauses) {
@@ -4415,7 +4434,6 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
         if (words.length <= 4) {
           resultChunks.push(clause.trim());
         } else {
-          // Break into 2-3 word chunks
           let i = 0;
           while (i < words.length) {
             const remaining = words.length - i;
@@ -4432,18 +4450,16 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
     }
   }
 
-  // Fallback if still empty
   if (chunks.length === 0) {
     chunks = [card.targetWord || 'Beispielsatz'];
   }
 
   if (!fullText) {
-    fullText = rawSource.includes('|') 
-      ? rawSource.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim()
+    fullText = card.targetWord && !card.targetWord.includes('|')
+      ? card.targetWord.trim()
       : chunks.join(' ').replace(/\s+([,;:\.\?!])/g, '$1').trim();
   }
 
-  // Shuffled chunks with stable unique IDs
   const chunkObjects: RedemittelChunk[] = chunks.map((text, idx) => ({
     id: `chunk-${card.id}-${idx}`,
     text,
@@ -4451,7 +4467,6 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
   }));
 
   const shuffled = [...chunkObjects].sort(() => Math.random() - 0.5);
-  // Ensure the initial display is actually shuffled if there are 2 or more chunks
   if (shuffled.length > 1 && shuffled.every((c, i) => c.originalIndex === i)) {
     const first = shuffled[0];
     shuffled[0] = shuffled[1];
@@ -4463,23 +4478,29 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
     shuffledChunks: shuffled,
     translation,
     fullText,
+    exampleEnde,
   };
 }
 
 export function RedemittelStudyCard({
   card,
   deckTitle,
+  cardIndex,
+  totalCards,
   onAnswer,
   onNext,
 }: {
   card: Flashcard;
   deckTitle?: string;
+  cardIndex?: number;
+  totalCards?: number;
   onAnswer: (correct: boolean, isHilfe: boolean) => void;
   onNext: () => void;
 }) {
   const data = useMemo(() => parseRedemittelCard(card), [card]);
   const [placedChunks, setPlacedChunks] = useState<RedemittelChunk[]>([]);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [isHilfe, setIsHilfe] = useState(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -4498,14 +4519,14 @@ export function RedemittelStudyCard({
   }, [data.fullText]);
 
   const handleSelectChunk = useCallback((chunk: RedemittelChunk) => {
-    if (status === 'success') return;
+    if (status === 'success' || isHilfe) return;
     if (placedChunks.some(c => c.id === chunk.id)) return;
 
     playTockSound();
     const nextPlaced = [...placedChunks, chunk];
     setPlacedChunks(nextPlaced);
 
-    // If this completed the phrase, check validity
+    // Automatic check when all chunks are placed
     if (nextPlaced.length === data.chunks.length) {
       const isCorrect = nextPlaced.every((c, i) => c.originalIndex === i);
       if (isCorrect) {
@@ -4516,9 +4537,10 @@ export function RedemittelStudyCard({
           onEnd: () => setIsAudioPlaying(false),
         });
         onAnswer(true, false);
+        // Transition after 0.8s
         timerRef.current = setTimeout(() => {
           onNext();
-        }, 1200);
+        }, 800);
       } else {
         setStatus('error');
         playFeedbackSound(false);
@@ -4529,25 +4551,43 @@ export function RedemittelStudyCard({
         setStatus('idle');
       }
     }
-  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, onNext]);
+  }, [placedChunks, data.chunks.length, data.fullText, status, isHilfe, onAnswer, onNext]);
 
   const handleRemoveChunk = useCallback((chunk: RedemittelChunk) => {
-    if (status === 'success') return;
+    if (status === 'success' || isHilfe) return;
     playTockSound();
     setPlacedChunks(prev => prev.filter(c => c.id !== chunk.id));
     if (status === 'error') {
       setStatus('idle');
     }
-  }, [status]);
+  }, [status, isHilfe]);
 
   const handleReset = useCallback(() => {
-    if (status === 'success') return;
+    if (status === 'success' || isHilfe) return;
     playTockSound();
     setPlacedChunks([]);
     setStatus('idle');
-  }, [status]);
+  }, [status, isHilfe]);
 
-  // Keyboard shortcut support: 1-9 to pick available chunk, Backspace to remove last
+  const handleHilfe = useCallback(() => {
+    if (status === 'success' || isHilfe) return;
+    setIsHilfe(true);
+    // Put chunks in correct order
+    const correctOrder = [...data.shuffledChunks].sort((a, b) => a.originalIndex - b.originalIndex);
+    setPlacedChunks(correctOrder);
+    setStatus('success');
+    playFeedbackSound(false);
+    setIsAudioPlaying(true);
+    playGermanSpeech(data.fullText, {
+      onEnd: () => setIsAudioPlaying(false),
+    });
+    onAnswer(false, true);
+    timerRef.current = setTimeout(() => {
+      onNext();
+    }, 1500);
+  }, [data.shuffledChunks, data.fullText, status, isHilfe, onAnswer, onNext]);
+
+  // Keyboard shortcut support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -4555,87 +4595,125 @@ export function RedemittelStudyCard({
       if (e.key >= '1' && e.key <= '9') {
         const num = parseInt(e.key, 10);
         const available = data.shuffledChunks.filter(c => !placedChunks.some(p => p.id === c.id));
-        if (available[num - 1] && status !== 'success') {
+        if (available[num - 1] && status !== 'success' && !isHilfe) {
           e.preventDefault();
           handleSelectChunk(available[num - 1]);
         }
       } else if (e.key === 'Backspace') {
-        if (placedChunks.length > 0 && status !== 'success') {
+        if (placedChunks.length > 0 && status !== 'success' && !isHilfe) {
           e.preventDefault();
           handleRemoveChunk(placedChunks[placedChunks.length - 1]);
         }
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        handlePlayAudio();
+      } else if (e.key === 'h' || e.key === 'H' || e.key === '?') {
+        e.preventDefault();
+        handleHilfe();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [data.shuffledChunks, placedChunks, status, handleSelectChunk, handleRemoveChunk]);
+  }, [data.shuffledChunks, placedChunks, status, isHilfe, handleSelectChunk, handleRemoveChunk, handlePlayAudio, handleHilfe]);
 
   return (
     <div className="w-full flex justify-center px-4">
       <motion.div
-        animate={status === 'error' ? { x: [-6, 6, -4, 4, -2, 2, 0] } : { x: 0 }}
-        transition={{ duration: 0.35 }}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.2 }}
         className={cn(
-          "w-full max-w-2xl rounded-3xl p-6 md:p-8 transition-all duration-300 relative shadow-2xl backdrop-blur-xl border",
-          "bg-white/95 dark:bg-[#1C1C1E]",
+          "relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-10 transition-colors duration-200 shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] border flex flex-col justify-between min-h-[420px] w-full max-w-2xl",
           status === 'success'
-            ? "border-emerald-500/50 shadow-[0_0_35px_rgba(16,185,129,0.18)]"
+            ? "border-emerald-500/50 dark:border-emerald-500/50"
             : status === 'error'
-            ? "border-rose-500/50 shadow-[0_0_35px_rgba(244,63,94,0.18)]"
-            : "border-black/[0.08] dark:border-white/10"
+            ? "border-rose-500/40 dark:border-rose-500/40"
+            : "border-black/[0.08] dark:border-white/[0.08]"
         )}
       >
-        {/* Header Bar */}
-        <div className="flex items-center justify-between mb-6 pb-2 border-b border-black/[0.05] dark:border-white/[0.06]">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+        {/* 1. Верхняя панель карточки */}
+        <div className="w-full flex items-center justify-between mb-6 pb-2 border-b border-black/[0.05] dark:border-white/[0.06]">
+          {/* Left: Speaker icon, badge, card counter */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handlePlayAudio}
+              disabled={isAudioPlaying}
+              className="w-10 h-10 rounded-full bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-700 dark:text-[#E5E5EA] flex items-center justify-center transition-transform active:scale-[0.96] border border-black/[0.05] dark:border-white/[0.05] shadow-sm"
+              title="Satz anhören (R)"
+            >
+              <Volume2 className={cn("w-5 h-5", isAudioPlaying && "animate-pulse text-blue-500")} />
+            </button>
+            <span className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
               Redemittel
             </span>
-            {deckTitle && (
-              <span className="text-xs text-gray-500 dark:text-zinc-400 font-medium truncate max-w-[200px]">
-                {deckTitle}
+            {cardIndex && totalCards && (
+              <span className="text-xs text-gray-400 dark:text-[#8E8E93] font-medium tabular-nums ml-1">
+                {cardIndex} / {totalCards}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            {placedChunks.length > 0 && status !== 'success' && (
+
+          {/* Right: Reset (Zurücksetzen), Help (?), 4 mastery round dots */}
+          <div className="flex items-center gap-3">
+            {placedChunks.length > 0 && status !== 'success' && !isHilfe && (
               <button
                 onClick={handleReset}
-                className="text-xs text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white px-2 py-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors flex items-center gap-1"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
                 title="Zurücksetzen"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Zurücksetzen</span>
+                <RotateCcw className="w-4 h-4" />
               </button>
             )}
             <button
-              onClick={handlePlayAudio}
+              onClick={handleHilfe}
+              disabled={status === 'success' || isHilfe}
               className={cn(
-                "p-2 rounded-xl transition-all",
-                isAudioPlaying
-                  ? "bg-blue-500 text-white scale-105 shadow-md shadow-blue-500/20"
-                  : "bg-gray-100 hover:bg-gray-200 dark:bg-white/5 dark:hover:bg-white/10 text-gray-700 dark:text-zinc-300"
+                "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
+                (status === 'success' || isHilfe) && "opacity-0 pointer-events-none"
               )}
-              title="Satz anhören"
+              title="Hilfe (H)"
             >
-              <Volume2 className={cn("w-4 h-4", isAudioPlaying && "animate-pulse")} />
+              <HelpCircle className="w-5 h-5" />
             </button>
+            <div className="flex gap-1.5 items-center">
+              {[0, 1, 2, 3].map((step) => (
+                <div
+                  key={step}
+                  className={cn(
+                    "w-2.5 h-2.5 rounded-full transition-colors",
+                    (card.isArchived || (card.masteryLevel || 0) > step)
+                      ? "bg-blue-600 dark:bg-blue-500"
+                      : "bg-gray-200 dark:bg-zinc-700"
+                  )}
+                />
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* 1. ZONA СБОРКИ (Верх/Центр) */}
-        <div
+        {/* 2. ЗОНА ПЕРЕВОДА (ПОД ЗАГОЛОВКОМ) */}
+        {data.translation && (
+          <div className="text-sm text-zinc-500 dark:text-zinc-400 italic font-normal text-center mb-6 px-4 select-none min-h-[1.25rem]">
+            {data.translation}
+          </div>
+        )}
+
+        {/* 3. ЗОНА СБОРКИ (ЦЕНТР) */}
+        <motion.div
+          animate={status === 'error' ? { x: [-5, 5, -4, 4, -2, 2, 0] } : { x: 0 }}
+          transition={{ duration: 0.35 }}
           className={cn(
-            "min-h-[110px] md:min-h-[125px] p-4 md:p-5 rounded-xl transition-all duration-300 relative flex flex-wrap items-center justify-center gap-2.5",
-            "bg-zinc-900/60 dark:bg-zinc-900/60 border border-zinc-800",
-            status === 'success' && "border-emerald-500/50 bg-emerald-950/20",
-            status === 'error' && "border-rose-500/50 bg-rose-950/20"
+            "w-full min-h-[110px] md:min-h-[125px] p-4 md:p-5 rounded-2xl transition-all duration-300 relative flex flex-wrap items-center justify-center gap-2.5",
+            "bg-zinc-50/90 dark:bg-zinc-900/60 border border-zinc-200/90 dark:border-zinc-800/80",
+            status === 'success' && "border-emerald-500/50 bg-emerald-50/50 dark:bg-emerald-950/20 dark:border-emerald-500/50",
+            status === 'error' && "border-rose-500/40 bg-rose-50/50 dark:bg-rose-950/20 dark:border-rose-500/40"
           )}
         >
           {placedChunks.length === 0 ? (
-            <div className="flex items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500 text-sm font-medium py-6 px-4 border border-dashed border-zinc-800 rounded-xl w-full select-none text-center">
-              <span>Wähle die Satzteile unten aus, um den Satz zu bauen</span>
+            <div className="flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-sm font-normal py-6 px-4 border border-dashed border-zinc-300 dark:border-zinc-800/80 rounded-xl w-full select-none text-center">
+              <span>Соберите фразу из блоков ниже</span>
             </div>
           ) : (
             <AnimatePresence>
@@ -4643,60 +4721,37 @@ export function RedemittelStudyCard({
                 <motion.button
                   key={chunk.id}
                   layout
-                  initial={{ scale: 0.85, opacity: 0 }}
+                  initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.85, opacity: 0 }}
+                  exit={{ scale: 0.9, opacity: 0 }}
                   transition={{ type: "spring", stiffness: 450, damping: 30 }}
                   onClick={() => handleRemoveChunk(chunk)}
                   disabled={status === 'success'}
                   className={cn(
-                    "px-4 py-2 rounded-lg text-sm md:text-base font-medium shadow-sm transition-all flex items-center gap-1.5 cursor-pointer select-none",
+                    "px-4 py-2.5 rounded-xl text-sm font-medium shadow-sm transition-all duration-200 cursor-pointer select-none",
                     status === 'success'
-                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/50"
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40"
                       : status === 'error'
-                      ? "bg-rose-500/20 text-rose-300 border border-rose-500/50 hover:bg-rose-500/30"
-                      : "bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/30 hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400"
+                      ? "bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/40 hover:bg-rose-500/25"
+                      : "bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 border border-zinc-300/80 dark:border-zinc-700/80 hover:border-zinc-400 dark:hover:border-zinc-500"
                   )}
-                  title="Klicken zum Entfernen"
+                  title="Нажмите, чтобы вернуть блок"
                 >
                   <span>{chunk.text}</span>
-                  {status !== 'success' && (
-                    <span className="text-xs opacity-50 ml-0.5">×</span>
-                  )}
                 </motion.button>
               ))}
             </AnimatePresence>
           )}
-        </div>
+        </motion.div>
 
-        {/* 2. ПЕРЕВОД (Чуть ниже зоны сборки) */}
-        <div className="text-sm text-zinc-400 font-medium italic mt-4 text-center select-none px-4 min-h-[1.5rem]">
-          {data.translation}
-        </div>
-
-        {/* Status Hint */}
-        {status === 'error' && (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-2 text-center text-xs text-rose-400 font-medium"
-          >
-            Reihenfolge nicht korrekt — klicke auf Bausteine, um sie anzupassen
-          </motion.div>
-        )}
-        {status === 'success' && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="mt-2 text-center text-xs text-emerald-400 font-medium flex items-center justify-center gap-1.5"
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Richtig zusammengesetzt!</span>
-          </motion.div>
+        {data.exampleEnde && (
+          <div className="text-xs text-zinc-400 dark:text-zinc-500 text-center mt-2.5 font-normal select-none italic">
+            {data.exampleEnde}
+          </div>
         )}
 
-        {/* 3. ПЛИТКИ ВЫБОРА (Внизу карточки) */}
-        <div className="mt-6 pt-4 border-t border-black/[0.04] dark:border-white/[0.05]">
+        {/* 4. ПЛИТКИ ВЫБОРА (НИЗ КАРТОЧКИ) */}
+        <div className="mt-8 pt-5 border-t border-black/[0.05] dark:border-white/[0.06]">
           <div className="flex flex-wrap items-center justify-center gap-2.5">
             {data.shuffledChunks.map((chunk) => {
               const isPlaced = placedChunks.some(c => c.id === chunk.id);
@@ -4704,23 +4759,21 @@ export function RedemittelStudyCard({
                 return (
                   <div
                     key={chunk.id}
-                    className="px-4 py-2 rounded-lg border border-dashed border-zinc-700/50 text-transparent text-sm md:text-base font-medium select-none pointer-events-none opacity-20 bg-zinc-800/20"
+                    className="opacity-40 pointer-events-none px-4 py-2.5 rounded-xl text-sm font-medium border border-dashed border-zinc-300/80 dark:border-zinc-700/50 text-zinc-400 dark:text-zinc-600 bg-zinc-100/50 dark:bg-zinc-900/30 select-none"
                   >
                     {chunk.text}
                   </div>
                 );
               }
               return (
-                <motion.button
+                <button
                   key={chunk.id}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.96 }}
                   onClick={() => handleSelectChunk(chunk)}
                   disabled={status === 'success'}
-                  className="bg-zinc-800/80 hover:bg-zinc-700 text-zinc-100 transition-all cursor-pointer px-4 py-2 rounded-lg border border-zinc-700/50 text-sm md:text-base font-medium shadow-sm backdrop-blur-md select-none"
+                  className="bg-zinc-100 hover:bg-zinc-200/90 text-zinc-800 border border-zinc-300/80 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 dark:border-zinc-700/60 transition-all duration-200 px-4 py-2.5 rounded-xl text-sm font-medium cursor-pointer shadow-sm active:scale-95 select-none"
                 >
                   {chunk.text}
-                </motion.button>
+                </button>
               );
             })}
           </div>
@@ -5189,19 +5242,66 @@ try {
             });
           }
         } else if (isRedemittelMode) {
-          if (parts.length >= 2) {
-            const rawGerman = parts[0];
-            const rawRussian = parts[1];
-            const chunks = rawGerman.includes('|')
-              ? rawGerman.split('|').map(s => s.trim()).filter(Boolean)
-              : [];
-            const fullText = rawGerman.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
-            
+          // Skip header row if present
+          const col0 = (parts[0] || '').toLowerCase();
+          const col1 = (parts[1] || '').toLowerCase();
+          if (col0.includes('konstruktion') || col0.includes('chunks') || col1.includes('chunks') || col0.includes('übersetzung')) {
+            return;
+          }
+
+          const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
+
+          let konstruktion = '';
+          let chunksStr = '';
+          let translation = '';
+          let beispielEnde = '';
+
+          if (parts.length >= 4) {
+            // User table: Konstruktion, Chunks, Übersetzung, Beispiel_Ende
+            konstruktion = parts[0].trim();
+            chunksStr = parts[1].trim();
+            translation = parts[2].trim();
+            beispielEnde = parts[3].trim();
+          } else if (parts.length === 3) {
+            if (cyr(parts[2])) {
+              konstruktion = parts[0].trim();
+              chunksStr = parts[1].trim();
+              translation = parts[2].trim();
+            } else if (cyr(parts[1])) {
+              chunksStr = parts[0].trim();
+              translation = parts[1].trim();
+              beispielEnde = parts[2].trim();
+              konstruktion = chunksStr.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+            }
+          } else if (parts.length === 2) {
+            if (cyr(parts[1])) {
+              chunksStr = parts[0].trim();
+              translation = parts[1].trim();
+              konstruktion = chunksStr.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+            } else if (cyr(parts[0])) {
+              translation = parts[0].trim();
+              chunksStr = parts[1].trim();
+              konstruktion = chunksStr.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+            }
+          }
+
+          let chunks: string[] = [];
+          if (chunksStr && chunksStr.includes('|')) {
+            chunks = chunksStr.split('|').map(s => s.trim()).filter(Boolean);
+          } else if (konstruktion && konstruktion.includes('|')) {
+            chunks = konstruktion.split('|').map(s => s.trim()).filter(Boolean);
+          }
+
+          const fullText = konstruktion 
+            ? konstruktion.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim()
+            : (chunks.length > 0 ? chunks.join(' ') : (parts[0] || ''));
+
+          if (fullText) {
             cards.push({
               id: crypto.randomUUID(),
               targetWord: fullText,
-              sentence: rawGerman,
-              translation: rawRussian,
+              sentence: chunksStr || konstruktion || fullText,
+              translation: translation,
               options: [],
               masteryLevel: 0,
               isArchived: false,
@@ -5210,7 +5310,8 @@ try {
               repetitions: 0,
               baseWordInfo: JSON.stringify({
                 chunks: chunks.length > 0 ? chunks : undefined,
-                fullText: fullText
+                fullText: fullText,
+                exampleEnde: beispielEnde || undefined
               })
             });
           }
