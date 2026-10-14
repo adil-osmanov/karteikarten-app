@@ -1236,6 +1236,8 @@ function RapidFlashcardMode({
       isFlippedRef.current = false;
       setReverse(forcedReverse !== undefined ? forcedReverse : progress >= 2);
       lastFlipTimeRef.current = 0;
+    } else if (forcedReverse !== undefined) {
+      setReverse(forcedReverse);
     }
   }, [card?.id, forcedReverse, progress]);
 
@@ -1605,6 +1607,7 @@ function RapidSession({
             progress={wordProgress[current.card.id] || 0}
             locked={locked}
             onAnswer={handleAnswer}
+            reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
           />
         </AnimatePresence>
       </div>
@@ -1616,12 +1619,16 @@ function RapidStudyCard({
   card,
   deckTitle,
   onAnswer,
-  onNext
+  onNext,
+  isReview = false,
+  reverse
 }: {
   card: Flashcard;
   deckTitle?: string;
   onAnswer: (correct: boolean, isHilfe: boolean) => void;
   onNext: () => void;
+  isReview?: boolean;
+  reverse?: boolean;
 }) {
   const [locked, setLocked] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1645,6 +1652,12 @@ function RapidStudyCard({
     }, 450);
   }, [locked, onAnswer, onNext]);
 
+  // When repeating cards (in a review session or if already archived),
+  // prompt MUST be in Russian (reverse = true) so the user actively recalls the German translation.
+  const isReverse = reverse !== undefined 
+    ? reverse 
+    : (isReview || card.isArchived || progress >= 2);
+
   return (
     <div className="w-full flex justify-center px-4">
       <RapidFlashcardMode
@@ -1654,7 +1667,7 @@ function RapidStudyCard({
         locked={locked}
         onAnswer={handleAnswer}
         deckTitle={deckTitle}
-        reverse={false}
+        reverse={isReverse}
       />
     </div>
   );
@@ -1933,6 +1946,7 @@ function StudyInterface({
             <RapidStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
+              isReview={Boolean(reviewCards || isInitialArchivedDeck || liveCard.isArchived)}
               onAnswer={(correct, isHilfe) => {
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (correct && !isHilfe) {
