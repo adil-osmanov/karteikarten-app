@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, useTransition, useMemo
 import { 
   Check, Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
-  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, Flame, Plus,
+  Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -328,7 +328,7 @@ export interface BookMeta {
   coverImage?: string | null;
   activeLevels: LanguageLevel[];
   category?: 'book' | 'deck' | 'coursebook' | 'flashcards' | string;
-  training_mode?: 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards';
+  training_mode?: 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' | 'redemittel';
   coverType?: 'color' | 'image';
   coverValue?: string;
   accentColor?: string;
@@ -1201,7 +1201,7 @@ export function getCardTrainingMode(
   decks: Deck[] = [],
   books: BookMeta[] = [],
   fallbackMode?: string
-): 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' {
+): 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' | 'redemittel' {
   if (!card) return 'standard_cloze';
 
   const deck = deckId ? decks?.find(d => d.id === deckId) : undefined;
@@ -1232,6 +1232,10 @@ export function getCardTrainingMode(
     return 'preposition_drill';
   }
 
+  if (bookId === 'redemittel' || bookTitleLower.includes('redemittel')) {
+    return 'redemittel';
+  }
+
   if (typeof card.sentence === 'string' && (card.sentence.includes('| Akkusativ') || card.sentence.includes('| Dativ') || card.sentence.includes('| Genitiv'))) {
     return 'preposition_drill';
   }
@@ -1245,8 +1249,8 @@ export function getCardTrainingMode(
   }
 
   // 3. Fallback to passed fallbackMode or 'standard_cloze'
-  if (fallbackMode && ['standard_cloze', 'starke_verben', 'preposition_drill', 'rapid_flashcards'].includes(fallbackMode)) {
-    return fallbackMode as 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards';
+  if (fallbackMode && ['standard_cloze', 'starke_verben', 'preposition_drill', 'rapid_flashcards', 'redemittel'].includes(fallbackMode)) {
+    return fallbackMode as 'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' | 'redemittel';
   }
 
   return 'standard_cloze';
@@ -1962,6 +1966,8 @@ function StudyInterface({
       let textToPreload = '';
       if (mode === 'rapid_flashcards') {
         textToPreload = getCardSpeechText(nextCard);
+      } else if (mode === 'redemittel') {
+        textToPreload = nextCard.targetWord || nextCard.sentence.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
       } else if (mode === 'starke_verben') {
         try {
           const vInfo = JSON.parse(nextCard.baseWordInfo || '{}');
@@ -2064,6 +2070,23 @@ function StudyInterface({
             <VerbStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
+              onAnswer={(correct, isHilfe) => {
+                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
+                if (correct && !isHilfe) {
+                  setMasteredInSession(prev => prev + 1);
+                } else {
+                  if (!isDrillMode) {
+                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
+                  }
+                }
+              }}
+              onNext={handleNext}
+            />
+          ) : currentCardTrainingMode === 'redemittel' ? (
+            <RedemittelStudyCard
+              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              card={liveCard}
+              deckTitle={decks.find(d => d.id === currentDeckId)?.name}
               onAnswer={(correct, isHilfe) => {
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (correct && !isHilfe) {
@@ -3224,7 +3247,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const [title, setTitle] = useState(book?.title || "");
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
   const [category, setCategory] = useState<'book' | 'deck'>((book?.category as 'book' | 'deck') || 'book');
-  const [trainingMode, setTrainingMode] = useState<'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards'>(book?.training_mode || 'standard_cloze');
+  const [trainingMode, setTrainingMode] = useState<'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' | 'redemittel'>(book?.training_mode || 'standard_cloze');
   const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue || "#1C1C1E");
   
   const initialCoverStr = book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null);
@@ -3362,6 +3385,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
               <option value="starke_verben">Starke Verben (3 Formen)</option>
               <option value="preposition_drill">Verben mit Präpositionen</option>
               <option value="rapid_flashcards">Rapid Flashcards (Neu)</option>
+              <option value="redemittel">Redemittel</option>
             </select>
           </div>
         </div>
@@ -4330,6 +4354,382 @@ function VerbStudyCard({
     </motion.div>
   );
 }
+
+// --- REDEMITTEL STUDY CARD ---
+
+export interface RedemittelChunk {
+  id: string;
+  text: string;
+  originalIndex: number;
+}
+
+export interface RedemittelCardData {
+  chunks: string[];
+  shuffledChunks: RedemittelChunk[];
+  translation: string;
+  fullText: string;
+}
+
+export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
+  let chunks: string[] = [];
+  let fullText = '';
+  const translation = card.translation || '';
+
+  // 1. Try reading baseWordInfo if it has precomputed chunks
+  if (card.baseWordInfo && typeof card.baseWordInfo === 'string') {
+    try {
+      const parsed = JSON.parse(card.baseWordInfo);
+      if (Array.isArray(parsed?.chunks) && parsed.chunks.length > 0) {
+        chunks = parsed.chunks.map((c: any) => String(c).trim()).filter(Boolean);
+      }
+      if (parsed?.fullText && typeof parsed.fullText === 'string') {
+        fullText = parsed.fullText.trim();
+      }
+    } catch (e) {}
+  }
+
+  // 2. Check card.sentence or card.targetWord for pipe '|' or ' / ' or ';' delimiters
+  const rawSource = (card.sentence && card.sentence !== 'VERB_DRILL' && card.sentence !== '-') 
+    ? card.sentence 
+    : card.targetWord;
+
+  if (chunks.length === 0 && rawSource) {
+    if (rawSource.includes('|')) {
+      chunks = rawSource.split('|').map(s => s.trim()).filter(Boolean);
+    } else if (rawSource.includes(' / ')) {
+      chunks = rawSource.split(' / ').map(s => s.trim()).filter(Boolean);
+    } else if (rawSource.includes(';') && !rawSource.startsWith('{')) {
+      chunks = rawSource.split(';').map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  // 3. Fallback: smart semantic chunking on sentences without explicit delimiters
+  if (chunks.length === 0 && rawSource) {
+    const cleanSentence = rawSource.replace(/___/g, card.targetWord || '').trim();
+    if (cleanSentence) {
+      // Split on clauses / punctuation while preserving punctuation with the preceding phrase
+      const clauses = cleanSentence.split(/(?<=[,;:\.\?!])\s+/).filter(Boolean);
+      const resultChunks: string[] = [];
+      for (const clause of clauses) {
+        const words = clause.trim().split(/\s+/).filter(Boolean);
+        if (words.length <= 4) {
+          resultChunks.push(clause.trim());
+        } else {
+          // Break into 2-3 word chunks
+          let i = 0;
+          while (i < words.length) {
+            const remaining = words.length - i;
+            let take = 3;
+            if (remaining === 4) take = 2;
+            else if (remaining <= 3) take = remaining;
+            const chunkWords = words.slice(i, i + take);
+            resultChunks.push(chunkWords.join(' '));
+            i += take;
+          }
+        }
+      }
+      chunks = resultChunks.filter(Boolean);
+    }
+  }
+
+  // Fallback if still empty
+  if (chunks.length === 0) {
+    chunks = [card.targetWord || 'Beispielsatz'];
+  }
+
+  if (!fullText) {
+    fullText = rawSource.includes('|') 
+      ? rawSource.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim()
+      : chunks.join(' ').replace(/\s+([,;:\.\?!])/g, '$1').trim();
+  }
+
+  // Shuffled chunks with stable unique IDs
+  const chunkObjects: RedemittelChunk[] = chunks.map((text, idx) => ({
+    id: `chunk-${card.id}-${idx}`,
+    text,
+    originalIndex: idx,
+  }));
+
+  const shuffled = [...chunkObjects].sort(() => Math.random() - 0.5);
+  // Ensure the initial display is actually shuffled if there are 2 or more chunks
+  if (shuffled.length > 1 && shuffled.every((c, i) => c.originalIndex === i)) {
+    const first = shuffled[0];
+    shuffled[0] = shuffled[1];
+    shuffled[1] = first;
+  }
+
+  return {
+    chunks,
+    shuffledChunks: shuffled,
+    translation,
+    fullText,
+  };
+}
+
+export function RedemittelStudyCard({
+  card,
+  deckTitle,
+  onAnswer,
+  onNext,
+}: {
+  card: Flashcard;
+  deckTitle?: string;
+  onAnswer: (correct: boolean, isHilfe: boolean) => void;
+  onNext: () => void;
+}) {
+  const data = useMemo(() => parseRedemittelCard(card), [card]);
+  const [placedChunks, setPlacedChunks] = useState<RedemittelChunk[]>([]);
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handlePlayAudio = useCallback(() => {
+    if (!data.fullText) return;
+    setIsAudioPlaying(true);
+    playGermanSpeech(data.fullText, {
+      onEnd: () => setIsAudioPlaying(false),
+    });
+  }, [data.fullText]);
+
+  const handleSelectChunk = useCallback((chunk: RedemittelChunk) => {
+    if (status === 'success') return;
+    if (placedChunks.some(c => c.id === chunk.id)) return;
+
+    playTockSound();
+    const nextPlaced = [...placedChunks, chunk];
+    setPlacedChunks(nextPlaced);
+
+    // If this completed the phrase, check validity
+    if (nextPlaced.length === data.chunks.length) {
+      const isCorrect = nextPlaced.every((c, i) => c.originalIndex === i);
+      if (isCorrect) {
+        setStatus('success');
+        playFeedbackSound(true);
+        setIsAudioPlaying(true);
+        playGermanSpeech(data.fullText, {
+          onEnd: () => setIsAudioPlaying(false),
+        });
+        onAnswer(true, false);
+        timerRef.current = setTimeout(() => {
+          onNext();
+        }, 1200);
+      } else {
+        setStatus('error');
+        playFeedbackSound(false);
+        onAnswer(false, false);
+      }
+    } else {
+      if (status === 'error') {
+        setStatus('idle');
+      }
+    }
+  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, onNext]);
+
+  const handleRemoveChunk = useCallback((chunk: RedemittelChunk) => {
+    if (status === 'success') return;
+    playTockSound();
+    setPlacedChunks(prev => prev.filter(c => c.id !== chunk.id));
+    if (status === 'error') {
+      setStatus('idle');
+    }
+  }, [status]);
+
+  const handleReset = useCallback(() => {
+    if (status === 'success') return;
+    playTockSound();
+    setPlacedChunks([]);
+    setStatus('idle');
+  }, [status]);
+
+  // Keyboard shortcut support: 1-9 to pick available chunk, Backspace to remove last
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key >= '1' && e.key <= '9') {
+        const num = parseInt(e.key, 10);
+        const available = data.shuffledChunks.filter(c => !placedChunks.some(p => p.id === c.id));
+        if (available[num - 1] && status !== 'success') {
+          e.preventDefault();
+          handleSelectChunk(available[num - 1]);
+        }
+      } else if (e.key === 'Backspace') {
+        if (placedChunks.length > 0 && status !== 'success') {
+          e.preventDefault();
+          handleRemoveChunk(placedChunks[placedChunks.length - 1]);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [data.shuffledChunks, placedChunks, status, handleSelectChunk, handleRemoveChunk]);
+
+  return (
+    <div className="w-full flex justify-center px-4">
+      <motion.div
+        animate={status === 'error' ? { x: [-6, 6, -4, 4, -2, 2, 0] } : { x: 0 }}
+        transition={{ duration: 0.35 }}
+        className={cn(
+          "w-full max-w-2xl rounded-3xl p-6 md:p-8 transition-all duration-300 relative shadow-2xl backdrop-blur-xl border",
+          "bg-white/95 dark:bg-[#1C1C1E]",
+          status === 'success'
+            ? "border-emerald-500/50 shadow-[0_0_35px_rgba(16,185,129,0.18)]"
+            : status === 'error'
+            ? "border-rose-500/50 shadow-[0_0_35px_rgba(244,63,94,0.18)]"
+            : "border-black/[0.08] dark:border-white/10"
+        )}
+      >
+        {/* Header Bar */}
+        <div className="flex items-center justify-between mb-6 pb-2 border-b border-black/[0.05] dark:border-white/[0.06]">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+              Redemittel
+            </span>
+            {deckTitle && (
+              <span className="text-xs text-gray-500 dark:text-zinc-400 font-medium truncate max-w-[200px]">
+                {deckTitle}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {placedChunks.length > 0 && status !== 'success' && (
+              <button
+                onClick={handleReset}
+                className="text-xs text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white px-2 py-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors flex items-center gap-1"
+                title="Zurücksetzen"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Zurücksetzen</span>
+              </button>
+            )}
+            <button
+              onClick={handlePlayAudio}
+              className={cn(
+                "p-2 rounded-xl transition-all",
+                isAudioPlaying
+                  ? "bg-blue-500 text-white scale-105 shadow-md shadow-blue-500/20"
+                  : "bg-gray-100 hover:bg-gray-200 dark:bg-white/5 dark:hover:bg-white/10 text-gray-700 dark:text-zinc-300"
+              )}
+              title="Satz anhören"
+            >
+              <Volume2 className={cn("w-4 h-4", isAudioPlaying && "animate-pulse")} />
+            </button>
+          </div>
+        </div>
+
+        {/* 1. ZONA СБОРКИ (Верх/Центр) */}
+        <div
+          className={cn(
+            "min-h-[110px] md:min-h-[125px] p-4 md:p-5 rounded-xl transition-all duration-300 relative flex flex-wrap items-center justify-center gap-2.5",
+            "bg-zinc-900/60 dark:bg-zinc-900/60 border border-zinc-800",
+            status === 'success' && "border-emerald-500/50 bg-emerald-950/20",
+            status === 'error' && "border-rose-500/50 bg-rose-950/20"
+          )}
+        >
+          {placedChunks.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500 text-sm font-medium py-6 px-4 border border-dashed border-zinc-800 rounded-xl w-full select-none text-center">
+              <span>Wähle die Satzteile unten aus, um den Satz zu bauen</span>
+            </div>
+          ) : (
+            <AnimatePresence>
+              {placedChunks.map((chunk) => (
+                <motion.button
+                  key={chunk.id}
+                  layout
+                  initial={{ scale: 0.85, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.85, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 450, damping: 30 }}
+                  onClick={() => handleRemoveChunk(chunk)}
+                  disabled={status === 'success'}
+                  className={cn(
+                    "px-4 py-2 rounded-lg text-sm md:text-base font-medium shadow-sm transition-all flex items-center gap-1.5 cursor-pointer select-none",
+                    status === 'success'
+                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/50"
+                      : status === 'error'
+                      ? "bg-rose-500/20 text-rose-300 border border-rose-500/50 hover:bg-rose-500/30"
+                      : "bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/30 hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400"
+                  )}
+                  title="Klicken zum Entfernen"
+                >
+                  <span>{chunk.text}</span>
+                  {status !== 'success' && (
+                    <span className="text-xs opacity-50 ml-0.5">×</span>
+                  )}
+                </motion.button>
+              ))}
+            </AnimatePresence>
+          )}
+        </div>
+
+        {/* 2. ПЕРЕВОД (Чуть ниже зоны сборки) */}
+        <div className="text-sm text-zinc-400 font-medium italic mt-4 text-center select-none px-4 min-h-[1.5rem]">
+          {data.translation}
+        </div>
+
+        {/* Status Hint */}
+        {status === 'error' && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-2 text-center text-xs text-rose-400 font-medium"
+          >
+            Reihenfolge nicht korrekt — klicke auf Bausteine, um sie anzupassen
+          </motion.div>
+        )}
+        {status === 'success' && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mt-2 text-center text-xs text-emerald-400 font-medium flex items-center justify-center gap-1.5"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Richtig zusammengesetzt!</span>
+          </motion.div>
+        )}
+
+        {/* 3. ПЛИТКИ ВЫБОРА (Внизу карточки) */}
+        <div className="mt-6 pt-4 border-t border-black/[0.04] dark:border-white/[0.05]">
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
+            {data.shuffledChunks.map((chunk) => {
+              const isPlaced = placedChunks.some(c => c.id === chunk.id);
+              if (isPlaced) {
+                return (
+                  <div
+                    key={chunk.id}
+                    className="px-4 py-2 rounded-lg border border-dashed border-zinc-700/50 text-transparent text-sm md:text-base font-medium select-none pointer-events-none opacity-20 bg-zinc-800/20"
+                  >
+                    {chunk.text}
+                  </div>
+                );
+              }
+              return (
+                <motion.button
+                  key={chunk.id}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                  onClick={() => handleSelectChunk(chunk)}
+                  disabled={status === 'success'}
+                  className="bg-zinc-800/80 hover:bg-zinc-700 text-zinc-100 transition-all cursor-pointer px-4 py-2 rounded-lg border border-zinc-700/50 text-sm md:text-base font-medium shadow-sm backdrop-blur-md select-none"
+                >
+                  {chunk.text}
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function App() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -4685,6 +5085,7 @@ try {
       const bookTitleLower = (currentBook?.title || '').toLowerCase();
       if (currentBookId === 'verbs-de') tm = 'starke_verben';
       else if (currentBookId === 'prep-verbs-de' || bookTitleLower.includes('präposition')) tm = 'preposition_drill';
+      else if (currentBookId === 'redemittel' || bookTitleLower.includes('redemittel')) tm = 'redemittel';
       else if (currentBook?.category === 'flashcards' || currentBook?.category === 'deck') tm = 'rapid_flashcards';
       else tm = 'standard_cloze';
     }
@@ -4748,6 +5149,7 @@ try {
         const isPrepBookObj = trainingMode === 'preposition_drill' || activeBookId === 'prep-verbs-de' || (activeBook?.title || '').toLowerCase().includes('präposition');
         const isVerbBookObj = trainingMode === 'starke_verben' || activeBookId === 'verbs-de';
         const isRapidMode = trainingMode === 'rapid_flashcards';
+        const isRedemittelMode = trainingMode === 'redemittel' || (activeBook?.title || '').toLowerCase().includes('redemittel');
         
         if (isPrepBookObj) {
           if (parts.length >= 4) {
@@ -4784,6 +5186,32 @@ try {
               interval: 0,
               repetitions: 0,
               baseWordInfo: JSON.stringify({ infinitiv, praesens, praeteritum, perfekt })
+            });
+          }
+        } else if (isRedemittelMode) {
+          if (parts.length >= 2) {
+            const rawGerman = parts[0];
+            const rawRussian = parts[1];
+            const chunks = rawGerman.includes('|')
+              ? rawGerman.split('|').map(s => s.trim()).filter(Boolean)
+              : [];
+            const fullText = rawGerman.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+            
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord: fullText,
+              sentence: rawGerman,
+              translation: rawRussian,
+              options: [],
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0,
+              baseWordInfo: JSON.stringify({
+                chunks: chunks.length > 0 ? chunks : undefined,
+                fullText: fullText
+              })
             });
           }
         } else if (isRapidMode) {
