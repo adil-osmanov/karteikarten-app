@@ -5,7 +5,7 @@ import {
   Check, Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
-  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle
+  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from 'sonner';
@@ -3158,6 +3158,51 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
 
 
+interface ModeBadgeInfo {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  iconColor: string;
+}
+
+function getBookModeBadge(book: BookMeta): ModeBadgeInfo | null {
+  const mode = book.training_mode;
+  const isFlashcardCategory = book.category === 'flashcards';
+
+  if (mode === 'rapid_flashcards' || isFlashcardCategory) {
+    return {
+      label: 'KARTEN • BLITZKARTEN',
+      icon: Layers,
+      iconColor: 'text-amber-400',
+    };
+  }
+
+  if (mode === 'redemittel') {
+    return {
+      label: 'REDEMITTEL',
+      icon: Shuffle,
+      iconColor: 'text-sky-400',
+    };
+  }
+
+  if (mode === 'starke_verben') {
+    return {
+      label: 'STARKE VERBEN',
+      icon: Flame,
+      iconColor: 'text-rose-400',
+    };
+  }
+
+  if (mode === 'preposition_drill') {
+    return {
+      label: 'PRÄPOSITIONEN',
+      icon: Database,
+      iconColor: 'text-purple-400',
+    };
+  }
+
+  return null;
+}
+
 const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
   const initialCoverStr = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
   let lightCover = initialCoverStr;
@@ -3173,6 +3218,8 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
   
   const isImage = !!(lightCover || darkCover);
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
+  const badge = getBookModeBadge(book);
+  const BadgeIcon = badge?.icon;
 
   return (
     <div className="relative group w-full h-full flex flex-col">
@@ -3186,17 +3233,37 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
       <div onClick={onClick} className="relative z-10 cursor-pointer w-full h-full rounded-[20px] overflow-hidden bg-white dark:bg-[#1C1C1E] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-none border border-black/[0.04] dark:border-white/10 hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 flex flex-col">
         
         {/* Cover Image Section */}
-        <div className="relative w-full aspect-[2/3] shrink-0" style={isImage ? {} : { backgroundColor: tintColor }}>
+        <div className="relative w-full aspect-[2/3] shrink-0 overflow-hidden" style={isImage ? {} : { backgroundColor: tintColor }}>
           {lightCover && (
-            <img src={lightCover} className={cn("absolute inset-0 w-full h-full object-cover", darkCover ? "dark:hidden" : "")} alt="Light Cover" />
+            <img 
+              src={lightCover} 
+              className={cn("absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ease-out", darkCover ? "dark:hidden" : "")} 
+              alt="Light Cover" 
+            />
           )}
           {darkCover && (
-            <img src={darkCover} className={cn("absolute inset-0 w-full h-full object-cover", lightCover ? "hidden dark:block" : "")} alt="Dark Cover" />
+            <img 
+              src={darkCover} 
+              className={cn("absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ease-out", lightCover ? "hidden dark:block" : "")} 
+              alt="Dark Cover" 
+            />
           )}
           
           {/* Inner Ring for Cover */}
           <div className="absolute inset-0 ring-1 ring-black/5 dark:ring-white/10 pointer-events-none z-30" />
           
+          {/* Dynamic Apple Glassmorphism Mode Badge */}
+          {badge && BadgeIcon && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none w-max max-w-[90%]">
+              <div className="px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/40 group-hover:bg-black/55 dark:bg-black/50 dark:group-hover:bg-black/65 backdrop-blur-md border border-white/15 group-hover:border-white/25 shadow-lg transition-all duration-300 transform-gpu">
+                <BadgeIcon className={cn("w-3.5 h-3.5 shrink-0", badge.iconColor)} />
+                <span className="text-[11px] font-semibold tracking-wider uppercase text-white/95 select-none truncate">
+                  {badge.label}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Action Buttons */}
           <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-40">
             <button onClick={onEdit} className="p-2 text-white/90 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
