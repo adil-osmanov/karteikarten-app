@@ -934,11 +934,18 @@ function getBestGermanVoice(): SpeechSynthesisVoice | null {
   const germanVoices = voices.filter(v => v.lang && (v.lang.startsWith('de') || v.lang.startsWith('DE')));
   if (germanVoices.length === 0) return null;
 
-  // Prioritize high-quality natural voices
-  const preferred = germanVoices.find(v => 
-    /neural|natural|siri|google|microsoft|katja|conrad|anna|markus|yannick/i.test(v.name)
+  // Filter out any female voice names
+  const isFemale = (name: string) =>
+    /anna|katja|petra|hedda|gisela|marlene|vicki|amala|louisa|elke|klara|helena|zira|steffi|maren|gudrun|sybille|sabine|monika|claudia|birgit|ulrike|heike|brigitte|ingrid|renate|ursula|female|weiblich/i.test(name);
+
+  const maleVoices = germanVoices.filter(v => !isFemale(v.name));
+
+  // Prioritize known high-quality male German voices
+  const preferred = maleVoices.find(v => 
+    /markus|yannick|viktor|martin|conrad|killian|stefan|bernd|christoph|ralf|kasper|male|männlich/i.test(v.name)
   );
-  cachedGermanVoice = preferred || germanVoices[0];
+  // Strictly enforce male voice only; do not fall back to female voices
+  cachedGermanVoice = preferred || (maleVoices.length > 0 ? maleVoices[0] : null);
   return cachedGermanVoice;
 }
 
@@ -977,7 +984,17 @@ export function speakNative(
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.lang = 'de-DE';
     const voice = getBestGermanVoice();
-    if (voice) utterance.voice = voice;
+    // Strictly prevent female voice playback when online
+    if (typeof navigator !== 'undefined' && navigator.onLine && !voice) {
+      if (onEnded) onEnded();
+      return false;
+    }
+    if (voice) {
+      utterance.voice = voice;
+    } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const anyGerman = window.speechSynthesis.getVoices().find(v => v.lang && (v.lang.startsWith('de') || v.lang.startsWith('DE')));
+      if (anyGerman) utterance.voice = anyGerman;
+    }
     utterance.rate = Math.max(0.7, Math.min(1.3, rate));
 
     let hasEnded = false;
@@ -1032,7 +1049,7 @@ let activeSpeechAbortCtrl: AbortController | null = null;
 export async function playGermanSpeech(text: string, options?: PlaySpeechOptions) {
   if (typeof window === 'undefined') return;
 
-  const cleanText = text.replace(/\|/g, '').trim();
+  const cleanText = text.replace(/\|/g, '').replace(/___+/g, '').trim();
   if (!cleanText) {
     if (options?.onEnd) options.onEnd();
     return;
@@ -1091,13 +1108,13 @@ export async function playGermanSpeech(text: string, options?: PlaySpeechOptions
     }
   }
 
-  // 2. Fetch /api/tts with 5000ms timeout
+  // 2. Fetch /api/tts with 7500ms timeout
   if (activeSpeechAbortCtrl) {
     activeSpeechAbortCtrl.abort();
   }
   const abortCtrl = new AbortController();
   activeSpeechAbortCtrl = abortCtrl;
-  const timeoutId = setTimeout(() => abortCtrl.abort(), 5000);
+  const timeoutId = setTimeout(() => abortCtrl.abort(), 7500);
 
   try {
     const res = await fetch('/api/tts', {
@@ -4679,6 +4696,14 @@ export function RedemittelStudyCard({
         return;
       }
 
+      if (e.key === 'Escape') {
+        if (placedChunks.length > 0 && status !== 'success' && status !== 'surrender') {
+          e.preventDefault();
+          handleReset();
+        }
+        return;
+      }
+
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         handlePlayAudio();
@@ -4694,7 +4719,7 @@ export function RedemittelStudyCard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [availableChunks, placedChunks, status, onNext, handleSelectChunk, handleRemoveChunk, handlePlayAudio, handleSurrender]);
+  }, [availableChunks, placedChunks, status, onNext, handleSelectChunk, handleRemoveChunk, handleReset, handlePlayAudio, handleSurrender]);
 
   return (
     <div className="w-full flex justify-center px-4">
@@ -4728,11 +4753,11 @@ export function RedemittelStudyCard({
 
           {/* Right: Reset (Zurücksetzen), HelpCircle (?), 4 mastery round dots */}
           <div className="flex items-center gap-3">
-            {placedChunks.length > 0 && status === 'idle' && (
+            {placedChunks.length > 0 && status !== 'success' && status !== 'surrender' && (
               <button
                 onClick={handleReset}
                 className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
-                title="Zurücksetzen"
+                title="Zurücksetzen (Esc)"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>

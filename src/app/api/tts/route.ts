@@ -22,7 +22,11 @@ const MAX_SERVER_CACHE_ITEMS = 1000;
 const FALLBACK_VOICES = [
   "de-DE-KillianNeural",
   "de-DE-ConradNeural",
-  "de-DE-KatjaNeural",
+  "de-DE-BerndNeural",
+  "de-DE-ChristophNeural",
+  "de-DE-KasperNeural",
+  "de-DE-RalfNeural",
+  "de-DE-FlorianMultilingualNeural",
 ];
 
 function getCacheFilename(text: string): string {
