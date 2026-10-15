@@ -4238,8 +4238,8 @@ function PrepStudyCard({
             {[
               { k: 'NOM', hover: 'hover:bg-zinc-200 dark:hover:bg-white/20', success: 'bg-zinc-500 text-white' },
               { k: 'GEN', hover: 'hover:bg-purple-200 dark:hover:bg-purple-500/30', success: 'bg-purple-500 text-white' },
-              { k: 'DAT', hover: 'hover:bg-blue-200 dark:hover:bg-blue-500/30', success: 'bg-blue-500 text-white' },
-              { k: 'AKK', hover: 'hover:bg-orange-200 dark:hover:bg-[#FF9500]/30', success: 'bg-[#FF9500] text-white' }
+              { k: 'AKK', hover: 'hover:bg-orange-200 dark:hover:bg-[#FF9500]/30', success: 'bg-[#FF9500] text-white' },
+              { k: 'DAT', hover: 'hover:bg-blue-200 dark:hover:bg-blue-500/30', success: 'bg-blue-500 text-white' }
             ].map(({ k, hover, success }) => {
               const isError = wrongKasus === k;
               const isWinner = (isSuccess || isHilfe) && kasusRaw === k;
