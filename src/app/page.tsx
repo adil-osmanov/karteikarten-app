@@ -79,51 +79,82 @@ function createFallbackAudio(src: string, vol: number): HTMLAudioElement | null 
   }
 }
 
+let keepAliveSource: AudioBufferSourceNode | null = null;
+
+function ensureAudioKeepAlive(ctx: AudioContext) {
+  if (keepAliveSource) return;
+  try {
+    const silentBuffer = ctx.createBuffer(1, 1, 22050);
+    const source = ctx.createBufferSource();
+    source.buffer = silentBuffer;
+    source.loop = true;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001; // Inaudible, keeps CoreAudio hardware awake in Safari
+    source.connect(gain);
+    gain.connect(ctx.destination);
+    source.start(0);
+    keepAliveSource = source;
+  } catch (e) {}
+}
+
 export const getAudioContext = (): AudioContext | null => {
   if (typeof window === 'undefined') return null;
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   if (!AudioCtx) return null;
 
-  if (!globalAudioCtx || globalAudioCtx.state === 'closed') {
+  // If context is closed or interrupted by Safari media session, recycle it
+  if (!globalAudioCtx || globalAudioCtx.state === 'closed' || (globalAudioCtx.state as any) === 'interrupted') {
     try {
+      if (globalAudioCtx) {
+        try { globalAudioCtx.close(); } catch (e) {}
+      }
       globalAudioCtx = new AudioCtx();
       lastDecodedCtx = null;
       tockBuffer = null;
       successBuffer = null;
       failBuffer = null;
+      keepAliveSource = null;
     } catch (e) {
       return null;
     }
   }
 
-  if (globalAudioCtx.state === 'suspended' || (globalAudioCtx.state as any) === 'interrupted') {
+  if (globalAudioCtx.state === 'suspended') {
     globalAudioCtx.resume().catch(() => {});
   }
+
+  ensureAudioKeepAlive(globalAudioCtx);
 
   return globalAudioCtx;
 };
 
-// Pure Web Audio API synthesizers — zero external files, zero latency, impossible to fail or exhaust
+// Pure Web Audio API synthesizers — zero external files, zero latency, impossible to fail in WebKit/Safari
 function synthesizeTock(ctx: AudioContext, volume: number = 0.3) {
   try {
+    if (ctx.state !== 'running') {
+      ctx.resume().catch(() => {});
+    }
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    const now = ctx.currentTime;
+    const now = Math.max(ctx.currentTime, 0.001) + 0.002;
     osc.type = 'sine';
     osc.frequency.setValueAtTime(1400, now);
-    osc.frequency.exponentialRampToValueAtTime(180, now + 0.025);
+    osc.frequency.setTargetAtTime(180, now, 0.007);
     gain.gain.setValueAtTime(volume * 0.7, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
+    gain.gain.setTargetAtTime(0.0001, now, 0.007);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.03);
+    osc.stop(now + 0.04);
   } catch (e) {}
 }
 
 function synthesizeSuccess(ctx: AudioContext, volume: number = 0.4) {
   try {
-    const now = ctx.currentTime;
+    if (ctx.state !== 'running') {
+      ctx.resume().catch(() => {});
+    }
+    const now = Math.max(ctx.currentTime, 0.001) + 0.002;
     [
       { freq: 523.25, start: 0, dur: 0.22, vol: volume * 0.6 },
       { freq: 783.99, start: 0.07, dur: 0.28, vol: volume * 0.75 },
@@ -134,18 +165,21 @@ function synthesizeSuccess(ctx: AudioContext, volume: number = 0.4) {
       osc.frequency.setValueAtTime(freq, now + start);
       gain.gain.setValueAtTime(0.001, now + start);
       gain.gain.linearRampToValueAtTime(vol, now + start + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      gain.gain.setTargetAtTime(0.0001, now + start + 0.02, dur * 0.35);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now + start);
-      osc.stop(now + start + dur + 0.02);
+      osc.stop(now + start + dur + 0.03);
     });
   } catch (e) {}
 }
 
 function synthesizeFail(ctx: AudioContext, volume: number = 0.4) {
   try {
-    const now = ctx.currentTime;
+    if (ctx.state !== 'running') {
+      ctx.resume().catch(() => {});
+    }
+    const now = Math.max(ctx.currentTime, 0.001) + 0.002;
     [
       { freq: 220, start: 0, dur: 0.12, vol: volume * 0.5 },
       { freq: 164.81, start: 0.07, dur: 0.2, vol: volume * 0.6 },
@@ -156,11 +190,11 @@ function synthesizeFail(ctx: AudioContext, volume: number = 0.4) {
       osc.frequency.setValueAtTime(freq, now + start);
       gain.gain.setValueAtTime(0.001, now + start);
       gain.gain.linearRampToValueAtTime(vol, now + start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      gain.gain.setTargetAtTime(0.0001, now + start + 0.02, dur * 0.3);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now + start);
-      osc.stop(now + start + dur + 0.02);
+      osc.stop(now + start + dur + 0.03);
     });
   } catch (e) {}
 }
@@ -222,20 +256,20 @@ export async function loadAudioBuffers() {
 
 function playBufferDirect(buffer: AudioBuffer | null, volume: number): boolean {
   const ctx = getAudioContext();
-  if (!ctx) return false;
+  if (!ctx || !buffer) return false;
 
   try {
-    if (ctx.state === 'suspended' || (ctx.state as any) === 'interrupted') {
+    if (ctx.state !== 'running') {
       ctx.resume().catch(() => {});
     }
-    if (!buffer) return false;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     const gainNode = ctx.createGain();
-    gainNode.gain.setValueAtTime(volume, ctx.currentTime);
+    const now = Math.max(ctx.currentTime, 0.001) + 0.001;
+    gainNode.gain.setValueAtTime(volume, now);
     source.connect(gainNode);
     gainNode.connect(ctx.destination);
-    source.start(0);
+    source.start(now);
     return true;
   } catch (e) {
     return false;
@@ -268,7 +302,10 @@ function playFallback(type: 'tock' | 'success' | 'fail', volume: number) {
 export const playTockSound = () => {
   const ctx = getAudioContext();
   if (ctx) {
-    const played = playBufferDirect(tockBuffer, 0.3);
+    if (ctx.state !== 'running') {
+      ctx.resume().catch(() => {});
+    }
+    const played = tockBuffer ? playBufferDirect(tockBuffer, 0.3) : false;
     if (!played) {
       synthesizeTock(ctx, 0.3);
       loadAudioBuffers();
@@ -283,7 +320,10 @@ export const playFeedbackSound = (isCorrect: boolean) => {
   const buffer = isCorrect ? successBuffer : failBuffer;
   const vol = 0.4;
   if (ctx) {
-    const played = playBufferDirect(buffer, vol);
+    if (ctx.state !== 'running') {
+      ctx.resume().catch(() => {});
+    }
+    const played = buffer ? playBufferDirect(buffer, vol) : false;
     if (!played) {
       if (isCorrect) synthesizeSuccess(ctx, vol);
       else synthesizeFail(ctx, vol);
@@ -863,6 +903,7 @@ export const resetSharedSpeechAudio = () => {
 };
 
 // Safari: Unlock both Web Audio Context and HTML5 Audio pipeline synchronously inside user gestures
+let html5AudioPrimed = false;
 export const unlockRapidAudio = () => {
   try {
     const ctx = getAudioContext();
@@ -871,19 +912,32 @@ export const unlockRapidAudio = () => {
     }
     loadAudioBuffers();
 
-    // Prime the HTML5 audio element so Safari marks it as user-activated for future async calls
-    const audio = getSharedSpeechAudio();
-    if (audio && !audio.src) {
-      audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-      audio.play().then(() => audio.pause()).catch(() => {});
+    // Prime the HTML5 audio element only ONCE for user-activation in Safari
+    if (!html5AudioPrimed) {
+      html5AudioPrimed = true;
+      const audio = getSharedSpeechAudio();
+      if (audio && !audio.src) {
+        audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        audio.play().then(() => {
+          audio.pause();
+          audio.src = '';
+        }).catch(() => {});
+      }
     }
   } catch (e) {}
 };
 
 let audioUnlocked = false;
 const globalAudioUnlock = () => {
-  unlockRapidAudio();
+  if (audioUnlocked) return;
   audioUnlocked = true;
+  unlockRapidAudio();
+  if (typeof window !== 'undefined') {
+    document.removeEventListener('click', globalAudioUnlock);
+    document.removeEventListener('keydown', globalAudioUnlock);
+    document.removeEventListener('touchstart', globalAudioUnlock);
+    document.removeEventListener('pointerdown', globalAudioUnlock);
+  }
 };
 
 if (typeof window !== 'undefined') {
@@ -4805,7 +4859,7 @@ export function RedemittelStudyCard({
             animate={status === 'error' ? { x: [-6, 6, -5, 5, -2, 2, 0] } : { x: 0 }}
             transition={{ duration: 0.35, ease: "easeInOut" }}
             className={cn(
-              "w-full min-h-[64px] p-4 rounded-2xl transition-all duration-200 relative flex flex-wrap items-center justify-center gap-2",
+              "w-full min-h-[64px] p-4 rounded-2xl transition-colors duration-200 relative flex flex-wrap items-center justify-center gap-2",
               "bg-black/[0.02] dark:bg-white/[0.03] border border-black/10 dark:border-white/10",
               status === 'success' && "border-emerald-500/30 bg-emerald-500/[0.04]",
               status === 'surrender' && "border-zinc-300 dark:border-zinc-600/70 bg-zinc-100 dark:bg-zinc-800/90",
@@ -4817,19 +4871,18 @@ export function RedemittelStudyCard({
                 Нажмите на блоки ниже для сборки
               </span>
             )}
-            <AnimatePresence mode="popLayout">
+            <AnimatePresence>
               {placedChunks.map((chunk) => (
                 <motion.button
                   key={chunk.id}
-                  layout
-                  initial={{ scale: 0.85, opacity: 0, y: 4 }}
+                  initial={{ scale: 0.9, opacity: 0, y: 3 }}
                   animate={{ scale: 1, opacity: 1, y: 0 }}
-                  exit={{ scale: 0.85, opacity: 0, y: -4 }}
-                  transition={{ type: "spring", stiffness: 500, damping: 32 }}
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
                   onClick={() => handleRemoveChunk(chunk)}
                   disabled={status === 'success' || status === 'surrender'}
                   className={cn(
-                    "px-4 py-2 rounded-xl text-base font-medium shadow-sm transition-all duration-150 select-none active:scale-95",
+                    "px-4 py-2 rounded-xl text-base font-medium shadow-sm transition-colors duration-150 select-none active:scale-95",
                     status === 'success'
                       ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30 cursor-default"
                       : status === 'surrender'
@@ -4881,28 +4934,26 @@ export function RedemittelStudyCard({
                   const availableIdx = availableChunks.findIndex(c => c.id === chunk.id);
                   const hotkeyNum = availableIdx !== -1 ? availableIdx + 1 : null;
 
-                  if (isPlaced) {
-                    return (
-                      <div
-                        key={chunk.id}
-                        className="opacity-20 pointer-events-none scale-95 transition-all duration-150 px-4 py-2.5 rounded-xl text-base font-normal border border-black/5 dark:border-white/5 text-zinc-400 dark:text-zinc-500 bg-black/[0.02] dark:bg-white/[0.02] select-none flex items-center gap-2"
-                      >
-                        <span>{chunk.text}</span>
-                      </div>
-                    );
-                  }
-
                   return (
                     <button
                       key={chunk.id}
-                      onClick={() => handleSelectChunk(chunk)}
-                      className="bg-gray-100 hover:bg-gray-200 border-black/5 text-zinc-900 dark:bg-zinc-800/90 dark:hover:bg-zinc-700/90 dark:border-white/10 dark:text-zinc-100 text-base font-normal px-4 py-2.5 rounded-xl shadow-sm transition-all duration-150 active:scale-95 cursor-pointer flex items-center gap-2 select-none border"
-                    >
-                      {hotkeyNum !== null && hotkeyNum <= 9 && (
-                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 bg-black/5 dark:bg-white/5 px-1.5 py-0.5 rounded border border-black/5 dark:border-white/5 font-mono select-none">
-                          {hotkeyNum}
-                        </span>
+                      onClick={() => !isPlaced && handleSelectChunk(chunk)}
+                      disabled={isPlaced}
+                      className={cn(
+                        "text-base font-normal px-4 py-2.5 rounded-xl transition-colors duration-150 flex items-center gap-2 select-none border",
+                        isPlaced
+                          ? "opacity-20 cursor-default bg-black/[0.02] dark:bg-white/[0.02] border-black/5 dark:border-white/5 text-zinc-400 dark:text-zinc-500"
+                          : "bg-gray-100 hover:bg-gray-200 border-black/5 text-zinc-900 dark:bg-zinc-800/90 dark:hover:bg-zinc-700/90 dark:border-white/10 dark:text-zinc-100 shadow-sm active:scale-95 cursor-pointer"
                       )}
+                    >
+                      <span
+                        className={cn(
+                          "text-[10px] bg-black/5 dark:bg-white/5 px-1.5 py-0.5 rounded border border-black/5 dark:border-white/5 font-mono select-none transition-opacity duration-150",
+                          isPlaced || hotkeyNum === null || hotkeyNum > 9 ? "invisible" : "text-zinc-500 dark:text-zinc-400"
+                        )}
+                      >
+                        {hotkeyNum && hotkeyNum <= 9 ? hotkeyNum : "1"}
+                      </span>
                       <span>{chunk.text}</span>
                     </button>
                   );
