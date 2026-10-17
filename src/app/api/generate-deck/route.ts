@@ -1,13 +1,26 @@
 import { NextResponse } from 'next/server';
 import Groq from 'groq-sdk';
 
-// Получаем список ключей из переменной окружения (поддерживаем разделение запятой)
+// Получаем список ключей из переменных окружения (GROQ_API_KEYS, GROQ_API_KEY, GROQ_API_KEY_2)
 function getGroqApiKeys(): string[] {
-  const raw = process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || '';
-  return raw
-    .split(',')
-    .map((k) => k.trim().replace(/^["']|["']$/g, ''))
-    .filter((k) => k.length > 0);
+  const sources = [
+    process.env.GROQ_API_KEYS,
+    process.env.GROQ_API_KEY,
+    process.env.GROQ_API_KEY_2,
+    process.env.NEXT_PUBLIC_GROQ_API_KEY
+  ].filter(Boolean) as string[];
+
+  const allKeys: string[] = [];
+  for (const src of sources) {
+    const parts = src.split(',').map((k) => k.trim().replace(/^["']|["']$/g, ''));
+    for (const p of parts) {
+      if (p && p.startsWith('gsk_') && !allKeys.includes(p)) {
+        allKeys.push(p);
+      }
+    }
+  }
+
+  return allKeys;
 }
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -120,9 +133,14 @@ export async function POST(req: Request) {
 
     const isGrammar = category.toLowerCase().includes('grammat');
     const targetCount = Math.max(5, Math.min(50, Number(count) || 15));
+    const hasImages = Array.isArray(images) && images.length > 0;
 
-    // Рабочая модель Groq (qwen3.8-27b поддерживает и зрение/OCR, и текст, и активна на всех ключах):
-    const model = 'qwen/qwen3.8-27b';
+    // Пул моделей:
+    // - Со скриншотами: строго Vision-модель qwen3.8-27b
+    // - Для чисто текстовых запросов: сначала openai/gpt-oss-120b (быстрая, высокое качество, отдельный лимит токенов), затем qwen3.8-27b
+    const modelsToTry = hasImages 
+      ? ['qwen/qwen3.8-27b'] 
+      : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
 
     const systemPrompt = `Ты — ведущий немецкий методист и экзаменатор уровня B1–B2 (Goethe-Institut / Duden).
 Твоя задача — составить ровно ${targetCount} карточек для тренировки.
@@ -180,7 +198,7 @@ export async function POST(req: Request) {
       { type: 'text', text: `Тема: "${title}" (${level}). Режим: ${isGrammar ? 'Grammatik' : 'Wörter'}. Сгенерируй ровно ${targetCount} карточек.` }
     ];
 
-    if (images && images.length > 0) {
+    if (hasImages) {
       images.forEach((imgBase64: string) => {
         userContent.push({
           type: 'image_url',
@@ -191,57 +209,60 @@ export async function POST(req: Request) {
 
     let lastError: any = null;
 
-    // Последовательно перебираем ключи, если ловим Rate Limit (429)
+    // Последовательно перебираем ключи и доступные модели
     for (let i = 0; i < keys.length; i++) {
       const apiKey = keys[i];
-      try {
-        const groq = new Groq({ apiKey });
+      const groq = new Groq({ apiKey });
 
-        console.log(`[API generate-deck] Querying model ${model} with key ${i + 1}/${keys.length}...`);
-        const completion = await groq.chat.completions.create({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: images && images.length > 0 ? (userContent as any) : `Тема: "${title}". Сгенерируй ровно ${targetCount} карточек.` }
-          ],
-          response_format: { type: 'json_object' },
-          temperature: 0.15,
-        });
-
-        let raw = completion.choices[0]?.message?.content || '{}';
-        raw = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
-        
-        let result: any = null;
+      for (const model of modelsToTry) {
         try {
-          result = JSON.parse(raw);
-        } catch (pErr) {
-          console.error('[API generate-deck] Failed to parse JSON from LLM:', raw);
-          throw new Error('Модель вернула некорректный ответ');
-        }
+          console.log(`[API generate-deck] Querying model ${model} with key ${i + 1}/${keys.length}...`);
+          const completion = await groq.chat.completions.create({
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: hasImages ? (userContent as any) : `Тема: "${title}". Сгенерируй ровно ${targetCount} карточек.` }
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.15,
+          });
 
-        const rawCards = Array.isArray(result?.cards) ? result.cards : [];
-        if (rawCards.length === 0) {
-          console.warn('[API generate-deck] LLM returned empty cards array');
-          throw new Error('Модель вернула некорректный ответ');
-        }
+          let raw = completion.choices[0]?.message?.content || '{}';
+          raw = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+          
+          let result: any = null;
+          try {
+            result = JSON.parse(raw);
+          } catch (pErr) {
+            console.error('[API generate-deck] Failed to parse JSON from LLM:', raw);
+            throw new Error('Модель вернула некорректный ответ');
+          }
 
-        const validatedCards = rawCards.map(sanitizeAndValidateCard);
-        console.log(`[API generate-deck] Successfully generated and validated ${validatedCards.length} cards`);
+          const rawCards = Array.isArray(result?.cards) ? result.cards : [];
+          if (rawCards.length === 0) {
+            console.warn('[API generate-deck] LLM returned empty cards array');
+            throw new Error('Модель вернула некорректный ответ');
+          }
 
-        return NextResponse.json({ success: true, cards: validatedCards });
-      } catch (err: any) {
-        lastError = err;
-        const isRateLimit = err?.status === 429 || (err?.message && err.message.includes('429'));
-        console.warn(`[Groq Key ${i + 1}/${keys.length}] Ошибка:`, err?.status || err?.message);
+          const validatedCards = rawCards.map(sanitizeAndValidateCard);
+          console.log(`[API generate-deck] Successfully generated and validated ${validatedCards.length} cards using ${model} (key ${i + 1})`);
 
-        // Если это ошибка 429 (Rate Limit) и есть следующий ключ — пробуем его
-        if (isRateLimit && i < keys.length - 1) {
-          console.info(`Переключаемся на резервный API-ключ (${i + 2}/${keys.length})...`);
+          return NextResponse.json({ success: true, cards: validatedCards });
+        } catch (err: any) {
+          lastError = err;
+          const isRateLimit = err?.status === 429 || 
+            (err?.message && (err.message.includes('429') || err.message.includes('Rate limit') || err.message.includes('rate_limit_exceeded'))) ||
+            err?.error?.code === 'rate_limit_exceeded';
+
+          console.warn(`[Groq Key ${i + 1}/${keys.length}, Model ${model}] Error:`, err?.status || err?.message);
+
+          if (isRateLimit) {
+            // Переходим к следующей модели или следующему ключу
+            continue;
+          }
+          // Другая ошибка — пробуем следующую модель
           continue;
         }
-
-        // Если это не 429 или ключи закончились — выходим из цикла
-        break;
       }
     }
 
