@@ -3062,12 +3062,9 @@ function StudyCard({
             {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
           </p>
 
-          {(card.hint || card.forms) && (
-            <div className="mt-4 flex justify-center">
-              <div className={cn(
-                "px-4 py-2 rounded-2xl border text-xs font-medium tracking-wide shadow-sm max-w-md text-center transition-all",
-                getHintColorClasses(card.hint || card.forms || '')
-              )}>
+          {phase === "Answer" && (card.hint || card.forms) && (
+            <div className="mt-3.5 flex justify-center animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="px-3.5 py-1.5 rounded-full bg-zinc-900/80 border border-white/10 text-xs font-medium text-zinc-300 shadow-sm inline-flex items-center gap-2 backdrop-blur-md">
                 {card.hint || card.forms}
               </div>
             </div>
