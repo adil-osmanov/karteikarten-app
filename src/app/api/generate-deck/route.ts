@@ -111,10 +111,22 @@ export async function POST(req: Request) {
     const isGrammar = category.toLowerCase().includes('grammat');
     const targetCount = Math.max(5, Math.min(50, Number(count) || 15));
 
-    const systemPrompt = `Ты — строгий экзаменатор немецкого языка уровня B1/B2 (Goethe-Institut / telc).
-Твоя цель — составить ${targetCount} безупречных предложений.
+    const systemPrompt = `Ты — ведущий немецкий методист и экзаменатор (Duden / Goethe-Institut).
+Твоя цель — составить ${targetCount} карточек.
 
-1. ЖЕЛЕЗНЫЙ ЗАКОН НЕМЕЦКОЙ РАМКИ (SATZKLAMMER & AUSKLAMMERUNGSVERBOT):
+КАТЕГОРИЧЕСКИЕ ПРАВИЛА СОСТАВЛЕНИЯ СЛОВ И ПРОПУСКОВ:
+
+1. ПРАВИЛО НЕМЕЦКИХ СЛОЖНЫХ СЛОВ (KOMPOSITA):
+   - В немецком языке сложные существительные пишутся СТРОГО СЛИТНО В ОДНО СЛОВО!
+   - ❌ КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО разделять слова пробелом: "Violin Unterricht", "Bewerbung Training", "Sprach Kurs"!
+   - ✅ СТРОГО СЛИТНО: "Violinunterricht", "Bewerbungstraining", "Sprachkurs".
+   - ❌ ЗАПРЕЩЕНО делать пропуск на половине составного слова: "...seit drei Jahren ___ Unterricht."
+   - ✅ ПРОПУСКАЕТСЯ СТРОГО ВСЕ СЛОВО ЦЕЛИКОМ: "Sie besucht seit drei Jahren ___ ." (targetWord: "Violinunterricht").
+
+2. ПРАВИЛО ПРОПУСКА ЦЕЛОГО СЛОВА:
+   - Пропуском "___" всегда является ЦЕЛОЕ, самостоятельное слово или глагольная форма. Никогда не отрывай от слова суффиксы, префиксы или корни существительных.
+
+3. ЖЕЛЕЗНЫЙ ЗАКОН НЕМЕЦКОЙ РАМКИ (SATZKLAMMER & AUSKLAMMERUNGSVERBOT):
    - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО ставить Partizip II или Infinitiv в середину предложения перед обстоятельствами времени и места (калька с английского)!
    - ❌ ЗАПРЕЩЕНО: "Ich wurde geboren am 25. Oktober in Homs."
    - ✅ СТРОГО ОБЯЗАТЕЛЬНО: "Ich wurde am 25. Oktober 1993 in der Stadt Homs GEBOREN."
@@ -122,23 +134,15 @@ export async function POST(req: Request) {
    - ✅ СТРОГО ОБЯЗАТЕЛЬНО: "Er hat drei Jahre in Berlin GEARBEITET."
    - Причастия прошедшего времени (geboren, gearbeitet, studiert) и инфинитивы с модальными глаголами ВСЕГДА замыкают предложение в самом конце!
 
-2. РЕЖИМ ГРАММАТИКА (GRAMMATIK):
-   - Пропуск "___" делается СТРОГО на грамматической конструкции темы:
-     • В теме Passiv/Perfekt: пропуск на вспомогательном глаголе ("Ich ___ 1993 in Homs geboren.") или на причастии ("Ich wurde 1993 in Homs ___ .").
-     • В теме Präteritum: пропуск на форме глагола ("Er ___ als Ingenieur tätig.").
-   - Поле "hint" — чистая формула через точку "·":
-     • "Passiv Präteritum · wurde ... geboren"
-     • "Präteritum · konnte (können)"
-     • "Perfekt · hat ... gearbeitet"
+4. ФОРМАТ ПОЛЯ "hint" ДЛЯ СЛОВ (WÖRTER):
+   - Для существительных: строго "артикль Слово, -мн.число — перевод" (например: "der Violinunterricht, -e — уроки игры на скрипке", "die Grundschule, -n — начальная школа", "das Fach, -er — предмет, специальность"). БЕЗ суффикса родительного падежа (-s)!
+   - Для глаголов: "3 формы — перевод" (например: "sich bewerben, bewarb sich, hat sich beworben — подавать заявление").
+   - Для прилагательных: "слово — перевод" (например: "anspruchsvoll — требовательный").
 
-3. РЕЖИМ СЛОВА (WÖRTER):
-   - Пропуск "___" делается на целевом слове, которое тренируется.
-   - Поле "hint" формируется строго:
-     • Существительные: "артикль Слово, -мн.число — перевод" (например: "die Grundschule, -n — начальная школа", "der Ingenieur, -e — инженер", "das Fach, -er — предмет, специальность"). БЕЗ суффикса родительного падежа (-s)!
-     • Глаголы: "3 формы — перевод" (например: "sich bewerben, bewarb sich, hat sich beworben — подавать заявление").
-     • Прилагательные: "слово — перевод" (например: "anspruchsvoll — требовательный").
+5. ФОРМАТ ПОЛЯ "hint" ДЛЯ ГРАММАТИКИ (GRAMMATIK):
+   - Лаконичная формула через точку "·" (например: "Perfekt · habe ... beworben", "Präteritum · ging (gehen)", "Passiv · wurde ... geboren").
 
-4. ДИСТРАКТОРЫ (OPTIONS):
+6. ДИСТРАКТОРЫ (OPTIONS):
    - 4 варианта ответа, идеально подходящие по смыслу и грамматике на место пропуска. Никаких повторов.
 
 ФОРМАТ JSON:

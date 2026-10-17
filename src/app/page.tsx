@@ -2601,24 +2601,31 @@ function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: str
   };
 }
 
-function getHintBadgeStyle(hint: string, isGrammar: boolean) {
-  if (isGrammar) {
-    return 'bg-zinc-800/90 border-white/15 text-zinc-100 shadow-zinc-950/50';
+function renderFormattedHint(hint: string) {
+  if (!hint) return null;
+  const trimmed = hint.trim();
+
+  // Проверяем, начинается ли подсказка с немецкого артикля
+  const match = trimmed.match(/^(der|die|das)\b\s*(.*)/i);
+  if (match) {
+    const article = match[1].toLowerCase();
+    const rest = match[2];
+
+    const articleColor = 
+      article === 'der' ? 'text-sky-400 font-semibold' :
+      article === 'die' ? 'text-rose-400 font-semibold' :
+      'text-emerald-400 font-semibold';
+
+    return (
+      <span>
+        <span className={articleColor}>{match[1]}</span>{' '}
+        <span className="text-zinc-200">{rest}</span>
+      </span>
+    );
   }
-  const clean = hint.trim().toLowerCase();
-  if (clean.startsWith('der ')) {
-    return 'bg-sky-500/15 border-sky-500/35 text-sky-200 shadow-sky-950/30';
-  }
-  if (clean.startsWith('die ')) {
-    return 'bg-rose-500/15 border-rose-500/35 text-rose-200 shadow-rose-950/30';
-  }
-  if (clean.startsWith('das ')) {
-    return 'bg-emerald-500/15 border-emerald-500/35 text-emerald-200 shadow-emerald-950/30';
-  }
-  if (clean.includes('hat ') || clean.includes('ist ') || clean.includes('ge-') || clean.includes('teils')) {
-    return 'bg-indigo-500/15 border-indigo-500/35 text-indigo-200 shadow-indigo-950/30';
-  }
-  return 'bg-amber-500/15 border-amber-500/35 text-amber-200 shadow-amber-950/30';
+
+  // Для глаголов, прилагательных и грамматических формул (вывод нейтральным текстом):
+  return <span className="text-zinc-200">{trimmed}</span>;
 }
 
 // --- STUDY CARD ---
@@ -2894,11 +2901,6 @@ function StudyCard({
 
   const isAnswered = phase === "Answer";
   const displayHint = (card.hint || card.forms || '').trim();
-  const isGrammarCard = Boolean(
-    isGrammar || 
-    (deckTitle && deckTitle.toLowerCase().includes('gramm')) ||
-    (displayHint && (displayHint.includes('·') || displayHint.includes('Passiv') || displayHint.includes('Präteritum') || displayHint.includes('Perfekt')))
-  );
   const displayAnswerWord = shouldCapitalize ? clozeWord.charAt(0).toUpperCase() + clozeWord.slice(1) : clozeWord;
   const parsedTargetWord = phase === "Answer" 
     ? (parseTargetNoun(displayAnswerWord) || (!isCustomCloze ? parseTargetNoun(card.targetWord) : null))
@@ -3046,8 +3048,8 @@ function StudyCard({
 
           {isAnswered && displayHint && (
             <div className="mt-4 flex justify-center animate-in fade-in zoom-in-95 duration-200">
-              <div className={`backdrop-blur-xl px-5 py-2.5 rounded-full border shadow-lg inline-flex items-center gap-2 text-sm font-medium tracking-wide transition-all ${getHintBadgeStyle(displayHint, isGrammarCard)}`}>
-                {displayHint}
+              <div className="px-4 py-2 rounded-2xl bg-zinc-800/80 border border-white/10 text-xs font-medium shadow-lg backdrop-blur-xl text-center">
+                {renderFormattedHint(displayHint)}
               </div>
             </div>
           )}
