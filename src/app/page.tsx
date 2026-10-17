@@ -3065,6 +3065,39 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
   );
 }
 
+export const UI_TRANSLATIONS = {
+  DE: {
+    libraryTitle: "Lehrbücher",
+    dueCardsBadge: (count: number) => `${count} zu wiederholen`,
+    dueCardsTitle: (count: number) => `${count} Karten zu wiederholen`,
+    today: "heute",
+    trainingTitle: "Blitzkarten & Training",
+    newBook: "Neues Buch",
+    archived: "Archiv anzeigen",
+    noDecks: "Noch keine Decks in diesem Level.",
+  },
+  EN: {
+    libraryTitle: "Textbooks",
+    dueCardsBadge: (count: number) => `${count} to review`,
+    dueCardsTitle: (count: number) => `${count} cards to review`,
+    today: "today",
+    trainingTitle: "Flashcards & Training",
+    newBook: "New Book",
+    archived: "Archived",
+    noDecks: "No decks in this level yet.",
+  },
+  RU: {
+    libraryTitle: "Учебники",
+    dueCardsBadge: (count: number) => `${count} к повторению`,
+    dueCardsTitle: (count: number) => `${count} карточек ждут повторения`,
+    today: "сегодня",
+    trainingTitle: "Карточки и тренировки",
+    newBook: "Новая книга",
+    archived: "Архив",
+    noDecks: "В этом уровне пока нет колод.",
+  },
+} as const;
+
 const LANGUAGES = [
   { code: 'DE', flag: '🇩🇪', label: 'Deutsch' },
   { code: 'EN', flag: '🇬🇧', label: 'English' },
@@ -3127,7 +3160,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
   const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
-
+  const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
 
   return (
     <>
@@ -3135,103 +3168,105 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
         {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} activeBook={activeBook} />}
       </AnimatePresence>
 
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 w-full select-none pointer-events-none">
-        
-        {/* 1. ЛЕВЫЙ УГОЛ: ЯЗЫКОВАЯ ПИЛЮЛЯ / BACK PILL */}
-        <div className="pointer-events-auto flex items-center">
-          {activeBook ? (
-            <button
-              onClick={onBack}
-              className="h-9 px-3.5 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 hover:bg-white/95 dark:hover:bg-zinc-800/95 transition-all duration-150 active:scale-95 cursor-pointer font-medium text-xs sm:text-sm select-none"
-              title="Zurück zur Übersicht"
-            >
-              <ArrowLeft className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
-              <span className="truncate max-w-[130px] sm:max-w-[200px]">{activeBook.title}</span>
-            </button>
-          ) : (
-            <div ref={langRef} className="relative">
+      <header className="fixed top-0 left-0 right-0 z-50 w-full select-none pointer-events-none py-3 sm:py-4">
+        <div className="w-full max-w-6xl mx-auto px-6 flex items-center justify-between">
+          
+          {/* 1. ЛЕВЫЙ УГОЛ: ЯЗЫКОВАЯ ПИЛЮЛЯ / BACK PILL */}
+          <div className="pointer-events-auto flex items-center">
+            {activeBook ? (
               <button
-                type="button"
-                onClick={() => setIsLangOpen(prev => !prev)}
-                className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 hover:bg-white/95 dark:hover:bg-zinc-800/95 transition-all duration-150 active:scale-95 cursor-pointer select-none"
-                title="Sprache wählen"
+                onClick={onBack}
+                className="h-9 px-3.5 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 hover:bg-white/95 dark:hover:bg-zinc-800/95 transition-all duration-150 active:scale-95 cursor-pointer font-medium text-xs sm:text-sm select-none"
+                title="Zurück zur Übersicht"
               >
-                <span className="text-base leading-none select-none">{currentLang.flag}</span>
-                <span className="font-bold text-xs tracking-tight text-zinc-800 dark:text-zinc-200">{appLanguage}</span>
-                <ChevronDown className={cn("w-3 h-3 text-zinc-400 dark:text-zinc-500 transition-transform duration-200", isLangOpen && "rotate-180")} />
+                <ArrowLeft className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
+                <span className="truncate max-w-[130px] sm:max-w-[200px]">{activeBook.title}</span>
               </button>
+            ) : (
+              <div ref={langRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsLangOpen(prev => !prev)}
+                  className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 hover:bg-white/95 dark:hover:bg-zinc-800/95 transition-all duration-150 active:scale-95 cursor-pointer select-none"
+                  title="Sprache wählen"
+                >
+                  <span className="text-base leading-none select-none">{currentLang.flag}</span>
+                  <span className="font-bold text-xs tracking-tight text-zinc-800 dark:text-zinc-200">{appLanguage}</span>
+                  <ChevronDown className={cn("w-3 h-3 text-zinc-400 dark:text-zinc-500 transition-transform duration-200", isLangOpen && "rotate-180")} />
+                </button>
 
-              <AnimatePresence>
-                {isLangOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                    transition={{ duration: 0.15, ease: "easeOut" }}
-                    className="absolute left-0 top-full mt-2 w-36 rounded-xl p-1 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl border border-black/5 dark:border-white/10 z-50 flex flex-col gap-0.5 select-none"
-                  >
-                    {LANGUAGES.map(lang => {
-                      const isSelected = appLanguage === lang.code;
-                      return (
-                        <button
-                          key={lang.code}
-                          type="button"
-                          onClick={() => {
-                            setAppLanguage(lang.code as any);
-                            setIsLangOpen(false);
-                          }}
-                          className={cn(
-                            "w-full px-2.5 py-1.5 rounded-lg flex items-center justify-between text-xs transition-colors cursor-pointer",
-                            isSelected
-                              ? "bg-black/5 dark:bg-white/10 text-zinc-900 dark:text-white font-semibold"
-                              : "text-zinc-600 dark:text-zinc-400 hover:bg-black/5 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-200"
-                          )}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm">{lang.flag}</span>
-                            <span>{lang.label}</span>
-                          </div>
-                          {isSelected && <Check className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />}
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
-        </div>
-
-        {/* 2. ПРАВЫЙ УГОЛ: ЕДИНЫЙ КАПСУЛЬНЫЙ ТУЛБАР (UNIFIED CONTROL ISLAND) */}
-        <div className="pointer-events-auto flex items-center">
-          <div className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm select-none">
-            {/* 1. Карточки за сегодня */}
-            <div 
-              onClick={(e) => { if (e.detail === 3) setAdminOpen(true); }}
-              className="flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 cursor-default"
-              title="Gelernte Karten heute"
-            >
-              <Layers className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400" />
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{todayCount}</span>
-              <span className="text-zinc-400 dark:text-zinc-500 font-normal">heute</span>
-            </div>
-
-            {/* Тонкий разделитель */}
-            <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/10 mx-0.5" />
-
-            {/* 2. Переключатель темы */}
-            <button 
-              type="button"
-              onClick={toggleTheme}
-              className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-black/[0.05] dark:hover:bg-white/[0.08] active:scale-95 transition-all cursor-pointer"
-              aria-label="Toggle theme"
-              title={isDark ? "Heller Modus" : "Dunkler Modus"}
-            >
-              {isDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
-            </button>
+                <AnimatePresence>
+                  {isLangOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                      transition={{ duration: 0.15, ease: "easeOut" }}
+                      className="absolute left-0 top-full mt-2 w-36 rounded-xl p-1 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl border border-black/5 dark:border-white/10 z-50 flex flex-col gap-0.5 select-none"
+                    >
+                      {LANGUAGES.map(lang => {
+                        const isSelected = appLanguage === lang.code;
+                        return (
+                          <button
+                            key={lang.code}
+                            type="button"
+                            onClick={() => {
+                              setAppLanguage(lang.code as any);
+                              setIsLangOpen(false);
+                            }}
+                            className={cn(
+                              "w-full px-2.5 py-1.5 rounded-lg flex items-center justify-between text-xs transition-colors cursor-pointer",
+                              isSelected
+                                ? "bg-black/5 dark:bg-white/10 text-zinc-900 dark:text-white font-semibold"
+                                : "text-zinc-600 dark:text-zinc-400 hover:bg-black/5 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-200"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">{lang.flag}</span>
+                              <span>{lang.label}</span>
+                            </div>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
           </div>
-        </div>
 
+          {/* 2. ПРАВЫЙ УГОЛ: ЕДИНЫЙ КАПСУЛЬНЫЙ ТУЛБАР (UNIFIED CONTROL ISLAND) */}
+          <div className="pointer-events-auto flex items-center">
+            <div className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm select-none">
+              {/* 1. Карточки за сегодня */}
+              <div 
+                onClick={(e) => { if (e.detail === 3) setAdminOpen(true); }}
+                className="flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 cursor-default"
+                title="Gelernte Karten heute"
+              >
+                <Layers className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400" />
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100">{todayCount}</span>
+                <span className="text-zinc-400 dark:text-zinc-500 font-normal">{currentTranslations.today}</span>
+              </div>
+
+              {/* Тонкий разделитель */}
+              <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/10 mx-0.5" />
+
+              {/* 2. Переключатель темы */}
+              <button 
+                type="button"
+                onClick={toggleTheme}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-black/[0.05] dark:hover:bg-white/[0.08] active:scale-95 transition-all cursor-pointer"
+                aria-label="Toggle theme"
+                title={isDark ? "Heller Modus" : "Dunkler Modus"}
+              >
+                {isDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+
+        </div>
       </header>
     </>
   );
@@ -3251,7 +3286,7 @@ function getBookModeBadge(book: BookMeta): ModeBadgeInfo | null {
 
   if (mode === 'rapid_flashcards' || isFlashcardCategory) {
     return {
-      label: 'KARTEN • BLITZKARTEN',
+      label: 'BLITZKARTEN',
       icon: Layers,
       iconColor: 'text-amber-400',
     };
@@ -3314,7 +3349,7 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
       <div onClick={onClick} className="relative z-10 cursor-pointer w-full h-full rounded-[20px] overflow-hidden bg-white dark:bg-[#1C1C1E] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-none border border-black/[0.04] dark:border-white/10 hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 flex flex-col">
         
         {/* Cover Image Section */}
-        <div className="relative w-full aspect-[2/3] shrink-0 overflow-hidden" style={isImage ? {} : { backgroundColor: tintColor }}>
+        <div className="relative w-full aspect-[3/4] shrink-0 overflow-hidden" style={isImage ? {} : { backgroundColor: tintColor }}>
           {lightCover && (
             <img 
               src={lightCover} 
@@ -3335,10 +3370,10 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
           
           {/* Dynamic Apple Glassmorphism Mode Badge */}
           {badge && BadgeIcon && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none w-max max-w-[90%]">
-              <div className="px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/40 group-hover:bg-black/55 dark:bg-black/50 dark:group-hover:bg-black/65 backdrop-blur-md border border-white/15 group-hover:border-white/25 shadow-lg transition-all duration-300 transform-gpu">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none w-max max-w-[90%]">
+              <div className="rounded-full px-3.5 py-1.5 backdrop-blur-md shadow-lg border border-white/15 flex items-center gap-1.5 whitespace-nowrap select-none text-[11px] font-semibold tracking-wider uppercase bg-black/45 group-hover:bg-black/60 dark:bg-black/55 dark:group-hover:bg-black/70 text-white transition-all duration-300 transform-gpu">
                 <BadgeIcon className={cn("w-3.5 h-3.5 shrink-0", badge.iconColor)} />
-                <span className="text-[11px] font-semibold tracking-wider uppercase text-white/95 select-none truncate">
+                <span className="text-[11px] font-semibold tracking-wider uppercase text-white/95 select-none truncate antialiased">
                   {badge.label}
                 </span>
               </div>
@@ -5982,7 +6017,7 @@ try {
 
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
-      <main className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 pt-20 pb-12 md:pt-24 md:pb-24">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-20 pb-12 md:pt-24 md:pb-24">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-12 pb-16 space-y-16">
             
@@ -5997,9 +6032,11 @@ try {
               }}
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
-              <div className="flex items-center gap-3 mb-6 px-2">
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Lehrbücher</h2>
-                <DueCardsBadge count={dueCards.length} onClick={() => dueCards.length > 0 && setReviewCards(dueCards)} />
+              <div className="flex items-center gap-3 mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {UI_TRANSLATIONS[appLanguage]?.libraryTitle || 'Lehrbücher'}
+                </h2>
+                <DueCardsBadge count={dueCards.length} language={appLanguage} onClick={() => dueCards.length > 0 && setReviewCards(dueCards)} />
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
                 {displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map(book => (
@@ -6030,7 +6067,9 @@ try {
               }}
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
-              <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white px-2">Blitzkarten & Training</h2>
+              <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">
+                {UI_TRANSLATIONS[appLanguage]?.trainingTitle || 'Blitzkarten & Training'}
+              </h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
                 {displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).map(book => (
                   <div
@@ -6053,7 +6092,9 @@ try {
                     <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
                       <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
                     </div>
-                    <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Neues Buch</span>
+                    <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -6154,7 +6195,7 @@ try {
                     {sortedDecks.length === 0 ? (
                       <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px] shadow-sm">
                         <p className="text-gray-400 dark:text-[#8E8E93] text-sm font-medium">
-                          {appLanguage === 'EN' ? "No decks in this level yet." : "Noch keine Decks in diesem Level."}
+                          {UI_TRANSLATIONS[appLanguage]?.noDecks || "Noch keine Decks in diesem Level."}
                         </p>
                       </div>
                     ) : (
@@ -6194,7 +6235,7 @@ try {
                               className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mx-2 mb-4"
                             >
                               <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
-                              <span>{appLanguage === 'EN' ? 'Archived' : 'Archiv anzeigen'}</span>
+                              <span>{UI_TRANSLATIONS[appLanguage]?.archived || 'Archiv anzeigen'}</span>
                               <span className="bg-black/5 dark:bg-white/10 text-gray-500 dark:text-gray-400 text-xs px-2 py-0.5 rounded-full ml-1">
                                 {completedDecks.length}
                               </span>
