@@ -33,6 +33,12 @@ function useIsMobile() {
   return isMobile;
 }
 
+function ensureUuid(id?: string): string {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (id && uuidRegex.test(id)) return id;
+  return crypto.randomUUID();
+}
+
 // Client-side image compression for OCR/Groq Vision (1200px max dimension, JPEG 0.72)
 async function compressImageForOcr(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -765,54 +771,41 @@ const useStore = create<DeckState>()((set, get) => ({
   setDecks: (decks) => set({ decks, isLoaded: true }),
   
   addDeck: async (deck) => {
-    const previousDecks = get().decks;
-    set({ decks: [...previousDecks, deck] });
+    const deckId = ensureUuid(deck.id);
     
     if (deck.materials && typeof window !== 'undefined') {
       try {
-        localStorage.setItem(`deck_materials_${deck.id}`, JSON.stringify(deck.materials));
+        localStorage.setItem(`deck_materials_${deckId}`, JSON.stringify(deck.materials));
       } catch (e) {}
     }
 
     const payload: any = {
-      id: deck.id,
-      name: deck.name,
-      category: deck.category,
-      level: deck.level || 'A1',
-      book_id: deck.bookId,
-      language: deck.language
+      id: deckId,
+      name: deck.name.trim(),
+      category: deck.category || 'grammatik',
+      level: deck.level || 'B1',
+      book_id: deck.bookId || 'default-de',
+      language: deck.language || 'DE'
     };
     if (deck.materials && deck.materials.length > 0) payload.materials = deck.materials;
     if (deck.card_count) payload.card_count = deck.card_count;
     
-    let deckRes = await supabase.from('decks').insert(payload);
+    console.log('[Supabase] Inserting deck:', deckId, payload.name);
+    const { error: deckError } = await supabase.from('decks').insert([payload]);
     
-    if (deckRes.error && deckRes.error.message.includes('not exist')) {
-        console.warn("Falling back to deck insert without materials/book_id/language columns.");
-        const fallbackPayload = {
-          id: deck.id,
-          name: deck.name,
-          category: deck.category,
-          level: deck.level || 'A1'
-        };
-        deckRes = await supabase.from('decks').insert(fallbackPayload);
+    if (deckError) {
+      console.error('[Supabase Insert Deck Error]:', deckError);
+      throw new Error(`Ошибка сохранения в базу данных: ${deckError.message} (${deckError.details || ''})`);
     }
     
-    if (deckRes.error) {
-      console.error("Supabase Deck Insert Error:", deckRes.error.message);
-      alert(`Fehler beim Speichern des Decks in der Datenbank: ${deckRes.error.message}`);
-      set({ decks: previousDecks });
-      return;
-    }
-    
-    const cardsToInsert = deck.cards.map(c => ({
-      id: c.id,
-      deck_id: deck.id,
+    const cardsToInsert = (deck.cards || []).map(c => ({
+      id: ensureUuid(c.id),
+      deck_id: deckId,
       targetWord: c.targetWord,
       sentence: c.sentence,
       translation: c.translation,
-      forms: c.forms || null,
-      options: c.options,
+      forms: c.forms || (c as any).hint || null,
+      options: Array.isArray(c.options) && c.options.length > 0 ? c.options : [c.targetWord],
       masteryLevel: c.masteryLevel || 0,
       isArchived: c.isArchived || false,
       nextReviewDate: c.nextReviewDate || null,
@@ -821,85 +814,105 @@ const useStore = create<DeckState>()((set, get) => ({
       baseWordInfo: c.baseWordInfo || null
     }));
     
-    let { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
-    
-    if (cardsError && cardsError.message.includes('does not exist')) {
-      const fallbackCards = cardsToInsert.map(({ forms, ...rest }) => rest);
-      const fallbackRes = await supabase.from('cards').insert(fallbackCards);
-      cardsError = fallbackRes.error;
+    if (cardsToInsert.length > 0) {
+      console.log('[Supabase] Inserting cards for deck:', deckId, cardsToInsert.length);
+      const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
+      
+      if (cardsError) {
+        console.error('[Supabase Insert Cards Error]:', cardsError);
+        // Rollback deck insert if cards fail
+        await supabase.from('decks').delete().eq('id', deckId);
+        throw new Error(`Ошибка сохранения карточек в базу данных: ${cardsError.message} (${cardsError.details || ''})`);
+      }
     }
     
-    if (cardsError) {
-      console.error("Supabase Cards Insert Error:", cardsError.message);
-      alert(`Fehler beim Speichern der Karten: ${cardsError.message}`);
-      set({ decks: previousDecks });
-    }
+    console.log('Saved to DB successfully:', deckId);
+
+    // Обновляем локальный стейт только ПОСЛЕ успешного сохранения в БД
+    const savedDeck: Deck = {
+      ...deck,
+      id: deckId,
+      cards: cardsToInsert
+    };
+    set({ decks: [...get().decks, savedDeck] });
   },
   
   updateDeck: async (deckId, updates, replaceCards) => {
+    const validDeckId = ensureUuid(deckId);
+
+    if (updates.materials && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`deck_materials_${validDeckId}`, JSON.stringify(updates.materials));
+      } catch (e) {}
+    }
+    if (updates.theory === null && typeof window !== 'undefined') {
+      localStorage.removeItem(`deck_theory_json_${validDeckId}`);
+      localStorage.removeItem(`deck_theory_${validDeckId}`);
+    }
+
+    const payload: any = {};
+    if (updates.name !== undefined) payload.name = updates.name.trim();
+    if (updates.category !== undefined) payload.category = updates.category;
+    if (updates.level !== undefined) payload.level = updates.level;
+    if (updates.theory !== undefined) payload.theory = updates.theory;
+    if (updates.materials !== undefined) payload.materials = updates.materials;
+    if (updates.card_count !== undefined) payload.card_count = updates.card_count;
+
+    if (Object.keys(payload).length > 0) {
+      console.log('[Supabase] Updating deck:', validDeckId, payload);
+      const { error: deckUpdateError } = await supabase.from('decks').update(payload).eq('id', validDeckId);
+      if (deckUpdateError) {
+        console.error('[Supabase Update Deck Error]:', deckUpdateError);
+        throw new Error(`Не удалось обновить базу данных: ${deckUpdateError.message} (${deckUpdateError.details || ''})`);
+      }
+    }
+
+    let insertedCards: Flashcard[] | undefined = undefined;
+    if (replaceCards) {
+      console.log('[Supabase] Replacing cards for deck:', validDeckId, replaceCards.length);
+      const { error: delError } = await supabase.from('cards').delete().eq('deck_id', validDeckId);
+      if (delError) {
+        console.error('[Supabase Delete Old Cards Error]:', delError);
+      }
+
+      const cardsToInsert = replaceCards.map(c => ({
+        id: ensureUuid(c.id),
+        deck_id: validDeckId,
+        targetWord: c.targetWord,
+        sentence: c.sentence,
+        translation: c.translation,
+        forms: c.forms || (c as any).hint || null,
+        options: Array.isArray(c.options) && c.options.length > 0 ? c.options : [c.targetWord],
+        masteryLevel: c.masteryLevel || 0,
+        isArchived: c.isArchived || false,
+        nextReviewDate: c.nextReviewDate || null,
+        interval: c.interval || 0,
+        repetitions: c.repetitions || 0,
+        baseWordInfo: c.baseWordInfo || null
+      }));
+
+      const { error: insertCardsError } = await supabase.from('cards').insert(cardsToInsert);
+      if (insertCardsError) {
+        console.error('[Supabase Insert Replacement Cards Error]:', insertCardsError);
+        throw new Error(`Не удалось сохранить новые карточки: ${insertCardsError.message} (${insertCardsError.details || ''})`);
+      }
+      insertedCards = cardsToInsert;
+    }
+
+    console.log('Saved to DB successfully:', validDeckId);
+
+    // Обновляем локальный стейт только после успешного обновления БД
     const previousDecks = get().decks;
-    const target = previousDecks.find(d => d.id === deckId);
-    if (!target) return;
-
-    const updatedDeck: Deck = {
-      ...target,
-      ...updates,
-      ...(replaceCards ? { cards: replaceCards } : {})
-    };
-
-    set({
-      decks: previousDecks.map(d => d.id === deckId ? updatedDeck : d)
-    });
-
-    try {
-      if (updates.materials && typeof window !== 'undefined') {
-        localStorage.setItem(`deck_materials_${deckId}`, JSON.stringify(updates.materials));
-      }
-      if (updates.theory === null && typeof window !== 'undefined') {
-        localStorage.removeItem(`deck_theory_json_${deckId}`);
-        localStorage.removeItem(`deck_theory_${deckId}`);
-      }
-
-      const payload: any = {};
-      if (updates.name !== undefined) payload.name = updates.name;
-      if (updates.category !== undefined) payload.category = updates.category;
-      if (updates.level !== undefined) payload.level = updates.level;
-      if (updates.theory !== undefined) payload.theory = updates.theory;
-      if (updates.materials !== undefined) payload.materials = updates.materials;
-      if (updates.card_count !== undefined) payload.card_count = updates.card_count;
-
-      if (Object.keys(payload).length > 0) {
-        let res = await supabase.from('decks').update(payload).eq('id', deckId);
-        if (res.error && res.error.message.includes('does not exist')) {
-          delete payload.materials;
-          delete payload.card_count;
-          if (Object.keys(payload).length > 0) {
-            await supabase.from('decks').update(payload).eq('id', deckId);
-          }
-        }
-      }
-
-      if (replaceCards) {
-        await supabase.from('cards').delete().eq('deck_id', deckId);
-        const cardsToInsert = replaceCards.map(c => ({
-          id: c.id,
-          deck_id: deckId,
-          targetWord: c.targetWord,
-          sentence: c.sentence,
-          translation: c.translation,
-          forms: c.forms || null,
-          options: c.options,
-          masteryLevel: c.masteryLevel || 0,
-          isArchived: c.isArchived || false,
-          nextReviewDate: c.nextReviewDate || null,
-          interval: c.interval || 0,
-          repetitions: c.repetitions || 0,
-          baseWordInfo: c.baseWordInfo || null
-        }));
-        await supabase.from('cards').insert(cardsToInsert);
-      }
-    } catch (err) {
-      console.error("Supabase Update Deck Error:", err);
+    const target = previousDecks.find(d => d.id === validDeckId);
+    if (target) {
+      const updatedDeck: Deck = {
+        ...target,
+        ...updates,
+        ...(insertedCards ? { cards: insertedCards } : {})
+      };
+      set({
+        decks: previousDecks.map(d => d.id === validDeckId ? updatedDeck : d)
+      });
     }
   },
 
@@ -4061,7 +4074,7 @@ function DeckModal({
           } catch (e) {}
         }
 
-        // 2. Сохранение новых карточек в Supabase и обновление локального стейта
+        // 2. Мгновенный UPDATE в Supabase (decks + cards) и обновление локального стейта
         await updateDeck(initialDeck.id, {
           name: title.trim(),
           materials: materials,
@@ -4069,29 +4082,15 @@ function DeckModal({
           theory: null
         }, generatedCards);
 
-        try {
-          await supabase.from('decks').update({
-            name: title.trim(),
-            materials: materials,
-            card_count: cardCount,
-            theory: null
-          }).eq('id', initialDeck.id);
-        } catch (e) {}
-        try {
-          await supabase.from('topics').update({
-            title: title.trim(),
-            cards: generatedCards,
-            materials: materials
-          }).eq('id', initialDeck.id);
-        } catch (e) {}
-
+        console.log('Saved to DB successfully:', initialDeck.id);
         toast.success(`Колода перегенерирована (${generatedCards.length} карточек)`);
         onSuccess(initialDeck.id);
         onClose();
       }
     } catch (err: any) {
-      console.error('Regeneration failed:', err);
+      console.error('[Regeneration Failure]:', err);
       toast.error(err.message || 'Ошибка при перегенерации колоды');
+      alert(`Ошибка: ${err.message || 'Неизвестная ошибка'}`);
     } finally {
       setIsRegenerating(false);
     }
@@ -4155,11 +4154,12 @@ function DeckModal({
           } catch (e) {}
         }
 
+        // МГНОВЕННАЯ ЗАПИСЬ В SUPABASE (decks + cards)
         await addDeck({
           id: newDeckId,
           name: title.trim(),
-          category,
-          level,
+          category: category || 'grammatik',
+          level: level || 'B1',
           cards: generatedCards,
           language: appLanguage,
           bookId: bId,
@@ -4167,6 +4167,7 @@ function DeckModal({
           card_count: cardCount
         });
 
+        console.log('Saved to DB successfully:', newDeckId);
         toast.success(`Колода "${title.trim()}" создана (${generatedCards.length} карточек)`);
         onSuccess(newDeckId);
         onClose();
@@ -4187,13 +4188,15 @@ function DeckModal({
           theory: null
         }, generatedCards);
 
+        console.log('Saved to DB successfully:', initialDeck.id);
         toast.success(`Колода обновлена и перегенерирована (${generatedCards.length} карточек)`);
         onSuccess(initialDeck.id);
         onClose();
       }
     } catch (err: any) {
-      console.error("Deck generation error:", err);
-      toast.error(err.message || "Ошибка при генерации карточек");
+      console.error('[Deck Generation Failure]:', err);
+      toast.error(err.message || 'Ошибка при генерации карточек');
+      alert(`Ошибка: ${err.message || 'Неизвестная ошибка'}`);
     } finally {
       setIsGenerating(false);
     }
