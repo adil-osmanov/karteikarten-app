@@ -3107,8 +3107,18 @@ const LANGUAGES = [
 function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, onBack?: () => void }) {
   const [adminOpen, setAdminOpen] = useState(false);
   const [isLangOpen, setIsLangOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
   const langRef = useRef<HTMLDivElement>(null);
   const { appLanguage, setAppLanguage } = useStore();
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 12);
+    };
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const [isDark, setIsDark] = useState(false);
   useEffect(() => {
@@ -3168,11 +3178,18 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
         {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} activeBook={activeBook} />}
       </AnimatePresence>
 
-      <header className="fixed top-0 left-0 right-0 z-50 w-full select-none pointer-events-none py-3 sm:py-4">
-        <div className="w-full max-w-6xl mx-auto px-6 flex items-center justify-between">
+      <header 
+        className={cn(
+          "sticky top-0 z-50 w-full select-none transition-all duration-300",
+          isScrolled 
+            ? "bg-white/80 dark:bg-black/75 backdrop-blur-xl border-b border-black/[0.06] dark:border-white/10 shadow-sm" 
+            : "bg-transparent border-b border-transparent"
+        )}
+      >
+        <div className="w-full max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           
           {/* 1. ЛЕВЫЙ УГОЛ: ЯЗЫКОВАЯ ПИЛЮЛЯ / BACK PILL */}
-          <div className="pointer-events-auto flex items-center">
+          <div className="flex items-center">
             {activeBook ? (
               <button
                 onClick={onBack}
@@ -3237,7 +3254,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
           </div>
 
           {/* 2. ПРАВЫЙ УГОЛ: ЕДИНЫЙ КАПСУЛЬНЫЙ ТУЛБАР (UNIFIED CONTROL ISLAND) */}
-          <div className="pointer-events-auto flex items-center">
+          <div className="flex items-center">
             <div className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm select-none">
               {/* 1. Карточки за сегодня */}
               <div 
@@ -6064,9 +6081,9 @@ try {
 
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-20 pb-12 md:pt-24 md:pb-24">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-6 pb-12 md:pt-8 md:pb-24">
         {!activeBookId ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-12 pb-16 space-y-16">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-2 pb-16 space-y-16">
             
             {/* Секция 1: Учебники */}
             <section
