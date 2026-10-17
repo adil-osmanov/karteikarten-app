@@ -433,6 +433,7 @@ export interface TheoryExampleItem {
   de: string;
   highlight?: string;
   gender?: 'maskulin' | 'neutral' | 'feminin' | 'plural' | string;
+  accent?: 'sky' | 'emerald' | 'rose' | 'amber' | 'violet' | string;
   ru: string;
   note?: string;
 }
@@ -4031,47 +4032,54 @@ function EndingsMatrixWidget({ data }: { data?: { m: string; n: string; f: strin
   );
 }
 
-const getVisualBreakdownAccent = (accent: string = '') => {
-  const a = accent.toLowerCase().trim();
-  switch (a) {
-    case 'sky':
-      return {
-        card: 'border-sky-500/25 bg-sky-500/5 text-sky-300',
-        badge: 'text-sky-300 bg-sky-500/15 border-sky-500/25',
-        value: 'text-sky-200'
-      };
-    case 'emerald':
-      return {
-        card: 'border-emerald-500/25 bg-emerald-500/5 text-emerald-300',
-        badge: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/25',
-        value: 'text-emerald-200'
-      };
-    case 'rose':
-      return {
-        card: 'border-rose-500/25 bg-rose-500/5 text-rose-300',
-        badge: 'text-rose-300 bg-rose-500/15 border-rose-500/25',
-        value: 'text-rose-200'
-      };
-    case 'amber':
-      return {
-        card: 'border-amber-500/25 bg-amber-500/5 text-amber-300',
-        badge: 'text-amber-300 bg-amber-500/15 border-amber-500/25',
-        value: 'text-amber-200'
-      };
-    case 'violet':
-      return {
-        card: 'border-violet-500/25 bg-violet-500/5 text-violet-300',
-        badge: 'text-violet-300 bg-violet-500/15 border-violet-500/25',
-        value: 'text-violet-200'
-      };
-    default:
-      return {
-        card: 'border-sky-500/25 bg-sky-500/5 text-sky-300',
-        badge: 'text-sky-300 bg-sky-500/15 border-sky-500/25',
-        value: 'text-sky-200'
-      };
-  }
+const ACCENT_MAP: Record<string, {
+  card: string;
+  badge: string;
+  text: string;
+  highlight: string;
+}> = {
+  sky: {
+    card: "bg-sky-500/5 border-sky-500/25",
+    badge: "bg-sky-500/15 text-sky-300 border-sky-500/30",
+    text: "text-sky-300",
+    highlight: "bg-sky-500/20 text-sky-200 border-sky-500/40",
+  },
+  emerald: {
+    card: "bg-emerald-500/5 border-emerald-500/25",
+    badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    text: "text-emerald-300",
+    highlight: "bg-emerald-500/20 text-emerald-200 border-emerald-500/40",
+  },
+  rose: {
+    card: "bg-rose-500/5 border-rose-500/25",
+    badge: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+    text: "text-rose-300",
+    highlight: "bg-rose-500/20 text-rose-200 border-rose-500/40",
+  },
+  amber: {
+    card: "bg-amber-500/5 border-amber-500/25",
+    badge: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+    text: "text-amber-300",
+    highlight: "bg-amber-500/20 text-amber-200 border-amber-500/40",
+  },
+  violet: {
+    card: "bg-violet-500/5 border-violet-500/25",
+    badge: "bg-violet-500/15 text-violet-300 border-violet-500/30",
+    text: "text-violet-300",
+    highlight: "bg-violet-500/20 text-violet-200 border-violet-500/40",
+  },
 };
+
+// Хелпер: если акцент не задан явно, определяем по метке рода:
+function getAccentKey(accent?: string, label?: string): string {
+  if (accent && ACCENT_MAP[accent]) return accent;
+  const l = (label || "").toLowerCase();
+  if (l.includes("муж") || l.includes("mask") || l.includes("der") || l.includes("den") || l.includes("dem") || l.includes("des")) return "sky";
+  if (l.includes("сред") || l.includes("neutr") || l.includes("das")) return "emerald";
+  if (l.includes("жен") || l.includes("fem") || (l.includes("die") && !l.includes("plur")) || l.includes("eine")) return "rose";
+  if (l.includes("множ") || l.includes("plur") || l.includes("eltern") || l.includes("freunde")) return "amber";
+  return "sky";
+}
 
 const getAppleGenderTokens = (genderStr: string = '') => {
   const g = genderStr.toLowerCase().trim();
@@ -4152,13 +4160,19 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   
   // 1. Мгновенно вычисляем начальную теорию из памяти или localStorage, исключая повторные генерации
   const initialTheory = useMemo(() => {
-    if (deck?.theory && typeof deck.theory === 'object' && Object.keys(deck.theory).length > 0) {
+    const isValidTheory = (obj: any): boolean => {
+      if (!obj || typeof obj !== 'object' || Object.keys(obj).length === 0) return false;
+      const str = JSON.stringify(obj).toLowerCase();
+      return !str.includes('meinder') && !str.includes('meinedie') && !str.includes('meindas');
+    };
+
+    if (deck && isValidTheory(deck.theory)) {
       return deck.theory as StructuredTheory;
     }
     if (typeof deck?.theory === 'string') {
       try {
         const p = JSON.parse(deck.theory);
-        if (p && Object.keys(p).length > 0) return p;
+        if (isValidTheory(p)) return p;
       } catch (e) {}
     }
     if (typeof window !== 'undefined') {
@@ -4166,7 +4180,11 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       if (raw) {
         try {
           const p = JSON.parse(raw);
-          if (p && Object.keys(p).length > 0) return p;
+          if (isValidTheory(p)) return p;
+          else {
+            localStorage.removeItem(`deck_theory_json_${deckId}`);
+            localStorage.removeItem(`deck_theory_${deckId}`);
+          }
         } catch (e) {}
       }
     }
@@ -4181,13 +4199,19 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   useEffect(() => {
     if (!deckId) return;
 
+    const isValidTheory = (obj: any): boolean => {
+      if (!obj || typeof obj !== 'object' || Object.keys(obj).length === 0) return false;
+      const str = JSON.stringify(obj).toLowerCase();
+      return !str.includes('meinder') && !str.includes('meinedie') && !str.includes('meindas');
+    };
+
     // 1. Если теория уже есть в объекте темы или в состоянии — мгновенно берем её
-    if (theoryData && Object.keys(theoryData).length > 0) {
+    if (isValidTheory(theoryData)) {
       setIsLoading(false);
       return;
     }
 
-    if (deck?.theory && typeof deck.theory === 'object' && Object.keys(deck.theory).length > 0) {
+    if (deck && isValidTheory(deck.theory)) {
       setTheoryData(deck.theory as StructuredTheory);
       setIsLoading(false);
       return;
@@ -4196,7 +4220,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     if (typeof deck?.theory === 'string') {
       try {
         const p = JSON.parse(deck.theory);
-        if (p && Object.keys(p).length > 0) {
+        if (isValidTheory(p)) {
           setTheoryData(p);
           setIsLoading(false);
           return;
@@ -4209,13 +4233,16 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     if (cached) {
       try {
         const p = JSON.parse(cached);
-        if (p && Object.keys(p).length > 0) {
+        if (isValidTheory(p)) {
           setTheoryData(p);
           setIsLoading(false);
           useStore.setState(state => ({
             decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p } : d)
           }));
           return;
+        } else {
+          localStorage.removeItem(`deck_theory_json_${deckId}`);
+          localStorage.removeItem(`deck_theory_${deckId}`);
         }
       } catch (e) {}
     }
@@ -4536,12 +4563,13 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
                     {theoryData.visualBreakdown.items.map((item, idx) => {
-                      const style = getVisualBreakdownAccent(item.accent);
+                      const key = getAccentKey(item.accent, `${item.label} ${item.badge || ''}`);
+                      const style = ACCENT_MAP[key] || ACCENT_MAP.sky;
                       const forms = (item.value || '').split(/[\/\•\n]/).map(s => s.trim()).filter(Boolean);
                       return (
                         <div 
                           key={idx} 
-                          className={cn("h-full p-4 rounded-2xl flex flex-col justify-between border bg-zinc-900/70 shadow-sm", style.card)}
+                          className={`h-full p-4 rounded-2xl flex flex-col justify-between border ${style.card}`}
                         >
                           <div>
                             <div className="flex items-center justify-between gap-2 mb-2">
@@ -4549,14 +4577,14 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                                 {item.label}
                               </span>
                               {item.badge && (
-                                <span className={cn("px-1.5 py-0.5 rounded text-[11px] font-bold border shrink-0", style.badge)}>
+                                <span className={`px-2 py-0.5 rounded-md text-xs font-semibold border shrink-0 ${style.badge}`}>
                                   {item.badge}
                                 </span>
                               )}
                             </div>
                             <div className="space-y-1 my-2">
                               {forms.map((form, fIdx) => (
-                                <div key={fIdx} className={cn("text-sm font-semibold tracking-tight", style.value)}>
+                                <div key={fIdx} className={`text-sm font-semibold tracking-tight ${style.text}`}>
                                   {form}
                                 </div>
                               ))}
@@ -4669,14 +4697,17 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                   <div className="space-y-2.5">
                     {theoryData.examples.map((ex, idx) => {
                       const cleanDe = (ex.de || '').replace(/\s+([.,!?:;])/g, '$1').trim();
-                      const highlightClass = "px-2 py-0.5 rounded-md font-bold inline-block border mx-0.5 text-xs sm:text-sm bg-blue-500/10 border-blue-500/30 text-blue-300";
+                      const exKey = getAccentKey(ex.accent, `${ex.gender || ''} ${ex.highlight || ''} ${ex.note || ''}`);
+                      const exStyle = ACCENT_MAP[exKey] || ACCENT_MAP.sky;
+                      const highlightClass = `px-2 py-0.5 rounded-md font-bold inline-block border mx-0.5 text-xs sm:text-sm ${exStyle.highlight}`;
 
+                      const cleanHl = (ex.highlight || '').replace(/\s+([.,!?:;])/g, '$1').trim();
                       let parts: (string | React.ReactNode)[] = [cleanDe];
-                      if (ex.highlight && cleanDe.toLowerCase().includes(ex.highlight.toLowerCase())) {
-                        const idxStart = cleanDe.toLowerCase().indexOf(ex.highlight.toLowerCase());
+                      if (cleanHl && cleanDe.toLowerCase().includes(cleanHl.toLowerCase())) {
+                        const idxStart = cleanDe.toLowerCase().indexOf(cleanHl.toLowerCase());
                         const before = cleanDe.slice(0, idxStart);
-                        const matched = cleanDe.slice(idxStart, idxStart + ex.highlight.length);
-                        const after = cleanDe.slice(idxStart + ex.highlight.length);
+                        const matched = cleanDe.slice(idxStart, idxStart + cleanHl.length);
+                        const after = cleanDe.slice(idxStart + cleanHl.length);
                         parts = [
                           before,
                           <span key="hl" className={highlightClass}>{matched}</span>,
@@ -6022,8 +6053,8 @@ export default function App() {
   useEffect(() => {
     setIsMounted(true);
     // Complete wipe of all old cached theories for fresh AI re-generation
-    if (typeof window !== 'undefined' && !localStorage.getItem('theory_v4_clean_reset_done')) {
-      localStorage.setItem('theory_v4_clean_reset_done', 'true');
+    if (typeof window !== 'undefined' && !localStorage.getItem('theory_v5_clean_reset_done')) {
+      localStorage.setItem('theory_v5_clean_reset_done', 'true');
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const key = localStorage.key(i);
         if (key && (key.startsWith('deck_theory_') || key === 'cache_decks_v2')) {
