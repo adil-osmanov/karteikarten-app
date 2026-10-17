@@ -23,6 +23,14 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = React.useState(false);
+  React.useEffect(() => {
+    setIsMobile('ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0));
+  }, []);
+  return isMobile;
+}
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder";
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -2432,6 +2440,13 @@ function StudyCard({
     return { isValid, isComplete, lastCharValid, activeTarget };
   }, [primaryTarget, secondaryTarget]);
 
+  const isMobile = useIsMobile();
+
+  const expectedChar = useMemo(() => {
+    const { activeTarget } = checkInputValidation(inputText);
+    return activeTarget[inputText.length] || "";
+  }, [checkInputValidation, inputText]);
+
   useEffect(() => {
     if (phase === "Answer" && nextButtonRef.current) {
       nextButtonRef.current.focus();
@@ -2456,10 +2471,10 @@ function StudyCard({
   const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2 && Boolean(card.options && card.options.length >= 2);
 
   useEffect(() => {
-    if (phase === "Question" && !isMultipleChoice && inputRef.current) {
+    if (!isMobile && phase === "Question" && !isMultipleChoice && inputRef.current) {
       inputRef.current.focus();
     }
-  }, [isMultipleChoice, phase]);
+  }, [isMobile, isMultipleChoice, phase]);
 
   const playAudio = useCallback((text: string) => {
     setIsPlayingAudio(true);
@@ -2695,7 +2710,7 @@ function StudyCard({
       transition={{ duration: 0.2 }}
       className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
       onClick={() => {
-        if (!isMultipleChoice && phase === "Question" && inputRef.current) {
+        if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
         }
       }}
@@ -2801,9 +2816,10 @@ function StudyCard({
                   </span>
                   <input
                     ref={inputRef}
-                    autoFocus
+                    autoFocus={!isMobile}
                     type="text"
-                    inputMode="none"
+                    inputMode={isMobile ? "none" : "text"}
+                    readOnly={isMobile}
                     value={inputText}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
@@ -2879,6 +2895,7 @@ function StudyCard({
             <VirtualKeyboard 
               onKeyPress={handleVirtualKeyPress}
               onBackspace={handleVirtualBackspace}
+              expectedChar={expectedChar}
             />
           </motion.div>
         )}
@@ -3923,13 +3940,6 @@ const RUSSIAN_TO_QWERTZ: Record<string, string> = {
 };
 
 
-function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState(false);
-  React.useEffect(() => {
-    setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0);
-  }, []);
-  return isMobile;
-}
 
 const VerbSlot = React.memo(({
   label,
