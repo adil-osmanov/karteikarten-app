@@ -1540,7 +1540,7 @@ function RapidFlashcardMode({
     return () => window.removeEventListener('keydown', handleKey);
   }, [flip, answer, speak]);
 
-  const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-6 md:p-10 rounded-2xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
+  const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
   // Header lives INSIDE each face so it rotates together with the card
@@ -1640,12 +1640,6 @@ function RapidFlashcardMode({
                 renderGermanBlock()
               )}
             </div>
-            <div className="absolute bottom-5 flex items-center justify-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity select-none hidden md:flex">
-              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-sm">SPACE</kbd>
-              <span className="text-zinc-400 dark:text-zinc-600 text-xs">/</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-sm">ENTER</kbd>
-            </div>
-            <span className="absolute bottom-6 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium tracking-widest uppercase md:hidden opacity-50">Tap</span>
           </div>
 
           {/* BACK FACE */}
@@ -1805,7 +1799,7 @@ function RapidSession({
 
   return (
     <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-xl mx-auto px-4 mb-4">
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -1822,7 +1816,7 @@ function RapidSession({
         </div>
       </div>
 
-      <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
         <AnimatePresence mode="wait">
           <RapidFlashcardMode
             key={`${current.card.id}-${turn}`}
@@ -2109,7 +2103,7 @@ function StudyInterface({
   return (
       <>
 <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-xl mx-auto px-4 mb-4">
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -2133,7 +2127,7 @@ function StudyInterface({
         </div>
       </div>
 
-      <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
             <PrepStudyCard
@@ -2714,7 +2708,7 @@ function StudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-3xl p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[420px] transition-colors duration-200"
       onClick={() => {
         if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
@@ -2800,8 +2794,8 @@ function StudyCard({
           
           {phase === "Answer" ? (
             <span className={cn(
-              "inline-block align-baseline mx-1.5 border-b-2 bg-transparent px-2 py-0.5 font-medium transition-colors",
-              parsedTargetWord ? parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses : "border-blue-500 text-blue-600 dark:text-blue-400"
+              "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white transition-colors",
+              parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
             )}>
               {parsedTargetWord ? (
                 <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {parsedTargetWord.rest}</>
@@ -2812,11 +2806,11 @@ function StudyCard({
           ) : (
             <>
               {isMultipleChoice ? (
-                <span className="inline-block align-baseline mx-1.5 min-w-[90px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent">
+                <span className="inline-block align-baseline mx-1.5 min-w-[100px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent select-none">
                   {displayAnswerWord}
                 </span>
               ) : (
-                <span className="inline-block relative align-baseline border-b-2 border-blue-500 bg-transparent px-2 py-0.5 text-center font-medium text-zinc-900 dark:text-white placeholder:text-zinc-500 focus-within:border-blue-400 transition-colors mx-1.5 min-w-[90px]">
+                <span className="inline-block relative align-baseline border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5">
                   <span className="inline-block w-full text-center">
                     {renderInputChars()}
                   </span>
@@ -2911,22 +2905,23 @@ function StudyCard({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="grid grid-cols-2 gap-4"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mt-8"
           >
             {card.options.map((opt, idx) => {
               const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
               return (
-              <button
-                key={opt}
-                onClick={() => handleOptionClick(opt)}
-                className="bg-white dark:bg-zinc-900/80 hover:bg-zinc-50 dark:hover:bg-zinc-800 active:scale-[0.98] border border-zinc-200/80 dark:border-white/10 hover:border-zinc-300 dark:hover:border-white/20 text-zinc-900 dark:text-zinc-100 text-base font-medium px-5 py-4 rounded-xl flex items-center justify-between transition-all cursor-pointer shadow-sm relative group"
-              >
-                <span className="flex-1 text-center pr-2">{displayOpt}</span>
-                <kbd className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 px-2 py-0.5 rounded-md shadow-inner shrink-0 pointer-events-none">
-                  {idx + 1}
-                </kbd>
-              </button>
-            )})}
+                <button
+                  key={opt}
+                  onClick={() => handleOptionClick(opt)}
+                  className="w-full py-3.5 px-4 rounded-xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-zinc-50 hover:bg-zinc-100/80 border border-zinc-200/70 hover:border-zinc-300 text-zinc-900 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/80 dark:border-white/10 dark:hover:border-white/20 dark:text-zinc-100 shadow-sm"
+                >
+                  <span className="flex-1 pr-2 truncate">{displayOpt}</span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 text-zinc-400 dark:text-zinc-400 font-mono shrink-0">
+                    {idx + 1}
+                  </span>
+                </button>
+              );
+            })}
           </motion.div>
         )}
 
@@ -2944,11 +2939,6 @@ function StudyCard({
             >
               Weiter
             </button>
-            <div className="flex items-center justify-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity select-none mt-4">
-              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-sm">SPACE</kbd>
-              <span className="text-zinc-400 dark:text-zinc-600 text-xs">/</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-sm">ENTER</kbd>
-            </div>
           </motion.div>
         )}
       </div>
@@ -4346,7 +4336,7 @@ function PrepStudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-3xl p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[420px] transition-colors duration-200"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
@@ -6256,11 +6246,11 @@ try {
                       {levelIdx === 0 && dueCards.length > 0 && (
                         <button 
                           onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
-                          className="h-8 px-3 rounded-full bg-blue-500/15 hover:bg-blue-500/25 active:scale-95 border border-blue-500/30 text-blue-600 dark:text-blue-300 flex items-center gap-2 text-xs font-medium transition-all shadow-sm cursor-pointer select-none"
+                          className="h-8 px-3 rounded-full flex items-center gap-2 text-xs font-medium transition-all active:scale-95 shadow-sm bg-white border border-zinc-200/80 text-zinc-800 hover:bg-zinc-100 active:bg-zinc-200 hover:border-zinc-300 dark:bg-blue-500/15 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/25 cursor-pointer select-none"
                         >
-                          <RotateCcw className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+                          <RotateCcw className="w-3 h-3 text-zinc-700 dark:text-blue-400" />
                           <span className="font-semibold text-zinc-900 dark:text-white font-mono">{dueCards.length}</span>
-                          <span className="hidden sm:inline text-blue-600/80 dark:text-blue-300/80">
+                          <span className="hidden sm:inline text-zinc-700 dark:text-blue-300/80">
                             {appLanguage === 'RU' ? 'повторить' : appLanguage === 'EN' ? 'review' : 'wiederholen'}
                           </span>
                         </button>
