@@ -3116,7 +3116,7 @@ function StudyCard({
               const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
               return (
                 <button
-                  key={opt}
+                  key={`${opt}-${idx}`}
                   onClick={() => handleOptionClick(opt)}
                   className="w-full py-3.5 px-4 rounded-xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-zinc-50 hover:bg-zinc-100/80 border border-zinc-200/70 hover:border-zinc-300 text-zinc-900 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/80 dark:border-white/10 dark:hover:border-white/20 dark:text-zinc-100 shadow-sm"
                 >
