@@ -3176,7 +3176,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="h-9 px-3.5 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 hover:bg-white/95 dark:hover:bg-zinc-800/95 transition-all duration-150 active:scale-95 cursor-pointer font-medium text-xs sm:text-sm select-none"
+                className="h-9 px-3.5 rounded-full bg-zinc-100 hover:bg-zinc-200/80 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-700 dark:text-zinc-300 text-sm font-medium flex items-center gap-2 transition-all active:scale-95 cursor-pointer select-none"
                 title="Zurück zur Übersicht"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
@@ -3337,6 +3337,19 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
   const badge = getBookModeBadge(book);
   const BadgeIcon = badge?.icon;
 
+  const decks = useStore(s => s.decks);
+  const { totalCards, masteredCards } = useMemo(() => {
+    const bookDecks = decks.filter(d => d.bookId === book.id);
+    let total = 0;
+    let mastered = 0;
+    bookDecks.forEach(d => {
+      total += d.cards?.length || 0;
+      mastered += d.cards?.filter(c => c.isArchived)?.length || 0;
+    });
+    return { totalCards: total, masteredCards: mastered };
+  }, [decks, book.id]);
+  const progressPercent = totalCards > 0 ? (masteredCards / totalCards) * 100 : 0;
+
   return (
     <div className="relative group w-full h-full flex flex-col">
       {/* Glow Behind (Dark Mode Only) */}
@@ -3380,21 +3393,37 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-40">
-            <button onClick={onEdit} className="p-2 text-white/90 hover:text-white bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
+          {/* Action Buttons: Micro glass pills */}
+          <div className="absolute top-3 right-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-40">
+            <button 
+              onClick={onEdit} 
+              className="w-7 h-7 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-zinc-300 hover:text-white flex items-center justify-center transition-transform active:scale-95 shadow-md cursor-pointer"
+              title="Bearbeiten"
+            >
               <Edit2 className="w-3.5 h-3.5" />
             </button>
-            <button onClick={onDelete} className="p-2 text-white/90 hover:text-red-400 bg-black/30 hover:bg-black/50 backdrop-blur-md rounded-full transition-all">
+            <button 
+              onClick={onDelete} 
+              className="w-7 h-7 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-zinc-300 hover:text-red-400 flex items-center justify-center transition-transform active:scale-95 shadow-md cursor-pointer"
+              title="Löschen"
+            >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
         
-        {/* Text Section */}
-        <div className="flex-1 flex flex-col justify-start p-4 bg-white dark:bg-[#1C1C1E]">
+        {/* Text Section with minimal bottom padding & progress bar */}
+        <div className="flex-1 flex flex-col justify-start px-4 pt-3.5 pb-4 bg-white dark:bg-[#1C1C1E]">
           <h3 className="text-[15px] md:text-[17px] font-bold text-gray-900 dark:text-white leading-tight line-clamp-2">{book.title}</h3>
           {book.subtitle && <p className="text-[12px] md:text-[13px] font-medium text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">{book.subtitle}</p>}
+          {totalCards > 0 && (
+            <div className="w-full h-1 bg-zinc-100 dark:bg-zinc-800 rounded-full mt-3 overflow-hidden">
+              <div 
+                className={cn("h-full rounded-full transition-all duration-500", progressPercent === 100 ? "bg-emerald-500" : "bg-blue-500")}
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          )}
         </div>
 
       </div>
@@ -3423,34 +3452,39 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
-        "group cursor-pointer bg-white/80 dark:bg-[#1C1C1E]/70 backdrop-blur-3xl rounded-[28px] p-8 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors duration-200 hover:-translate-y-1 active:scale-[0.98] active:translate-y-0 min-h-[160px] flex flex-col relative will-change-transform transform-gpu translate-z-0",
-        isCompleted && "opacity-60 hover:opacity-100"
+        "group cursor-pointer bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:hover:border-white/15 rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-lg relative select-none",
+        isCompleted && "opacity-75 hover:opacity-100"
       )}
     >
-      <div className="absolute top-6 right-6 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Action Buttons (Edit / Delete) */}
+      <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
         <button 
           onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-          className="p-2.5 text-gray-300 hover:text-blue-600 dark:text-blue-500 transition-all duration-100 active:scale-[0.98] rounded-full"
+          className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white flex items-center justify-center transition-all cursor-pointer active:scale-95"
+          title="Umbenennen"
         >
-          <Edit2 className="w-4 h-4" />
+          <Edit2 className="w-3.5 h-3.5" />
         </button>
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
-          className="p-2.5 text-gray-300 hover:text-red-500 transition-all duration-100 active:scale-[0.98] rounded-full"
+          className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/10 hover:bg-red-500/10 text-zinc-500 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400 flex items-center justify-center transition-all cursor-pointer active:scale-95"
+          title="Löschen"
         >
-          <Trash2 className="w-4 h-4" />
+          <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      <div className="mb-6 flex items-start min-h-[3em] leading-[1.35]">
-        <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] pr-20 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
+      {/* Header / Title */}
+      <div className="mb-4 pr-16 min-h-[2.5rem] flex items-start">
+        <h3 className="text-lg font-semibold text-zinc-900 dark:text-white tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
           {deck.name}
-          {isCompleted && <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0 inline-block ml-2 align-text-bottom" />}
+          {isCompleted && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 inline-block ml-2 align-text-bottom" />}
         </h3>
       </div>
       
+      {/* Footer / Controls & Status */}
       <div className="mt-auto">
-        <div className="flex items-center justify-between w-full text-sm font-bold mb-3">
+        <div className="flex items-center w-full mb-1">
           <div className="flex items-center gap-2">
             {!isVerbBook && activeTab === 'Grammatik' && (
               <DeckTheoryIndicator 
@@ -3460,31 +3494,38 @@ const DeckCard = React.memo(({
               />
             )}
             {!isVerbBook && (
-              <>
+              <div className="flex items-center gap-1">
+                {!isVerbBook && activeTab === 'Grammatik' && (
+                  <div className="h-3 w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" />
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
-                  className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
-                  title="Dictation Mode"
+                  className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 rounded transition-all cursor-pointer"
+                  title="Diktat-Modus"
                 >
-                  <Keyboard className="w-4 h-4" />
+                  <Keyboard className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
-                  className="hidden sm:flex items-center justify-center p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/10 rounded-md transition-all cursor-pointer"
-                  title="Shadowing Mode"
+                  className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 rounded transition-all cursor-pointer"
+                  title="Shadowing-Modus"
                 >
-                  <Mic className="w-4 h-4" />
+                  <Mic className="w-3.5 h-3.5" />
                 </button>
-              </>
+              </div>
             )}
           </div>
-          <span className={cn("ml-auto", isCompleted ? "text-green-600" : "text-gray-400")}>{mastered} / {total}</span>
+          <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400 ml-auto tabular-nums">
+            {mastered} / {total}
+          </span>
         </div>
-        <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+
+        {/* Apple Progress Bar */}
+        <div className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-800/80 rounded-full mt-3 overflow-hidden">
           <div
             className={cn(
-              "h-full rounded-full transition-all duration-700 ease-out",
-              isCompleted ? "bg-green-500" : "bg-blue-600 dark:bg-blue-500"
+              "h-full rounded-full transition-all duration-300",
+              progressPercentage >= 100 ? "bg-emerald-500" : "bg-blue-500"
             )}
             style={{ width: `${progressPercentage}%` }}
           />
@@ -3768,14 +3809,20 @@ function DeckTheoryIndicator({ deckId, onOpenEdit, onOpenView }: { deckId: strin
 
   if (hasTheory) {
     return (
-      <button onClick={onOpenView} className="flex items-center gap-1.5 text-[11px] font-medium text-gray-700 dark:text-gray-300 bg-gray-100/80 dark:bg-white/10 border border-black/5 dark:border-white/[0.05] px-2.5 py-1 rounded-full hover:bg-gray-200 dark:hover:bg-white/15 transition-all cursor-pointer backdrop-blur-md">
+      <button 
+        onClick={onOpenView} 
+        className="px-2.5 py-1 rounded-md bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/5 dark:border-white/5 text-[11px] font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 transition-colors cursor-pointer select-none"
+      >
         <BookOpen className="w-3.5 h-3.5 opacity-70" />
         Theorie
       </button>
     );
   }
   return (
-    <button onClick={onOpenEdit} className="text-xs font-medium text-gray-400 dark:text-white/30 hover:text-gray-600 dark:hover:text-white/80 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-white/5 transition-all">
+    <button 
+      onClick={onOpenEdit} 
+      className="px-2.5 py-1 rounded-md bg-transparent hover:bg-black/5 dark:hover:bg-white/5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors cursor-pointer select-none"
+    >
       + Theorie
     </button>
   );
@@ -6102,45 +6149,50 @@ try {
 
           </div>
         ) : (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="max-w-2xl mx-auto">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="w-full">
           {(!activeBook?.training_mode || activeBook.training_mode === 'standard_cloze') && (
           <div className="flex justify-center mb-8 pt-2">
-            <div className="bg-gray-100/80 dark:bg-[#1C1C1E] p-1 rounded-xl inline-flex w-full max-w-[280px] mx-auto border border-black/[0.05] dark:border-white/[0.08]">
-              {(["Grammatik", "Wörter"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => startTransition(() => setActiveTab(tab))}
-                  className={cn(
-                    "flex-1 px-4 py-1.5 transition-all text-xs font-medium tracking-tight rounded-lg",
-                    activeTab === tab
-                      ? "bg-white dark:bg-[#2C2C2E] text-gray-900 dark:text-white shadow-sm"
-                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-[#F5F5F7]" 
-                  )}
-                >
-                  {tab}
-                </button>
-              ))}
+            <div className="h-9 p-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/5 dark:border-white/10 flex items-center shadow-inner">
+              {(["Grammatik", "Wörter"] as const).map((tab) => {
+                const isActive = activeTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => startTransition(() => setActiveTab(tab))}
+                    className={cn(
+                      "rounded-full px-4 py-1 text-xs font-medium transition-all select-none cursor-pointer",
+                      isActive
+                        ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm"
+                        : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    )}
+                  >
+                    {tab}
+                  </button>
+                );
+              })}
             </div>
           </div>
           )}
 
           {dueCards.length > 0 && (
-            <div className="mb-10">
+            <div className="mb-8">
               <div 
                 onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
-                className="bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-2xl p-4 flex items-center justify-between cursor-pointer hover:border-blue-600/40 dark:hover:border-blue-500/40 transition-all shadow-sm active:scale-[0.98]"
+                className="bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:border-white/15 rounded-2xl p-4 flex items-center justify-between cursor-pointer transition-all shadow-sm active:scale-[0.99] group"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-600/10 dark:bg-blue-500/10 flex items-center justify-center">
-                    <RotateCw className="w-4 h-4 text-blue-600 dark:text-blue-500" />
+                  <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
+                    <RotateCw className="w-4 h-4 text-blue-500 group-hover:rotate-180 transition-transform duration-500" />
                   </div>
-                  <span className="font-medium text-sm text-gray-900 dark:text-white">Heute wiederholen</span>
+                  <span className="font-medium text-sm text-zinc-900 dark:text-white">
+                    {appLanguage === 'RU' ? 'Повторить сегодня' : appLanguage === 'EN' ? 'Review today' : 'Heute wiederholen'}
+                  </span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="px-2.5 py-0.5 rounded-full bg-blue-600/10 dark:bg-blue-500/10 text-blue-600 dark:text-blue-500 text-xs font-semibold tabular-nums">
+                <div className="flex items-center gap-2.5">
+                  <div className="px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-semibold tabular-nums">
                     {dueCards.length}
                   </div>
-                  <ChevronRight className="w-4 h-4 text-gray-400" />
+                  <ChevronRight className="w-4 h-4 text-zinc-400" />
                 </div>
               </div>
             </div>
@@ -6171,25 +6223,24 @@ try {
 
                 return (
                   <section key={sectionKey}>
-                    <div className="flex items-center mb-4 px-1">
-                      <div className="inline-flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] rounded-full p-0.5 shadow-sm">
-                        <span className="h-7 px-3 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-[#8E8E93]">
-                          {level}
-                        </span>
-                        <button 
-                          onClick={() => handleGlobalDrill(level, activeTab)}
-                          className="h-7 w-7 mr-0.5 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
-                          title={`Глобальная тренировка ${level}`}
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                        </button>
-                        <button 
-                          onClick={() => handlePlusClick(activeTab, level)}
-                          className="h-7 w-7 flex items-center justify-center rounded-full bg-white dark:bg-[#2C2C2E] text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-500 transition-colors shadow-sm"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                    <div className="flex items-center gap-1 p-1 bg-white/80 dark:bg-zinc-900/80 backdrop-blur border border-zinc-200/70 dark:border-white/10 rounded-full w-fit mb-6 shadow-sm select-none">
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-black/5 dark:bg-white/10 text-zinc-800 dark:text-white">
+                        {level}
+                      </span>
+                      <button 
+                        onClick={() => handleGlobalDrill(level, activeTab)}
+                        className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer"
+                        title={`Training ${level}`}
+                      >
+                        <Play className="w-3 h-3 fill-current" />
+                      </button>
+                      <button 
+                        onClick={() => handlePlusClick(activeTab, level)}
+                        className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer"
+                        title="Neues Deck"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                     
                     {sortedDecks.length === 0 ? (
@@ -6201,7 +6252,7 @@ try {
                     ) : (
                       <div className="space-y-6">
                         {inProgressDecks.length > 0 && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                             {inProgressDecks.map(deck => (
                               <div
                                 key={deck.id}
@@ -6250,7 +6301,7 @@ try {
                                   transition={{ duration: 0.2 }}
                                   className="overflow-hidden"
                                 >
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 pb-4">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 pt-2 pb-4">
                                     {completedDecks.map(deck => (
                                       <div key={deck.id} className="opacity-70 hover:opacity-100 transition-opacity">
                                         <DeckCard 
@@ -6259,8 +6310,8 @@ try {
                                           activeTab={activeTab} 
                                           onCardClick={handleDeckClick} 
                                           onRename={handleRenameClick}
-                                  onStartDictation={(id) => setDictationDeckId(id)}
-                                  onStartShadowing={(id: string) => setShadowingDeckId(id)} 
+                                          onStartDictation={(id) => setDictationDeckId(id)}
+                                          onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                           onDelete={handleDeleteClick} 
                                           onEditTheory={handleEditTheory} 
                                           onViewTheory={handleViewTheory} 
@@ -6278,7 +6329,7 @@ try {
                     {sortedDecks.length > limit && (
                       <button 
                         onClick={() => handleLoadMore(sectionKey)}
-                        className="mt-6 mx-auto block px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm rounded-full transition-all"
+                        className="mt-6 mx-auto block px-6 py-2 bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-zinc-700 dark:text-zinc-200 font-semibold text-xs rounded-full transition-all cursor-pointer active:scale-95"
                       >
                         Weitere {Math.min(10, sortedDecks.length - limit)} laden
                       </button>
