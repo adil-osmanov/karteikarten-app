@@ -2605,27 +2605,27 @@ function renderFormattedHint(hint: string) {
   if (!hint) return null;
   const trimmed = hint.trim();
 
-  // Проверяем, начинается ли подсказка с немецкого артикля
+  // Проверяем наличие артикля der / die / das в начале
   const match = trimmed.match(/^(der|die|das)\b\s*(.*)/i);
   if (match) {
-    const article = match[1].toLowerCase();
+    const art = match[1].toLowerCase();
     const rest = match[2];
 
-    const articleColor = 
-      article === 'der' ? 'text-sky-400 font-semibold' :
-      article === 'die' ? 'text-rose-400 font-semibold' :
+    const artColor = 
+      art === 'der' ? 'text-sky-400 font-semibold' :
+      art === 'die' ? 'text-rose-400 font-semibold' :
       'text-emerald-400 font-semibold';
 
     return (
-      <span>
-        <span className={articleColor}>{match[1]}</span>{' '}
-        <span className="text-zinc-200">{rest}</span>
+      <span className="text-sm font-medium leading-relaxed">
+        <span className={artColor}>{match[1]}</span>{' '}
+        <span className="text-zinc-100">{rest}</span>
       </span>
     );
   }
 
-  // Для глаголов, прилагательных и грамматических формул (вывод нейтральным текстом):
-  return <span className="text-zinc-200">{trimmed}</span>;
+  // Для глаголов и грамматических формул (нейтральный текст Apple)
+  return <span className="text-sm font-medium text-zinc-100 leading-relaxed">{trimmed}</span>;
 }
 
 // --- STUDY CARD ---
@@ -3047,8 +3047,8 @@ function StudyCard({
           </p>
 
           {isAnswered && displayHint && (
-            <div className="mt-4 flex justify-center animate-in fade-in zoom-in-95 duration-200">
-              <div className="px-4 py-2 rounded-2xl bg-zinc-800/80 border border-white/10 text-xs font-medium shadow-lg backdrop-blur-xl text-center">
+            <div className="mt-5 flex justify-center animate-in fade-in zoom-in-95 duration-200">
+              <div className="px-6 py-2.5 rounded-full bg-zinc-800/90 border border-white/15 text-sm font-medium shadow-xl backdrop-blur-xl text-center max-w-lg">
                 {renderFormattedHint(displayHint)}
               </div>
             </div>
@@ -3885,6 +3885,7 @@ function DeckModal({
   const [cardCount, setCardCount] = useState<number>(initialDeck?.card_count || initialDeck?.cards?.length || 15);
   
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
   
@@ -3996,6 +3997,95 @@ function DeckModal({
       }
     };
     reader.readAsText(file, 'UTF-8');
+  };
+
+  const handleRegenerate = async () => {
+    if (isRegenerating) return;
+    if (!title.trim()) {
+      toast.error("Укажите название темы");
+      return;
+    }
+    setIsRegenerating(true);
+
+    try {
+      // 1. Запрос к Groq API с актуальными материалами и количеством
+      const res = await fetch('/api/generate-deck', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title.trim(),
+          category: category || 'grammatik',
+          count: cardCount,
+          images: materials || [], // прикрепленные скриншоты
+          level: level || 'B1'
+        })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success || !data.cards || data.cards.length === 0) {
+        throw new Error(data.error || 'Ошибка при генерации карточек');
+      }
+
+      const generatedCards: Flashcard[] = data.cards.map((c: any) => ({
+        id: crypto.randomUUID(),
+        targetWord: c.targetWord,
+        sentence: c.sentence,
+        translation: c.translation,
+        forms: c.hint || c.forms || undefined,
+        options: Array.isArray(c.options) && c.options.length > 0 ? c.options : [c.targetWord],
+        masteryLevel: 0,
+        isArchived: false,
+        nextReviewDate: null,
+        interval: 0,
+        repetitions: 0,
+        hint: c.hint || null
+      }));
+
+      if (initialDeck) {
+        // Очищаем кеш теории
+        localStorage.removeItem(`deck_theory_json_${initialDeck.id}`);
+        localStorage.removeItem(`deck_theory_${initialDeck.id}`);
+        if (materials.length > 0) {
+          try {
+            localStorage.setItem(`deck_materials_${initialDeck.id}`, JSON.stringify(materials));
+          } catch (e) {}
+        }
+
+        // 2. Сохранение новых карточек в Supabase и обновление локального стейта
+        await updateDeck(initialDeck.id, {
+          name: title.trim(),
+          materials: materials,
+          card_count: cardCount,
+          theory: null
+        }, generatedCards);
+
+        try {
+          await supabase.from('decks').update({
+            name: title.trim(),
+            materials: materials,
+            card_count: cardCount,
+            theory: null
+          }).eq('id', initialDeck.id);
+        } catch (e) {}
+        try {
+          await supabase.from('topics').update({
+            title: title.trim(),
+            cards: generatedCards,
+            materials: materials
+          }).eq('id', initialDeck.id);
+        } catch (e) {}
+
+        toast.success(`Колода перегенерирована (${generatedCards.length} карточек)`);
+        onSuccess(initialDeck.id);
+        onClose();
+      }
+    } catch (err: any) {
+      console.error('Regeneration failed:', err);
+      alert(`Не удалось перегенерировать колоду: ${err.message || 'Ошибка сети'}`);
+    } finally {
+      setIsRegenerating(false);
+    }
   };
 
   const handleCreateOrUpdateAI = async () => {
@@ -4487,27 +4577,18 @@ function DeckModal({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleCreateOrUpdateAI}
-                disabled={isGenerating || isSaving}
-                className="py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-white/10 transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                onClick={handleRegenerate}
+                disabled={isRegenerating || isSaving}
+                className="h-10 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-200 text-xs font-medium border border-white/10 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
-                    <span>Перегенерация...</span>
-                  </>
-                ) : (
-                  <>
-                    <RotateCw className="w-3.5 h-3.5 text-blue-400" />
-                    <span>🔄 Перегенерировать</span>
-                  </>
-                )}
+                <RotateCcw className={`w-3.5 h-3.5 text-blue-400 ${isRegenerating ? 'animate-spin' : ''}`} />
+                <span>{isRegenerating ? 'Генерация...' : 'Перегенерировать карточки'}</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleSaveEditOnly}
-                disabled={isGenerating || isSaving || !title.trim()}
+                disabled={isRegenerating || isSaving || !title.trim()}
                 className="py-2.5 px-5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 {isSaving ? (
