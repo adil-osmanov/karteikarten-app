@@ -130,8 +130,8 @@ ${hasMaterials ? 'ВАЖНО: Используй правила, таблицы 
 }`;
 
     const candidateModels = hasMaterials
-      ? ['llama-3.2-11b-vision-preview', 'llama-3.3-70b-versatile']
-      : ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
+      ? ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b']
+      : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'];
 
     let userContent: any = userPrompt;
     if (hasMaterials) {
@@ -149,8 +149,8 @@ ${hasMaterials ? 'ВАЖНО: Используй правила, таблицы 
 
     for (const model of candidateModels) {
       try {
-        const isVisionModel = model.includes('vision');
-        const contentToSend = isVisionModel && hasMaterials ? userContent : userPrompt;
+        const canSendImages = model === 'qwen/qwen3.8-27b';
+        const contentToSend = canSendImages && hasMaterials ? userContent : userPrompt;
 
         completion = await groq.chat.completions.create({
           model,
