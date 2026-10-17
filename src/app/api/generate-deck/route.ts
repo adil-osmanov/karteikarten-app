@@ -57,6 +57,38 @@ const FALLBACK_POOLS = {
   prefixes: ['ab', 'an', 'aus', 'ein', 'mit', 'vor', 'zu', 'auf']
 };
 
+const AUXILIARY_STOP_WORDS = new Set([
+  'war', 'waren', 'warst', 'wart',
+  'hatte', 'hatten', 'hattest', 'hattet',
+  'wurde', 'wurden', 'wurdest', 'wurdet',
+  'bin', 'bist', 'ist', 'sind', 'seid',
+  'habe', 'hast', 'hat', 'haben', 'habt',
+  'werden', 'wird'
+]);
+
+function sanitizeAndFilterCards(cards: any[], isGrammar: boolean) {
+  return cards
+    .map(card => {
+      let hint = String(card.hint || '').trim();
+      // Вычищаем префиксы "Nomen ·", "Adverb ·", "Verb ·", "Adjektiv ·"
+      hint = hint.replace(/^(Nomen|Verb|Adverb|Adjektiv)\s*[·•-]\s*(wie\?|was\?|wo\?)?\s*/i, '');
+
+      return {
+        ...card,
+        sentence: String(card.sentence || '').trim().replace(/\s+([,.:;!?])/g, '$1'),
+        targetWord: String(card.targetWord || '').trim(),
+        hint
+      };
+    })
+    .filter(card => {
+      // Если это режим слов, отбрасываем случайные служебные глаголы
+      if (!isGrammar && AUXILIARY_STOP_WORDS.has(card.targetWord.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+}
+
 function sanitizeAndValidateCard(card: any, isGrammar: boolean) {
   let sentence = String(card.sentence || '').trim().replace(/\s+([,.:;!?])/g, '$1');
   let targetWord = String(card.targetWord || '').trim();
@@ -163,44 +195,47 @@ export async function POST(req: Request) {
       ? ['qwen/qwen3.8-27b'] 
       : ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'qwen/qwen3.8-27b'];
 
-    const systemPrompt = `Ты — ведущий составитель тестов по немецкому языку (Goethe-Institut / telc B1–B2).
-Твоя цель — сгенерировать ровно ${targetCount} атомарных предложений.
+    const systemPrompt = `Ты — ведущий составитель учебных материалов по немецкому языку (Goethe-Institut / telc B1–B2).
+Твоя задача — составить ${targetCount} эталонных карточек.
 
-ТЕКУЩИЙ РЕЖИМ: ${isGrammar ? 'ГРАММАТИКА (GRAMMATIK)' : 'СЛОВАРНЫЙ ЗАПАС (WÖRTER)'}
+ТЕКУЩИЙ РЕЖИМ: ${isGrammar ? 'ГРАММАТИКА (GRAMMATIK)' : 'СЛОВА И ФЛЕШКАРТЫ (WÖRTER / BLITZKARTEN)'}
 
-КРИТИЧЕСКИЕ ПРАВИЛА:
+${!isGrammar ? `
+=== ЖЕЛЕЗНЫЕ ПРАВИЛА ДЛЯ РЕЖИМА "WÖRTER" (СЛОВА) ===
+1. КАТЕГОРИЧЕСКИЙ ЗАПРЕТ НА СЛУЖЕБНЫЕ СЛОВА (STOP-LIST):
+   - ЗАПРЕЩЕНО создавать карточки на вспомогательные глаголы: "waren", "hatte", "hatten", "wurde", "wurden", "ist", "sind", "haben", "sein", "werden"!
+   - ЗАПРЕЩЕНО делать карточками артикли, местоимения, предлоги и союзы.
+   - Карточками становятся СТРОГО содержательные лексические единицы B1–B2:
+     • Тематические существительные.
+     • Полноценные смысловые глаголы (в инфинитиве).
+     • Прилагательные и наречия.
 
-1. ТОЧНОЕ СООТВЕТСТВИЕ ПОЛЯ "hint" И СЛОВА "targetWord":
-   - Поле "hint" ОБЯЗАНО объяснять ИМЕННО ТО СЛОВО, которое находится в "targetWord"!
-   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО подменять слово синонимами (если targetWord = "Ausbildung", запрещено писать "die Lehre"; если targetWord = "schwierig", запрещено писать "schwer")!
-   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО вставлять грамматические вопросы вроде "Adverb · wie? (как?)".
+2. СТРОГИЙ ФОРМАТ ПОЛЯ "targetWord" И "hint" ДЛЯ СУЩЕСТВИТЕЛЬНЫХ:
+   - В поле "targetWord" помещается слово для пропуска в предложении (например: "Abiturprüfung").
+   - В поле "hint" ОБЯЗАТЕЛЬНО указывается: "артикль Слово, -мн.число — перевод"
+     ✅ ПРАВИЛЬНО: "die Abiturprüfung, -en — экзамен на аттестат зрелости"
+     ✅ ПРАВИЛЬНО: "der Sprachkurs, -e — языковой курс"
+     ✅ ПРАВИЛЬНО: "das Zertifikat, -e — сертификат"
+     ❌ ЗАПРЕЩЕНО: писать "Nomen · ...", опускать артикль или форму множественного числа!
 
-   ФОРМАТ ПОЛЯ "hint":
-   ${isGrammar ? `
-   - Краткая грамматическая формула через точку "·":
-     "Passiv Präteritum · wurde ... geboren"
-     "Modalverb Präteritum · konnte (können)"
-     "Perfekt · habe ... beworben (sich bewerben)"
-     "Präteritum · schloss ... ab (abschließen)"
-   ` : `
-   - Существительные: строго "артикль Слово, -мн.число — русский_перевод"
-     Пример: "die Ausbildung, -en — профессиональное обучение"
-     Пример: "die Assistentin, -nen — ассистентка"
-     (Без суффикса -s родительного падежа!)
-   - Глаголы: "3 формы — русский_перевод"
-     Пример: "beginnen, begann, hat begonnen — начинать"
-   - Прилагательные и наречия: "targetWord — русский_перевод"
-     Пример: "schwierig — сложный, трудный"
-     Пример: "aushilfsweise — временно, в качестве подработки"
-   `}
+3. СТАНДАРТ ДЛЯ ГЛАГОЛОВ:
+   - В поле "hint": "Infinitiv, Präteritum, hat/ist Partizip II — перевод"
+     Пример: "ankommen, kam an, ist angekommen — прибывать, приезжать"
 
-2. СИНТАКСИС, СЛОЖНЫЕ СЛОВА И РАМОЧНАЯ КОНСТРУКЦИЯ (SATZKLAMMER):
-   - Все сложные слова (Komposita) пишутся СТРОГО СЛИТНО ("Violinunterricht", а не "Violin Unterricht"). Пропуск "___" делается на всем сложном слове целиком.
-   - Partizip II и смысловые инфинитивы всегда замыкают предложение ("Ich wurde am 25. Oktober 1993 in der Stadt Homs geboren.").
-   - Никаких пробелов перед знаками препинания ("schwierig, aber...", а не "schwierig , aber...").
+4. СТАНДАРТ ДЛЯ ПРИЛАГАТЕЛЬНЫХ:
+   - В поле "hint": "Wort — русский перевод" (например: "anspruchsvoll — требовательный").
+` : `
+=== ЖЕЛЕЗНЫЕ ПРАВИЛА ДЛЯ РЕЖИМА "GRAMMATIK" (ГРАММАТИКА) ===
+1. ЧТО ТРЕНИРУЕМ:
+   - Пропуском "___" является целевая грамматическая форма темы (окончание, форма времени, вспомогательный глагол, предлог или приставка).
+   - Например, в предложении "Nachdem wir in Deutschland angekommen ___, ..." пропуском является "waren", а в поле hint пишется краткая формула правила:
+     "Plusquamperfekt · waren ... angekommen (ankommen)"
+`}
 
-3. ДИСТРАКТОРЫ (OPTIONS):
-   - Ровно 4 уникальных варианта одной части речи и грамматической формы. Никаких дубликатов!
+ОБЩИЕ ТРЕБОВАНИЯ К ПРЕДЛОЖЕНИЯМ:
+- Satzklammer: рамочная конструкция закрыта (Partizip II стоит в конце предложения: "Nachdem wir 2014 in Deutschland angekommen waren...").
+- Никаких разрывов сложных слов ("Violinunterricht", а не "Violin Unterricht").
+- Options: ровно 4 уникальных варианта одной части речи.
 
 ФОРМАТ JSON:
 {
@@ -208,10 +243,10 @@ export async function POST(req: Request) {
   "cards": [
     {
       "sentence": "Предложение с пропуском ___",
-      "targetWord": "пропущенное слово",
-      "translation": "Естественный русский перевод",
-      "hint": "Подсказка по правилам",
-      "options": ["слово1", "слово2", "слово3", "слово4"]
+      "targetWord": "целевое_слово",
+      "translation": "Русский перевод",
+      "hint": "Подсказка строго по правилам выше",
+      "options": ["вариант1", "вариант2", "вариант3", "вариант4"]
     }
   ]
 }`;
@@ -266,7 +301,13 @@ export async function POST(req: Request) {
             throw new Error('Модель вернула некорректный ответ');
           }
 
-          const validatedCards = rawCards.map((c: any) => sanitizeAndValidateCard(c, isGrammar));
+          const filteredCards = sanitizeAndFilterCards(rawCards, isGrammar);
+          if (filteredCards.length === 0) {
+            console.warn('[API generate-deck] No cards left after stop-word filtering');
+            throw new Error('Модель вернула некорректный ответ');
+          }
+
+          const validatedCards = filteredCards.map((c: any) => sanitizeAndValidateCard(c, isGrammar));
           console.log(`[API generate-deck] Successfully generated and validated ${validatedCards.length} cards using ${model} (key ${i + 1})`);
 
           return NextResponse.json({ success: true, cards: validatedCards });

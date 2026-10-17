@@ -1201,7 +1201,15 @@ if (typeof window !== 'undefined') {
 }
 
 export function getCardSpeechText(card: Flashcard): string {
-  return (card.targetWord || '').replace(/\|/g, '').trim();
+  const rawTarget = (card.targetWord || '').replace(/\|/g, '').trim();
+  if (/^(der|die|das)\s+/i.test(rawTarget)) {
+    return rawTarget;
+  }
+  const hintMatch = (card.hint || card.forms || '').trim().match(/^(der|die|das)\b/i);
+  if (hintMatch && /^[A-ZÄÖÜ]/.test(rawTarget)) {
+    return `${hintMatch[1]} ${rawTarget}`;
+  }
+  return rawTarget;
 }
 
 // ==========================================
@@ -1684,8 +1692,51 @@ function RapidFlashcardMode({
     }
   }, [card?.id, forcedReverse, progress]);
 
-  const german = (card?.targetWord || '').replace(/\|/g, '');
-  const speechText = useMemo(() => getCardSpeechText(card), [card]);
+  const formatForms = (f: string | undefined | null) => {
+    if (!f || f === '-') return null;
+    return f.replace(/,\s*/g, ' · ');
+  };
+
+  const { displayGerman, displayForms } = useMemo(() => {
+    let rawWord = (card?.targetWord || '').replace(/\|/g, '').trim();
+    let forms = card?.forms || null;
+
+    // 1. Если слово уже содержит артикль (например "die Abiturprüfung")
+    const directMatch = rawWord.match(/^(der|die|das)\s+(.+)$/i);
+    if (directMatch) {
+      return { displayGerman: rawWord, displayForms: formatForms(forms) };
+    }
+
+    // 2. Извлекаем артикль и форму мн. числа из card.hint (или card.forms)
+    // Формат: "die Abiturprüfung, -en — экзамен на аттестат зрелости" или "die Abiturprüfung, -en"
+    const hintText = (card?.hint || card?.forms || '').trim();
+    const hintMatch = hintText.match(/^(der|die|das)\b\s*([a-zA-ZäöüÄÖÜß\s-]+?)(?:,\s*([-a-zA-ZäöüÄÖÜß]+))?(?:\s*—|\s*-\s*|\s*\(|$)/i);
+
+    if (hintMatch) {
+      const art = hintMatch[1];
+      const nounInHint = hintMatch[2].trim();
+      const pluralInHint = hintMatch[3]?.trim();
+
+      // Если существительное (с заглавной буквы или совпадает с hint)
+      if (/^[A-ZÄÖÜ]/.test(rawWord) || (nounInHint && nounInHint.toLowerCase() === rawWord.toLowerCase())) {
+        const fullNoun = `${art} ${rawWord}`;
+        if (!forms && pluralInHint) {
+          forms = pluralInHint.startsWith('-') ? pluralInHint : `-${pluralInHint}`;
+        }
+        return { displayGerman: fullNoun, displayForms: formatForms(forms) };
+      }
+    }
+
+    // 3. Упрощенный поиск артикля в начале hint
+    const simpleArt = hintText.match(/^(der|die|das)\b/i);
+    if (simpleArt && /^[A-ZÄÖÜ]/.test(rawWord)) {
+      return { displayGerman: `${simpleArt[1]} ${rawWord}`, displayForms: formatForms(forms) };
+    }
+
+    return { displayGerman: rawWord, displayForms: formatForms(forms) };
+  }, [card?.targetWord, card?.hint, card?.forms]);
+
+  const speechText = useMemo(() => displayGerman || getCardSpeechText(card), [displayGerman, card]);
   let translation = card.translation || '';
   let example = card.sentence && card.sentence !== '-' ? card.sentence : '';
   if (!hasCyrillic(translation) && hasCyrillic(example)) {
@@ -1787,11 +1838,6 @@ function RapidFlashcardMode({
     </div>
   );
 
-  const formatForms = (f: string | undefined | null) => {
-    if (!f || f === '-') return null;
-    return f.replace(/,\s*/g, ' · ');
-  };
-
   const formatGermanWord = (w: string) => {
     const trimmed = w.trim();
     const match = trimmed.match(/^(der|die|das)\s+(.+)$/i);
@@ -1804,13 +1850,13 @@ function RapidFlashcardMode({
 
       let articleColor = '';
       const lowerArticle = article.toLowerCase();
-      if (lowerArticle === 'der') articleColor = 'text-[#007AFF] dark:text-[#0A84FF]';
-      else if (lowerArticle === 'die') articleColor = 'text-[#FF3B30] dark:text-[#FF453A]';
-      else if (lowerArticle === 'das') articleColor = 'text-[#34C759] dark:text-[#30D158]';
+      if (lowerArticle === 'der') articleColor = 'text-sky-500 dark:text-sky-400 font-semibold';
+      else if (lowerArticle === 'die') articleColor = 'text-rose-500 dark:text-rose-400 font-semibold';
+      else if (lowerArticle === 'das') articleColor = 'text-emerald-500 dark:text-emerald-400 font-semibold';
 
       return (
         <span className="inline-flex items-baseline justify-center whitespace-nowrap">
-          <span className={`font-normal ${articleColor}`}>{article}{`\u00A0`}</span>
+          <span className={articleColor}>{article}{`\u00A0`}</span>
           <span className="whitespace-nowrap">{firstWord}</span>
           {remaining && <span className="whitespace-nowrap">&nbsp;{remaining}</span>}
         </span>
@@ -1819,16 +1865,14 @@ function RapidFlashcardMode({
     return <span className="whitespace-nowrap">{trimmed}</span>;
   };
 
-  const formattedForms = formatForms(card.forms);
-
   const renderGermanBlock = () => (
     <div className="flex flex-col items-center justify-center w-full px-0.5 sm:px-1">
-      <AutoFitGermanHeading text={german}>
-        {formatGermanWord(german)}
+      <AutoFitGermanHeading text={displayGerman}>
+        {formatGermanWord(displayGerman)}
       </AutoFitGermanHeading>
-      {formattedForms && (
+      {displayForms && (
         <div className="text-[14px] md:text-[16px] text-zinc-500 dark:text-zinc-400 mt-2 font-normal tracking-wide text-center">
-          {formattedForms}
+          {displayForms}
         </div>
       )}
     </div>
