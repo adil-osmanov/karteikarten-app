@@ -107,6 +107,8 @@ export async function POST(req: Request) {
   try {
     const { title, category = 'grammatik', count = 15, images = [], level = 'B1' } = await req.json();
 
+    console.log('[API generate-deck] Started:', { title, category, count, imagesCount: images?.length });
+
     if (!title || !title.trim()) {
       return NextResponse.json({ success: false, error: 'Название темы обязательно' }, { status: 400 });
     }
@@ -119,10 +121,8 @@ export async function POST(req: Request) {
     const isGrammar = category.toLowerCase().includes('grammat');
     const targetCount = Math.max(5, Math.min(50, Number(count) || 15));
 
-    // Актуальная рабочая Vision-модель Groq (llama-3.2-11b отключена):
-    const model = images && images.length > 0 
-      ? 'qwen/qwen3.8-27b' 
-      : 'llama-3.3-70b-versatile';
+    // Рабочая модель Groq (qwen3.8-27b поддерживает и зрение/OCR, и текст, и активна на всех ключах):
+    const model = 'qwen/qwen3.8-27b';
 
     const systemPrompt = `Ты — ведущий немецкий методист и экзаменатор уровня B1–B2 (Goethe-Institut / Duden).
 Твоя задача — составить ровно ${targetCount} карточек для тренировки.
@@ -197,6 +197,7 @@ export async function POST(req: Request) {
       try {
         const groq = new Groq({ apiKey });
 
+        console.log(`[API generate-deck] Querying model ${model} with key ${i + 1}/${keys.length}...`);
         const completion = await groq.chat.completions.create({
           model,
           messages: [
@@ -209,16 +210,24 @@ export async function POST(req: Request) {
 
         let raw = completion.choices[0]?.message?.content || '{}';
         raw = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
-        const result = JSON.parse(raw);
-        const rawCards = Array.isArray(result.cards) ? result.cards : [];
+        
+        let result: any = null;
+        try {
+          result = JSON.parse(raw);
+        } catch (pErr) {
+          console.error('[API generate-deck] Failed to parse JSON from LLM:', raw);
+          throw new Error('Модель вернула некорректный ответ');
+        }
 
+        const rawCards = Array.isArray(result?.cards) ? result.cards : [];
         if (rawCards.length === 0) {
-          throw new Error('Модель вернула пустой список карточек');
+          console.warn('[API generate-deck] LLM returned empty cards array');
+          throw new Error('Модель вернула некорректный ответ');
         }
 
         const validatedCards = rawCards.map(sanitizeAndValidateCard);
+        console.log(`[API generate-deck] Successfully generated and validated ${validatedCards.length} cards`);
 
-        // Успешно сгенерировано
         return NextResponse.json({ success: true, cards: validatedCards });
       } catch (err: any) {
         lastError = err;
@@ -245,10 +254,10 @@ export async function POST(req: Request) {
 
     throw lastError;
   } catch (error: any) {
-    console.error('Deck generation error:', error);
+    console.error('[API generate-deck] Final Error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: error?.message || 'Ошибка генерации карточек' 
+      error: error?.message || 'Модель вернула некорректный ответ' 
     }, { status: 500 });
   }
 }
