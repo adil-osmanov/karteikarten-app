@@ -2913,10 +2913,10 @@ function StudyCard({
                 <button
                   key={opt}
                   onClick={() => handleOptionClick(opt)}
-                  className="w-full py-3.5 px-4 rounded-xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-zinc-50 hover:bg-zinc-100/80 border border-zinc-200/70 hover:border-zinc-300 text-zinc-900 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/80 dark:border-white/10 dark:hover:border-white/20 dark:text-zinc-100 shadow-sm"
+                  className="w-full py-3.5 px-4 rounded-xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-900 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/80 dark:border-white/10 dark:hover:border-white/20 dark:text-zinc-100 shadow-sm"
                 >
                   <span className="flex-1 pr-2 truncate">{displayOpt}</span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 text-zinc-400 dark:text-zinc-400 font-mono shrink-0">
+                  <span className="text-xs px-2 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-zinc-500 dark:text-zinc-400 font-mono shrink-0">
                     {idx + 1}
                   </span>
                 </button>
@@ -3193,7 +3193,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="h-9 px-3.5 rounded-full bg-zinc-100 hover:bg-zinc-200/80 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-700 dark:text-zinc-300 text-sm font-medium flex items-center gap-2 transition-all active:scale-95 cursor-pointer select-none"
+                className="h-9 px-3.5 rounded-full bg-white/80 hover:bg-white/95 dark:bg-zinc-900/80 dark:hover:bg-zinc-800/95 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 text-sm font-medium flex items-center gap-2 transition-all active:scale-95 cursor-pointer select-none"
                 title="Zurück zur Übersicht"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
