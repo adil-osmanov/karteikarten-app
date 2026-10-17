@@ -3128,15 +3128,6 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
 
-  const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch (e) {}
-    toast.success(appLanguage === 'EN' ? 'Signed out' : 'Erfolgreich abgemeldet');
-    setTimeout(() => {
-      if (typeof window !== 'undefined') window.location.reload();
-    }, 400);
-  };
 
   return (
     <>
@@ -3213,67 +3204,31 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
         {/* 2. ПРАВЫЙ УГОЛ: ЕДИНЫЙ КАПСУЛЬНЫЙ ТУЛБАР (UNIFIED CONTROL ISLAND) */}
         <div className="pointer-events-auto flex items-center">
-          <div className="h-9 px-2 rounded-full flex items-center gap-1 sm:gap-1.5 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 transition-all select-none">
-            
-            {/* А) Блок активности / прогресса */}
-            <div className="flex items-center gap-1.5 px-1.5 sm:px-2 py-0.5 text-zinc-700 dark:text-zinc-200">
-              <Flame className="w-4 h-4 text-amber-500 fill-amber-500/20" />
-              <span className="text-xs font-semibold tabular-nums leading-none">{todayCount}</span>
-              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium hidden sm:inline leading-none">heute</span>
+          <div className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm select-none">
+            {/* 1. Карточки за сегодня */}
+            <div 
+              onClick={(e) => { if (e.detail === 3) setAdminOpen(true); }}
+              className="flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 cursor-default"
+              title="Gelernte Karten heute"
+            >
+              <Layers className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400" />
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{todayCount}</span>
+              <span className="text-zinc-400 dark:text-zinc-500 font-normal">heute</span>
             </div>
 
-            {/* Б) Вертикальный микро-разделитель (Divider) */}
+            {/* Тонкий разделитель */}
             <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/10 mx-0.5" />
 
-            {/* В) Переключатель темы (Dark / Light) */}
-            <button
+            {/* 2. Переключатель темы */}
+            <button 
               type="button"
               onClick={toggleTheme}
-              className="p-1.5 rounded-full text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-150 active:scale-95 cursor-pointer flex items-center justify-center"
-              title={isDark ? "Heller Modus" : "Dunkler Modus"}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-black/[0.05] dark:hover:bg-white/[0.08] active:scale-95 transition-all cursor-pointer"
               aria-label="Toggle theme"
+              title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
-              {isDark ? (
-                <Moon className="w-4 h-4 transition-transform duration-200 hover:-rotate-12" />
-              ) : (
-                <Sun className="w-4 h-4 transition-transform duration-200 hover:rotate-45" />
-              )}
+              {isDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
             </button>
-
-            {/* Г) Вертикальный микро-разделитель (Divider) */}
-            <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/10 mx-0.5" />
-
-            {/* Д) Статусный бейдж тарифа (FREE / PRO) */}
-            <span
-              onClick={() => toast.success('PRO Mitgliedschaft aktiv • Unbegrenzter Zugriff')}
-              className="px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-white/10 uppercase select-none cursor-pointer transition-all hover:border-zinc-300 dark:hover:border-white/20 active:scale-95"
-              title="Tarif: PRO"
-            >
-              PRO
-            </span>
-
-            {/* Database / Admin Dashboard Trigger */}
-            <button
-              type="button"
-              onClick={() => setAdminOpen(true)}
-              className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer active:scale-95 flex items-center justify-center"
-              title="Admin Dashboard"
-              aria-label="Admin Dashboard"
-            >
-              <Database className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Е) Кнопка профиля / выхода (Action) */}
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer active:scale-95 flex items-center justify-center"
-              title="Abmelden"
-              aria-label="Abmelden"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-            </button>
-
           </div>
         </div>
 
