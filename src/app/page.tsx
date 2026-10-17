@@ -4154,18 +4154,52 @@ const renderFormsList = (forms: any, style: any) => {
   );
 };
 
+interface TheoryErrorBoundaryProps {
+  children: React.ReactNode;
+  fallback: (error: Error, reset: () => void) => React.ReactNode;
+}
+
+interface TheoryErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class TheoryErrorBoundary extends React.Component<TheoryErrorBoundaryProps, TheoryErrorBoundaryState> {
+  constructor(props: TheoryErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): TheoryErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("Theory render error caught by boundary:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback(this.state.error || new Error("Unknown error"), () => {
+        this.setState({ hasError: false, error: null });
+      });
+    }
+    return this.props.children;
+  }
+}
+
 function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: string, onClose: () => void, onStartSession: () => void, onEdit?: () => void }) {
   useScrollLock(true);
   const deck = useStore(state => state.decks.find(d => d.id === deckId));
   
+  const isValidTheory = useCallback((obj: any): boolean => {
+    if (!obj || typeof obj !== 'object' || Object.keys(obj).length === 0) return false;
+    const str = JSON.stringify(obj).toLowerCase();
+    return !str.includes('meinder') && !str.includes('meinedie') && !str.includes('meindas');
+  }, []);
+
   // 1. Мгновенно вычисляем начальную теорию из памяти или localStorage, исключая повторные генерации
   const initialTheory = useMemo(() => {
-    const isValidTheory = (obj: any): boolean => {
-      if (!obj || typeof obj !== 'object' || Object.keys(obj).length === 0) return false;
-      const str = JSON.stringify(obj).toLowerCase();
-      return !str.includes('meinder') && !str.includes('meinedie') && !str.includes('meindas');
-    };
-
     if (deck && isValidTheory(deck.theory)) {
       return deck.theory as StructuredTheory;
     }
@@ -4189,117 +4223,114 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       }
     }
     return null;
-  }, [deck?.theory, deckId]);
+  }, [deck, deckId, isValidTheory]);
 
   const [theoryData, setTheoryData] = useState<StructuredTheory | null>(initialTheory);
   const [legacyText, setLegacyText] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(!initialTheory);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchTheory = useCallback(async (force = false) => {
     if (!deckId) return;
 
-    const isValidTheory = (obj: any): boolean => {
-      if (!obj || typeof obj !== 'object' || Object.keys(obj).length === 0) return false;
-      const str = JSON.stringify(obj).toLowerCase();
-      return !str.includes('meinder') && !str.includes('meinedie') && !str.includes('meindas');
-    };
-
-    // 1. Если теория уже есть в объекте темы или в состоянии — мгновенно берем её
-    if (isValidTheory(theoryData)) {
-      setIsLoading(false);
-      return;
-    }
-
-    if (deck && isValidTheory(deck.theory)) {
-      setTheoryData(deck.theory as StructuredTheory);
-      setIsLoading(false);
-      return;
-    }
-
-    if (typeof deck?.theory === 'string') {
-      try {
-        const p = JSON.parse(deck.theory);
-        if (isValidTheory(p)) {
-          setTheoryData(p);
-          setIsLoading(false);
-          return;
-        }
-      } catch (e) {}
-    }
-
-    // 2. Проверяем localStorage
-    const cached = localStorage.getItem(`deck_theory_json_${deckId}`) || localStorage.getItem(`deck_theory_${deckId}`);
-    if (cached) {
-      try {
-        const p = JSON.parse(cached);
-        if (isValidTheory(p)) {
-          setTheoryData(p);
-          setIsLoading(false);
-          useStore.setState(state => ({
-            decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p } : d)
-          }));
-          return;
-        } else {
-          localStorage.removeItem(`deck_theory_json_${deckId}`);
-          localStorage.removeItem(`deck_theory_${deckId}`);
-        }
-      } catch (e) {}
-    }
-
-    // 3. Только если теории НЕТ — вызываем генерацию
-    const fetchTheory = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const res = await fetch('/api/generate-theory', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            topicId: deckId,
-            topicTitle: deck?.name || 'Grammatik',
-            level: deck?.level || 'B1'
-          })
-        });
-
-        const json = await res.json();
-        if (!res.ok || !json.success || !json.data) {
-          throw new Error(json.error || 'Theorie konnte nicht generiert werden');
-        }
-
-        const generatedData: StructuredTheory = json.data;
-        setTheoryData(generatedData);
-
-        // Обновляем локальное состояние стора
-        useStore.setState(state => ({
-          decks: state.decks.map(d => d.id === deckId ? { ...d, theory: generatedData } : d)
-        }));
-
-        // Сохраняем в localStorage
-        const stringified = JSON.stringify(generatedData);
-        localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
-        localStorage.setItem(`deck_theory_${deckId}`, stringified);
-
-        window.dispatchEvent(new Event('theory-update'));
-
-        // Сохраняем в Supabase навсегда
-        try {
-          await supabase.from('decks').update({ theory: generatedData }).eq('id', deckId);
-        } catch (e) {}
-        try {
-          await supabase.from('topics').update({ theory: generatedData }).eq('id', deckId);
-        } catch (e) {}
-        syncAppStateToCloud();
-      } catch (err: any) {
-        console.error('Failed to load theory:', err);
-        setError(err.message || 'Fehler beim Laden der Theorie');
-      } finally {
+    if (!force) {
+      // 1. Если теория уже есть в состоянии — берем её
+      if (isValidTheory(theoryData)) {
         setIsLoading(false);
+        return;
       }
-    };
 
-    fetchTheory();
-  }, [deckId, deck?.theory]);
+      // 2. Если в объекте темы
+      if (deck && isValidTheory(deck.theory)) {
+        setTheoryData(deck.theory as StructuredTheory);
+        setIsLoading(false);
+        return;
+      }
+
+      if (typeof deck?.theory === 'string') {
+        try {
+          const p = JSON.parse(deck.theory);
+          if (isValidTheory(p)) {
+            setTheoryData(p);
+            setIsLoading(false);
+            return;
+          }
+        } catch (e) {}
+      }
+
+      // 3. Проверяем localStorage
+      const cached = localStorage.getItem(`deck_theory_json_${deckId}`) || localStorage.getItem(`deck_theory_${deckId}`);
+      if (cached) {
+        try {
+          const p = JSON.parse(cached);
+          if (isValidTheory(p)) {
+            setTheoryData(p);
+            setIsLoading(false);
+            useStore.setState(state => ({
+              decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p } : d)
+            }));
+            return;
+          } else {
+            localStorage.removeItem(`deck_theory_json_${deckId}`);
+            localStorage.removeItem(`deck_theory_${deckId}`);
+          }
+        } catch (e) {}
+      }
+    }
+
+    // Принудительная или первичная генерация
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/generate-theory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicId: deckId,
+          topicTitle: deck?.name || 'Grammatik',
+          level: deck?.level || 'B1'
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success || !json.data) {
+        throw new Error(json.error || 'Theorie konnte nicht generiert werden');
+      }
+
+      const generatedData: StructuredTheory = json.data;
+      setTheoryData(generatedData);
+
+      // Обновляем локальное состояние стора
+      useStore.setState(state => ({
+        decks: state.decks.map(d => d.id === deckId ? { ...d, theory: generatedData } : d)
+      }));
+
+      // Сохраняем в localStorage
+      const stringified = JSON.stringify(generatedData);
+      localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
+      localStorage.setItem(`deck_theory_${deckId}`, stringified);
+
+      window.dispatchEvent(new Event('theory-update'));
+
+      // Сохраняем в Supabase навсегда
+      try {
+        await supabase.from('decks').update({ theory: generatedData }).eq('id', deckId);
+      } catch (e) {}
+      try {
+        await supabase.from('topics').update({ theory: generatedData }).eq('id', deckId);
+      } catch (e) {}
+      syncAppStateToCloud();
+    } catch (err: any) {
+      console.error('Failed to load theory:', err);
+      setError(err.message || 'Fehler beim Laden der Theorie');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [deckId, deck, theoryData, isValidTheory]);
+
+  useEffect(() => {
+    fetchTheory(false);
+  }, [fetchTheory]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -4478,13 +4509,25 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           <h2 className="text-xl font-bold tracking-tight text-white">
             {displayTitle}
           </h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-all cursor-pointer active:scale-95"
-            title="Schließen (Esc)"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setTheoryData(null);
+                fetchTheory(true);
+              }}
+              title="Neu generieren"
+              className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-all cursor-pointer active:scale-95"
+            >
+              <RotateCcw className={cn("w-3.5 h-3.5", isLoading && "animate-spin text-blue-400")} />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-all cursor-pointer active:scale-95"
+              title="Schließen (Esc)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Content Scroll Container with pb-24 bottom protection */}
@@ -4524,313 +4567,281 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 <div className="h-24 rounded-2xl bg-zinc-900/60 border border-white/5" />
               </div>
             </div>
-          ) : theoryData ? (
-            /* Apple Guidebook Sheet (max-w-4xl) */
-            <div className="space-y-6">
-              {/* 1. Заголовок и Инсайт (Catchy Headline) */}
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight text-white mb-2">
-                  {theoryData.title || displayTitle}
-                </h1>
-                {(theoryData.catchyHeadline || theoryData.oneLiner) && (
-                  <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900/30 to-indigo-900/20 border border-blue-500/30 text-blue-100 text-sm font-medium leading-relaxed shadow-sm">
-                    {theoryData.catchyHeadline || theoryData.oneLiner}
-                  </div>
-                )}
-              </div>
-
-              {/* 2. Живое объяснение (Explanation) */}
-              {(theoryData.explanation || theoryData.coreConcept || theoryData.simpleExplanation) && (
-                <div className="text-zinc-300 text-sm leading-relaxed font-normal whitespace-pre-line space-y-2">
-                  {theoryData.explanation || theoryData.coreConcept || theoryData.simpleExplanation}
-                </div>
-              )}
-
-              {/* 3. Визуальная формула */}
-              {(theoryData.visualFormula || theoryData.formula) && (
-                <div className="p-3.5 rounded-xl bg-zinc-900/80 border border-white/10 text-center font-medium text-white text-sm tracking-wide shadow-sm leading-relaxed">
-                  {(theoryData.visualFormula || theoryData.formula || '').replace(/->/g, '→')}
-                </div>
-              )}
-
-              {/* 4. Наглядный блок (visualBreakdown.items) */}
-              {theoryData.visualBreakdown?.items && theoryData.visualBreakdown.items.length > 0 ? (
-                <div className="space-y-2.5">
-                  {theoryData.visualBreakdown.title && (
-                    <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
-                      {theoryData.visualBreakdown.title}
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
-                    {theoryData.visualBreakdown.items.map((item, idx) => {
-                      const key = getAccentKey(item.accent, `${item.label} ${item.badge || ''}`);
-                      const style = ACCENT_MAP[key] || ACCENT_MAP.sky;
-                      const forms = (item.value || '').split(/[\/\•\n]/).map(s => s.trim()).filter(Boolean);
-                      return (
-                        <div 
-                          key={idx} 
-                          className={`h-full p-4 rounded-2xl flex flex-col justify-between border ${style.card}`}
-                        >
-                          <div>
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <span className="text-xs font-semibold uppercase tracking-wider opacity-80 truncate">
-                                {item.label}
-                              </span>
-                              {item.badge && (
-                                <span className={`px-2 py-0.5 rounded-md text-xs font-semibold border shrink-0 ${style.badge}`}>
-                                  {item.badge}
-                                </span>
-                              )}
-                            </div>
-                            <div className="space-y-1 my-2">
-                              {forms.map((form, fIdx) => (
-                                <div key={fIdx} className={`text-sm font-semibold tracking-tight ${style.text}`}>
-                                  {form}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                          {item.hint && (
-                            <p className="text-xs opacity-80 mt-2 leading-snug">
-                              {item.hint}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : theoryData.genderMatrix && theoryData.genderMatrix.length > 0 ? (
-                /* Backward compatibility: genderMatrix */
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
-                    Цветовая матрица форм
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
-                    {theoryData.genderMatrix.map((item, idx) => {
-                      const style = getAppleGenderTokens(item.gender);
-                      return (
-                        <div 
-                          key={idx} 
-                          className={cn("h-full p-4 rounded-2xl flex flex-col justify-between border bg-zinc-900/70 shadow-sm", style.card)}
-                        >
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-xs font-semibold uppercase tracking-wider opacity-80">
-                                {item.gender}
-                              </span>
-                              <span className={cn("px-1.5 py-0.5 rounded text-[11px] font-bold border", style.badge)}>
-                                {item.article || style.article}
-                              </span>
-                            </div>
-                            {renderFormsList(item.forms, style)}
-                          </div>
-                          {item.note && (
-                            <p className="text-xs opacity-80 mt-2 leading-snug">
-                              {item.note}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {/* 5. Правила и нюансы (keyRules) */}
-              {theoryData.keyRules && theoryData.keyRules.length > 0 ? (
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
-                    Правила и нюансы
-                  </div>
-                  <div className="space-y-2.5">
-                    {theoryData.keyRules.map((rule, idx) => (
-                      <div 
-                        key={idx}
-                        className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 space-y-1 shadow-sm"
-                      >
-                        <div className="text-sm font-semibold text-zinc-200">
-                          {rule.title}
-                        </div>
-                        <div className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-normal">
-                          {rule.desc}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : theoryData.structuralRules && theoryData.structuralRules.length > 0 ? (
-                /* Backward compatibility: structuralRules */
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
-                    Правила структуры предложения
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {theoryData.structuralRules.map((rule, idx) => (
-                      <div 
-                        key={idx}
-                        className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 flex flex-col justify-between shadow-sm"
-                      >
-                        <div>
-                          <div className="text-xs font-semibold text-zinc-200 mb-2">
-                            {rule.title}
-                          </div>
-                          <div className="p-2.5 rounded-xl bg-zinc-900 border border-white/5 text-xs text-zinc-200 mb-2.5 font-medium leading-relaxed">
-                            {rule.scheme}
-                          </div>
-                        </div>
-                        <div className="text-xs text-zinc-400 leading-relaxed font-normal">
-                          {rule.explanation}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {/* 6. Живые примеры (examples) */}
-              {theoryData.examples && theoryData.examples.length > 0 && (
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
-                    Живые примеры
-                  </div>
-                  <div className="space-y-2.5">
-                    {theoryData.examples.map((ex, idx) => {
-                      const cleanDe = (ex.de || '').replace(/\s+([.,!?:;])/g, '$1').trim();
-                      const exKey = getAccentKey(ex.accent, `${ex.gender || ''} ${ex.highlight || ''} ${ex.note || ''}`);
-                      const exStyle = ACCENT_MAP[exKey] || ACCENT_MAP.sky;
-                      const highlightClass = `px-2 py-0.5 rounded-md font-bold inline-block border mx-0.5 text-xs sm:text-sm ${exStyle.highlight}`;
-
-                      const cleanHl = (ex.highlight || '').replace(/\s+([.,!?:;])/g, '$1').trim();
-                      let parts: (string | React.ReactNode)[] = [cleanDe];
-                      if (cleanHl && cleanDe.toLowerCase().includes(cleanHl.toLowerCase())) {
-                        const idxStart = cleanDe.toLowerCase().indexOf(cleanHl.toLowerCase());
-                        const before = cleanDe.slice(0, idxStart);
-                        const matched = cleanDe.slice(idxStart, idxStart + cleanHl.length);
-                        const after = cleanDe.slice(idxStart + cleanHl.length);
-                        parts = [
-                          before,
-                          <span key="hl" className={highlightClass}>{matched}</span>,
-                          after
-                        ];
-                      }
-
-                      return (
-                        <div 
-                          key={idx}
-                          className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 space-y-1 shadow-sm"
-                        >
-                          <div className="text-sm sm:text-base font-semibold text-white leading-relaxed">
-                            {parts}
-                          </div>
-                          <div className="text-sm text-zinc-300">
-                            {ex.ru}
-                          </div>
-                          {ex.note && (
-                            <div className="text-xs text-zinc-400 italic pt-0.5">
-                              {ex.note}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* 7. Ловушки (traps) */}
-              {theoryData.traps && theoryData.traps.length > 0 && (
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-amber-400 uppercase flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                    Типичные ловушки и ошибки (Achtung)
-                  </div>
-                  <div className="space-y-3">
-                    {theoryData.traps.map((trap, idx) => (
-                      <div 
-                        key={idx}
-                        className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-3 shadow-sm"
-                      >
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm font-medium flex items-start gap-2.5">
-                            <span className="shrink-0 text-base leading-none mt-0.5">❌</span>
-                            <span className="leading-snug">{trap.wrong.replace(/[❌✅]/g, '').trim()}</span>
-                          </div>
-                          <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-medium flex items-start gap-2.5">
-                            <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
-                            <span className="leading-snug">{trap.right.replace(/[❌✅]/g, '').trim()}</span>
-                          </div>
-                        </div>
-                        {trap.explanation && (
-                          <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-normal">
-                            {trap.explanation}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Backward compatibility: single trap */}
-              {!theoryData.traps && (theoryData.trap || theoryData.commonMistakes) && (
-                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-3 text-amber-900 dark:text-amber-200 text-sm shadow-sm">
-                  <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 mt-0.5" />
-                  <div className="space-y-1">
-                    <div className="font-bold text-amber-950 dark:text-amber-200">
-                      {theoryData.trap?.title || "Achtung / Ловушка"}
-                    </div>
-                    <div className="text-xs sm:text-sm text-amber-900/90 dark:text-amber-200/90 leading-relaxed font-normal">
-                      {theoryData.trap?.desc || theoryData.commonMistakes}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : legacyText ? (
-            renderedLegacyContent
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <AlertCircle className="w-8 h-8 text-red-500 mb-2 opacity-80" />
-              <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 mb-1">{error}</p>
+          ) : (!theoryData || typeof theoryData !== 'object' || Object.keys(theoryData).length === 0) ? (
+            <div className="p-8 text-center flex flex-col items-center justify-center space-y-4 my-auto py-16">
+              <p className="text-zinc-400 text-sm">Не удалось загрузить теорию или данные повреждены.</p>
               <button 
                 onClick={() => {
-                  setError(null);
-                  setIsLoading(true);
-                  fetch('/api/generate-theory', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      topicId: deckId,
-                      topicTitle: deck?.name || 'Grammatik',
-                      level: deck?.level || 'B1'
-                    })
-                  }).then(r => r.json()).then(json => {
-                    if (json.success && json.data) {
-                      setTheoryData(json.data);
-                      const stringified = JSON.stringify(json.data);
-                      localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
-                      localStorage.setItem(`deck_theory_${deckId}`, stringified);
-                      useStore.setState(state => ({
-                        decks: state.decks.map(d => d.id === deckId ? { ...d, theory: json.data } : d)
-                      }));
-                      window.dispatchEvent(new Event('theory-update'));
-                      try { supabase.from('decks').update({ theory: json.data }).eq('id', deckId); } catch (e) {}
-                      try { supabase.from('topics').update({ theory: json.data }).eq('id', deckId); } catch (e) {}
-                      syncAppStateToCloud();
-                    } else throw new Error(json.error || 'Failed');
-                  }).catch(e => setError(e.message)).finally(() => setIsLoading(false));
+                  setTheoryData(null);
+                  fetchTheory(true);
                 }}
-                className="mt-3 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer active:scale-95"
               >
-                Erneut versuchen
+                Сгенерировать заново
               </button>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-16 text-zinc-400">
-              <BookOpen className="w-10 h-10 mb-3 opacity-40" />
-              <p className="text-xs">Keine Theorie für dieses Deck gefunden.</p>
-            </div>
+            <TheoryErrorBoundary
+              fallback={(err, reset) => (
+                <div className="p-8 text-center flex flex-col items-center justify-center space-y-4 my-auto py-16">
+                  <p className="text-zinc-400 text-sm">Ошибка отображения: {err?.message || 'Не удалось отрисовать теорию'}</p>
+                  <button 
+                    onClick={() => {
+                      reset();
+                      setTheoryData(null);
+                      fetchTheory(true);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer active:scale-95"
+                  >
+                    Сгенерировать заново
+                  </button>
+                </div>
+              )}
+            >
+              {/* Apple Guidebook Sheet (max-w-4xl) */}
+              <div className="space-y-6">
+                {/* 1. Заголовок и Инсайт (Catchy Headline) */}
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight text-white mb-2">
+                    {theoryData.title || displayTitle}
+                  </h1>
+                  {(theoryData.catchyHeadline || theoryData.oneLiner) && (
+                    <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900/30 to-indigo-900/20 border border-blue-500/30 text-blue-100 text-sm font-medium leading-relaxed shadow-sm">
+                      {theoryData.catchyHeadline || theoryData.oneLiner}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Живое объяснение (Explanation) */}
+                {(theoryData.explanation || theoryData.coreConcept || theoryData.simpleExplanation) && (
+                  <div className="text-zinc-300 text-sm leading-relaxed font-normal whitespace-pre-line space-y-2">
+                    {theoryData.explanation || theoryData.coreConcept || theoryData.simpleExplanation}
+                  </div>
+                )}
+
+                {/* 3. Визуальная формула */}
+                {(theoryData.visualFormula || theoryData.formula) && (
+                  <div className="p-3.5 rounded-xl bg-zinc-900/80 border border-white/10 text-center font-medium text-white text-sm tracking-wide shadow-sm leading-relaxed">
+                    {(theoryData.visualFormula || theoryData.formula || '').replace(/->/g, '→')}
+                  </div>
+                )}
+
+                {/* 4. Наглядный блок (visualBreakdown.items) */}
+                {(() => {
+                  const breakdownItems: VisualBreakdownItem[] = Array.isArray(theoryData.visualBreakdown?.items)
+                    ? theoryData.visualBreakdown.items
+                    : Array.isArray(theoryData.visualBreakdown)
+                    ? (theoryData.visualBreakdown as any)
+                    : [];
+
+                  if (breakdownItems.length === 0) return null;
+
+                  return (
+                    <div className="space-y-2.5">
+                      {theoryData.visualBreakdown?.title && (
+                        <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
+                          {theoryData.visualBreakdown.title}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
+                        {breakdownItems.map((item, idx) => {
+                          if (!item || typeof item !== 'object') return null;
+                          const key = getAccentKey(item.accent, `${item.label || ''} ${item.badge || ''}`);
+                          const style = ACCENT_MAP[key] || ACCENT_MAP.sky;
+                          const rawVal: string = typeof (item as any).value === 'string' ? (item as any).value : (Array.isArray((item as any).value) ? ((item as any).value as any[]).join(' / ') : String((item as any).value || ''));
+                          const forms: string[] = rawVal.split(/[\/\•\n]/).map((s: string) => s.trim()).filter(Boolean);
+                          return (
+                            <div 
+                              key={idx} 
+                              className={`h-full p-4 rounded-2xl flex flex-col justify-between border ${style.card}`}
+                            >
+                              <div>
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                  <span className="text-xs font-semibold uppercase tracking-wider opacity-80 truncate">
+                                    {item.label || 'Категория'}
+                                  </span>
+                                  {item.badge && (
+                                    <span className={`px-2 py-0.5 rounded-md text-xs font-semibold border shrink-0 ${style.badge}`}>
+                                      {item.badge}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="space-y-1 my-2">
+                                  {forms.map((form: string, fIdx: number) => (
+                                    <div key={fIdx} className={`text-sm font-semibold tracking-tight ${style.text}`}>
+                                      {form}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              {item.hint && (
+                                <p className="text-xs opacity-80 mt-2 leading-snug">
+                                  {item.hint}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 5. Правила и нюансы (keyRules) */}
+                {(() => {
+                  const keyRulesList: KeyRuleItem[] = Array.isArray(theoryData.keyRules)
+                    ? theoryData.keyRules
+                    : Array.isArray((theoryData as any)?.nuances)
+                    ? (theoryData as any).nuances
+                    : [];
+
+                  if (keyRulesList.length === 0) return null;
+
+                  return (
+                    <div className="space-y-2.5">
+                      <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
+                        Правила и нюансы
+                      </div>
+                      <div className="space-y-2.5">
+                        {keyRulesList.map((rule, idx) => {
+                          if (!rule) return null;
+                          const title = typeof rule === 'string' ? rule : (rule.title || '');
+                          const desc = typeof rule === 'object' ? (rule.desc || '') : '';
+                          return (
+                            <div 
+                              key={idx}
+                              className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 space-y-1 shadow-sm"
+                            >
+                              {title && (
+                                <div className="text-sm font-semibold text-zinc-200">
+                                  {title}
+                                </div>
+                              )}
+                              {desc && (
+                                <div className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-normal">
+                                  {desc}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 6. Живые примеры (examples) */}
+                {(() => {
+                  const examplesList: TheoryExampleItem[] = Array.isArray(theoryData.examples) ? theoryData.examples : [];
+                  if (examplesList.length === 0) return null;
+
+                  return (
+                    <div className="space-y-2.5">
+                      <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
+                        Живые примеры
+                      </div>
+                      <div className="space-y-2.5">
+                        {examplesList.map((ex, idx) => {
+                          if (!ex || typeof ex !== 'object') return null;
+                          const cleanDe = (typeof ex.de === 'string' ? ex.de : '').replace(/\s+([.,!?:;])/g, '$1').trim();
+                          if (!cleanDe) return null;
+                          const exKey = getAccentKey(ex.accent, `${ex.gender || ''} ${ex.highlight || ''} ${ex.note || ''}`);
+                          const exStyle = ACCENT_MAP[exKey] || ACCENT_MAP.sky;
+                          const highlightClass = `px-2 py-0.5 rounded-md font-bold inline-block border mx-0.5 text-xs sm:text-sm ${exStyle.highlight}`;
+
+                          const cleanHl = (typeof ex.highlight === 'string' ? ex.highlight : '').replace(/\s+([.,!?:;])/g, '$1').trim();
+                          let parts: (string | React.ReactNode)[] = [cleanDe];
+                          if (cleanHl && cleanDe.toLowerCase().includes(cleanHl.toLowerCase())) {
+                            const idxStart = cleanDe.toLowerCase().indexOf(cleanHl.toLowerCase());
+                            const before = cleanDe.slice(0, idxStart);
+                            const matched = cleanDe.slice(idxStart, idxStart + cleanHl.length);
+                            const after = cleanDe.slice(idxStart + cleanHl.length);
+                            parts = [
+                              before,
+                              <span key="hl" className={highlightClass}>{matched}</span>,
+                              after
+                            ];
+                          }
+
+                          return (
+                            <div 
+                              key={idx}
+                              className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 space-y-1 shadow-sm"
+                            >
+                              <div className="text-sm sm:text-base font-semibold text-white leading-relaxed">
+                                {parts}
+                              </div>
+                              {ex.ru && (
+                                <div className="text-sm text-zinc-300">
+                                  {ex.ru}
+                                </div>
+                              )}
+                              {ex.note && (
+                                <div className="text-xs text-zinc-400 italic pt-0.5">
+                                  {ex.note}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 7. Ловушки (traps) */}
+                {(() => {
+                  const trapsList: TheoryTrapItem[] = Array.isArray(theoryData.traps) ? theoryData.traps : [];
+                  if (trapsList.length === 0) return null;
+
+                  return (
+                    <div className="space-y-2.5">
+                      <div className="text-xs font-semibold tracking-wider text-amber-400 uppercase flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                        Типичные ловушки и ошибки (Achtung)
+                      </div>
+                      <div className="space-y-3">
+                        {trapsList.map((trap: any, idx: number) => {
+                          if (!trap) return null;
+                          const wrongRaw = typeof trap === 'string' ? trap : (trap.wrong || trap.mistake || trap.incorrect || '');
+                          const rightRaw = typeof trap === 'object' ? (trap.right || trap.correct || trap.solution || '') : '';
+                          const wrongClean = typeof wrongRaw === 'string' ? wrongRaw.replace(/[❌✅]/g, '').trim() : String(wrongRaw || '');
+                          const rightClean = typeof rightRaw === 'string' ? rightRaw.replace(/[❌✅]/g, '').trim() : String(rightRaw || '');
+                          const explanation = typeof trap === 'object' ? (trap.explanation || trap.desc || trap.note || '') : '';
+
+                          return (
+                            <div 
+                              key={idx}
+                              className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-3 shadow-sm"
+                            >
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {wrongClean && (
+                                  <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm font-medium flex items-start gap-2.5">
+                                    <span className="shrink-0 text-base leading-none mt-0.5">❌</span>
+                                    <span className="leading-snug">{wrongClean}</span>
+                                  </div>
+                                )}
+                                {rightClean && (
+                                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-medium flex items-start gap-2.5">
+                                    <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
+                                    <span className="leading-snug">{rightClean}</span>
+                                  </div>
+                                )}
+                              </div>
+                              {explanation && (
+                                <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-normal">
+                                  {explanation}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </TheoryErrorBoundary>
           )}
         </div>
 
