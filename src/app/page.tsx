@@ -410,10 +410,50 @@ export interface Flashcard {
   forms?: string | null;
 }
 
+export interface GenderMatrixItem {
+  gender: 'maskulin' | 'neutral' | 'feminin' | 'plural' | string;
+  article: string;
+  forms: string;
+  note: string;
+  color?: string;
+}
+
+export interface StructuralRuleItem {
+  title: string;
+  scheme: string;
+  explanation: string;
+}
+
+export interface NuanceItem {
+  title: string;
+  desc: string;
+}
+
+export interface TheoryExampleItem {
+  de: string;
+  highlight?: string;
+  gender?: 'maskulin' | 'neutral' | 'feminin' | 'plural' | string;
+  ru: string;
+  note?: string;
+}
+
+export interface TheoryTrapItem {
+  wrong: string;
+  right: string;
+  explanation: string;
+}
+
 export interface StructuredTheory {
   title: string;
-  oneLiner?: string;
+  catchyHeadline?: string;
+  coreConcept?: string;
   formula?: string;
+  genderMatrix?: GenderMatrixItem[];
+  structuralRules?: StructuralRuleItem[];
+  nuances?: NuanceItem[];
+  examples?: TheoryExampleItem[];
+  traps?: TheoryTrapItem[];
+  oneLiner?: string;
   simpleExplanation?: string;
   matrix?: {
     headers?: string[];
@@ -426,18 +466,13 @@ export interface StructuredTheory {
     explanation?: string;
   };
   rules?: { title: string; desc: string }[];
-  examples?: { 
-    de: string; 
-    highlight?: string;
-    ru: string; 
-    note?: string; 
-  }[];
   trap?: {
     title: string;
     desc: string;
   };
   commonMistakes?: string;
 }
+
 
 export interface Deck {
   id: string;
@@ -3499,6 +3534,23 @@ const DeckCard = React.memo(({
   onStartShadowing: (id: string) => void;
 }) => {
   const isVerbBook = deck.bookId === 'verbs-de';
+  const books = useStore(state => state.books);
+  const book = deck.bookId ? books.find(b => b.id === deck.bookId) : undefined;
+  const isGrammarTab = activeTab === 'Grammatik';
+  const bookMode = book?.training_mode || 'standard_cloze';
+  const isSpecialMode = 
+    deck.bookId === 'verbs-de' || 
+    deck.bookId === 'prep-verbs-de' || 
+    deck.bookId === 'redemittel' ||
+    bookMode === 'starke_verben' ||
+    bookMode === 'preposition_drill' ||
+    bookMode === 'rapid_flashcards' ||
+    bookMode === 'redemittel' ||
+    book?.category === 'flashcards' ||
+    book?.category === 'deck';
+  const isStandardCloze = bookMode === 'standard_cloze' && !isSpecialMode;
+  const showTheoryButton = isGrammarTab && isStandardCloze;
+
   const total = deck.cards.length;
   const mastered = deck.cards.filter(c => c.isArchived).length;
   const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
@@ -3511,15 +3563,8 @@ const DeckCard = React.memo(({
         isCompleted && "opacity-75 hover:opacity-100"
       )}
     >
-      {/* Action Buttons (Edit / Delete) */}
+      {/* Action Buttons (Delete only - Edit button removed for clean Apple UI) */}
       <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
-        <button 
-          onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-          className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
-          title="Umbenennen"
-        >
-          <Edit2 className="w-3.5 h-3.5" />
-        </button>
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
           className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
@@ -3541,7 +3586,7 @@ const DeckCard = React.memo(({
       <div className="mt-auto pt-4 flex flex-col w-full">
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center gap-2">
-            {!isVerbBook && activeTab === 'Grammatik' && (
+            {showTheoryButton && (
               <DeckTheoryIndicator 
                 deckId={deck.id} 
                 onOpenEdit={(e) => { e.stopPropagation(); onEditTheory(deck.id); }} 
@@ -4037,7 +4082,50 @@ function EndingsMatrixWidget({ data }: { data?: { m: string; n: string; f: strin
   );
 }
 
-function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: string, onClose: () => void, onStartSession: () => void, onEdit: () => void }) {
+const getAppleGenderTokens = (genderStr: string = '') => {
+  const g = genderStr.toLowerCase().trim();
+  if (g.includes('maskulin') || g === 'der' || g.includes('мужск')) {
+    return {
+      card: "bg-sky-500/10 border-sky-500/25 text-sky-950 dark:text-sky-300",
+      badge: "text-sky-700 dark:text-sky-400 bg-sky-500/15 border-sky-500/25",
+      highlight: "text-sky-700 dark:text-sky-400 bg-sky-500/15 border-sky-500/25",
+      form: "text-sky-600 dark:text-sky-400",
+      article: "der",
+      label: "Maskulin"
+    };
+  }
+  if (g.includes('neutral') || g === 'das' || g.includes('средн')) {
+    return {
+      card: "bg-emerald-500/10 border-emerald-500/25 text-emerald-950 dark:text-emerald-300",
+      badge: "text-emerald-700 dark:text-emerald-400 bg-emerald-500/15 border-emerald-500/25",
+      highlight: "text-emerald-700 dark:text-emerald-400 bg-emerald-500/15 border-emerald-500/25",
+      form: "text-emerald-600 dark:text-emerald-400",
+      article: "das",
+      label: "Neutral"
+    };
+  }
+  if (g.includes('feminin') || (g === 'die' && !g.includes('plural')) || g.includes('женск')) {
+    return {
+      card: "bg-rose-500/10 border-rose-500/25 text-rose-950 dark:text-rose-300",
+      badge: "text-rose-700 dark:text-rose-400 bg-rose-500/15 border-rose-500/25",
+      highlight: "text-rose-600 dark:text-rose-400 bg-rose-500/15 border-rose-500/25",
+      form: "text-rose-600 dark:text-rose-400",
+      article: "die",
+      label: "Feminin"
+    };
+  }
+  // Plural
+  return {
+    card: "bg-amber-500/10 border-amber-500/25 text-amber-950 dark:text-amber-300",
+    badge: "text-amber-700 dark:text-amber-400 bg-amber-500/15 border-amber-500/25",
+    highlight: "text-amber-600 dark:text-amber-400 bg-amber-500/15 border-amber-500/25",
+    form: "text-amber-600 dark:text-amber-400",
+    article: "die",
+    label: "Plural"
+  };
+};
+
+function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: string, onClose: () => void, onStartSession: () => void, onEdit?: () => void }) {
   useScrollLock(true);
   const deck = useStore(state => state.decks.find(d => d.id === deckId));
   
@@ -4081,14 +4169,14 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       window.dispatchEvent(new Event('theory-update'));
       syncAppStateToCloud();
 
-      // Update Supabase decks table
+      // Attempt to update Supabase decks table
       try {
         await supabase
           .from('decks')
           .update({ theory: generatedData })
           .eq('id', deckId);
       } catch (dbErr) {
-        console.warn('Could not update decks table theory:', dbErr);
+        // Table or column might not exist, state is safely persisted in GLOBAL_APP_STATE
       }
     } catch (err: any) {
       console.error('Groq generation error:', err);
@@ -4101,16 +4189,20 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   useEffect(() => {
     setError(null);
 
+    const isDeepTheory = (data: any): boolean => {
+      return Boolean(data && typeof data === 'object' && (data.genderMatrix || data.structuralRules || data.coreConcept || data.catchyHeadline));
+    };
+
     // 1. Check if deck.theory has structured data
     if (deck?.theory) {
-      if (typeof deck.theory === 'object' && (deck.theory.oneLiner || deck.theory.formula || deck.theory.title || deck.theory.matrix)) {
+      if (typeof deck.theory === 'object' && isDeepTheory(deck.theory)) {
         setTheoryData(deck.theory as StructuredTheory);
         return;
       }
       if (typeof deck.theory === 'string') {
         try {
           const parsed = JSON.parse(deck.theory);
-          if (parsed && (parsed.oneLiner || parsed.formula || parsed.title || parsed.matrix)) {
+          if (isDeepTheory(parsed)) {
             setTheoryData(parsed as StructuredTheory);
             return;
           }
@@ -4123,43 +4215,26 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     if (cachedJson) {
       try {
         const parsed = JSON.parse(cachedJson);
-        if (parsed && (parsed.oneLiner || parsed.formula || parsed.title || parsed.matrix)) {
+        if (isDeepTheory(parsed)) {
           setTheoryData(parsed as StructuredTheory);
           return;
         }
       } catch (e) {}
     }
 
-    // 3. Check localStorage 'deck_theory_' + deckId
+    // 3. Check legacy text if any manual edit was saved
     const saved = localStorage.getItem(`deck_theory_${deckId}`);
     if (saved && saved.trim()) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed && (parsed.oneLiner || parsed.formula || parsed.title || parsed.matrix)) {
+        if (isDeepTheory(parsed)) {
           setTheoryData(parsed as StructuredTheory);
           return;
         }
       } catch (e) {}
-      // User manual markdown
-      setLegacyText(saved);
-      return;
     }
 
-    // 4. Check DEFAULT_THEORIES
-    const deckName = deck?.name || "";
-    let found: string | undefined = undefined;
-    for (const [key, val] of Object.entries(DEFAULT_THEORIES)) {
-      if (deckName.toLowerCase().includes(key.toLowerCase()) || key.toLowerCase().includes(deckName.toLowerCase())) {
-        found = val;
-        break;
-      }
-    }
-    if (found) {
-      setLegacyText(found);
-      return;
-    }
-
-    // 5. If missing everywhere, automatically generate once!
+    // 4. Missing or shallow old theory -> automatically generate comprehensive theory via Groq!
     fetchTheory();
   }, [deckId, deck?.name, deck?.theory, fetchTheory]);
 
@@ -4289,25 +4364,21 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   const renderedLegacyContent = useMemo(() => {
     let preprocessed = (legacyText || '').replace(/^( {4,}|\t+)/gm, '  ');
 
-    // 1. Strip the leading # Title if it matches displayTitle to prevent duplication
     const match = preprocessed.match(/^#\s+(.+)$/m);
     if (match) {
       preprocessed = preprocessed.replace(/^#\s+.+$/m, '').trim();
     }
 
-    // 2. Fix typos and missing spaces like "артикляein"
     preprocessed = preprocessed.replace(/артикл([а-яё]*)ein/gi, 'артикл$1 ein');
     preprocessed = preprocessed.replace(/артикляein/gi, 'артикля ein');
     preprocessed = preprocessed.replace(/артиклейein/gi, 'артиклей ein');
     preprocessed = preprocessed.replace(/артикльein/gi, 'артикль ein');
     preprocessed = preprocessed.replace(/артиклемein/gi, 'артиклем ein');
 
-    // 3. Auto-wrap ⚠️ blocks into blockquotes until the next blank line
     preprocessed = preprocessed.replace(/^(⚠️.*(?:\n(?!\s*\n).*)*)/gm, (m) => {
       return m.split('\n').map(line => line.trim().startsWith('>') ? line : '> ' + line).join('\n');
     });
 
-    // 4. Transform markdown table with Maskulin / Neutral / Feminin / Plural into COMPACT_MATRIX
     const tableRegex = /\|?\s*Maskulin(?:um)?\s*\|\s*Neutr(?:al|um)?\s*\|\s*Feminin(?:um)?\s*\|\s*Plural\s*\|?\s*\n\|?[-:\s|]+\|?\s*\n\|?\s*([^|\n]+)\s*\|\s*([^|\n]+)\s*\|\s*([^|\n]+)\s*\|\s*([^|\n]+)\s*\|?/i;
     const tableMatch = preprocessed.match(tableRegex);
     if (tableMatch) {
@@ -4315,10 +4386,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       preprocessed = preprocessed.replace(tableRegex, matrixToken);
     }
 
-    // 5. Catch Key Template / Formula
     preprocessed = preprocessed.replace(/^[>\s]*(?:\*\*|__)?\s*(Ключевой шаблон|Шаблон|Формула)\s*(?:\*\*|__)?\s*[:\-]?\s*(.*)$/gim, '💡WIDGET_TEMPLATE💡$2');
-
-    // 6. Catch Examples Header
     preprocessed = preprocessed.replace(/^[#>\s]*(?:\*\*|__)?\s*(Примеры|Живые примеры|Beispiele)\s*(?:\*\*|__)?\s*[:\-]?\s*$/gim, '💡EXAMPLES_HEADER💡');
 
     return (
@@ -4337,7 +4405,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         exit={{ opacity: 0, y: 60, scale: 0.98 }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-4xl h-[92vh] md:h-auto md:max-h-[88vh] mx-auto bg-white dark:bg-zinc-950 border border-zinc-200/80 dark:border-white/10 shadow-2xl rounded-t-3xl md:rounded-3xl flex flex-col overflow-hidden relative transform-gpu"
+        className="w-full max-w-4xl h-[92vh] md:h-auto md:max-h-[88vh] mx-auto bg-white dark:bg-zinc-950 border border-zinc-200/80 dark:border-white/10 shadow-2xl rounded-t-3xl md:rounded-3xl flex flex-col overflow-hidden relative text-zinc-900 dark:text-zinc-100 transform-gpu"
       >
         {/* Mobile Drag Handle */}
         <div className="w-10 h-1 bg-zinc-300 dark:bg-white/20 rounded-full mx-auto mt-3 mb-1 shrink-0 md:hidden" />
@@ -4349,7 +4417,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           </h2>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all cursor-pointer active:scale-95"
+            className="w-8 h-8 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all cursor-pointer active:scale-95"
             title="Schließen (Esc)"
           >
             <X className="w-4 h-4" />
@@ -4366,171 +4434,153 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 <span>Theorie wird mit KI generiert...</span>
               </div>
 
-              {/* One-Liner Skeleton */}
-              <div className="h-24 rounded-2xl bg-zinc-100 dark:bg-zinc-900/80 border border-zinc-200/50 dark:border-white/5" />
+              {/* Headline Skeleton */}
+              <div className="h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20" />
 
-              {/* Matrix Skeleton */}
+              {/* Core Concept Skeleton */}
+              <div className="space-y-2">
+                <div className="h-4 w-3/4 rounded bg-zinc-200 dark:bg-zinc-800" />
+                <div className="h-4 w-full rounded bg-zinc-200 dark:bg-zinc-800" />
+                <div className="h-4 w-5/6 rounded bg-zinc-200 dark:bg-zinc-800" />
+              </div>
+
+              {/* Formula Skeleton */}
+              <div className="h-12 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-white/5" />
+
+              {/* Gender Matrix Skeleton (4 cards) */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="h-20 rounded-xl bg-zinc-100 dark:bg-zinc-900/80 border border-zinc-200/50 dark:border-white/5" />
-                ))}
+                <div className="h-24 rounded-2xl bg-sky-500/10 border border-sky-500/20" />
+                <div className="h-24 rounded-2xl bg-emerald-500/10 border border-emerald-500/20" />
+                <div className="h-24 rounded-2xl bg-rose-500/10 border border-rose-500/20" />
+                <div className="h-24 rounded-2xl bg-amber-500/10 border border-amber-500/20" />
               </div>
 
-              {/* Triggers Skeleton */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="h-32 rounded-2xl bg-zinc-100 dark:bg-zinc-900/80" />
-                <div className="h-32 rounded-2xl bg-zinc-100 dark:bg-zinc-900/80" />
+              {/* Structural Rules Skeleton */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="h-28 rounded-2xl bg-zinc-100 dark:bg-zinc-900/60" />
+                <div className="h-28 rounded-2xl bg-zinc-100 dark:bg-zinc-900/60" />
+                <div className="h-28 rounded-2xl bg-zinc-100 dark:bg-zinc-900/60" />
               </div>
-
-              {/* Examples Skeleton */}
-              <div className="space-y-3">
-                <div className="h-16 rounded-r-xl border-l-2 border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/40" />
-                <div className="h-16 rounded-r-xl border-l-2 border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/40" />
-              </div>
-
-              {/* Achtung Skeleton */}
-              <div className="h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20" />
             </div>
           ) : theoryData ? (
             /* Apple Guidebook Sheet (max-w-4xl) */
             <div className="space-y-6">
-              {/* А) One-Liner (Главный инсайт) */}
-              {(theoryData.oneLiner || theoryData.simpleExplanation || theoryData.formula) && (
-                <div className="p-5 rounded-2xl bg-blue-500/10 dark:bg-gradient-to-r dark:from-blue-900/30 dark:to-indigo-900/20 border border-blue-500/20 dark:border-blue-500/30 text-blue-900 dark:text-blue-100 text-base font-medium leading-relaxed shadow-sm">
-                  <div className="text-[11px] font-semibold tracking-wider text-blue-600 dark:text-blue-400 uppercase mb-1">
-                    Ключевой инсайт / Главное правило
-                  </div>
-                  <p>{theoryData.oneLiner || theoryData.simpleExplanation || theoryData.formula}</p>
+              {/* 1. Заголовок-девиз (Catchy Headline) */}
+              {(theoryData.catchyHeadline || theoryData.oneLiner) && (
+                <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-900 dark:text-blue-200 text-sm font-medium leading-relaxed shadow-sm">
+                  {theoryData.catchyHeadline || theoryData.oneLiner}
                 </div>
               )}
 
-              {/* Б) Матрица форм (Таблица на 4 колонки) */}
-              {(() => {
-                const m = theoryData.matrix;
-                if (!m) return null;
+              {/* 2. Суть правила (Core Concept) */}
+              {(theoryData.coreConcept || theoryData.simpleExplanation) && (
+                <div className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-normal whitespace-pre-line space-y-2">
+                  {theoryData.coreConcept || theoryData.simpleExplanation}
+                </div>
+              )}
 
-                if (Array.isArray(m)) {
-                  return (
-                    <div className="space-y-2">
-                      <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                        Формы и окончания
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {m.map((cell: any, idx: number) => (
-                          <div key={idx} className="p-3.5 rounded-xl bg-black/[0.03] dark:bg-zinc-900/70 border border-black/5 dark:border-white/5 flex flex-col items-center text-center gap-1 shadow-sm">
-                            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{cell.label}</span>
-                            <span className="text-blue-600 dark:text-blue-400 font-bold text-lg font-mono">{cell.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                }
+              {/* 3. Визуальная формула */}
+              {theoryData.formula && (
+                <div className="p-4 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/80 dark:border-white/10 text-zinc-900 dark:text-white font-mono text-sm tracking-wide text-center select-all shadow-sm">
+                  {theoryData.formula}
+                </div>
+              )}
 
-                if (m && typeof m === 'object' && m.headers && m.forms) {
-                  return (
-                    <div className="space-y-2">
-                      <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                        Матрица форм по родам и числам
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {m.headers.map((header: string, idx: number) => {
-                          const form = m.forms?.[idx] || "";
-                          const pronoun = m.pronouns?.[idx] || "";
-                          return (
-                            <div key={idx} className="p-3.5 rounded-xl bg-black/[0.03] dark:bg-zinc-900/70 border border-black/5 dark:border-white/5 flex flex-col items-center text-center gap-1 shadow-sm">
-                              <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{header}</span>
-                              <span className="text-blue-600 dark:text-blue-400 font-bold text-lg font-mono">{form}</span>
-                              {pronoun && (
-                                <span className="text-xs text-zinc-600 dark:text-zinc-400 font-mono mt-0.5">{pronoun}</span>
-                              )}
+              {/* 4. Цветовая матрица родов (4 колонки) */}
+              {theoryData.genderMatrix && theoryData.genderMatrix.length > 0 && (
+                <div className="space-y-2.5">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
+                    Цветовая матрица родов
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {theoryData.genderMatrix.map((item, idx) => {
+                      const style = getAppleGenderTokens(item.gender);
+                      return (
+                        <div 
+                          key={idx} 
+                          className={cn("p-4 rounded-2xl border flex flex-col justify-between shadow-sm", style.card)}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-semibold uppercase tracking-wider opacity-80">
+                                {item.gender}
+                              </span>
+                              <span className={cn("px-1.5 py-0.5 rounded text-[11px] font-mono font-bold border", style.badge)}>
+                                {item.article || style.article}
+                              </span>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                }
-
-                return null;
-              })()}
-
-              {/* В) Триггеры (Глаголы и Предлоги) */}
-              {theoryData.triggers && (theoryData.triggers.verbs?.length || theoryData.triggers.prepositions?.length || theoryData.triggers.explanation) && (
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                    Триггеры правила
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Left: Prepositions & Verbs */}
-                    <div className="p-4 rounded-2xl bg-black/[0.02] dark:bg-zinc-900/60 border border-black/5 dark:border-white/5 space-y-3">
-                      {theoryData.triggers.prepositions && theoryData.triggers.prepositions.length > 0 && (
-                        <div>
-                          <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-2">
-                            Предлоги:
-                          </span>
-                          <div className="flex flex-wrap gap-2">
-                            {theoryData.triggers.prepositions.map((prep, idx) => (
-                              <span 
-                                key={idx}
-                                className="bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 px-2.5 py-1 rounded-lg font-mono text-xs font-bold"
-                              >
-                                {prep}
-                              </span>
-                            ))}
+                            <div className={cn("text-base sm:text-lg font-bold font-mono my-1 tracking-tight", style.form)}>
+                              {item.forms}
+                            </div>
                           </div>
+                          {item.note && (
+                            <p className="text-xs opacity-80 mt-2 leading-snug">
+                              {item.note}
+                            </p>
+                          )}
                         </div>
-                      )}
-
-                      {theoryData.triggers.verbs && theoryData.triggers.verbs.length > 0 && (
-                        <div>
-                          <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-2">
-                            Глаголы-маркеры:
-                          </span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {theoryData.triggers.verbs.map((verb, idx) => (
-                              <span 
-                                key={idx}
-                                className="bg-black/5 dark:bg-white/10 text-zinc-800 dark:text-zinc-200 px-2.5 py-1 rounded-md font-mono text-xs font-medium"
-                              >
-                                {verb}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Right: Explanation */}
-                    <div className="p-4 rounded-2xl bg-black/[0.02] dark:bg-zinc-900/60 border border-black/5 dark:border-white/5 flex flex-col justify-center">
-                      <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-1.5">
-                        Когда и почему включается:
-                      </span>
-                      <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
-                        {theoryData.triggers.explanation || "Правило определяет форму артикля и окончания при согласовании с глаголом или предлогом."}
-                      </p>
-                    </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
-              {/* Rules (если есть) */}
-              {theoryData.rules && theoryData.rules.length > 0 && (
+              {/* Backward compatibility: Old Matrix Table */}
+              {!theoryData.genderMatrix && theoryData.matrix && (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
+                    Матрица форм
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {Array.isArray(theoryData.matrix) ? theoryData.matrix.map((cell: any, idx: number) => {
+                      const style = getAppleGenderTokens(cell.label);
+                      return (
+                        <div key={idx} className={cn("p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 shadow-sm", style.card)}>
+                          <span className="text-xs font-semibold uppercase opacity-80">{cell.label}</span>
+                          <span className={cn("font-bold text-lg font-mono", style.form)}>{cell.value}</span>
+                        </div>
+                      );
+                    }) : (theoryData.matrix as any)?.headers?.map((header: string, idx: number) => {
+                      const m = theoryData.matrix as any;
+                      const form = m?.forms?.[idx] || "";
+                      const pronoun = m?.pronouns?.[idx] || "";
+                      const style = getAppleGenderTokens(header);
+                      return (
+                        <div key={idx} className={cn("p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 shadow-sm", style.card)}>
+                          <span className="text-xs font-semibold uppercase opacity-80">{header}</span>
+                          <span className={cn("font-bold text-lg font-mono", style.form)}>{form}</span>
+                          {pronoun && (
+                            <span className="text-xs font-mono opacity-70 mt-0.5">{pronoun}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Правила структуры предложения (structuralRules) */}
+              {theoryData.structuralRules && theoryData.structuralRules.length > 0 && (
                 <div className="space-y-2.5">
                   <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                    Шаги и правила
+                    Правила структуры предложения
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {theoryData.rules.map((rule, idx) => (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {theoryData.structuralRules.map((rule, idx) => (
                       <div 
-                        key={idx} 
-                        className="p-3.5 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-zinc-200/60 dark:border-white/5 text-sm"
+                        key={idx}
+                        className="p-4 rounded-2xl bg-black/[0.02] dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/10 flex flex-col justify-between shadow-sm"
                       >
-                        <div className="font-semibold text-zinc-900 dark:text-white mb-1">
-                          {rule.title}
+                        <div>
+                          <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 mb-2">
+                            {rule.title}
+                          </div>
+                          <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/60 dark:border-white/5 font-mono text-xs text-zinc-800 dark:text-zinc-200 mb-2.5 font-medium leading-relaxed">
+                            {rule.scheme}
+                          </div>
                         </div>
-                        <div className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                          {rule.desc}
+                        <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                          {rule.explanation}
                         </div>
                       </div>
                     ))}
@@ -4538,34 +4588,124 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 </div>
               )}
 
-              {/* Г) Примеры из жизни */}
+              {/* Backward compatibility: Legacy rules */}
+              {!theoryData.structuralRules && theoryData.rules && theoryData.rules.length > 0 && (
+                <div className="space-y-2.5">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
+                    Шаги и правила
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {theoryData.rules.map((rule, idx) => (
+                      <div key={idx} className="p-3.5 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-zinc-200/60 dark:border-white/5 text-sm">
+                        <div className="font-semibold text-zinc-900 dark:text-white mb-1">{rule.title}</div>
+                        <div className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">{rule.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 6. Смысловые нюансы (nuances) */}
+              {theoryData.nuances && theoryData.nuances.length > 0 && (
+                <div className="space-y-2.5">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
+                    Смысловые нюансы
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {theoryData.nuances.map((item, idx) => (
+                      <div 
+                        key={idx}
+                        className="p-4 rounded-2xl bg-violet-500/5 dark:bg-violet-950/20 border border-violet-500/20 text-violet-950 dark:text-violet-200 space-y-1.5 shadow-sm"
+                      >
+                        <div className="font-semibold text-sm text-violet-900 dark:text-violet-300">
+                          {item.title}
+                        </div>
+                        <div className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                          {item.desc}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Backward compatibility: triggers */}
+              {!theoryData.nuances && theoryData.triggers && (theoryData.triggers.verbs?.length || theoryData.triggers.prepositions?.length || theoryData.triggers.explanation) && (
+                <div className="space-y-2.5">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
+                    Триггеры правила
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-2xl bg-black/[0.02] dark:bg-zinc-900/60 border border-black/5 dark:border-white/5 space-y-3">
+                      {theoryData.triggers.prepositions && theoryData.triggers.prepositions.length > 0 && (
+                        <div>
+                          <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-2">Предлоги:</span>
+                          <div className="flex flex-wrap gap-2">
+                            {theoryData.triggers.prepositions.map((prep, idx) => (
+                              <span key={idx} className="bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 px-2.5 py-1 rounded-lg font-mono text-xs font-bold">{prep}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {theoryData.triggers.verbs && theoryData.triggers.verbs.length > 0 && (
+                        <div>
+                          <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-2">Глаголы-маркеры:</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {theoryData.triggers.verbs.map((verb, idx) => (
+                              <span key={idx} className="bg-black/5 dark:bg-white/10 text-zinc-800 dark:text-zinc-200 px-2.5 py-1 rounded-md font-mono text-xs font-medium">{verb}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-4 rounded-2xl bg-black/[0.02] dark:bg-zinc-900/60 border border-black/5 dark:border-white/5 flex flex-col justify-center">
+                      <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-1.5">Когда и почему включается:</span>
+                      <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">{theoryData.triggers.explanation}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 7. Живые примеры (examples) */}
               {theoryData.examples && theoryData.examples.length > 0 && (
                 <div className="space-y-2.5">
                   <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                    Примеры из жизни
+                    Живые примеры
                   </div>
                   <div className="space-y-2.5">
                     {theoryData.examples.map((ex, idx) => {
-                      let germanContent = ex.de;
-                      if (ex.highlight && !germanContent.includes('<b') && !germanContent.includes('<strong')) {
-                        const regex = new RegExp(`(${ex.highlight})`, 'gi');
-                        germanContent = germanContent.replace(regex, '<b>$1</b>');
+                      const style = getAppleGenderTokens(ex.gender || '');
+                      const highlightClass = cn(
+                        "px-2 py-0.5 rounded-md font-bold inline-block border mx-0.5 text-xs sm:text-sm",
+                        ex.gender ? style.highlight : "text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/20"
+                      );
+
+                      let parts: (string | React.ReactNode)[] = [ex.de];
+                      if (ex.highlight && ex.de.toLowerCase().includes(ex.highlight.toLowerCase())) {
+                        const idxStart = ex.de.toLowerCase().indexOf(ex.highlight.toLowerCase());
+                        const before = ex.de.slice(0, idxStart);
+                        const matched = ex.de.slice(idxStart, idxStart + ex.highlight.length);
+                        const after = ex.de.slice(idxStart + ex.highlight.length);
+                        parts = [
+                          before,
+                          <span key="hl" className={highlightClass}>{matched}</span>,
+                          after
+                        ];
                       }
 
                       return (
                         <div 
-                          key={idx} 
-                          className="border-l-2 border-blue-500 pl-4 py-2 bg-black/[0.02] dark:bg-white/[0.02] rounded-r-xl space-y-1 shadow-sm"
+                          key={idx}
+                          className="p-3.5 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-zinc-200/80 dark:border-white/10 space-y-1 shadow-sm"
                         >
-                          <div 
-                            className="text-sm md:text-base font-bold text-zinc-900 dark:text-white [&>b]:text-blue-600 dark:[&>b]:text-blue-400 [&>b]:font-bold"
-                            dangerouslySetInnerHTML={{ __html: germanContent }}
-                          />
-                          <div className="text-sm text-zinc-600 dark:text-zinc-300">
+                          <div className="text-sm sm:text-base font-semibold text-zinc-900 dark:text-white leading-relaxed">
+                            {parts}
+                          </div>
+                          <div className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300">
                             {ex.ru}
                           </div>
                           {ex.note && (
-                            <div className="text-xs text-zinc-400 italic">
+                            <div className="text-xs text-zinc-400 dark:text-zinc-500 italic pt-0.5">
                               {ex.note}
                             </div>
                           )}
@@ -4576,8 +4716,42 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 </div>
               )}
 
-              {/* Д) Ловушка (Achtung) */}
-              {(theoryData.trap || theoryData.commonMistakes) && (
+              {/* 8. Ловушки (Traps / Achtung) */}
+              {theoryData.traps && theoryData.traps.length > 0 && (
+                <div className="space-y-2.5">
+                  <div className="text-xs font-semibold tracking-wider text-amber-500 dark:text-amber-400 uppercase flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Ловушки (Traps / Achtung)
+                  </div>
+                  <div className="space-y-3">
+                    {theoryData.traps.map((trap, idx) => (
+                      <div 
+                        key={idx}
+                        className="p-4 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 space-y-3 shadow-sm"
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-900 dark:text-rose-300 font-mono text-xs sm:text-sm font-semibold flex items-center gap-2">
+                            <span className="shrink-0 text-base">❌</span>
+                            <span>{trap.wrong.replace(/[❌✅]/g, '').trim()}</span>
+                          </div>
+                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-900 dark:text-emerald-300 font-mono text-xs sm:text-sm font-semibold flex items-center gap-2">
+                            <span className="shrink-0 text-base">✅</span>
+                            <span>{trap.right.replace(/[❌✅]/g, '').trim()}</span>
+                          </div>
+                        </div>
+                        {trap.explanation && (
+                          <p className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                            {trap.explanation}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Backward compatibility: single trap */}
+              {!theoryData.traps && (theoryData.trap || theoryData.commonMistakes) && (
                 <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-3 text-amber-900 dark:text-amber-200 text-sm shadow-sm">
                   <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 mt-0.5" />
                   <div className="space-y-1">
@@ -4612,18 +4786,10 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           )}
         </div>
 
-        {/* Фиксированный футер (Floating Bar) */}
+        {/* Закреплённая стеклянная панель (Футер: Starten only) */}
         <div className="px-8 py-4 bg-white/90 dark:bg-zinc-900/80 backdrop-blur-md border-t border-black/5 dark:border-white/10 flex items-center justify-between sticky bottom-0 z-20 mt-auto shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-zinc-400 hidden sm:inline">
-              Готовы закрепить на практике?
-            </span>
-            <button 
-              onClick={onEdit} 
-              className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors cursor-pointer select-none"
-            >
-              Konzept bearbeiten
-            </button>
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+            Готовы закрепить на практике?
           </div>
           <button 
             onClick={onStartSession}
@@ -4638,6 +4804,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     </div>
   );
 }
+
 
 
 // --- CLOUD SYNC HELPER ---

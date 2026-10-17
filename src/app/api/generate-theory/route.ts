@@ -8,52 +8,119 @@ export async function POST(req: Request) {
     const { topicTitle, level = 'B1' } = await req.json();
 
     if (!topicTitle) {
-      return NextResponse.json({ error: 'Topic title is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Topic title required' }, { status: 400 });
     }
 
-    const systemPrompt = `Ты — ведущий методист немецкого языка. Объясняй грамматику максимально понятно, наглядно и структурно, без академической воды.
-Все правила, пояснения и переводы пиши на русском языке, а грамматические формы и примеры — на немецком.
+    const systemPrompt = `Ты — ведущий немецкий методист уровня C2/Native и Apple Technical Writer. Твоя задача — формировать безупречные, исчерпывающие и визуально структурированные грамматические конспекты уровня ${level}.
+Объясняй все правила, нюансы и переводы на РУССКОМ языке, а термины, схемы, формы и примеры — на НЕМЕЦКОМ.
 Ответ верни СТРОГО в виде валидного JSON без разметки markdown и вступительного текста.`;
 
     const userPrompt = `Тема: "${topicTitle}" (Уровень: ${level}).
-Сформируй конспект по следующей JSON-структуре:
+Сформируй глубокий конспект по следующей JSON-структуре:
 {
   "title": "${topicTitle}",
-  "oneLiner": "Главная суть правила в 1 емкую понятную фразу с ключевым инсайтом",
-  "matrix": {
-    "headers": ["Maskulin (der)", "Neutral (das)", "Feminin (die)", "Plural (die)"],
-    "forms": ["форма/окончание", "форма/окончание", "форма/окончание", "форма/окончание"],
-    "pronouns": ["местоимение", "местоимение", "местоимение", "местоимение"]
-  },
-  "triggers": {
-    "verbs": ["глагол 1", "глагол 2", "глагол 3", "глагол 4", "глагол 5"],
-    "prepositions": ["предлог 1", "предлог 2", "предлог 3", "предлог 4"],
-    "explanation": "Когда и почему включается это правило (триггеры, падеж, вопросы)"
-  },
-  "examples": [
+  "catchyHeadline": "Короткий, запоминающийся заголовок-девиз темы (1 предложение, отражающее суть)",
+  "coreConcept": "Фундаментальное объяснение сути правила простым языком без заумных терминов (2-3 емких абзаца)",
+  "formula": "Главная визуальная схема правила (например: Subjekt + Modalverb (Pos 2) + ... + Infinitiv (Ende))",
+  "genderMatrix": [
     {
-      "de": "Немецкое предложение с ключевым фрагментом",
-      "highlight": "ключевой фрагмент",
-      "ru": "Точный естественный перевод на русский язык",
-      "note": "Краткое понятное пояснение грамматического выбора"
+      "gender": "maskulin",
+      "article": "der",
+      "forms": "den / einen / meinen",
+      "note": "Меняет форму на -en!",
+      "color": "sky"
     },
     {
-      "de": "Второй наглядный пример",
-      "highlight": "ключевой фрагмент",
-      "ru": "Перевод на русский язык",
-      "note": "Пояснение"
+      "gender": "neutral",
+      "article": "das",
+      "forms": "das / ein / mein",
+      "note": "Форма совпадает с Nominativ",
+      "color": "emerald"
     },
     {
-      "de": "Третий контрастный пример",
-      "highlight": "ключевой фрагмент",
-      "ru": "Перевод на русский язык",
-      "note": "Пояснение"
+      "gender": "feminin",
+      "article": "die",
+      "forms": "die / eine / meine",
+      "note": "Форма совпадает с Nominativ",
+      "color": "rose"
+    },
+    {
+      "gender": "plural",
+      "article": "die",
+      "forms": "die / - / meine",
+      "note": "Окончание -e во всех формах",
+      "color": "amber"
     }
   ],
-  "trap": {
-    "title": "Ловушка или типичная ошибка студентов",
-    "desc": "Как не ошибиться в реальной речи или тестах"
-  }
+  "structuralRules": [
+    {
+      "title": "Позиция в простом предложении",
+      "scheme": "Ich + muss + heute länger arbeiten.",
+      "explanation": "Спрягаемый глагол стоит строго на 2-й позиции, смысловой инфинитив уходит в абсолютный конец."
+    },
+    {
+      "title": "Позиция в вопросе",
+      "scheme": "Kannst + du + mir bitte helfen?",
+      "explanation": "Модальный глагол выходит на 1-е место."
+    },
+    {
+      "title": "В придаточном предложении (weil, dass)",
+      "scheme": "...weil ich heute Überstunden machen muss.",
+      "explanation": "Оба глагола уходят в конец: сначала смысловой инфинитив, затем модальный."
+    }
+  ],
+  "nuances": [
+    {
+      "title": "Смысловой оттенок: müssen vs sollen",
+      "desc": "Müssen — личная необходимость или объективный факт (надо спать, чтобы жить). Sollen — выполнение чужого поручения, совет врача или приказ начальства."
+    },
+    {
+      "title": "Dürfen vs Können",
+      "desc": "Können выражает физическую или интеллектуальную способность. Dürfen — наличие официального разрешения или строгого запрета (nicht dürfen)."
+    }
+  ],
+  "examples": [
+    {
+      "de": "Ich habe einen neuen Laptop gekauft.",
+      "highlight": "einen neuen Laptop",
+      "gender": "maskulin",
+      "ru": "Я купил новый ноутбук.",
+      "note": "Мужской род в винительном падеже (der Laptop -> einen Laptop)"
+    },
+    {
+      "de": "Wir brauchen das grüne Ticket.",
+      "highlight": "das grüne Ticket",
+      "gender": "neutral",
+      "ru": "Нам нужен зеленый билет.",
+      "note": "Средний род не меняется"
+    },
+    {
+      "de": "Er sieht die schöne Stadt.",
+      "highlight": "die schöne Stadt",
+      "gender": "feminin",
+      "ru": "Он видит красивый город.",
+      "note": "Женский род остаётся die"
+    },
+    {
+      "de": "Ich nehme meine alten Bücher mit.",
+      "highlight": "meine alten Bücher",
+      "gender": "plural",
+      "ru": "Я беру с собой свои старые книги.",
+      "note": "Множественное число с окончанием -e"
+    }
+  ],
+  "traps": [
+    {
+      "wrong": "Ich muss zu lernen. ❌",
+      "right": "Ich muss lernen. ✅",
+      "explanation": "С модальными глаголами частица ZU НИКОГДА не используется."
+    },
+    {
+      "wrong": "Er will kauft ein Auto. ❌",
+      "right": "Er will ein Auto kaufen. ✅",
+      "explanation": "Смысловой глагол в конце обязан стоять в форме чистого инфинитива."
+    }
+  ]
 }`;
 
     const candidateModels = [
@@ -92,7 +159,7 @@ export async function POST(req: Request) {
     const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
     return NextResponse.json({ success: true, data: parsed });
   } catch (error) {
-    console.error('Groq generation error:', error);
-    return NextResponse.json({ success: false, error: 'Failed' }, { status: 500 });
+    console.error('Groq Generation Error:', error);
+    return NextResponse.json({ success: false, error: 'Generation failed' }, { status: 500 });
   }
 }
