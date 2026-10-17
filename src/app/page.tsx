@@ -3057,7 +3057,7 @@ function StudyCard({
 
           {isAnswered && displayHint && (
             <div className="mt-5 flex justify-center animate-in fade-in zoom-in-95 duration-200">
-              <div className="px-6 py-2.5 rounded-full bg-zinc-800/90 border border-white/15 text-sm font-medium shadow-xl backdrop-blur-xl text-center max-w-lg">
+              <div className="px-6 py-2.5 rounded-full bg-zinc-800/90 border border-white/15 shadow-xl backdrop-blur-xl text-center inline-flex items-center justify-center gap-2 max-w-lg text-zinc-100">
                 {renderFormattedHint(displayHint)}
               </div>
             </div>
@@ -4092,7 +4092,6 @@ function DeckModal({
     } catch (err: any) {
       console.error('Regeneration failed:', err);
       toast.error(err.message || 'Ошибка при перегенерации колоды');
-      alert(`Не удалось перегенерировать колоду: ${err.message || 'Ошибка сети'}`);
     } finally {
       setIsRegenerating(false);
     }

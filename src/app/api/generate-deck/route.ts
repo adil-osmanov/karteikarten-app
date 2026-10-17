@@ -119,23 +119,48 @@ export async function POST(req: Request) {
     const isGrammar = category.toLowerCase().includes('grammat');
     const targetCount = Math.max(5, Math.min(50, Number(count) || 15));
 
-    // Используем исключительно официальные модели Groq:
+    // Актуальная рабочая Vision-модель Groq (llama-3.2-11b отключена):
     const model = images && images.length > 0 
-      ? 'llama-3.2-11b-vision-preview' 
+      ? 'qwen/qwen3.8-27b' 
       : 'llama-3.3-70b-versatile';
 
-    const systemPrompt = `Ты — методист и составитель тестов по немецкому языку (B1–B2).
-Твоя задача — сгенерировать ровно ${targetCount} карточек по предоставленным материалам.
-РЕЖИМ: ${isGrammar ? 'ГРАММАТИКА (GRAMMATIK)' : 'СЛОВА (WÖRTER)'}
+    const systemPrompt = `Ты — ведущий немецкий методист и экзаменатор уровня B1–B2 (Goethe-Institut / Duden).
+Твоя задача — составить ровно ${targetCount} карточек для тренировки.
 
-КРИТИЧЕСКИЕ ПРАВИЛА:
-1. 1 карточка = строго 1 короткое законченное предложение (8-14 слов). Никаких параграфов.
-2. Немецкая рамочная конструкция (Satzklammer) обязана быть закрыта (причастия и инфинитивы стоят в самом конце предложения, например: "...am 25. Oktober 1993 in Homs geboren.").
-3. Не разрывай сложные слова пробелом (строго "Violinunterricht", а не "Violin Unterricht").
-4. В options ровно 4 уникальных варианта одной части речи и грамматической формы.
-5. Поле hint:
-   - В словах: "артикль Слово, -мн.число — перевод" (der/die/das подсвечиваются отдельно) или "3 формы глагола — перевод".
-   - В грамматике: лаконичная формула через точку "·" (например: "Passiv Präteritum · wurde ... geboren").
+ТЕКУЩИЙ РЕЖИМ: ${isGrammar ? 'ОТРАБОТКА ГРАММАТИКИ (GRAMMATIK)' : 'ИЗУЧЕНИЕ СЛОВ (WÖRTER)'}
+
+КРИТИЧЕСКИЕ ЛИНГВИСТИЧЕСКИЕ ПРАВИЛА:
+1. НЕМЕЦКИЕ СЛОЖНЫЕ СЛОВА (KOMPOSITA):
+   - Все сложные существительные пишутся СТРОГО СЛИТНО В ОДНО СЛОВО!
+   - ❌ ЗАПРЕЩЕНО: "Violin Unterricht", "Bewerbung Training", "Sprach Kurs".
+   - ✅ СТРОГО: "Violinunterricht", "Bewerbungstraining", "Sprachkurs".
+   - Пропуск "___" делается СТРОГО на ВСЕМ сложном слове целиком, а не на его части!
+
+2. ЖЕЛЕЗНЫЙ SATZKLAMMER (РАМОЧНАЯ КОНСТРУКЦИЯ):
+   - Причастия (Partizip II) и инфинитивы с модальными глаголами ОБЯЗАНЫ стоять в абсолютном конце предложения!
+   - ❌ ЗАПРЕЩЕНО: "Ich wurde geboren am 25. Oktober 1993 in der Stadt Homs."
+   - ✅ СТРОГО: "Ich wurde am 25. Oktober 1993 in der Stadt Homs geboren."
+   - ❌ ЗАПРЕЩЕНО: "Er hat gearbeitet drei Jahre in Berlin."
+   - ✅ СТРОГО: "Er hat drei Jahre in Berlin gearbeitet."
+
+3. ПРИНЦИП АТОМАРНОСТИ:
+   - 1 карточка = строго 1 короткое законченное предложение (8–14 слов). Никаких параграфов из 2-3 предложений.
+
+4. ДИСТРАКТОРЫ (OPTIONS):
+   - Ровно 4 УНИКАЛЬНЫХ варианта ответа, идеально подходящих по грамматике и смыслу на место пропуска. Никаких дубликатов!
+
+5. ПОДСКАЗКА (HINT):
+   ${isGrammar ? `
+   - В режиме "Grammatik": пропуск на грамматической форме темы. В поле hint — краткая формула через точку "·":
+     "Passiv Präteritum · wurde ... geboren"
+     "Perfekt · habe ... beworben"
+     "Präteritum · ging (gehen)"
+   ` : `
+   - В режиме "Wörter": пропуск на ключевом слове. В поле hint:
+     Существительные: строго "артикль Слово, -мн.число — перевод" (например: "der Violinunterricht, -e — уроки игры на скрипке", "die Grundschule, -n — начальная школа", "das Fach, -er — предмет"). Без родительного падежа -s!
+     Глаголы: "3 формы — перевод" (например: "sich bewerben, bewarb sich, hat sich beworben — подавать заявление").
+     Прилагательные: "слово — перевод" (например: "anspruchsvoll — требовательный").
+   `}
 
 ФОРМАТ JSON:
 {
@@ -213,7 +238,7 @@ export async function POST(req: Request) {
 
     if (lastError?.status === 429 || (lastError?.message && lastError.message.includes('429'))) {
       return NextResponse.json(
-        { success: false, error: 'Все доступные API-ключи временно исчерпали дневной лимит. Попробуйте чуть позже.' },
+        { success: false, error: 'Дневной лимит токенов исчерпан на всех ключах. Подождите немного или смените ключ.' },
         { status: 429 }
       );
     }
