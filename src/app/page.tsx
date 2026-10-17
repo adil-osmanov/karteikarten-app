@@ -1800,16 +1800,16 @@ function RapidSession({
 
   return (
     <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-xl mx-auto px-2 mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
+      <div className="w-full max-w-xl mx-auto px-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="text-xs font-mono tabular-nums text-gray-400 dark:text-gray-500">
             {mastered} / {total}
           </div>
         </div>
-        <div className="w-full h-1 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
+        <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div
             className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
             style={{ width: `${Math.max(5, total > 0 ? (mastered / total) * 100 : 0)}%` }}
@@ -1817,7 +1817,7 @@ function RapidSession({
         </div>
       </div>
 
-      <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+      <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
         <AnimatePresence mode="wait">
           <RapidFlashcardMode
             key={`${current.card.id}-${turn}`}
@@ -2104,9 +2104,9 @@ function StudyInterface({
   return (
       <>
 <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-xl mx-auto px-2 mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95">
+      <div className="w-full max-w-xl mx-auto px-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-2.5">
@@ -2120,7 +2120,7 @@ function StudyInterface({
             </div>
           </div>
         </div>
-        <div className="w-full h-1 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
+        <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div 
             className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
             style={{ width: `${Math.max(5, initialTotal > 0 ? (masteredInSession / initialTotal) * 100 : 0)}%` }}
@@ -2128,7 +2128,7 @@ function StudyInterface({
         </div>
       </div>
 
-      <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-center pb-12">
+      <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
             <PrepStudyCard
@@ -2838,7 +2838,7 @@ function StudyCard({
         </div>
 
         <div className="mt-4 mb-6 w-full text-center">
-          <p className="text-sm font-normal text-gray-500 dark:text-[#8E8E93] max-w-lg mx-auto leading-relaxed">
+          <p className="text-sm text-zinc-700 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-lg mx-auto leading-relaxed">
             {card.translation}
           </p>
           
@@ -2914,12 +2914,12 @@ function StudyCard({
               <button
                 key={opt}
                 onClick={() => handleOptionClick(opt)}
-                className="py-3 px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-all duration-150 ease-out active:scale-[0.99] border border-black/[0.05] dark:border-white/[0.06] relative flex items-center justify-between gap-3"
+                className="bg-white dark:bg-zinc-900/80 hover:bg-zinc-50 dark:hover:bg-zinc-800 active:scale-[0.98] border border-zinc-200/80 dark:border-white/10 hover:border-zinc-300 dark:hover:border-white/20 text-zinc-900 dark:text-zinc-100 text-base font-medium px-5 py-4 rounded-xl flex items-center justify-between transition-all cursor-pointer shadow-sm relative group"
               >
                 <span className="flex-1 text-center pr-2">{displayOpt}</span>
-                <span className="w-5 h-5 rounded bg-black/5 dark:bg-white/10 text-gray-500 dark:text-white/50 text-xs font-mono flex items-center justify-center flex-shrink-0 pointer-events-none">
+                <kbd className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 px-2 py-0.5 rounded-md shadow-inner shrink-0 pointer-events-none">
                   {idx + 1}
-                </span>
+                </kbd>
               </button>
             )})}
           </motion.div>
@@ -3469,7 +3469,7 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
-        "group cursor-pointer bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:hover:border-white/15 rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-lg relative select-none",
+        "h-full min-h-[148px] p-5 rounded-2xl bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:hover:border-white/15 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-lg relative select-none cursor-pointer group",
         isCompleted && "opacity-75 hover:opacity-100"
       )}
     >
@@ -3492,16 +3492,16 @@ const DeckCard = React.memo(({
       </div>
 
       {/* Header / Title */}
-      <div className="mb-4 pr-16 min-h-[2.5rem] flex items-start">
-        <h3 className="text-lg font-semibold text-zinc-900 dark:text-white tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
+      <div className="min-h-[3rem] flex items-start pr-14 mb-2">
+        <h3 className="text-base font-semibold text-zinc-900 dark:text-white tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
           {deck.name}
           {isCompleted && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 inline-block ml-2 align-text-bottom" />}
         </h3>
       </div>
       
       {/* Footer / Controls & Status */}
-      <div className="mt-auto">
-        <div className="flex items-center w-full mb-1">
+      <div className="mt-auto pt-4 flex flex-col w-full">
+        <div className="flex items-center justify-between w-full">
           <div className="flex items-center gap-2">
             {!isVerbBook && activeTab === 'Grammatik' && (
               <DeckTheoryIndicator 
@@ -3511,20 +3511,18 @@ const DeckCard = React.memo(({
               />
             )}
             {!isVerbBook && (
-              <div className="flex items-center gap-1">
-                {!isVerbBook && activeTab === 'Grammatik' && (
-                  <div className="h-3 w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" />
-                )}
+              <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-black/5 dark:bg-white/5 text-zinc-500 dark:text-zinc-400 text-xs">
                 <button
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
-                  className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 rounded transition-all cursor-pointer"
+                  className="hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
                   title="Diktat-Modus"
                 >
                   <Keyboard className="w-3.5 h-3.5" />
                 </button>
+                <div className="h-2.5 w-[1px] bg-black/10 dark:bg-white/10" />
                 <button
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
-                  className="p-1 text-zinc-400 dark:text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 rounded transition-all cursor-pointer"
+                  className="hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
                   title="Shadowing-Modus"
                 >
                   <Mic className="w-3.5 h-3.5" />
@@ -3538,7 +3536,7 @@ const DeckCard = React.memo(({
         </div>
 
         {/* Apple Progress Bar */}
-        <div className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-800/80 rounded-full mt-3 overflow-hidden">
+        <div className="w-full h-1 bg-zinc-200 dark:bg-zinc-800/80 rounded-full mt-3 overflow-hidden">
           <div
             className={cn(
               "h-full rounded-full transition-all duration-300",
@@ -6192,25 +6190,23 @@ try {
           )}
 
           {dueCards.length > 0 && (
-            <div className="mb-8">
-              <div 
-                onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
-                className="bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:border-white/15 rounded-2xl p-4 flex items-center justify-between cursor-pointer transition-all shadow-sm active:scale-[0.99] group"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
-                    <RotateCw className="w-4 h-4 text-blue-500 group-hover:rotate-180 transition-transform duration-500" />
-                  </div>
-                  <span className="font-medium text-sm text-zinc-900 dark:text-white">
-                    {appLanguage === 'RU' ? 'Повторить сегодня' : appLanguage === 'EN' ? 'Review today' : 'Heute wiederholen'}
-                  </span>
+            <div 
+              onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
+              className="h-14 px-5 rounded-2xl bg-gradient-to-r from-blue-950/30 to-zinc-900/50 border border-blue-500/20 hover:border-blue-500/40 flex items-center justify-between transition-all cursor-pointer mb-6 group select-none shadow-sm active:scale-[0.99]"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.3)]">
+                  <RotateCw className="w-4 h-4 text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
                 </div>
-                <div className="flex items-center gap-2.5">
-                  <div className="px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-semibold tabular-nums">
-                    {dueCards.length}
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-zinc-400" />
+                <span className="font-medium text-sm text-zinc-100">
+                  {appLanguage === 'RU' ? 'Повторить сегодня' : appLanguage === 'EN' ? 'Review today' : 'Heute wiederholen'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 font-semibold text-xs border border-blue-500/30 tabular-nums">
+                  {dueCards.length}
                 </div>
+                <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:translate-x-0.5 transition-transform" />
               </div>
             </div>
           )}
@@ -6269,7 +6265,7 @@ try {
                     ) : (
                       <div className="space-y-6">
                         {inProgressDecks.length > 0 && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
                             {inProgressDecks.map(deck => (
                               <div
                                 key={deck.id}
@@ -6278,7 +6274,7 @@ try {
                                 onDragOver={handleDragOver}
                                 onDrop={(e) => handleDrop(e, deck.id)}
                                 onDragEnd={handleDragEnd}
-                                className={cn("transition-all duration-300", draggedDeckId === deck.id ? "opacity-30 scale-95" : "opacity-100")}
+                                className={cn("h-full transition-all duration-300", draggedDeckId === deck.id ? "opacity-30 scale-95" : "opacity-100")}
                               >
                                 <DeckCard 
                                   deck={deck} 
@@ -6318,9 +6314,9 @@ try {
                                   transition={{ duration: 0.2 }}
                                   className="overflow-hidden"
                                 >
-                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 pt-2 pb-4">
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch pt-2 pb-4">
                                     {completedDecks.map(deck => (
-                                      <div key={deck.id} className="opacity-70 hover:opacity-100 transition-opacity">
+                                      <div key={deck.id} className="h-full opacity-70 hover:opacity-100 transition-opacity">
                                         <DeckCard 
                                           deck={deck} 
                                           isCompleted={true} 
