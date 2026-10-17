@@ -11,6 +11,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { create } from "zustand";
@@ -1800,7 +1801,7 @@ function RapidSession({
 
   return (
     <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-xl mx-auto px-4 mb-4">
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -1817,7 +1818,7 @@ function RapidSession({
         </div>
       </div>
 
-      <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
         <AnimatePresence mode="wait">
           <RapidFlashcardMode
             key={`${current.card.id}-${turn}`}
@@ -2104,7 +2105,7 @@ function StudyInterface({
   return (
       <>
 <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-xl mx-auto px-4 mb-4">
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -2128,7 +2129,7 @@ function StudyInterface({
         </div>
       </div>
 
-      <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
             <PrepStudyCard
@@ -2790,13 +2791,13 @@ function StudyCard({
       </div>
 
       <div className="flex flex-col items-center text-center w-full">
-        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 dark:text-[#F5F5F7] w-full max-w-lg mb-4">
+        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 dark:text-[#F5F5F7] w-full max-w-2xl mb-4">
           {parts[0]}
           
           {phase === "Answer" ? (
             <span className={cn(
-              "inline-block align-baseline mx-1 border-0 border-b-2 bg-transparent outline-none rounded-none py-0 px-1 transition-colors",
-              parsedTargetWord ? parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses : "border-blue-600/30 dark:border-blue-500/40 text-blue-600 dark:text-blue-500"
+              "inline-block align-baseline mx-1 px-3 py-0.5 rounded-lg border bg-white/5 transition-colors",
+              parsedTargetWord ? parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses : "border-blue-500/50 text-blue-600 dark:text-blue-400"
             )}>
               {parsedTargetWord ? (
                 <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {parsedTargetWord.rest}</>
@@ -2807,11 +2808,11 @@ function StudyCard({
           ) : (
             <>
               {isMultipleChoice ? (
-                <span className="inline-block align-baseline mx-1 min-w-[3rem] border-0 border-b-2 border-black/10 dark:border-white/20 bg-transparent rounded-none py-0 px-1 text-transparent">
+                <span className="inline-block align-baseline mx-1 min-w-[3rem] px-3 py-0.5 rounded-lg bg-white/5 border border-blue-500/30 text-transparent">
                   {displayAnswerWord}
                 </span>
               ) : (
-                <span className="inline-block relative align-baseline mx-1 min-w-[4rem] border-0 border-b-2 border-black/20 dark:border-white/20 focus-within:border-blue-600 dark:border-blue-500 dark:focus-within:border-blue-600 dark:border-blue-500 focus-within:ring-0 bg-transparent outline-none rounded-none py-0 px-1 transition-colors">
+                <span className="inline-block relative align-baseline mx-1 min-w-[4rem] px-3 py-1 rounded-lg bg-white/5 border border-blue-500/50 text-gray-900 dark:text-white placeholder:text-zinc-600 focus-within:outline-none focus-within:ring-2 focus-within:ring-blue-500/30 transition-all font-medium">
                   <span className="inline-block w-full text-center">
                     {renderInputChars()}
                   </span>
@@ -2838,7 +2839,7 @@ function StudyCard({
         </div>
 
         <div className="mt-4 mb-6 w-full text-center">
-          <p className="text-sm text-zinc-700 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-lg mx-auto leading-relaxed">
+          <p className="text-sm text-zinc-700 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
             {card.translation}
           </p>
           
@@ -3336,7 +3337,7 @@ function getBookModeBadge(book: BookMeta): ModeBadgeInfo | null {
   return null;
 }
 
-const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMeta, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
+const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete }: { book: BookMeta, priority?: boolean, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
   const initialCoverStr = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
   let lightCover = initialCoverStr;
   let darkCover = initialCoverStr;
@@ -3381,17 +3382,25 @@ const BookCard = React.memo(({ book, onClick, onEdit, onDelete }: { book: BookMe
         {/* Cover Image Section */}
         <div className="relative w-full aspect-[3/4] shrink-0 overflow-hidden" style={isImage ? {} : { backgroundColor: tintColor }}>
           {lightCover && (
-            <img 
+            <Image 
               src={lightCover} 
-              className={cn("absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ease-out", darkCover ? "dark:hidden" : "")} 
-              alt="Light Cover" 
+              alt={book.title || "Light Cover"}
+              fill
+              sizes="(max-width: 768px) 100vw, 320px"
+              quality={85}
+              priority={priority}
+              className={cn("object-cover group-hover:scale-105 transition-transform duration-300 ease-out", darkCover ? "dark:hidden" : "")} 
             />
           )}
           {darkCover && (
-            <img 
+            <Image 
               src={darkCover} 
-              className={cn("absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ease-out", lightCover ? "hidden dark:block" : "")} 
-              alt="Dark Cover" 
+              alt={book.title || "Dark Cover"}
+              fill
+              sizes="(max-width: 768px) 100vw, 320px"
+              quality={85}
+              priority={priority}
+              className={cn("object-cover group-hover:scale-105 transition-transform duration-300 ease-out", lightCover ? "hidden dark:block" : "")} 
             />
           )}
           
@@ -3469,7 +3478,7 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
-        "h-full min-h-[148px] p-5 rounded-2xl bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:hover:border-white/15 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-lg relative select-none cursor-pointer group",
+        "h-full min-h-[152px] p-5 rounded-2xl bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:hover:border-white/15 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-lg relative select-none cursor-pointer group",
         isCompleted && "opacity-75 hover:opacity-100"
       )}
     >
@@ -3587,7 +3596,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'light' | 'dark') => {
     const file = e.target.files?.[0];
     if (file) {
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const MAX_HEIGHT = 800;
@@ -5290,8 +5299,8 @@ export default function App() {
     const fetchData = async () => {
       
       try {
-        
-        
+        const cachedBooks = localStorage.getItem('cache_books_v2');
+        if (cachedBooks) setBooks(JSON.parse(cachedBooks));
         const cachedDecks = localStorage.getItem('cache_decks_v2');
         if (cachedDecks) setDecks(JSON.parse(cachedDecks));
       } catch (e) {}
@@ -5381,11 +5390,6 @@ try {
           }
         }
         
-        // CLEAR CACHE TO AVOID QUOTA EXCEEDED
-        try {
-          localStorage.removeItem('cache_books_v2');
-        } catch(e) {}
-
         if (booksRes.data && booksRes.data.length > 0) {
           const mappedBooks = booksRes.data.map((b: any) => {
             let dedicatedCover = null;
@@ -5407,6 +5411,9 @@ try {
           });
 
           setBooks(mappedBooks);
+          try {
+            localStorage.setItem('cache_books_v2', JSON.stringify(mappedBooks));
+          } catch(e) {}
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'], category: 'book', training_mode: 'standard_cloze' },
@@ -5548,7 +5555,7 @@ try {
 
   const activeBook = useMemo(() => books.find(b => b.id === activeBookId), [books, activeBookId]);
 
-  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-[#FBFBFD] animate-pulse" />;
+  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-black" />;
 
 
   if (activeDeckId) {
@@ -6101,7 +6108,7 @@ try {
                 <DueCardsBadge count={dueCards.length} language={appLanguage} onClick={() => dueCards.length > 0 && setReviewCards(dueCards)} />
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
-                {displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map(book => (
+                {displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map((book, idx) => (
                   <div
                     key={book.id}
                     draggable
@@ -6112,7 +6119,7 @@ try {
                     className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                   >
                     <div className="w-full h-full min-h-[250px] relative">
-                      <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                      <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
                     </div>
                   </div>
                 ))}
@@ -6133,7 +6140,7 @@ try {
                 {UI_TRANSLATIONS[appLanguage]?.trainingTitle || 'Blitzkarten & Training'}
               </h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
-                {displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).map(book => (
+                {displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).map((book, idx) => (
                   <div
                     key={book.id}
                     draggable
@@ -6144,7 +6151,7 @@ try {
                     className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                   >
                     <div className="w-full h-full min-h-[250px] relative">
-                      <BookCard book={book} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                      <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
                     </div>
                   </div>
                 ))}
