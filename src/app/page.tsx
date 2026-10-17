@@ -413,7 +413,7 @@ export interface Flashcard {
 export interface GenderMatrixItem {
   gender: 'maskulin' | 'neutral' | 'feminin' | 'plural' | string;
   article: string;
-  forms: string;
+  forms: string[] | string;
   note: string;
   color?: string;
 }
@@ -4125,118 +4125,163 @@ const getAppleGenderTokens = (genderStr: string = '') => {
   };
 };
 
+const renderFormsList = (forms: any, style: any) => {
+  let formItems: string[] = [];
+  if (Array.isArray(forms)) {
+    formItems = forms.map(f => String(f).trim()).filter(Boolean);
+  } else if (typeof forms === 'string') {
+    formItems = forms
+      .split(/[\/\•\,\|]/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && s !== '-');
+  }
+
+  if (formItems.length === 0) return <span className="opacity-60">-</span>;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 my-1.5">
+      {formItems.map((form, fIdx) => (
+        <span 
+          key={fIdx}
+          className={cn(
+            "px-2.5 py-0.5 rounded-lg text-sm sm:text-base font-semibold tracking-tight border",
+            style.badge
+          )}
+        >
+          {form}
+        </span>
+      ))}
+    </div>
+  );
+};
+
 function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: string, onClose: () => void, onStartSession: () => void, onEdit?: () => void }) {
   useScrollLock(true);
   const deck = useStore(state => state.decks.find(d => d.id === deckId));
   
-  const [theoryData, setTheoryData] = useState<StructuredTheory | null>(null);
-  const [legacyText, setLegacyText] = useState<string>("");
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchTheory = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/generate-theory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topicTitle: deck?.name || 'Grammatik',
-          level: deck?.level || 'B1'
-        })
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.success || !json.data) {
-        throw new Error(json.error || 'Theorie konnte nicht generiert werden');
-      }
-
-      const generatedData: StructuredTheory = json.data;
-      setTheoryData(generatedData);
-
-      // Cache locally
-      const stringified = JSON.stringify(generatedData);
-      localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
-      localStorage.setItem(`deck_theory_${deckId}`, stringified);
-
-      // Update Zustand
-      useStore.setState(state => ({
-        decks: state.decks.map(d => d.id === deckId ? { ...d, theory: generatedData } : d)
-      }));
-
-      // Trigger cloud sync and storage event
-      window.dispatchEvent(new Event('theory-update'));
-      syncAppStateToCloud();
-
-      // Attempt to update Supabase decks table
-      try {
-        await supabase
-          .from('decks')
-          .update({ theory: generatedData })
-          .eq('id', deckId);
-      } catch (dbErr) {
-        // Table or column might not exist, state is safely persisted in GLOBAL_APP_STATE
-      }
-    } catch (err: any) {
-      console.error('Groq generation error:', err);
-      setError(err.message || 'Fehler beim Laden der Theorie');
-    } finally {
-      setIsLoading(false);
+  // 1. Мгновенно вычисляем начальную теорию из памяти или localStorage, исключая повторные генерации
+  const initialTheory = useMemo(() => {
+    if (deck?.theory && typeof deck.theory === 'object' && Object.keys(deck.theory).length > 0) {
+      return deck.theory as StructuredTheory;
     }
-  }, [deckId, deck?.name, deck?.level]);
-
-  useEffect(() => {
-    setError(null);
-
-    const isDeepTheory = (data: any): boolean => {
-      return Boolean(data && typeof data === 'object' && (data.genderMatrix || data.structuralRules || data.coreConcept || data.catchyHeadline));
-    };
-
-    // 1. Check if deck.theory has structured data
-    if (deck?.theory) {
-      if (typeof deck.theory === 'object' && isDeepTheory(deck.theory)) {
-        setTheoryData(deck.theory as StructuredTheory);
-        return;
-      }
-      if (typeof deck.theory === 'string') {
+    if (typeof deck?.theory === 'string') {
+      try {
+        const p = JSON.parse(deck.theory);
+        if (p && Object.keys(p).length > 0) return p;
+      } catch (e) {}
+    }
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(`deck_theory_json_${deckId}`) || localStorage.getItem(`deck_theory_${deckId}`);
+      if (raw) {
         try {
-          const parsed = JSON.parse(deck.theory);
-          if (isDeepTheory(parsed)) {
-            setTheoryData(parsed as StructuredTheory);
-            return;
-          }
+          const p = JSON.parse(raw);
+          if (p && Object.keys(p).length > 0) return p;
         } catch (e) {}
       }
     }
+    return null;
+  }, [deck?.theory, deckId]);
 
-    // 2. Check localStorage 'deck_theory_json_' + deckId
-    const cachedJson = localStorage.getItem(`deck_theory_json_${deckId}`);
-    if (cachedJson) {
+  const [theoryData, setTheoryData] = useState<StructuredTheory | null>(initialTheory);
+  const [legacyText, setLegacyText] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(!initialTheory);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!deckId) return;
+
+    // 1. Если теория уже есть в объекте темы или в состоянии — мгновенно берем её
+    if (theoryData && Object.keys(theoryData).length > 0) {
+      setIsLoading(false);
+      return;
+    }
+
+    if (deck?.theory && typeof deck.theory === 'object' && Object.keys(deck.theory).length > 0) {
+      setTheoryData(deck.theory as StructuredTheory);
+      setIsLoading(false);
+      return;
+    }
+
+    if (typeof deck?.theory === 'string') {
       try {
-        const parsed = JSON.parse(cachedJson);
-        if (isDeepTheory(parsed)) {
-          setTheoryData(parsed as StructuredTheory);
+        const p = JSON.parse(deck.theory);
+        if (p && Object.keys(p).length > 0) {
+          setTheoryData(p);
+          setIsLoading(false);
           return;
         }
       } catch (e) {}
     }
 
-    // 3. Check legacy text if any manual edit was saved
-    const saved = localStorage.getItem(`deck_theory_${deckId}`);
-    if (saved && saved.trim()) {
+    // 2. Проверяем localStorage
+    const cached = localStorage.getItem(`deck_theory_json_${deckId}`) || localStorage.getItem(`deck_theory_${deckId}`);
+    if (cached) {
       try {
-        const parsed = JSON.parse(saved);
-        if (isDeepTheory(parsed)) {
-          setTheoryData(parsed as StructuredTheory);
+        const p = JSON.parse(cached);
+        if (p && Object.keys(p).length > 0) {
+          setTheoryData(p);
+          setIsLoading(false);
+          useStore.setState(state => ({
+            decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p } : d)
+          }));
           return;
         }
       } catch (e) {}
     }
 
-    // 4. Missing or shallow old theory -> automatically generate comprehensive theory via Groq!
+    // 3. Только если теории НЕТ — вызываем генерацию
+    const fetchTheory = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/generate-theory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topicId: deckId,
+            topicTitle: deck?.name || 'Grammatik',
+            level: deck?.level || 'B1'
+          })
+        });
+
+        const json = await res.json();
+        if (!res.ok || !json.success || !json.data) {
+          throw new Error(json.error || 'Theorie konnte nicht generiert werden');
+        }
+
+        const generatedData: StructuredTheory = json.data;
+        setTheoryData(generatedData);
+
+        // Обновляем локальное состояние стора
+        useStore.setState(state => ({
+          decks: state.decks.map(d => d.id === deckId ? { ...d, theory: generatedData } : d)
+        }));
+
+        // Сохраняем в localStorage
+        const stringified = JSON.stringify(generatedData);
+        localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
+        localStorage.setItem(`deck_theory_${deckId}`, stringified);
+
+        window.dispatchEvent(new Event('theory-update'));
+
+        // Сохраняем в Supabase навсегда
+        try {
+          await supabase.from('decks').update({ theory: generatedData }).eq('id', deckId);
+        } catch (e) {}
+        try {
+          await supabase.from('topics').update({ theory: generatedData }).eq('id', deckId);
+        } catch (e) {}
+        syncAppStateToCloud();
+      } catch (err: any) {
+        console.error('Failed to load theory:', err);
+        setError(err.message || 'Fehler beim Laden der Theorie');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
     fetchTheory();
-  }, [deckId, deck?.name, deck?.theory, fetchTheory]);
+  }, [deckId, deck?.theory]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -4278,7 +4323,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
               <div className="text-[11px] font-semibold tracking-wider text-blue-600 dark:text-blue-400 uppercase mb-1.5">
                 Ключевой шаблон
               </div>
-              <div className="font-mono font-semibold text-base text-blue-950 dark:text-blue-100 tracking-tight">
+              <div className="font-semibold text-base text-blue-950 dark:text-blue-100 tracking-tight">
                 {formula}
               </div>
               {explanation && (
@@ -4348,13 +4393,13 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     code: ({ node, inline, className, children, ...props }: any) => {
       if (!inline) {
         return (
-          <pre className="bg-black/5 dark:bg-white/5 p-3.5 rounded-xl overflow-x-auto font-mono text-xs text-zinc-800 dark:text-zinc-200 my-3 border border-black/5 dark:border-white/10 custom-scrollbar">
+          <pre className="bg-black/5 dark:bg-white/5 p-3.5 rounded-xl overflow-x-auto text-xs text-zinc-800 dark:text-zinc-200 my-3 border border-black/5 dark:border-white/10 custom-scrollbar">
             <code className={className} {...props}>{children}</code>
           </pre>
         );
       }
       return (
-        <code className="bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-md font-mono text-xs font-semibold" {...props}>
+        <code className="bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-md text-xs font-semibold" {...props}>
           {children}
         </code>
       );
@@ -4424,8 +4469,8 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           </button>
         </div>
 
-        {/* Content Scroll Container */}
-        <div className="overflow-y-auto px-8 py-6 space-y-6 flex-1 text-zinc-900 dark:text-zinc-100 pb-8 custom-scrollbar">
+        {/* Content Scroll Container with pb-14 bottom protection */}
+        <div className="overflow-y-auto px-8 pt-6 pb-14 space-y-6 flex-1 text-zinc-900 dark:text-zinc-100 custom-scrollbar">
           {isLoading ? (
             /* Apple Skeleton Loader */
             <div className="space-y-6 animate-pulse py-2">
@@ -4479,14 +4524,14 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 </div>
               )}
 
-              {/* 3. Визуальная формула */}
+              {/* 3. Визуальная формула (нативный Apple Sans вместо font-mono) */}
               {theoryData.formula && (
-                <div className="p-4 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/80 dark:border-white/10 text-zinc-900 dark:text-white font-mono text-sm tracking-wide text-center select-all shadow-sm">
-                  {theoryData.formula}
+                <div className="p-4 rounded-2xl bg-zinc-100 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-white/10 text-zinc-900 dark:text-zinc-100 text-sm sm:text-base font-semibold tracking-normal text-center shadow-sm leading-relaxed">
+                  {(theoryData.formula || '').replace(/->/g, '→')}
                 </div>
               )}
 
-              {/* 4. Цветовая матрица родов (4 колонки) */}
+              {/* 4. Цветовая матрица родов (4 колонки) без висячих слэшей */}
               {theoryData.genderMatrix && theoryData.genderMatrix.length > 0 && (
                 <div className="space-y-2.5">
                   <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
@@ -4505,13 +4550,11 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                               <span className="text-xs font-semibold uppercase tracking-wider opacity-80">
                                 {item.gender}
                               </span>
-                              <span className={cn("px-1.5 py-0.5 rounded text-[11px] font-mono font-bold border", style.badge)}>
+                              <span className={cn("px-1.5 py-0.5 rounded text-[11px] font-bold border", style.badge)}>
                                 {item.article || style.article}
                               </span>
                             </div>
-                            <div className={cn("text-base sm:text-lg font-bold font-mono my-1 tracking-tight", style.form)}>
-                              {item.forms}
-                            </div>
+                            {renderFormsList(item.forms, style)}
                           </div>
                           {item.note && (
                             <p className="text-xs opacity-80 mt-2 leading-snug">
@@ -4537,7 +4580,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                       return (
                         <div key={idx} className={cn("p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 shadow-sm", style.card)}>
                           <span className="text-xs font-semibold uppercase opacity-80">{cell.label}</span>
-                          <span className={cn("font-bold text-lg font-mono", style.form)}>{cell.value}</span>
+                          <span className={cn("font-bold text-lg", style.form)}>{cell.value}</span>
                         </div>
                       );
                     }) : (theoryData.matrix as any)?.headers?.map((header: string, idx: number) => {
@@ -4548,9 +4591,9 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                       return (
                         <div key={idx} className={cn("p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 shadow-sm", style.card)}>
                           <span className="text-xs font-semibold uppercase opacity-80">{header}</span>
-                          <span className={cn("font-bold text-lg font-mono", style.form)}>{form}</span>
+                          <span className={cn("font-bold text-lg", style.form)}>{form}</span>
                           {pronoun && (
-                            <span className="text-xs font-mono opacity-70 mt-0.5">{pronoun}</span>
+                            <span className="text-xs opacity-70 mt-0.5">{pronoun}</span>
                           )}
                         </div>
                       );
@@ -4575,7 +4618,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                           <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 mb-2">
                             {rule.title}
                           </div>
-                          <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/60 dark:border-white/5 font-mono text-xs text-zinc-800 dark:text-zinc-200 mb-2.5 font-medium leading-relaxed">
+                          <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/60 dark:border-white/5 text-xs text-zinc-800 dark:text-zinc-200 mb-2.5 font-medium leading-relaxed">
                             {rule.scheme}
                           </div>
                         </div>
@@ -4642,7 +4685,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                           <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-2">Предлоги:</span>
                           <div className="flex flex-wrap gap-2">
                             {theoryData.triggers.prepositions.map((prep, idx) => (
-                              <span key={idx} className="bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 px-2.5 py-1 rounded-lg font-mono text-xs font-bold">{prep}</span>
+                              <span key={idx} className="bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 px-2.5 py-1 rounded-lg text-xs font-bold">{prep}</span>
                             ))}
                           </div>
                         </div>
@@ -4652,7 +4695,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                           <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-2">Глаголы-маркеры:</span>
                           <div className="flex flex-wrap gap-1.5">
                             {theoryData.triggers.verbs.map((verb, idx) => (
-                              <span key={idx} className="bg-black/5 dark:bg-white/10 text-zinc-800 dark:text-zinc-200 px-2.5 py-1 rounded-md font-mono text-xs font-medium">{verb}</span>
+                              <span key={idx} className="bg-black/5 dark:bg-white/10 text-zinc-800 dark:text-zinc-200 px-2.5 py-1 rounded-md text-xs font-medium">{verb}</span>
                             ))}
                           </div>
                         </div>
@@ -4716,12 +4759,12 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 </div>
               )}
 
-              {/* 8. Ловушки (Traps / Achtung) */}
+              {/* 8. Ловушки (Traps / Achtung) - чистая типографика Apple Sans */}
               {theoryData.traps && theoryData.traps.length > 0 && (
                 <div className="space-y-2.5">
                   <div className="text-xs font-semibold tracking-wider text-amber-500 dark:text-amber-400 uppercase flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    Ловушки (Traps / Achtung)
+                    Типичные ловушки и ошибки (Achtung)
                   </div>
                   <div className="space-y-3">
                     {theoryData.traps.map((trap, idx) => (
@@ -4730,17 +4773,17 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                         className="p-4 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 space-y-3 shadow-sm"
                       >
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-900 dark:text-rose-300 font-mono text-xs sm:text-sm font-semibold flex items-center gap-2">
-                            <span className="shrink-0 text-base">❌</span>
-                            <span>{trap.wrong.replace(/[❌✅]/g, '').trim()}</span>
+                          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-800 dark:text-rose-300 text-sm font-medium flex items-start gap-2.5">
+                            <span className="shrink-0 text-base leading-none mt-0.5">❌</span>
+                            <span className="leading-snug">{trap.wrong.replace(/[❌✅]/g, '').trim()}</span>
                           </div>
-                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-900 dark:text-emerald-300 font-mono text-xs sm:text-sm font-semibold flex items-center gap-2">
-                            <span className="shrink-0 text-base">✅</span>
-                            <span>{trap.right.replace(/[❌✅]/g, '').trim()}</span>
+                          <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-sm font-medium flex items-start gap-2.5">
+                            <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
+                            <span className="leading-snug">{trap.right.replace(/[❌✅]/g, '').trim()}</span>
                           </div>
                         </div>
                         {trap.explanation && (
-                          <p className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                          <p className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-normal">
                             {trap.explanation}
                           </p>
                         )}
@@ -4772,7 +4815,33 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
               <AlertCircle className="w-8 h-8 text-red-500 mb-2 opacity-80" />
               <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 mb-1">{error}</p>
               <button 
-                onClick={fetchTheory}
+                onClick={() => {
+                  setError(null);
+                  setIsLoading(true);
+                  fetch('/api/generate-theory', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      topicId: deckId,
+                      topicTitle: deck?.name || 'Grammatik',
+                      level: deck?.level || 'B1'
+                    })
+                  }).then(r => r.json()).then(json => {
+                    if (json.success && json.data) {
+                      setTheoryData(json.data);
+                      const stringified = JSON.stringify(json.data);
+                      localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
+                      localStorage.setItem(`deck_theory_${deckId}`, stringified);
+                      useStore.setState(state => ({
+                        decks: state.decks.map(d => d.id === deckId ? { ...d, theory: json.data } : d)
+                      }));
+                      window.dispatchEvent(new Event('theory-update'));
+                      try { supabase.from('decks').update({ theory: json.data }).eq('id', deckId); } catch (e) {}
+                      try { supabase.from('topics').update({ theory: json.data }).eq('id', deckId); } catch (e) {}
+                      syncAppStateToCloud();
+                    } else throw new Error(json.error || 'Failed');
+                  }).catch(e => setError(e.message)).finally(() => setIsLoading(false));
+                }}
                 className="mt-3 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer"
               >
                 Erneut versuchen
@@ -4786,8 +4855,8 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           )}
         </div>
 
-        {/* Закреплённая стеклянная панель (Футер: Starten only) */}
-        <div className="px-8 py-4 bg-white/90 dark:bg-zinc-900/80 backdrop-blur-md border-t border-black/5 dark:border-white/10 flex items-center justify-between sticky bottom-0 z-20 mt-auto shrink-0">
+        {/* Закреплённая стеклянная панель (Футер: матовое стекло, Starten only) */}
+        <div className="px-8 py-4 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl border-t border-black/5 dark:border-white/10 flex items-center justify-between sticky bottom-0 z-20 mt-auto shrink-0">
           <div className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
             Готовы закрепить на практике?
           </div>
@@ -6174,15 +6243,25 @@ try {
           if (!localStorage.getItem('cache_decks_v2')) { setDecks([]); }
         } else if (decksRes.data) {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
-          const enhancedDecks = decksRes.data.map((d: any) => ({
-            ...d,
-            cards: d.cards ? d.cards.map((c: any) => ({
-              ...c,
-              baseWordInfo: c.baseWordInfo || null
-            })) : [],
-            language: d.language || langMap[d.id] || 'DE',
-            bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
-          }));
+          const enhancedDecks = decksRes.data.map((d: any) => {
+            let deckTheory = d.theory || null;
+            if (!deckTheory && typeof window !== 'undefined') {
+              try {
+                const stored = localStorage.getItem(`deck_theory_json_${d.id}`) || localStorage.getItem(`deck_theory_${d.id}`);
+                if (stored) deckTheory = JSON.parse(stored);
+              } catch(e) {}
+            }
+            return {
+              ...d,
+              theory: deckTheory,
+              cards: d.cards ? d.cards.map((c: any) => ({
+                ...c,
+                baseWordInfo: c.baseWordInfo || null
+              })) : [],
+              language: d.language || langMap[d.id] || 'DE',
+              bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
+            };
+          });
           setDecks(enhancedDecks as Deck[]);
           try {
             localStorage.setItem('cache_decks_v2', JSON.stringify(enhancedDecks));

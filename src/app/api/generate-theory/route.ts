@@ -11,43 +11,47 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Topic title required' }, { status: 400 });
     }
 
-    const systemPrompt = `Ты — ведущий немецкий методист уровня C2/Native и Apple Technical Writer. Твоя задача — формировать безупречные, исчерпывающие и визуально структурированные грамматические конспекты уровня ${level}.
-Объясняй все правила, нюансы и переводы на РУССКОМ языке, а термины, схемы, формы и примеры — на НЕМЕЦКОМ.
+    const systemPrompt = `Ты — ведущий немецкий методист уровня C2/Native и Apple Technical Writer. Твоя задача — формировать безупречные, академически точные и визуально структурированные грамматические конспекты уровня ${level}.
+СТРОГИЕ ПРАВИЛА ГРАММАТИКИ И ТИПОГРАФИКИ:
+1. Вопросы падежей: Akkusativ отвечает СТРОГО на вопросы «Wen?» (Кого?) / «Was?» (Что?). НИКОГДА не используй вопрос «Кто?» (Wer?) для Akkusativ — «Wer?» относится исключительно к Nominativ! Dativ отвечает строго на «Wem?» (Кому?).
+2. В массиве форм родов (forms) возвращай СТРОГО 3 полных элемента в виде массива строк: [определенный артикль, неопределенный артикль, притяжательное местоимение], например: ["den", "einen", "meinen"] для Maskulin Akkusativ; ["die", "eine", "meine"] для Feminin; ["das", "ein", "mein"] для Neutral; ["die", "-", "meine"] для Plural. Никаких пустых значений и никаких замыкающих слэшей!
+3. В схемах используй правильную типографскую стрелку → вместо -> и немецкие кавычки „...“.
+4. Объясняй все правила, нюансы и переводы на РУССКОМ языке, а термины, схемы, формы и примеры — на НЕМЕЦКОМ.
 Ответ верни СТРОГО в виде валидного JSON без разметки markdown и вступительного текста.`;
 
     const userPrompt = `Тема: "${topicTitle}" (Уровень: ${level}).
 Сформируй глубокий конспект по следующей JSON-структуре:
 {
   "title": "${topicTitle}",
-  "catchyHeadline": "Короткий, запоминающийся заголовок-девиз темы (1 предложение, отражающее суть)",
-  "coreConcept": "Фундаментальное объяснение сути правила простым языком без заумных терминов (2-3 емких абзаца)",
+  "catchyHeadline": "Короткий, запоминающийся заголовок-девиз темы (1 емкое предложение, отражающее суть правила)",
+  "coreConcept": "Фундаментальное объяснение сути правила простым языком без заумных терминов (2-3 емких абзаца). Для Akkusativ обязательно укажи вопросы «Wen? / Was?» (Кого? / Что?). Никаких «Кто?»!",
   "formula": "Главная визуальная схема правила (например: Subjekt + Modalverb (Pos 2) + ... + Infinitiv (Ende))",
   "genderMatrix": [
     {
       "gender": "maskulin",
       "article": "der",
-      "forms": "den / einen / meinen",
+      "forms": ["den", "einen", "meinen"],
       "note": "Меняет форму на -en!",
       "color": "sky"
     },
     {
       "gender": "neutral",
       "article": "das",
-      "forms": "das / ein / mein",
+      "forms": ["das", "ein", "mein"],
       "note": "Форма совпадает с Nominativ",
       "color": "emerald"
     },
     {
       "gender": "feminin",
       "article": "die",
-      "forms": "die / eine / meine",
+      "forms": ["die", "eine", "meine"],
       "note": "Форма совпадает с Nominativ",
       "color": "rose"
     },
     {
       "gender": "plural",
       "article": "die",
-      "forms": "die / - / meine",
+      "forms": ["die", "-", "meine"],
       "note": "Окончание -e во всех формах",
       "color": "amber"
     }
@@ -85,7 +89,7 @@ export async function POST(req: Request) {
       "highlight": "einen neuen Laptop",
       "gender": "maskulin",
       "ru": "Я купил новый ноутбук.",
-      "note": "Мужской род в винительном падеже (der Laptop -> einen Laptop)"
+      "note": "Мужской род в винительном падеже (der Laptop → einen Laptop)"
     },
     {
       "de": "Wir brauchen das grüne Ticket.",
@@ -111,13 +115,13 @@ export async function POST(req: Request) {
   ],
   "traps": [
     {
-      "wrong": "Ich muss zu lernen. ❌",
-      "right": "Ich muss lernen. ✅",
-      "explanation": "С модальными глаголами частица ZU НИКОГДА не используется."
+      "wrong": "Ich muss zu lernen.",
+      "right": "Ich muss lernen.",
+      "explanation": "С модальными глаголами частица ZU никогда не используется."
     },
     {
-      "wrong": "Er will kauft ein Auto. ❌",
-      "right": "Er will ein Auto kaufen. ✅",
+      "wrong": "Er will kauft ein Auto.",
+      "right": "Er will ein Auto kaufen.",
       "explanation": "Смысловой глагол в конце обязан стоять в форме чистого инфинитива."
     }
   ]
