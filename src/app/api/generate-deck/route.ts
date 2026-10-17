@@ -111,8 +111,28 @@ export async function POST(req: Request) {
     const isGrammar = category.toLowerCase().includes('grammatik');
     const targetCount = Math.max(5, Math.min(50, Number(count) || 15));
 
-    const systemPrompt = `Ты — эксперт по составлению стандартизированных тестов по немецкому языку (Goethe-Zertifikat / telc B1–B2).
-Твоя цель — сгенерировать ${targetCount} качественных атомарных карточек с пропуском "___" и безупречными вариантами ответов (options).
+    const systemPrompt = `Ты — методист немецкого языка (Goethe-Zertifikat / telc B1–B2 / Klett). 
+Твоя цель — сгенерировать ровно ${targetCount} атомарных карточек с пропуском "___", где под переводом ВСЕГДА выводится эталонная словарная или грамматическая плашка (поле "hint").
+
+ПРАВИЛА ЗАПОЛНЕНИЯ ПОЛЯ "hint" (ОБЯЗАТЕЛЬНО ДЛЯ КАЖДОЙ КАРТОЧКИ):
+1. ЕСЛИ РЕЖИМ СЛОВА (WÖRTER / ФЛЕШКАРТЫ):
+   - Для существительных: ОБЯЗАТЕЛЬНО артикль + слово + окончание множественного числа + перевод.
+     Пример: "die Führung, -en — руководство, управление"
+     Пример: "die Aushilfe, -n — подсобный рабочий, временная помощь"
+     Пример: "das Praktikum, Praktika — практика, стажировка"
+     Пример: "der Bereich, -e — сфера, область"
+   - Для глаголов: начальная форма (инфинитив, если возвратный — с sich) + управление/предлог (если есть) + перевод.
+     Пример: "sich einarbeiten — вникать в работу, осваиваться на новом месте"
+     Пример: "teilnehmen an (Dativ) — принимать участие в"
+   - Для прилагательных: словарная форма + перевод.
+     Пример: "zuverlässig — надежный, верный"
+
+2. ЕСЛИ РЕЖИМ ГРАММАТИКА (GRAMMATIK):
+   - Краткая визуальная формула или логика конкретной формы:
+     Пример: "Без артикля → motivierte | Plural • Akk."
+     Пример: "Präteritum von gehen: ging"
+     Пример: "Passiv Präteritum: wurde + Partizip II (geboren)"
+     Пример: "Akkusativ мужского рода: der → den / einen"
 
 ЖЕЛЕЗНЫЕ ПРАВИЛА ДЛЯ ПРЕДЛОЖЕНИЙ:
 1. ПРАВИЛО ОДНОГО ПРЕДЛОЖЕНИЯ (СТРОГО):
@@ -159,11 +179,11 @@ export async function POST(req: Request) {
   "deckTitle": "${title}",
   "cards": [
     {
-      "sentence": "Немецкое предложение с пропуском ___",
-      "targetWord": "правильное слово",
-      "translation": "Естественный русский перевод",
-      "hint": "Краткая подсказка",
-      "options": ["правильное", "дистрактор1", "дистрактор2", "дистрактор3"]
+      "sentence": "Ich habe in der Löwen-Apotheke als ___ gearbeitet.",
+      "targetWord": "Aushilfe",
+      "translation": "Я работала помощником в аптеке «Löwen».",
+      "hint": "die Aushilfe, -n — подсобный рабочий, временная помощь",
+      "options": ["Aushilfe", "Fachkraft", "Leitung", "Praktikantin"]
     }
   ]
 }

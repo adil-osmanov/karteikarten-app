@@ -440,6 +440,7 @@ export interface Flashcard {
   repetitions: number;
   baseWordInfo?: string | null;
   forms?: string | null;
+  hint?: string | null;
 }
 
 export interface GenderMatrixItem {
@@ -2104,6 +2105,21 @@ function StudyEntry(props: {
   return <StudyInterface {...props} />;
 }
 
+// Helper to tint card hint badge based on German gender markers (der: sky/blue, die: rose/pink, das: emerald/green)
+const getHintColorClasses = (text: string) => {
+  const lower = text.trim().toLowerCase();
+  if (/^der\b|\bder\s+[A-Za-zäöüÄÖÜ]/i.test(lower) || /\bder\b/i.test(lower)) {
+    return "bg-sky-500/10 border-sky-500/30 text-sky-200";
+  }
+  if (/^die\b|\bdie\s+[A-Za-zäöüÄÖÜ]/i.test(lower) || /\bdie\b/i.test(lower)) {
+    return "bg-rose-500/10 border-rose-500/30 text-rose-200";
+  }
+  if (/^das\b|\bdas\s+[A-Za-zäöüÄÖÜ]/i.test(lower) || /\bdas\b/i.test(lower)) {
+    return "bg-emerald-500/10 border-emerald-500/30 text-emerald-200";
+  }
+  return "bg-zinc-900/90 border-white/10 text-zinc-300";
+};
+
 // --- STUDY INTERFACE ---
 
 function StudyInterface({ 
@@ -3045,6 +3061,17 @@ function StudyCard({
           <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
             {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
           </p>
+
+          {(card.hint || card.forms) && (
+            <div className="mt-4 flex justify-center">
+              <div className={cn(
+                "px-4 py-2 rounded-2xl border text-xs font-medium tracking-wide shadow-sm max-w-md text-center transition-all",
+                getHintColorClasses(card.hint || card.forms || '')
+              )}>
+                {card.hint || card.forms}
+              </div>
+            </div>
+          )}
           
           {phase === "Answer" && parsedInfo.type !== 'none' && (
             <motion.div 
@@ -3706,7 +3733,14 @@ const DeckCard = React.memo(({
     >
       {/* Action Buttons: Edit (Pencil) & Delete */}
       <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
-        {onEdit && (
+        {onEdit && !(
+          deck.bookId === 'verbs-de' || 
+          deck.bookId === 'prep-verbs-de' || 
+          deck.bookId === 'redemittel' ||
+          bookMode === 'starke_verben' ||
+          bookMode === 'preposition_drill' ||
+          bookMode === 'redemittel'
+        ) && (
           <button 
             onClick={(e) => { e.stopPropagation(); onEdit(deck); }}
             className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
@@ -3949,20 +3983,78 @@ function DeckModal({
       setTitle(file.name.replace(/\.[^/.]+$/, ""));
     }
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      if (!text) return;
-      const isRedemittel = category.toLowerCase().includes('redemittel');
-      const isRapidMode = false;
-      const parsed = parseCardsFromCSV(text, isRedemittel, isRapidMode);
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (!text) {
+        setCsvCards([]);
+        return;
+      }
+
+      // Очищаем от BOM (\uFEFF) и разбиваем на строки с учетом любых переносов (\r\n или \n)
+      const cleanText = text.replace(/^\uFEFF/, '').trim();
+      const lines = cleanText.split(/\r?\n/).filter(line => line.trim().length > 0);
+      const parsed: Flashcard[] = [];
+
+      lines.forEach((line) => {
+        // Автоматически определяем разделитель: точка с запятой или запятая
+        const delimiter = line.includes(';') ? ';' : ',';
+        const parts = line.split(delimiter).map(p => p.trim().replace(/^["']|["']$/g, ''));
+
+        if (parts.length >= 3) {
+          const [targetWord, sentence, translation, ...distractors] = parts;
+          const escapedTw = targetWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const cleanSentence = sentence.includes('___') 
+            ? sentence 
+            : sentence.replace(new RegExp(`\\b${escapedTw}\\b`, 'i'), '___');
+
+          const validDistractors = distractors.filter(Boolean);
+          const options = validDistractors.length >= 3 
+            ? [targetWord, ...validDistractors.slice(0, 3)] 
+            : [targetWord];
+
+          const hint = parts.length >= 7 ? parts[3] : '';
+
+          parsed.push({
+            id: crypto.randomUUID(),
+            targetWord,
+            sentence: cleanSentence,
+            translation,
+            options,
+            hint,
+            forms: hint || undefined,
+            masteryLevel: 0,
+            isArchived: false,
+            nextReviewDate: null,
+            interval: 0,
+            repetitions: 0
+          });
+        } else if (parts.length === 2) {
+          const [targetWord, translation] = parts;
+          parsed.push({
+            id: crypto.randomUUID(),
+            targetWord,
+            sentence: `___ : ${translation}`,
+            translation,
+            options: [targetWord],
+            hint: '',
+            forms: undefined,
+            masteryLevel: 0,
+            isArchived: false,
+            nextReviewDate: null,
+            interval: 0,
+            repetitions: 0
+          });
+        }
+      });
+
       setCsvCards(parsed);
       if (parsed.length > 0) {
         toast.success(`Найдено ${parsed.length} карточек в CSV`);
       } else {
-        toast.error("Не удалось распознать карточки в файле. Проверьте формат разделителя (;)");
+        toast.error("Не удалось распознать карточки в файле. Проверьте содержимое.");
       }
     };
-    reader.readAsText(file);
+    reader.readAsText(file, 'UTF-8');
   };
 
   const handleCreateOrUpdateAI = async () => {
@@ -3995,7 +4087,7 @@ function DeckModal({
         targetWord: c.targetWord,
         sentence: c.sentence,
         translation: c.translation,
-        forms: c.forms || undefined,
+        forms: c.hint || c.forms || undefined,
         options: Array.isArray(c.options) && c.options.length > 0 ? c.options : [c.targetWord],
         masteryLevel: 0,
         isArchived: false,
@@ -4372,17 +4464,24 @@ function DeckModal({
               </label>
 
               <div
+                onDragOver={(e) => { e.preventDefault(); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) handleProcessCsvFile(f);
+                }}
                 onClick={() => csvInputRef.current?.click()}
                 className="border border-dashed border-white/15 hover:border-white/30 bg-zinc-900/30 rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 select-none"
               >
                 <input
                   ref={csvInputRef}
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".csv,text/csv,text/plain"
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     if (f) handleProcessCsvFile(f);
+                    e.target.value = '';
                   }}
                 />
                 <FileText className="w-8 h-8 text-amber-400/80" />
@@ -7518,10 +7617,29 @@ try {
       if (fileInputRef.current) fileInputRef.current.value = "";
       setUploadTarget(null);
     };
-    reader.readAsText(file);
+    reader.readAsText(file, 'UTF-8');
   };
 
   const handlePlusClick = (category: string, level: CEFRLevel) => {
+    const activeBook = books.find(b => b.id === activeBookId);
+    const trainingMode = activeBook?.training_mode || 'standard_cloze';
+    const isSpecializedMode = 
+      trainingMode === 'starke_verben' ||
+      trainingMode === 'preposition_drill' ||
+      trainingMode === 'redemittel' ||
+      activeBookId === 'verbs-de' ||
+      activeBookId === 'prep-verbs-de' ||
+      activeBookId === 'redemittel';
+
+    if (isSpecializedMode) {
+      setUploadTarget({ category, level });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+        fileInputRef.current.click();
+      }
+      return;
+    }
+
     setDeckModal({ mode: 'create', category, level });
   };
 
