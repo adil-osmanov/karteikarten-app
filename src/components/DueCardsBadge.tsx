@@ -31,8 +31,8 @@ export function DueCardsBadge({ count = 0, language = 'DE', onClick, className }
       type="button"
       onClick={onClick}
       className={cn(
-        "h-8 px-3 rounded-full flex items-center gap-2 text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm",
-        "bg-white border border-zinc-200/80 text-zinc-800 hover:bg-white hover:border-zinc-300 hover:shadow-md",
+        "h-8 px-3 rounded-full flex items-center gap-2 text-xs font-medium transition-all active:scale-95 shadow-sm",
+        "bg-white border border-zinc-200/80 text-zinc-800 hover:bg-zinc-100 active:bg-zinc-200",
         "dark:bg-blue-500/15 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/25",
         "cursor-pointer select-none group",
         className

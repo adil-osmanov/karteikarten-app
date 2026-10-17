@@ -5,38 +5,55 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export async function POST(req: Request) {
   try {
-    const { topicId, topicTitle, level = 'B1' } = await req.json();
+    const { topicTitle, level = 'B1' } = await req.json();
 
     if (!topicTitle) {
       return NextResponse.json({ error: 'Topic title is required' }, { status: 400 });
     }
 
-    const systemPrompt = `Ты — лучший преподаватель немецкого языка. Твоя цель — объяснить грамматическую тему максимально доходчиво, понятно и подробно, но без академической воды.
-Все объяснения пиши на русском языке, а немецкие примеры и грамматические термины — на немецком.
-Форматируй ответ строго в виде валидного JSON без разметки markdown и вводных слов.`;
+    const systemPrompt = `Ты — ведущий методист немецкого языка. Объясняй грамматику максимально понятно, наглядно и структурно, без академической воды.
+Все правила, пояснения и переводы пиши на русском языке, а грамматические формы и примеры — на немецком.
+Ответ верни СТРОГО в виде валидного JSON без разметки markdown и вступительного текста.`;
 
     const userPrompt = `Тема: "${topicTitle}" (Уровень: ${level}).
-Составь подробную и наглядную шпаргалку по следующей JSON-структуре:
+Сформируй конспект по следующей JSON-структуре:
 {
   "title": "${topicTitle}",
-  "formula": "Краткая визуальная формула или ключевой шаблон правила (например: der/ein -> meinen)",
-  "simpleExplanation": "Подробное, простое и понятное объяснение сути правила: зачем это нужно, когда используется и как устроена логика",
-  "matrix": [
-    { "label": "Maskulin (der)", "value": "форма / окончание" },
-    { "label": "Neutral (das)", "value": "форма / окончание" },
-    { "label": "Feminin (die)", "value": "форма / окончание" },
-    { "label": "Plural (die)", "value": "форма / окончание" }
-  ],
-  "rules": [
-    { "title": "Шаг 1: Основа", "desc": "Подробное описание первого важного нюанса" },
-    { "title": "Шаг 2: Изменение по падежам/лицам", "desc": "Подробное описание логики окончаний" }
-  ],
+  "oneLiner": "Главная суть правила в 1 емкую понятную фразу с ключевым инсайтом",
+  "matrix": {
+    "headers": ["Maskulin (der)", "Neutral (das)", "Feminin (die)", "Plural (die)"],
+    "forms": ["форма/окончание", "форма/окончание", "форма/окончание", "форма/окончание"],
+    "pronouns": ["местоимение", "местоимение", "местоимение", "местоимение"]
+  },
+  "triggers": {
+    "verbs": ["глагол 1", "глагол 2", "глагол 3", "глагол 4", "глагол 5"],
+    "prepositions": ["предлог 1", "предлог 2", "предлог 3", "предлог 4"],
+    "explanation": "Когда и почему включается это правило (триггеры, падеж, вопросы)"
+  },
   "examples": [
-    { "de": "Немецкое предложение с выделением ключевого слова", "ru": "Точный естественный перевод на русский", "note": "Краткий комментарий, почему именно такая форма использована" },
-    { "de": "Второй наглядный пример", "ru": "Перевод на русский", "note": "Комментарий к падежу или структуре" },
-    { "de": "Третий контрастный пример", "ru": "Перевод на русский", "note": "Комментарий" }
+    {
+      "de": "Немецкое предложение с ключевым фрагментом",
+      "highlight": "ключевой фрагмент",
+      "ru": "Точный естественный перевод на русский язык",
+      "note": "Краткое понятное пояснение грамматического выбора"
+    },
+    {
+      "de": "Второй наглядный пример",
+      "highlight": "ключевой фрагмент",
+      "ru": "Перевод на русский язык",
+      "note": "Пояснение"
+    },
+    {
+      "de": "Третий контрастный пример",
+      "highlight": "ключевой фрагмент",
+      "ru": "Перевод на русский язык",
+      "note": "Пояснение"
+    }
   ],
-  "commonMistakes": "Частая ловушка или ошибка, которую допускают студенты на этом правиле, и как её избежать"
+  "trap": {
+    "title": "Ловушка или типичная ошибка студентов",
+    "desc": "Как не ошибиться в реальной речи или тестах"
+  }
 }`;
 
     const candidateModels = [
@@ -72,10 +89,10 @@ export async function POST(req: Request) {
       throw lastError || new Error('No completion returned from Groq');
     }
 
-    const parsedData = JSON.parse(completion.choices[0]?.message?.content || '{}');
-    return NextResponse.json({ success: true, data: parsedData });
+    const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
+    return NextResponse.json({ success: true, data: parsed });
   } catch (error) {
     console.error('Groq generation error:', error);
-    return NextResponse.json({ success: false, error: 'Generation failed' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Failed' }, { status: 500 });
   }
 }
