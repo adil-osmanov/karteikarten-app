@@ -33,35 +33,44 @@ function useIsMobile() {
   return isMobile;
 }
 
-// Compress images to WebP Base64 to save storage and fit Groq Vision payload
-async function compressImageToWebP(file: File, maxWidth = 1600, quality = 0.8): Promise<string> {
+// Client-side image compression for OCR/Groq Vision (1200px max dimension, JPEG 0.72)
+async function compressImageForOcr(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.readAsDataURL(file);
     reader.onload = (e) => {
-      const img = new (window as any).Image();
+      const img = new window.Image();
+      img.src = e.target?.result as string;
       img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_DIMENSION = 1200; // Оптимальное разрешение для распознавания текста без перерасхода токенов
         let width = img.width;
         let height = img.height;
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
+
+        if (width > height) {
+          if (width > MAX_DIMENSION) {
+            height *= MAX_DIMENSION / width;
+            width = MAX_DIMENSION;
+          }
+        } else {
+          if (height > MAX_DIMENSION) {
+            width *= MAX_DIMENSION / height;
+            height = MAX_DIMENSION;
+          }
         }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
+
+        canvas.width = Math.round(width);
+        canvas.height = Math.round(height);
         const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/webp', quality));
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        // Сжимаем в JPEG с качеством 0.72 — размер падает с 4 МБ до 180-250 КБ
+        const compressed = canvas.toDataURL('image/jpeg', 0.72);
+        resolve(compressed);
       };
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = e.target?.result as string;
+      img.onerror = reject;
     };
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
+    reader.onerror = reject;
   });
 }
 
@@ -3904,7 +3913,7 @@ function DeckModal({
     setIsCompressing(true);
     try {
       const compressedList = await Promise.all(
-        fileArr.map(f => compressImageToWebP(f, 1600, 0.8))
+        fileArr.map(f => compressImageForOcr(f))
       );
       setMaterials(prev => [...prev, ...compressedList]);
     } catch (e) {
@@ -4082,6 +4091,7 @@ function DeckModal({
       }
     } catch (err: any) {
       console.error('Regeneration failed:', err);
+      toast.error(err.message || 'Ошибка при перегенерации колоды');
       alert(`Не удалось перегенерировать колоду: ${err.message || 'Ошибка сети'}`);
     } finally {
       setIsRegenerating(false);

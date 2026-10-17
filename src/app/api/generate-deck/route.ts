@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server';
 import Groq from 'groq-sdk';
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// Получаем список ключей из переменной окружения (поддерживаем разделение запятой)
+function getGroqApiKeys(): string[] {
+  const raw = process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || '';
+  return raw
+    .split(',')
+    .map((k) => k.trim().replace(/^["']|["']$/g, ''))
+    .filter((k) => k.length > 0);
+}
 
 function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];
@@ -51,7 +58,6 @@ function sanitizeAndValidateCard(card: any) {
 
   // 2. Если уникальных вариантов меньше 4 (модель вернула дубликаты):
   if (finalOptions.length < 4) {
-    // Определяем категорию для подбора запасных вариантов
     let pool = FALLBACK_POOLS.nouns;
     if (/^(ab|an|aus|ein|mit|vor|zu|auf)$/i.test(targetWord)) {
       pool = FALLBACK_POOLS.prefixes;
@@ -69,7 +75,6 @@ function sanitizeAndValidateCard(card: any) {
       if (finalOptions.length === 4) break;
     }
 
-    // Дополнительная страховка: если выбранного пула не хватило
     if (finalOptions.length < 4) {
       const allFallbacks = [
         ...FALLBACK_POOLS.nouns,
@@ -87,10 +92,8 @@ function sanitizeAndValidateCard(card: any) {
     }
   }
 
-  // Обрезаем до ровно 4
   finalOptions = finalOptions.slice(0, 4);
 
-  // 3. Перемешиваем варианты (Fisher-Yates shuffle), чтобы правильный ответ не стоял всегда первым
   return {
     sentence,
     targetWord,
@@ -108,63 +111,51 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Название темы обязательно' }, { status: 400 });
     }
 
+    const keys = getGroqApiKeys();
+    if (keys.length === 0) {
+      return NextResponse.json({ success: false, error: 'API-ключи Groq не настроены.' }, { status: 500 });
+    }
+
     const isGrammar = category.toLowerCase().includes('grammat');
     const targetCount = Math.max(5, Math.min(50, Number(count) || 15));
 
-    const systemPrompt = `Ты — ведущий немецкий методист и экзаменатор (Duden / Goethe-Institut).
-Твоя цель — составить ${targetCount} карточек.
+    // Используем исключительно официальные модели Groq:
+    const model = images && images.length > 0 
+      ? 'llama-3.2-11b-vision-preview' 
+      : 'llama-3.3-70b-versatile';
 
-КАТЕГОРИЧЕСКИЕ ПРАВИЛА СОСТАВЛЕНИЯ СЛОВ И ПРОПУСКОВ:
+    const systemPrompt = `Ты — методист и составитель тестов по немецкому языку (B1–B2).
+Твоя задача — сгенерировать ровно ${targetCount} карточек по предоставленным материалам.
+РЕЖИМ: ${isGrammar ? 'ГРАММАТИКА (GRAMMATIK)' : 'СЛОВА (WÖRTER)'}
 
-1. ПРАВИЛО НЕМЕЦКИХ СЛОЖНЫХ СЛОВ (KOMPOSITA):
-   - В немецком языке сложные существительные пишутся СТРОГО СЛИТНО В ОДНО СЛОВО!
-   - ❌ КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО разделять слова пробелом: "Violin Unterricht", "Bewerbung Training", "Sprach Kurs"!
-   - ✅ СТРОГО СЛИТНО: "Violinunterricht", "Bewerbungstraining", "Sprachkurs".
-   - ❌ ЗАПРЕЩЕНО делать пропуск на половине составного слова: "...seit drei Jahren ___ Unterricht."
-   - ✅ ПРОПУСКАЕТСЯ СТРОГО ВСЕ СЛОВО ЦЕЛИКОМ: "Sie besucht seit drei Jahren ___ ." (targetWord: "Violinunterricht").
-
-2. ПРАВИЛО ПРОПУСКА ЦЕЛОГО СЛОВА:
-   - Пропуском "___" всегда является ЦЕЛОЕ, самостоятельное слово или глагольная форма. Никогда не отрывай от слова суффиксы, префиксы или корни существительных.
-
-3. ЖЕЛЕЗНЫЙ ЗАКОН НЕМЕЦКОЙ РАМКИ (SATZKLAMMER & AUSKLAMMERUNGSVERBOT):
-   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО ставить Partizip II или Infinitiv в середину предложения перед обстоятельствами времени и места (калька с английского)!
-   - ❌ ЗАПРЕЩЕНО: "Ich wurde geboren am 25. Oktober in Homs."
-   - ✅ СТРОГО ОБЯЗАТЕЛЬНО: "Ich wurde am 25. Oktober 1993 in der Stadt Homs GEBOREN."
-   - ❌ ЗАПРЕЩЕНО: "Er hat gearbeitet drei Jahre in Berlin."
-   - ✅ СТРОГО ОБЯЗАТЕЛЬНО: "Er hat drei Jahre in Berlin GEARBEITET."
-   - Причастия прошедшего времени (geboren, gearbeitet, studiert) и инфинитивы с модальными глаголами ВСЕГДА замыкают предложение в самом конце!
-
-4. ФОРМАТ ПОЛЯ "hint" ДЛЯ СЛОВ (WÖRTER):
-   - Для существительных: строго "артикль Слово, -мн.число — перевод" (например: "der Violinunterricht, -e — уроки игры на скрипке", "die Grundschule, -n — начальная школа", "das Fach, -er — предмет, специальность"). БЕЗ суффикса родительного падежа (-s)!
-   - Для глаголов: "3 формы — перевод" (например: "sich bewerben, bewarb sich, hat sich beworben — подавать заявление").
-   - Для прилагательных: "слово — перевод" (например: "anspruchsvoll — требовательный").
-
-5. ФОРМАТ ПОЛЯ "hint" ДЛЯ ГРАММАТИКИ (GRAMMATIK):
-   - Лаконичная формула через точку "·" (например: "Perfekt · habe ... beworben", "Präteritum · ging (gehen)", "Passiv · wurde ... geboren").
-
-6. ДИСТРАКТОРЫ (OPTIONS):
-   - 4 варианта ответа, идеально подходящие по смыслу и грамматике на место пропуска. Никаких повторов.
+КРИТИЧЕСКИЕ ПРАВИЛА:
+1. 1 карточка = строго 1 короткое законченное предложение (8-14 слов). Никаких параграфов.
+2. Немецкая рамочная конструкция (Satzklammer) обязана быть закрыта (причастия и инфинитивы стоят в самом конце предложения, например: "...am 25. Oktober 1993 in Homs geboren.").
+3. Не разрывай сложные слова пробелом (строго "Violinunterricht", а не "Violin Unterricht").
+4. В options ровно 4 уникальных варианта одной части речи и грамматической формы.
+5. Поле hint:
+   - В словах: "артикль Слово, -мн.число — перевод" (der/die/das подсвечиваются отдельно) или "3 формы глагола — перевод".
+   - В грамматике: лаконичная формула через точку "·" (например: "Passiv Präteritum · wurde ... geboren").
 
 ФОРМАТ JSON:
 {
   "deckTitle": "${title}",
   "cards": [
     {
-      "sentence": "Немецкое предложение с идеальным порядком слов и пропуском ___",
-      "targetWord": "пропущенная форма",
+      "sentence": "Предложение с пропуском ___",
+      "targetWord": "пропущенное слово",
       "translation": "Естественный русский перевод",
-      "hint": "Унифицированная подсказка",
-      "options": ["ответ1", "ответ2", "ответ3", "ответ4"]
+      "hint": "Подсказка",
+      "options": ["слово1", "слово2", "слово3", "слово4"]
     }
   ]
-}
-`;
+}`;
 
-    // Подготовка контента
-    const hasImages = Array.isArray(images) && images.length > 0;
-    const userContent: any[] = [];
+    const userContent: any[] = [
+      { type: 'text', text: `Тема: "${title}" (${level}). Режим: ${isGrammar ? 'Grammatik' : 'Wörter'}. Сгенерируй ровно ${targetCount} карточек.` }
+    ];
 
-    if (hasImages) {
+    if (images && images.length > 0) {
       images.forEach((imgBase64: string) => {
         userContent.push({
           type: 'image_url',
@@ -173,58 +164,61 @@ export async function POST(req: Request) {
       });
     }
 
-    userContent.push({ 
-      type: 'text', 
-      text: `Тема: "${title}" (${level}). Режим: ${isGrammar ? 'Grammatik' : 'Wörter'}. Создай ровно ${targetCount} атомарных карточек строго по 1 короткому законченному предложению на карточку на основе учебника.` 
-    });
-
-    // Модели на Groq:
-    // llama-3.2-11b-vision-preview при наличии изображений (fallback qwen/qwen3.8-27b),
-    // llama-3.3-70b-versatile для текста (fallback openai/gpt-oss-120b, qwen/qwen3.8-27b)
-    const modelsToTry = hasImages 
-      ? ['llama-3.2-11b-vision-preview', 'qwen/qwen3.8-27b'] 
-      : ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
-
-    let completion: any = null;
     let lastError: any = null;
 
-    for (const model of modelsToTry) {
+    // Последовательно перебираем ключи, если ловим Rate Limit (429)
+    for (let i = 0; i < keys.length; i++) {
+      const apiKey = keys[i];
       try {
-        completion = await groq.chat.completions.create({
-          model: model,
+        const groq = new Groq({ apiKey });
+
+        const completion = await groq.chat.completions.create({
+          model,
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: hasImages ? (userContent as any) : `Тема: "${title}". Создай ровно ${targetCount} карточек строго по теме ${isGrammar ? 'Grammatik' : 'Wörter'}. 1 карточка = строго 1 короткое предложение.` }
+            { role: 'user', content: images && images.length > 0 ? (userContent as any) : `Тема: "${title}". Сгенерируй ровно ${targetCount} карточек.` }
           ],
           response_format: { type: 'json_object' },
           temperature: 0.15,
         });
-        if (completion?.choices?.[0]?.message?.content) {
-          break;
+
+        let raw = completion.choices[0]?.message?.content || '{}';
+        raw = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+        const result = JSON.parse(raw);
+        const rawCards = Array.isArray(result.cards) ? result.cards : [];
+
+        if (rawCards.length === 0) {
+          throw new Error('Модель вернула пустой список карточек');
         }
+
+        const validatedCards = rawCards.map(sanitizeAndValidateCard);
+
+        // Успешно сгенерировано
+        return NextResponse.json({ success: true, cards: validatedCards });
       } catch (err: any) {
-        console.warn(`Model ${model} failed, trying next:`, err.message);
         lastError = err;
+        const isRateLimit = err?.status === 429 || (err?.message && err.message.includes('429'));
+        console.warn(`[Groq Key ${i + 1}/${keys.length}] Ошибка:`, err?.status || err?.message);
+
+        // Если это ошибка 429 (Rate Limit) и есть следующий ключ — пробуем его
+        if (isRateLimit && i < keys.length - 1) {
+          console.info(`Переключаемся на резервный API-ключ (${i + 2}/${keys.length})...`);
+          continue;
+        }
+
+        // Если это не 429 или ключи закончились — выходим из цикла
+        break;
       }
     }
 
-    if (!completion?.choices?.[0]?.message?.content) {
-      throw lastError || new Error('Не удалось получить ответ от Groq');
+    if (lastError?.status === 429 || (lastError?.message && lastError.message.includes('429'))) {
+      return NextResponse.json(
+        { success: false, error: 'Все доступные API-ключи временно исчерпали дневной лимит. Попробуйте чуть позже.' },
+        { status: 429 }
+      );
     }
 
-    let raw = completion.choices[0]?.message?.content || '{}';
-    raw = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
-    const result = JSON.parse(raw);
-
-    const rawCards = Array.isArray(result.cards) ? result.cards : [];
-    if (rawCards.length === 0) {
-      throw new Error('Модель вернула пустой список карточек');
-    }
-
-    // Применяем валидатор ко всем сгенерированным карточкам (дедупликация, fallback и Fisher-Yates shuffle)
-    const validatedCards = rawCards.map(sanitizeAndValidateCard);
-
-    return NextResponse.json({ success: true, cards: validatedCards });
+    throw lastError;
   } catch (error: any) {
     console.error('Deck generation error:', error);
     return NextResponse.json({ 
