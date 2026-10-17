@@ -5,7 +5,8 @@ import {
   Check, Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, 
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
-  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers
+  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers,
+  ChevronDown, LogOut
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from 'sonner';
@@ -369,7 +370,7 @@ export type CEFRLevel = LanguageLevel; // Alias for existing code
 
 export interface BookMeta {
   id: string;
-  language: 'DE' | 'EN';
+  language: 'DE' | 'EN' | 'RU';
   title: string;
   subtitle?: string;
   tintColor: string;
@@ -414,7 +415,7 @@ export interface Deck {
   category: string;
   level?: CEFRLevel;
   cards: Flashcard[];
-  language?: 'DE' | 'EN';
+  language?: 'DE' | 'EN' | 'RU';
   bookId?: string;
 }
 
@@ -429,8 +430,8 @@ interface DeckState {
   setCardProgress: (deckId: string, cardId: string, score: number) => void;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: () => void;
-  appLanguage: 'DE' | 'EN';
-  setAppLanguage: (lang: 'DE' | 'EN') => void;
+  appLanguage: 'DE' | 'EN' | 'RU';
+  setAppLanguage: (lang: 'DE' | 'EN' | 'RU') => void;
   books: BookMeta[];
   setBooks: (books: BookMeta[]) => void;
   addBook: (book: BookMeta) => void;
@@ -2946,86 +2947,8 @@ function StudyCard({
 }
 
 
-function DarkModeToggle() {
-  const [isDark, setIsDark] = useState(false);
-  
-  useEffect(() => {
-    setIsDark(document.documentElement.classList.contains('dark'));
-  }, []);
-
-  const toggle = () => {
-    const next = !isDark;
-    setIsDark(next);
-    if (next) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
-  };
-
-  return (
-    <button onClick={toggle} className="p-2 rounded-full text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors">
-      {isDark ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-    </button>
-  );
-}
-
 // --- MAIN APP COMPONENT ---
 
-
-
-function ActivityWidget() {
-  const { appLanguage } = useStore();
-  const [daily, setDaily] = useState<Record<string, any>>({});
-
-  useEffect(() => {
-    const loadProgress = () => {
-      try {
-        const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
-        if (stored) setDaily(JSON.parse(stored));
-        else setDaily({});
-      } catch (e) {}
-    };
-    loadProgress();
-    window.addEventListener('storage-update', loadProgress);
-    return () => window.removeEventListener('storage-update', loadProgress);
-  }, [appLanguage]);
-
-  const todayStr = new Date().toLocaleDateString('en-CA');
-  const rawCount = daily[todayStr];
-  const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
-
-  return (
-    <div className="flex flex-col items-center justify-center px-2 mr-1">
-      <span className="text-[9px] uppercase tracking-[0.2em] font-medium text-gray-400 dark:text-gray-500 leading-none mb-1">Heute</span>
-      <span className="text-xl font-light tabular-nums text-gray-900 dark:text-white leading-none">{todayCount}</span>
-    </div>
-  );
-}
-
-function LanguageSelector() {
-  const { appLanguage, setAppLanguage } = useStore();
-  return (
-    <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50 flex items-center bg-gray-100 dark:bg-[#1C1C1E] border border-black/[0.05] dark:border-white/[0.08] p-0.5 rounded-xl shadow-sm">
-      {(['DE', 'EN'] as const).map(lang => (
-        <button
-          key={lang}
-          onClick={() => setAppLanguage(lang)}
-          className={cn(
-            "text-xs font-semibold px-2.5 py-1 rounded-lg transition-colors",
-            appLanguage === lang 
-              ? "bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm" 
-              : "text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-          )}
-        >
-          {lang}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 
 export const exportToMarkdown = (bookId?: string) => {
@@ -3142,33 +3065,219 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
   );
 }
 
+const LANGUAGES = [
+  { code: 'DE', flag: '🇩🇪', label: 'Deutsch' },
+  { code: 'EN', flag: '🇬🇧', label: 'English' },
+  { code: 'RU', flag: '🇷🇺', label: 'Русский' },
+] as const;
+
 function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, onBack?: () => void }) {
   const [adminOpen, setAdminOpen] = useState(false);
+  const [isLangOpen, setIsLangOpen] = useState(false);
+  const langRef = useRef<HTMLDivElement>(null);
+  const { appLanguage, setAppLanguage } = useStore();
+
+  const [isDark, setIsDark] = useState(false);
+  useEffect(() => {
+    setIsDark(document.documentElement.classList.contains('dark'));
+  }, []);
+
+  const toggleTheme = () => {
+    const next = !isDark;
+    setIsDark(next);
+    if (next) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (langRef.current && !langRef.current.contains(e.target as Node)) {
+        setIsLangOpen(false);
+      }
+    };
+    if (isLangOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isLangOpen]);
+
+  const [daily, setDaily] = useState<Record<string, any>>({});
+  useEffect(() => {
+    const loadProgress = () => {
+      try {
+        const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
+        if (stored) setDaily(JSON.parse(stored));
+        else setDaily({});
+      } catch (e) {}
+    };
+    loadProgress();
+    window.addEventListener('storage-update', loadProgress);
+    return () => window.removeEventListener('storage-update', loadProgress);
+  }, [appLanguage]);
+
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const rawCount = daily[todayStr];
+  const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
+
+  const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
+    toast.success(appLanguage === 'EN' ? 'Signed out' : 'Erfolgreich abgemeldet');
+    setTimeout(() => {
+      if (typeof window !== 'undefined') window.location.reload();
+    }, 400);
+  };
+
   return (
     <>
       <AnimatePresence>
         {adminOpen && <AdminModal onClose={() => setAdminOpen(false)} activeBook={activeBook} />}
       </AnimatePresence>
-      {activeBook ? (
-        <div className="absolute top-5 left-4 md:top-6 md:left-6 z-50">
-          <button onClick={onBack} className="text-sm font-medium text-gray-500 hover:text-gray-900 dark:text-white/70 dark:hover:text-white transition-colors flex items-center gap-1 cursor-pointer bg-white/50 dark:bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-black/5 dark:border-white/10 shadow-sm hover:shadow-md">
-            <span className="text-lg leading-none">&lsaquo;</span> {activeBook.title}
-          </button>
+
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 w-full select-none pointer-events-none">
+        
+        {/* 1. ЛЕВЫЙ УГОЛ: ЯЗЫКОВАЯ ПИЛЮЛЯ / BACK PILL */}
+        <div className="pointer-events-auto flex items-center">
+          {activeBook ? (
+            <button
+              onClick={onBack}
+              className="h-9 px-3.5 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 hover:bg-white/95 dark:hover:bg-zinc-800/95 transition-all duration-150 active:scale-95 cursor-pointer font-medium text-xs sm:text-sm select-none"
+              title="Zurück zur Übersicht"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
+              <span className="truncate max-w-[130px] sm:max-w-[200px]">{activeBook.title}</span>
+            </button>
+          ) : (
+            <div ref={langRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsLangOpen(prev => !prev)}
+                className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 hover:bg-white/95 dark:hover:bg-zinc-800/95 transition-all duration-150 active:scale-95 cursor-pointer select-none"
+                title="Sprache wählen"
+              >
+                <span className="text-base leading-none select-none">{currentLang.flag}</span>
+                <span className="font-bold text-xs tracking-tight text-zinc-800 dark:text-zinc-200">{appLanguage}</span>
+                <ChevronDown className={cn("w-3 h-3 text-zinc-400 dark:text-zinc-500 transition-transform duration-200", isLangOpen && "rotate-180")} />
+              </button>
+
+              <AnimatePresence>
+                {isLangOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="absolute left-0 top-full mt-2 w-36 rounded-xl p-1 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl border border-black/5 dark:border-white/10 z-50 flex flex-col gap-0.5 select-none"
+                  >
+                    {LANGUAGES.map(lang => {
+                      const isSelected = appLanguage === lang.code;
+                      return (
+                        <button
+                          key={lang.code}
+                          type="button"
+                          onClick={() => {
+                            setAppLanguage(lang.code as any);
+                            setIsLangOpen(false);
+                          }}
+                          className={cn(
+                            "w-full px-2.5 py-1.5 rounded-lg flex items-center justify-between text-xs transition-colors cursor-pointer",
+                            isSelected
+                              ? "bg-black/5 dark:bg-white/10 text-zinc-900 dark:text-white font-semibold"
+                              : "text-zinc-600 dark:text-zinc-400 hover:bg-black/5 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-200"
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">{lang.flag}</span>
+                            <span>{lang.label}</span>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />}
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
-      ) : (
-        <LanguageSelector />
-      )}
-      <div className="absolute top-5 right-4 md:top-6 md:right-6 pr-2 flex items-center gap-3.5 z-50">
-        <button 
-          onClick={() => setAdminOpen(true)}
-          className="w-8 h-8 flex items-center justify-center rounded-full bg-white/50 dark:bg-black/20 backdrop-blur-md border border-black/5 dark:border-white/10 text-gray-500 dark:text-white/70 hover:text-gray-900 dark:hover:text-white transition-colors cursor-pointer"
-          title="Admin Dashboard"
-        >
-          <Database className="w-4 h-4" />
-        </button>
-        <ActivityWidget />
-        <DarkModeToggle />
-      </div>
+
+        {/* 2. ПРАВЫЙ УГОЛ: ЕДИНЫЙ КАПСУЛЬНЫЙ ТУЛБАР (UNIFIED CONTROL ISLAND) */}
+        <div className="pointer-events-auto flex items-center">
+          <div className="h-9 px-2 rounded-full flex items-center gap-1 sm:gap-1.5 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 transition-all select-none">
+            
+            {/* А) Блок активности / прогресса */}
+            <div className="flex items-center gap-1.5 px-1.5 sm:px-2 py-0.5 text-zinc-700 dark:text-zinc-200">
+              <Flame className="w-4 h-4 text-amber-500 fill-amber-500/20" />
+              <span className="text-xs font-semibold tabular-nums leading-none">{todayCount}</span>
+              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium hidden sm:inline leading-none">heute</span>
+            </div>
+
+            {/* Б) Вертикальный микро-разделитель (Divider) */}
+            <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/10 mx-0.5" />
+
+            {/* В) Переключатель темы (Dark / Light) */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-1.5 rounded-full text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-all duration-150 active:scale-95 cursor-pointer flex items-center justify-center"
+              title={isDark ? "Heller Modus" : "Dunkler Modus"}
+              aria-label="Toggle theme"
+            >
+              {isDark ? (
+                <Moon className="w-4 h-4 transition-transform duration-200 hover:-rotate-12" />
+              ) : (
+                <Sun className="w-4 h-4 transition-transform duration-200 hover:rotate-45" />
+              )}
+            </button>
+
+            {/* Г) Вертикальный микро-разделитель (Divider) */}
+            <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/10 mx-0.5" />
+
+            {/* Д) Статусный бейдж тарифа (FREE / PRO) */}
+            <span
+              onClick={() => toast.success('PRO Mitgliedschaft aktiv • Unbegrenzter Zugriff')}
+              className="px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-white/10 uppercase select-none cursor-pointer transition-all hover:border-zinc-300 dark:hover:border-white/20 active:scale-95"
+              title="Tarif: PRO"
+            >
+              PRO
+            </span>
+
+            {/* Database / Admin Dashboard Trigger */}
+            <button
+              type="button"
+              onClick={() => setAdminOpen(true)}
+              className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer active:scale-95 flex items-center justify-center"
+              title="Admin Dashboard"
+              aria-label="Admin Dashboard"
+            >
+              <Database className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Е) Кнопка профиля / выхода (Action) */}
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer active:scale-95 flex items-center justify-center"
+              title="Abmelden"
+              aria-label="Abmelden"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+
+          </div>
+        </div>
+
+      </header>
     </>
   );
 }
