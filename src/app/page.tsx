@@ -2432,9 +2432,41 @@ interface ClozeResolution {
   isCustomCloze: boolean;
 }
 
-function resolveCloze(sentence: string | undefined | null, targetWord: string, forms?: string | null): ClozeResolution {
-  if (!sentence || sentence === '-') {
-    return { parts: ["", ""], clozeWord: targetWord, fullSentence: targetWord, isCustomCloze: false };
+function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: string, forms?: string | null): ClozeResolution {
+  if (!rawSentence || rawSentence === '-') {
+    return { parts: ["", ""], clozeWord: rawTargetWord, fullSentence: rawTargetWord, isCustomCloze: false };
+  }
+
+  let sentence = rawSentence.trim();
+  let targetWord = rawTargetWord.trim();
+
+  // 1. Очистка типографики от пробелов перед знаками препинания: "слово ." -> "слово."
+  sentence = sentence.replace(/\s+([.,!?;:])/g, '$1').replace(/\s{2,}/g, ' ');
+
+  // 2. Исправление потери "geboren" в предложениях о рождении:
+  // Например: "Ich wurde am 25. Oktober 1993 in Homs." -> "Ich wurde am 25. Oktober 1993 in Homs geboren."
+  if (
+    !/geboren/i.test(sentence) && !/geboren/i.test(targetWord) &&
+    /\b(?:wurde|wurden|bin|ist|war|___)\b.*?\b(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember|\d{4})\b.*?\bin\b/i.test(sentence)
+  ) {
+    sentence = sentence.replace(/\s*\.?$/, ' geboren.');
+  }
+
+  // 3. Замена неестественного "absolvieren"
+  if (/absolvier/i.test(sentence) || /absolvier/i.test(targetWord)) {
+    sentence = sentence
+      .replace(/das Studium absolvierte/gi, 'das Studium beendete')
+      .replace(/die Ausbildung absolvierte/gi, 'die Ausbildung beendete')
+      .replace(/das Studium absolvieren/gi, 'das Studium beenden')
+      .replace(/die Ausbildung absolvieren/gi, 'die Ausbildung beenden')
+      .replace(/absolvierte/gi, 'beendete')
+      .replace(/absolvieren/gi, 'beenden')
+      .replace(/absolviert/gi, 'beendet');
+
+    targetWord = targetWord
+      .replace(/absolvierte/gi, 'beendete')
+      .replace(/absolvieren/gi, 'beenden')
+      .replace(/absolviert/gi, 'beendet');
   }
 
   if (sentence.includes("___")) {
@@ -2608,6 +2640,17 @@ function StudyCard({
     return resolveCloze(card.sentence, card.targetWord, card.forms);
   }, [card.sentence, card.targetWord, card.forms]);
 
+  const sanitizedOptions = useMemo(() => {
+    if (!card.options || !Array.isArray(card.options)) return [];
+    return card.options.map(opt => 
+      String(opt)
+        .replace(/absolvierte/gi, 'beendete')
+        .replace(/absolvieren/gi, 'beenden')
+        .replace(/absolviert/gi, 'beendet')
+        .replace(/absolviere/gi, 'beende')
+    );
+  }, [card.options]);
+
   const { parts, clozeWord, fullSentence, isCustomCloze } = cloze;
   const shouldCapitalize = parts[0]?.trim() === "";
 
@@ -2669,7 +2712,7 @@ function StudyCard({
     return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
   }, [phase, forceInputMode, card.masteryLevel]);
 
-  const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2 && Boolean(card.options && card.options.length >= 2);
+  const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2 && Boolean(sanitizedOptions && sanitizedOptions.length >= 2);
 
   useEffect(() => {
     if (!isMobile && phase === "Question" && !isMultipleChoice && inputRef.current) {
@@ -2776,10 +2819,10 @@ function StudyCard({
       if (document.activeElement?.tagName === 'INPUT') return;
 
       if (phase === "Question" && isMultipleChoice) {
-        if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); handleOptionClick(card.options[0]); }
-        if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); handleOptionClick(card.options[1]); }
-        if (e.code === 'Digit3' || e.code === 'Numpad3') { e.preventDefault(); handleOptionClick(card.options[2]); }
-        if (e.code === 'Digit4' || e.code === 'Numpad4') { e.preventDefault(); handleOptionClick(card.options[3]); }
+        if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); handleOptionClick(sanitizedOptions[0]); }
+        if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); handleOptionClick(sanitizedOptions[1]); }
+        if (e.code === 'Digit3' || e.code === 'Numpad3') { e.preventDefault(); handleOptionClick(sanitizedOptions[2]); }
+        if (e.code === 'Digit4' || e.code === 'Numpad4') { e.preventDefault(); handleOptionClick(sanitizedOptions[3]); }
       }
 
       if (phase === "Answer") {
@@ -3039,7 +3082,7 @@ function StudyCard({
 
         <div className="mt-4 mb-6 w-full text-center">
           <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
-            {card.translation}
+            {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
           </p>
           
           {phase === "Answer" && parsedInfo.type !== 'none' && (
@@ -3108,7 +3151,7 @@ function StudyCard({
             exit={{ opacity: 0, scale: 0.95 }}
             className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mt-8"
           >
-            {card.options.map((opt, idx) => {
+            {sanitizedOptions.map((opt, idx) => {
               const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
               return (
                 <button
