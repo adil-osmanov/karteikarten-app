@@ -2105,20 +2105,7 @@ function StudyEntry(props: {
   return <StudyInterface {...props} />;
 }
 
-// Helper to tint card hint badge based on German gender markers (der: sky/blue, die: rose/pink, das: emerald/green)
-const getHintColorClasses = (text: string) => {
-  const lower = text.trim().toLowerCase();
-  if (/^der\b|\bder\s+[A-Za-zäöüÄÖÜ]/i.test(lower) || /\bder\b/i.test(lower)) {
-    return "bg-sky-500/10 border-sky-500/30 text-sky-200";
-  }
-  if (/^die\b|\bdie\s+[A-Za-zäöüÄÖÜ]/i.test(lower) || /\bdie\b/i.test(lower)) {
-    return "bg-rose-500/10 border-rose-500/30 text-rose-200";
-  }
-  if (/^das\b|\bdas\s+[A-Za-zäöüÄÖÜ]/i.test(lower) || /\bdas\b/i.test(lower)) {
-    return "bg-emerald-500/10 border-emerald-500/30 text-emerald-200";
-  }
-  return "bg-zinc-900/90 border-white/10 text-zinc-300";
-};
+
 
 // --- STUDY INTERFACE ---
 
@@ -2845,53 +2832,6 @@ function StudyCard({
     });
   };
 
-  type ParsedInfo = 
-  | { type: 'none' }
-  | { type: 'noun'; article: string; word: string; sub: string; colorClasses: string; articleClasses: string; textClasses: string; borderClasses: string }
-  | { type: 'other'; main: string; sub: string };
-
-  const parseBaseWordInfo = (text: string | undefined | null, targetWord?: string, forms?: string | null): ParsedInfo => {
-    let sourceText = text;
-    if (!sourceText && targetWord && /^(der|die|das)\s+/i.test(targetWord.trim())) {
-      sourceText = forms && forms !== '-' ? `${targetWord.trim()} (${forms.trim()})` : targetWord.trim();
-    }
-    if (!sourceText) return { type: 'none' };
-    
-    let subText = "";
-    let mainText = sourceText.trim();
-    
-    const match = sourceText.match(/\(([^)]+)\)/);
-    if (match) {
-      subText = match[1].split(',').map(s => s.trim()).join(' • ');
-      mainText = sourceText.replace(match[0], '').replace(/\s+,/g, ',').replace(/\s+—/g, ' —').replace(/  +/g, ' ').trim();
-    }
-    
-    const nounMatch = mainText.match(/^(der|die|das)\s+(.*)$/i);
-    if (nounMatch) {
-      const article = nounMatch[1].toLowerCase();
-      let colorClasses = "", articleClasses = "", textClasses = "", borderClasses = "";
-      if (article === 'der') {
-        colorClasses = "bg-blue-50 dark:bg-blue-500/10 border-blue-200/60 dark:border-blue-500/20 shadow-blue-500/5";
-        articleClasses = "font-semibold text-blue-600 dark:text-blue-400";
-        textClasses = "text-blue-800 dark:text-blue-200";
-        borderClasses = "border-blue-600/30 dark:border-blue-500/40";
-      } else if (article === 'die') {
-        colorClasses = "bg-rose-50 dark:bg-rose-500/10 border-rose-200/60 dark:border-rose-500/20 shadow-rose-500/5";
-        articleClasses = "font-semibold text-rose-600 dark:text-rose-400";
-        textClasses = "text-rose-800 dark:text-rose-200";
-        borderClasses = "border-rose-600/30 dark:border-rose-500/40";
-      } else if (article === 'das') {
-        colorClasses = "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200/60 dark:border-emerald-500/20 shadow-emerald-500/5";
-        articleClasses = "font-semibold text-emerald-600 dark:text-emerald-400";
-        textClasses = "text-emerald-800 dark:text-emerald-200";
-        borderClasses = "border-emerald-600/30 dark:border-emerald-500/40";
-      }
-      return { type: 'noun', article: nounMatch[1], word: nounMatch[2].trim(), sub: subText, colorClasses, articleClasses, textClasses, borderClasses };
-    }
-    
-    return { type: 'other', main: mainText, sub: subText };
-  };
-
   const parseTargetNoun = (text: string) => {
     const nounMatch = text.match(/^(der|die|das)\s+(.*)$/i);
     if (!nounMatch) return null;
@@ -2916,7 +2856,8 @@ function StudyCard({
     return { article: nounMatch[1], rest: nounMatch[2].trim(), colorClasses, articleClasses, textClasses, borderClasses };
   };
 
-  const parsedInfo = parseBaseWordInfo(card.baseWordInfo, card.targetWord, card.forms);
+  const isAnswered = phase === "Answer";
+  const displayHint = (card.hint || card.forms || '').trim();
   const displayAnswerWord = shouldCapitalize ? clozeWord.charAt(0).toUpperCase() + clozeWord.slice(1) : clozeWord;
   const parsedTargetWord = phase === "Answer" 
     ? (parseTargetNoun(displayAnswerWord) || (!isCustomCloze ? parseTargetNoun(card.targetWord) : null))
@@ -3062,52 +3003,20 @@ function StudyCard({
             {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
           </p>
 
-          {phase === "Answer" && (card.hint || card.forms) && (
-            <div className="mt-3.5 flex justify-center animate-in fade-in slide-in-from-bottom-2 duration-200">
-              <div className="px-3.5 py-1.5 rounded-full bg-zinc-900/80 border border-white/10 text-xs font-medium text-zinc-300 shadow-sm inline-flex items-center gap-2 backdrop-blur-md">
-                {card.hint || card.forms}
+          {isAnswered && displayHint && (
+            <div className="mt-4 flex justify-center animate-in fade-in zoom-in-95 duration-200">
+              <div className={`px-4 py-2 rounded-2xl border text-xs font-medium tracking-wide shadow-lg backdrop-blur-xl ${
+                displayHint.startsWith('der') 
+                  ? 'bg-sky-500/10 border-sky-500/25 text-sky-600 dark:text-sky-200'
+                  : displayHint.startsWith('die') 
+                  ? 'bg-rose-500/10 border-rose-500/25 text-rose-600 dark:text-rose-200'
+                  : displayHint.startsWith('das') 
+                  ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-200 dark:text-emerald-200'
+                  : 'bg-black/[0.04] dark:bg-white/[0.06] border-black/10 dark:border-white/10 text-zinc-700 dark:text-zinc-200'
+              }`}>
+                {displayHint}
               </div>
             </div>
-          )}
-          
-          {phase === "Answer" && parsedInfo.type !== 'none' && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="mt-6 flex flex-col items-center gap-2"
-            >
-              {parsedInfo.type === 'noun' && (
-                <>
-                  <div className={cn("px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] relative", parsedInfo.colorClasses)}>
-                    <span className={cn("text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10", parsedInfo.textClasses)}>
-                      <span className={parsedInfo.articleClasses}>{parsedInfo.article}</span> {parsedInfo.word}
-                    </span>
-                  </div>
-                  {parsedInfo.sub && (
-                    <span className="text-[13px] font-medium text-center tracking-wide font-sans z-10 text-slate-500 dark:text-[#8E8E93] mt-1">
-                      {parsedInfo.sub}
-                    </span>
-                  )}
-                </>
-              )}
-
-              {parsedInfo.type === 'other' && (
-                <>
-                  <div className="px-5 py-3.5 border rounded-2xl flex items-center justify-center backdrop-blur-md shadow-sm mx-auto w-fit max-w-[95%] relative bg-slate-800/70 dark:bg-[#2C2C2E]/80 border-white/10 dark:border-white/[0.05] shadow-lg">
-                    <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none rounded-2xl" />
-                    <span className="text-xs sm:text-sm font-medium text-center tracking-wide font-sans z-10 text-slate-200 dark:text-[#EBEBF5]">
-                      {parsedInfo.main}
-                    </span>
-                  </div>
-                  {parsedInfo.sub && (
-                    <span className="text-[13px] font-medium text-center tracking-wide font-sans z-10 text-slate-500 dark:text-[#8E8E93] mt-1">
-                      {parsedInfo.sub}
-                    </span>
-                  )}
-                </>
-              )}
-            </motion.div>
           )}
         </div>
 
