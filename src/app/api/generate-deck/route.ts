@@ -57,11 +57,15 @@ const FALLBACK_POOLS = {
   prefixes: ['ab', 'an', 'aus', 'ein', 'mit', 'vor', 'zu', 'auf']
 };
 
-function sanitizeAndValidateCard(card: any) {
-  let sentence = String(card.sentence || '').replace(/\s+([.,!?;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
-  const targetWord = String(card.targetWord || '').trim();
-  let translation = String(card.translation || '').replace(/\s+([.,!?;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
+function sanitizeAndValidateCard(card: any, isGrammar: boolean) {
+  let sentence = String(card.sentence || '').trim().replace(/\s+([,.:;!?])/g, '$1');
+  let targetWord = String(card.targetWord || '').trim();
+  let translation = String(card.translation || '').trim().replace(/\s+([,.:;!?])/g, '$1');
   let hint = String(card.hint || '').trim();
+
+  if (!isGrammar) {
+    hint = hint.replace(/^(Adverb|Nomen|Adjektiv)\s*·\s*(wie\?|was\?|wo\?)\s*/i, '');
+  }
 
   // Обеспечиваем наличие "___", если модель выдала готовое предложение без пропуска
   if (!sentence.includes('___') && targetWord) {
@@ -154,48 +158,49 @@ export async function POST(req: Request) {
 
     // Пул моделей:
     // - Со скриншотами: строго Vision-модель qwen3.8-27b
-    // - Для чисто текстовых запросов: сначала openai/gpt-oss-120b (быстрая, высокое качество, отдельный лимит токенов), затем qwen3.8-27b
+    // - Для чисто текстовых запросов: сначала openai/gpt-oss-120b, openai/gpt-oss-20b, затем llama-3.3-70b-versatile, qwen3.8-27b
     const modelsToTry = hasImages 
       ? ['qwen/qwen3.8-27b'] 
-      : ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+      : ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'qwen/qwen3.8-27b'];
 
-    const systemPrompt = `Ты — ведущий немецкий методист и экзаменатор уровня B1–B2 (Goethe-Institut / Duden).
-Твоя задача — составить ровно ${targetCount} карточек для тренировки.
+    const systemPrompt = `Ты — ведущий составитель тестов по немецкому языку (Goethe-Institut / telc B1–B2).
+Твоя цель — сгенерировать ровно ${targetCount} атомарных предложений.
 
-ТЕКУЩИЙ РЕЖИМ: ${isGrammar ? 'ОТРАБОТКА ГРАММАТИКИ (GRAMMATIK)' : 'ИЗУЧЕНИЕ СЛОВ (WÖRTER)'}
+ТЕКУЩИЙ РЕЖИМ: ${isGrammar ? 'ГРАММАТИКА (GRAMMATIK)' : 'СЛОВАРНЫЙ ЗАПАС (WÖRTER)'}
 
-КРИТИЧЕСКИЕ ЛИНГВИСТИЧЕСКИЕ ПРАВИЛА:
-1. НЕМЕЦКИЕ СЛОЖНЫЕ СЛОВА (KOMPOSITA):
-   - Все сложные существительные пишутся СТРОГО СЛИТНО В ОДНО СЛОВО!
-   - ❌ ЗАПРЕЩЕНО: "Violin Unterricht", "Bewerbung Training", "Sprach Kurs".
-   - ✅ СТРОГО: "Violinunterricht", "Bewerbungstraining", "Sprachkurs".
-   - Пропуск "___" делается СТРОГО на ВСЕМ сложном слове целиком, а не на его части!
+КРИТИЧЕСКИЕ ПРАВИЛА:
 
-2. ЖЕЛЕЗНЫЙ SATZKLAMMER (РАМОЧНАЯ КОНСТРУКЦИЯ):
-   - Причастия (Partizip II) и инфинитивы с модальными глаголами ОБЯЗАНЫ стоять в абсолютном конце предложения!
-   - ❌ ЗАПРЕЩЕНО: "Ich wurde geboren am 25. Oktober 1993 in der Stadt Homs."
-   - ✅ СТРОГО: "Ich wurde am 25. Oktober 1993 in der Stadt Homs geboren."
-   - ❌ ЗАПРЕЩЕНО: "Er hat gearbeitet drei Jahre in Berlin."
-   - ✅ СТРОГО: "Er hat drei Jahre in Berlin gearbeitet."
+1. ТОЧНОЕ СООТВЕТСТВИЕ ПОЛЯ "hint" И СЛОВА "targetWord":
+   - Поле "hint" ОБЯЗАНО объяснять ИМЕННО ТО СЛОВО, которое находится в "targetWord"!
+   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО подменять слово синонимами (если targetWord = "Ausbildung", запрещено писать "die Lehre"; если targetWord = "schwierig", запрещено писать "schwer")!
+   - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО вставлять грамматические вопросы вроде "Adverb · wie? (как?)".
 
-3. ПРИНЦИП АТОМАРНОСТИ:
-   - 1 карточка = строго 1 короткое законченное предложение (8–14 слов). Никаких параграфов из 2-3 предложений.
-
-4. ДИСТРАКТОРЫ (OPTIONS):
-   - Ровно 4 УНИКАЛЬНЫХ варианта ответа, идеально подходящих по грамматике и смыслу на место пропуска. Никаких дубликатов!
-
-5. ПОДСКАЗКА (HINT):
+   ФОРМАТ ПОЛЯ "hint":
    ${isGrammar ? `
-   - В режиме "Grammatik": пропуск на грамматической форме темы. В поле hint — краткая формула через точку "·":
+   - Краткая грамматическая формула через точку "·":
      "Passiv Präteritum · wurde ... geboren"
-     "Perfekt · habe ... beworben"
-     "Präteritum · ging (gehen)"
+     "Modalverb Präteritum · konnte (können)"
+     "Perfekt · habe ... beworben (sich bewerben)"
+     "Präteritum · schloss ... ab (abschließen)"
    ` : `
-   - В режиме "Wörter": пропуск на ключевом слове. В поле hint:
-     Существительные: строго "артикль Слово, -мн.число — перевод" (например: "der Violinunterricht, -e — уроки игры на скрипке", "die Grundschule, -n — начальная школа", "das Fach, -er — предмет"). Без родительного падежа -s!
-     Глаголы: "3 формы — перевод" (например: "sich bewerben, bewarb sich, hat sich beworben — подавать заявление").
-     Прилагательные: "слово — перевод" (например: "anspruchsvoll — требовательный").
+   - Существительные: строго "артикль Слово, -мн.число — русский_перевод"
+     Пример: "die Ausbildung, -en — профессиональное обучение"
+     Пример: "die Assistentin, -nen — ассистентка"
+     (Без суффикса -s родительного падежа!)
+   - Глаголы: "3 формы — русский_перевод"
+     Пример: "beginnen, begann, hat begonnen — начинать"
+   - Прилагательные и наречия: "targetWord — русский_перевод"
+     Пример: "schwierig — сложный, трудный"
+     Пример: "aushilfsweise — временно, в качестве подработки"
    `}
+
+2. СИНТАКСИС, СЛОЖНЫЕ СЛОВА И РАМОЧНАЯ КОНСТРУКЦИЯ (SATZKLAMMER):
+   - Все сложные слова (Komposita) пишутся СТРОГО СЛИТНО ("Violinunterricht", а не "Violin Unterricht"). Пропуск "___" делается на всем сложном слове целиком.
+   - Partizip II и смысловые инфинитивы всегда замыкают предложение ("Ich wurde am 25. Oktober 1993 in der Stadt Homs geboren.").
+   - Никаких пробелов перед знаками препинания ("schwierig, aber...", а не "schwierig , aber...").
+
+3. ДИСТРАКТОРЫ (OPTIONS):
+   - Ровно 4 уникальных варианта одной части речи и грамматической формы. Никаких дубликатов!
 
 ФОРМАТ JSON:
 {
@@ -205,7 +210,7 @@ export async function POST(req: Request) {
       "sentence": "Предложение с пропуском ___",
       "targetWord": "пропущенное слово",
       "translation": "Естественный русский перевод",
-      "hint": "Подсказка",
+      "hint": "Подсказка по правилам",
       "options": ["слово1", "слово2", "слово3", "слово4"]
     }
   ]
@@ -261,7 +266,7 @@ export async function POST(req: Request) {
             throw new Error('Модель вернула некорректный ответ');
           }
 
-          const validatedCards = rawCards.map(sanitizeAndValidateCard);
+          const validatedCards = rawCards.map((c: any) => sanitizeAndValidateCard(c, isGrammar));
           console.log(`[API generate-deck] Successfully generated and validated ${validatedCards.length} cards using ${model} (key ${i + 1})`);
 
           return NextResponse.json({ success: true, cards: validatedCards });

@@ -47,13 +47,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'API-ключи Groq не настроены.' }, { status: 500 });
     }
 
-    const { topicTitle, level = 'B1', materials = [] } = await req.json();
+    const body = await req.json();
+    const topicTitle = body.topicTitle || body.title;
+    const level = body.level || 'B1';
+    const materials = Array.isArray(body.materials) ? body.materials : [];
 
     if (!topicTitle) {
       return NextResponse.json({ error: 'Topic title required' }, { status: 400 });
     }
 
-    const hasMaterials = Array.isArray(materials) && materials.length > 0;
+    const hasMaterials = materials.length > 0;
 
     const systemPrompt = `Ты — строгий профессор и методист немецкого языка (Duden / Goethe-Institut), а также харизматичный наставник.
 Твоя цель — безупречная грамматическая точность и кристальная понятность по теме: "${topicTitle}" (${level}).
@@ -254,7 +257,7 @@ ${hasMaterials ? 'ВАЖНО: Используй грамматические п
       }));
     }
 
-    return NextResponse.json({ success: true, data: parsed });
+    return NextResponse.json({ success: true, theory: parsed, data: parsed });
   } catch (error: any) {
     console.error('Groq Error in generate-theory:', error);
     return NextResponse.json({ 

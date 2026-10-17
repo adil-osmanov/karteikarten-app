@@ -5263,6 +5263,24 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           }
         }
       } catch (e) {}
+
+      try {
+        const { data: remoteTopic } = await supabase.from('topics').select('theory, materials').eq('id', deckId).single();
+        if (remoteTopic && isValidTheory(remoteTopic.theory)) {
+          const p = typeof remoteTopic.theory === 'string' ? JSON.parse(remoteTopic.theory) : remoteTopic.theory;
+          if (isValidTheory(p)) {
+            setTheoryData(p);
+            setIsLoading(false);
+            useStore.setState(state => ({
+              decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p, materials: remoteTopic.materials || d.materials } : d)
+            }));
+            const strP = JSON.stringify(p);
+            localStorage.setItem(`deck_theory_json_${deckId}`, strP);
+            localStorage.setItem(`deck_theory_${deckId}`, strP);
+            return;
+          }
+        }
+      } catch (e) {}
     }
 
     // Принудительная или первичная генерация
@@ -5284,17 +5302,19 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         body: JSON.stringify({
           topicId: deckId,
           topicTitle: currentDeck?.name || 'Grammatik',
+          title: currentDeck?.name || 'Grammatik',
+          category: currentDeck?.category || 'Grammatik',
           level: currentDeck?.level || 'B1',
           materials: deckMaterials
         })
       });
 
       const json = await res.json();
-      if (!res.ok || !json.success || !json.data) {
+      const generatedData: StructuredTheory = json.theory || json.data;
+      if (!res.ok || !json.success || !generatedData) {
         throw new Error(json.error || 'Theorie konnte nicht generiert werden');
       }
 
-      const generatedData: StructuredTheory = json.data;
       setTheoryData(generatedData);
 
       // Обновляем локальное состояние стора
@@ -5302,20 +5322,24 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         decks: state.decks.map(d => d.id === deckId ? { ...d, theory: generatedData } : d)
       }));
 
-      // Сохраняем в localStorage
+      // Сохраняем в localStorage для мгновенного доступа без сети
       const stringified = JSON.stringify(generatedData);
       localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
       localStorage.setItem(`deck_theory_${deckId}`, stringified);
 
       window.dispatchEvent(new Event('theory-update'));
 
-      // Сохраняем в Supabase навсегда
+      // ФИЗИЧЕСКИ ЗАПИСЫВАЕМ ТЕОРИЮ В SUPABASE НАВСЕГДА (0 сетевых запросов при повторных открытиях)
       try {
-        await supabase.from('decks').update({ theory: generatedData }).eq('id', deckId);
+        const { error: dbErrTopics } = await supabase.from('topics').update({ theory: generatedData }).eq('id', deckId);
+        if (dbErrTopics) console.error('[Supabase Save Theory Error (topics)]:', dbErrTopics);
       } catch (e) {}
+
       try {
-        await supabase.from('topics').update({ theory: generatedData }).eq('id', deckId);
+        const { error: dbErrDecks } = await supabase.from('decks').update({ theory: generatedData }).eq('id', deckId);
+        if (dbErrDecks) console.error('[Supabase Save Theory Error (decks)]:', dbErrDecks);
       } catch (e) {}
+
       syncAppStateToCloud();
     } catch (err: any) {
       console.error('Failed to load theory:', err);
@@ -5326,6 +5350,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   }, [deckId, theoryData, isValidTheory]);
 
   useEffect(() => {
+    // Если у темы в базе/памяти уже есть сохраненная теория — мгновенно рендерим её (0 сетевых запросов)
     if (deck?.theory && typeof deck.theory === 'object' && Object.keys(deck.theory).length > 0) {
       setTheoryData(deck.theory as StructuredTheory);
       setIsLoading(false);
@@ -5336,9 +5361,10 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       setIsLoading(false);
       return;
     }
+    // Только если теории в базе действительно нет — запускаем первичную генерацию
     fetchTheory(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId, deck]);
+  }, [deckId, deck?.theory]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
