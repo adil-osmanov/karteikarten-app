@@ -2905,7 +2905,7 @@ function StudyCard({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mt-8"
+            className="grid grid-cols-2 gap-3 sm:gap-4 w-full mt-8"
           >
             {card.options.map((opt, idx) => {
               const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
@@ -2913,10 +2913,10 @@ function StudyCard({
                 <button
                   key={opt}
                   onClick={() => handleOptionClick(opt)}
-                  className="w-full py-3.5 px-4 rounded-xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-white hover:bg-zinc-50 border border-zinc-200/80 hover:border-zinc-300 text-zinc-900 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/80 dark:border-white/10 dark:hover:border-white/20 dark:text-zinc-100 shadow-sm"
+                  className="py-3 px-3 sm:px-5 rounded-xl text-base font-medium bg-gray-50 dark:bg-[#2C2C2E] text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-[#3A3A3C] transition-all duration-150 ease-out active:scale-[0.99] border border-black/[0.05] dark:border-white/[0.06] relative flex items-center justify-between gap-3 cursor-pointer"
                 >
-                  <span className="flex-1 pr-2 truncate">{displayOpt}</span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-zinc-500 dark:text-zinc-400 font-mono shrink-0">
+                  <span className="flex-1 text-center pr-2 truncate">{displayOpt}</span>
+                  <span className="w-5 h-5 rounded bg-black/5 dark:bg-white/10 text-gray-500 dark:text-white/50 text-xs font-mono flex items-center justify-center flex-shrink-0 pointer-events-none">
                     {idx + 1}
                   </span>
                 </button>
@@ -6459,11 +6459,11 @@ try {
                       {levelIdx === 0 && dueCards.length > 0 && (
                         <button 
                           onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
-                          className="h-8 px-3 rounded-full flex items-center gap-2 text-xs font-medium transition-all active:scale-95 shadow-sm bg-white border border-zinc-200/80 text-zinc-800 hover:bg-zinc-100 active:bg-zinc-200 hover:border-zinc-300 dark:bg-blue-500/15 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/25 cursor-pointer select-none"
+                          className="h-8 px-3 rounded-full flex items-center gap-2 text-xs font-medium transition-all duration-150 active:scale-95 shadow-sm bg-white border border-zinc-200/80 text-zinc-800 hover:bg-white hover:border-zinc-300 hover:shadow-md dark:bg-blue-500/15 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/25 cursor-pointer select-none group"
                         >
-                          <RotateCcw className="w-3 h-3 text-zinc-700 dark:text-blue-400" />
+                          <RotateCcw className="w-3 h-3 text-blue-600 dark:text-blue-400 transition-transform duration-300 group-hover:-rotate-45" />
                           <span className="font-semibold text-zinc-900 dark:text-white font-mono">{dueCards.length}</span>
-                          <span className="hidden sm:inline text-zinc-700 dark:text-blue-300/80">
+                          <span className="hidden sm:inline text-zinc-600 dark:text-blue-300/80 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
                             {appLanguage === 'RU' ? 'повторить' : appLanguage === 'EN' ? 'review' : 'wiederholen'}
                           </span>
                         </button>
