@@ -1640,8 +1640,12 @@ function RapidFlashcardMode({
                 renderGermanBlock()
               )}
             </div>
-            <span className="absolute bottom-6 text-[11px] text-zinc-300 dark:text-zinc-700 font-medium tracking-widest uppercase hidden md:block opacity-30">Space / Enter</span>
-            <span className="absolute bottom-6 text-[11px] text-zinc-300 dark:text-zinc-700 font-medium tracking-widest uppercase md:hidden opacity-30">Tap</span>
+            <div className="absolute bottom-5 flex items-center justify-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity select-none hidden md:flex">
+              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-sm">SPACE</kbd>
+              <span className="text-zinc-400 dark:text-zinc-600 text-xs">/</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-sm">ENTER</kbd>
+            </div>
+            <span className="absolute bottom-6 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium tracking-widest uppercase md:hidden opacity-50">Tap</span>
           </div>
 
           {/* BACK FACE */}
@@ -1801,7 +1805,7 @@ function RapidSession({
 
   return (
     <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 mb-4">
+      <div className="w-full max-w-xl mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -1818,7 +1822,7 @@ function RapidSession({
         </div>
       </div>
 
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+      <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
         <AnimatePresence mode="wait">
           <RapidFlashcardMode
             key={`${current.card.id}-${turn}`}
@@ -2105,7 +2109,7 @@ function StudyInterface({
   return (
       <>
 <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 mb-4">
+      <div className="w-full max-w-xl mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -2129,7 +2133,7 @@ function StudyInterface({
         </div>
       </div>
 
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+      <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
             <PrepStudyCard
@@ -2936,10 +2940,15 @@ function StudyCard({
               ref={nextButtonRef}
               onClick={onNext}
               autoFocus
-              className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-sm transition-transform duration-150 ease-out active:scale-[0.98]"
+              className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-sm transition-transform duration-150 ease-out active:scale-[0.98] cursor-pointer"
             >
               Weiter
             </button>
+            <div className="flex items-center justify-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity select-none mt-4">
+              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-sm">SPACE</kbd>
+              <span className="text-zinc-400 dark:text-zinc-600 text-xs">/</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/10 text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-sm">ENTER</kbd>
+            </div>
           </motion.div>
         )}
       </div>
@@ -6196,28 +6205,6 @@ try {
           </div>
           )}
 
-          {dueCards.length > 0 && (
-            <div 
-              onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
-              className="h-14 px-5 rounded-2xl bg-gradient-to-r from-blue-950/30 to-zinc-900/50 border border-blue-500/20 hover:border-blue-500/40 flex items-center justify-between transition-all cursor-pointer mb-6 group select-none shadow-sm active:scale-[0.99]"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.3)]">
-                  <RotateCw className="w-4 h-4 text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
-                </div>
-                <span className="font-medium text-sm text-zinc-100">
-                  {appLanguage === 'RU' ? 'Повторить сегодня' : appLanguage === 'EN' ? 'Review today' : 'Heute wiederholen'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <div className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 font-semibold text-xs border border-blue-500/30 tabular-nums">
-                  {dueCards.length}
-                </div>
-                <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-            </div>
-          )}
-
           <div className="space-y-16">
             {(() => {
               const ORDERED_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1-C2'];
@@ -6231,7 +6218,7 @@ try {
                 'C1-C2': { label: 'C1-C2', badgeClass: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-[#2C2C2E] dark:text-[#8E8E93] dark:border-white/[0.05]' }
               };
 
-              return cefrLevels.map(level => {
+              return cefrLevels.map((level, levelIdx) => {
                 const sectionKey = `${activeTab}-${level}`;
                 const sortedDecks = groupedDecks[`${activeTab}-${level}`] || [];
 
@@ -6243,29 +6230,46 @@ try {
 
                 return (
                   <section key={sectionKey}>
-                    <div className="flex items-center gap-1 p-1 bg-white/80 dark:bg-zinc-900/80 backdrop-blur border border-zinc-200/70 dark:border-white/10 rounded-full w-fit mb-6 shadow-sm select-none">
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-black/5 dark:bg-white/10 text-zinc-800 dark:text-white">
-                        {level}
-                      </span>
-                      <button 
-                        onClick={() => handleGlobalDrill(level, activeTab)}
-                        className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer"
-                        title={`Training ${level}`}
-                      >
-                        <Play className="w-3 h-3 fill-current" />
-                      </button>
-                      <button 
-                        onClick={() => handlePlusClick(activeTab, level)}
-                        className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer"
-                        title="Neues Deck"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
+                    <div className="flex items-center justify-between w-full mb-4">
+                      {/* Слева: группа уровня */}
+                      <div className="flex items-center gap-1.5 p-1 bg-white/80 dark:bg-zinc-900/80 backdrop-blur border border-zinc-200/70 dark:border-white/10 rounded-full shadow-sm select-none">
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-black/5 dark:bg-white/10 text-zinc-800 dark:text-white">
+                          {level}
+                        </span>
+                        <button 
+                          onClick={() => handleGlobalDrill(level, activeTab)}
+                          className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer"
+                          title={`Training ${level}`}
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                        </button>
+                        <button 
+                          onClick={() => handlePlusClick(activeTab, level)}
+                          className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer"
+                          title="Neues Deck"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Справа: компактная пилюля повторения */}
+                      {levelIdx === 0 && dueCards.length > 0 && (
+                        <button 
+                          onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
+                          className="h-8 px-3 rounded-full bg-blue-500/15 hover:bg-blue-500/25 active:scale-95 border border-blue-500/30 text-blue-600 dark:text-blue-300 flex items-center gap-2 text-xs font-medium transition-all shadow-sm cursor-pointer select-none"
+                        >
+                          <RotateCcw className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+                          <span className="font-semibold text-zinc-900 dark:text-white font-mono">{dueCards.length}</span>
+                          <span className="hidden sm:inline text-blue-600/80 dark:text-blue-300/80">
+                            {appLanguage === 'RU' ? 'повторить' : appLanguage === 'EN' ? 'review' : 'wiederholen'}
+                          </span>
+                        </button>
+                      )}
                     </div>
                     
                     {sortedDecks.length === 0 ? (
-                      <div className="py-6 text-center bg-white dark:bg-[#1C1C1E] border border-black/[0.08] dark:border-white/[0.08] rounded-[24px] shadow-sm">
-                        <p className="text-gray-400 dark:text-[#8E8E93] text-sm font-medium">
+                      <div className="w-full py-8 rounded-2xl border border-dashed border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 text-xs font-medium select-none bg-transparent">
+                        <p>
                           {UI_TRANSLATIONS[appLanguage]?.noDecks || "Noch keine Decks in diesem Level."}
                         </p>
                       </div>
