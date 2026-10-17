@@ -2195,6 +2195,18 @@ function StudyInterface({
     return decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id) || currentCardSnapshot;
   }, [decks, currentDeckId, currentCardSnapshot]);
 
+  const currentDeck = useMemo(() => {
+    if (!currentDeckId) return undefined;
+    return decks.find(d => d.id === currentDeckId);
+  }, [decks, currentDeckId]);
+
+  const isGrammarDeck = useMemo(() => {
+    return Boolean(
+      currentDeck?.category?.toLowerCase().includes('gramm') ||
+      currentDeck?.name?.toLowerCase().includes('gramm')
+    );
+  }, [currentDeck]);
+
   const currentCardTrainingMode = useMemo(() => {
     if (!currentCardSnapshot) return 'standard_cloze';
     return getCardTrainingMode(currentCardSnapshot, currentDeckId, decks, books, trainingMode);
@@ -2405,6 +2417,8 @@ function StudyInterface({
             <StudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
+              deckTitle={currentDeck?.name}
+              isGrammar={isGrammarDeck}
               forceInputMode={!!reviewCards && !isDrillMode}
               onAnswer={(correct, isHilfe) => {
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
@@ -2587,6 +2601,26 @@ function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: str
   };
 }
 
+function getHintBadgeStyle(hint: string, isGrammar: boolean) {
+  if (isGrammar) {
+    return 'bg-zinc-800/90 border-white/15 text-zinc-100 shadow-zinc-950/50';
+  }
+  const clean = hint.trim().toLowerCase();
+  if (clean.startsWith('der ')) {
+    return 'bg-sky-500/15 border-sky-500/35 text-sky-200 shadow-sky-950/30';
+  }
+  if (clean.startsWith('die ')) {
+    return 'bg-rose-500/15 border-rose-500/35 text-rose-200 shadow-rose-950/30';
+  }
+  if (clean.startsWith('das ')) {
+    return 'bg-emerald-500/15 border-emerald-500/35 text-emerald-200 shadow-emerald-950/30';
+  }
+  if (clean.includes('hat ') || clean.includes('ist ') || clean.includes('ge-') || clean.includes('teils')) {
+    return 'bg-indigo-500/15 border-indigo-500/35 text-indigo-200 shadow-indigo-950/30';
+  }
+  return 'bg-amber-500/15 border-amber-500/35 text-amber-200 shadow-amber-950/30';
+}
+
 // --- STUDY CARD ---
 
 function StudyCard({ 
@@ -2594,13 +2628,15 @@ function StudyCard({
   deckTitle,
   onAnswer, 
   onNext,
-  forceInputMode = false
+  forceInputMode = false,
+  isGrammar = false
 }: { 
   card: Flashcard, 
   deckTitle?: string,
   onAnswer: (correct: boolean, isHilfe: boolean) => void,
   onNext: () => void,
-  forceInputMode?: boolean
+  forceInputMode?: boolean,
+  isGrammar?: boolean
 }) {
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [hasErrored, setHasErrored] = useState(false);
@@ -2858,6 +2894,11 @@ function StudyCard({
 
   const isAnswered = phase === "Answer";
   const displayHint = (card.hint || card.forms || '').trim();
+  const isGrammarCard = Boolean(
+    isGrammar || 
+    (deckTitle && deckTitle.toLowerCase().includes('gramm')) ||
+    (displayHint && (displayHint.includes('·') || displayHint.includes('Passiv') || displayHint.includes('Präteritum') || displayHint.includes('Perfekt')))
+  );
   const displayAnswerWord = shouldCapitalize ? clozeWord.charAt(0).toUpperCase() + clozeWord.slice(1) : clozeWord;
   const parsedTargetWord = phase === "Answer" 
     ? (parseTargetNoun(displayAnswerWord) || (!isCustomCloze ? parseTargetNoun(card.targetWord) : null))
@@ -3005,15 +3046,7 @@ function StudyCard({
 
           {isAnswered && displayHint && (
             <div className="mt-4 flex justify-center animate-in fade-in zoom-in-95 duration-200">
-              <div className={`px-4 py-2 rounded-2xl border text-xs font-medium tracking-wide shadow-lg backdrop-blur-xl ${
-                displayHint.startsWith('der') 
-                  ? 'bg-sky-500/10 border-sky-500/25 text-sky-600 dark:text-sky-200'
-                  : displayHint.startsWith('die') 
-                  ? 'bg-rose-500/10 border-rose-500/25 text-rose-600 dark:text-rose-200'
-                  : displayHint.startsWith('das') 
-                  ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-200 dark:text-emerald-200'
-                  : 'bg-black/[0.04] dark:bg-white/[0.06] border-black/10 dark:border-white/10 text-zinc-700 dark:text-zinc-200'
-              }`}>
+              <div className={`backdrop-blur-xl px-5 py-2.5 rounded-full border shadow-lg inline-flex items-center gap-2 text-sm font-medium tracking-wide transition-all ${getHintBadgeStyle(displayHint, isGrammarCard)}`}>
                 {displayHint}
               </div>
             </div>
