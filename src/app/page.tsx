@@ -4194,8 +4194,14 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   
   const isValidTheory = useCallback((obj: any): boolean => {
     if (!obj || typeof obj !== 'object' || Object.keys(obj).length === 0) return false;
-    const str = JSON.stringify(obj).toLowerCase();
-    return !str.includes('meinder') && !str.includes('meinedie') && !str.includes('meindas');
+    const items = obj.visualBreakdown?.items || (Array.isArray(obj.visualBreakdown) ? obj.visualBreakdown : []);
+    if (Array.isArray(items)) {
+      for (const it of items) {
+        const val = String(it?.value || '').toLowerCase().trim();
+        if (val === 'meinder' || val === 'meinedie' || val === 'meindas') return false;
+      }
+    }
+    return true;
   }, []);
 
   // 1. Мгновенно вычисляем начальную теорию из памяти или localStorage, исключая повторные генерации
@@ -4235,21 +4241,22 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
     if (!force) {
       // 1. Если теория уже есть в состоянии — берем её
-      if (isValidTheory(theoryData)) {
+      if (theoryData && isValidTheory(theoryData)) {
         setIsLoading(false);
         return;
       }
 
       // 2. Если в объекте темы
-      if (deck && isValidTheory(deck.theory)) {
-        setTheoryData(deck.theory as StructuredTheory);
+      const currentDeck = useStore.getState().decks.find(d => d.id === deckId);
+      if (currentDeck && isValidTheory(currentDeck.theory)) {
+        setTheoryData(currentDeck.theory as StructuredTheory);
         setIsLoading(false);
         return;
       }
 
-      if (typeof deck?.theory === 'string') {
+      if (typeof currentDeck?.theory === 'string') {
         try {
-          const p = JSON.parse(deck.theory);
+          const p = JSON.parse(currentDeck.theory);
           if (isValidTheory(p)) {
             setTheoryData(p);
             setIsLoading(false);
@@ -4282,13 +4289,14 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     setIsLoading(true);
     setError(null);
     try {
+      const currentDeck = useStore.getState().decks.find(d => d.id === deckId);
       const res = await fetch('/api/generate-theory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topicId: deckId,
-          topicTitle: deck?.name || 'Grammatik',
-          level: deck?.level || 'B1'
+          topicTitle: currentDeck?.name || 'Grammatik',
+          level: currentDeck?.level || 'B1'
         })
       });
 
@@ -4326,11 +4334,16 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     } finally {
       setIsLoading(false);
     }
-  }, [deckId, deck, theoryData, isValidTheory]);
+  }, [deckId, theoryData, isValidTheory]);
 
   useEffect(() => {
+    if (initialTheory && isValidTheory(initialTheory)) {
+      setIsLoading(false);
+      return;
+    }
     fetchTheory(false);
-  }, [fetchTheory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckId]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {

@@ -119,9 +119,9 @@ export async function POST(req: Request) {
   ],
   "traps": [
     {
-      "wrong": "Das ist meinder Hund ❌",
+      "wrong": "Das ist der mein Hund ❌",
       "right": "Das ist mein Hund ✅",
-      "explanation": "Притяжательный артикль не соединяется со словом der! Для мужского рода в Nominativ форма 'mein'."
+      "explanation": "Нельзя использовать определенный артикль вместе с притяжательным (не 'der mein Hund', а просто 'mein Hund')."
     }
   ]
 }`;
