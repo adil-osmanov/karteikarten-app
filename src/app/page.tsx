@@ -6,7 +6,7 @@ import {
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, AlertTriangle,
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers,
-  ChevronDown, LogOut
+  ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from 'sonner';
@@ -31,6 +31,38 @@ function useIsMobile() {
     setIsMobile('ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0));
   }, []);
   return isMobile;
+}
+
+// Compress images to WebP Base64 to save storage and fit Groq Vision payload
+async function compressImageToWebP(file: File, maxWidth = 1600, quality = 0.8): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new (window as any).Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(e.target?.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/webp', quality));
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
 }
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
@@ -509,6 +541,8 @@ export interface Deck {
   language?: 'DE' | 'EN' | 'RU';
   bookId?: string;
   theory?: StructuredTheory | string | null;
+  materials?: string[];
+  card_count?: number;
 }
 
 interface DeckState {
@@ -516,6 +550,7 @@ interface DeckState {
   isLoaded: boolean;
   setDecks: (decks: Deck[]) => void;
   addDeck: (deck: Deck) => void;
+  updateDeck: (deckId: string, updates: Partial<Deck>, replaceCards?: Flashcard[]) => Promise<void>;
   deleteDeck: (deckId: string) => void;
   renameDeck: (deckId: string, newName: string) => void;
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
@@ -723,6 +758,12 @@ const useStore = create<DeckState>()((set, get) => ({
     const previousDecks = get().decks;
     set({ decks: [...previousDecks, deck] });
     
+    if (deck.materials && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`deck_materials_${deck.id}`, JSON.stringify(deck.materials));
+      } catch (e) {}
+    }
+
     const payload: any = {
       id: deck.id,
       name: deck.name,
@@ -731,11 +772,13 @@ const useStore = create<DeckState>()((set, get) => ({
       book_id: deck.bookId,
       language: deck.language
     };
+    if (deck.materials && deck.materials.length > 0) payload.materials = deck.materials;
+    if (deck.card_count) payload.card_count = deck.card_count;
     
     let deckRes = await supabase.from('decks').insert(payload);
     
     if (deckRes.error && deckRes.error.message.includes('not exist')) {
-        console.warn("Falling back to deck insert without book_id/language columns. Please run the SQL migration.");
+        console.warn("Falling back to deck insert without materials/book_id/language columns.");
         const fallbackPayload = {
           id: deck.id,
           name: deck.name,
@@ -760,11 +803,11 @@ const useStore = create<DeckState>()((set, get) => ({
       translation: c.translation,
       forms: c.forms || null,
       options: c.options,
-      masteryLevel: c.masteryLevel,
-      isArchived: c.isArchived,
-      nextReviewDate: c.nextReviewDate,
-      interval: c.interval,
-      repetitions: c.repetitions,
+      masteryLevel: c.masteryLevel || 0,
+      isArchived: c.isArchived || false,
+      nextReviewDate: c.nextReviewDate || null,
+      interval: c.interval || 0,
+      repetitions: c.repetitions || 0,
       baseWordInfo: c.baseWordInfo || null
     }));
     
@@ -783,6 +826,73 @@ const useStore = create<DeckState>()((set, get) => ({
     }
   },
   
+  updateDeck: async (deckId, updates, replaceCards) => {
+    const previousDecks = get().decks;
+    const target = previousDecks.find(d => d.id === deckId);
+    if (!target) return;
+
+    const updatedDeck: Deck = {
+      ...target,
+      ...updates,
+      ...(replaceCards ? { cards: replaceCards } : {})
+    };
+
+    set({
+      decks: previousDecks.map(d => d.id === deckId ? updatedDeck : d)
+    });
+
+    try {
+      if (updates.materials && typeof window !== 'undefined') {
+        localStorage.setItem(`deck_materials_${deckId}`, JSON.stringify(updates.materials));
+      }
+      if (updates.theory === null && typeof window !== 'undefined') {
+        localStorage.removeItem(`deck_theory_json_${deckId}`);
+        localStorage.removeItem(`deck_theory_${deckId}`);
+      }
+
+      const payload: any = {};
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.category !== undefined) payload.category = updates.category;
+      if (updates.level !== undefined) payload.level = updates.level;
+      if (updates.theory !== undefined) payload.theory = updates.theory;
+      if (updates.materials !== undefined) payload.materials = updates.materials;
+      if (updates.card_count !== undefined) payload.card_count = updates.card_count;
+
+      if (Object.keys(payload).length > 0) {
+        let res = await supabase.from('decks').update(payload).eq('id', deckId);
+        if (res.error && res.error.message.includes('does not exist')) {
+          delete payload.materials;
+          delete payload.card_count;
+          if (Object.keys(payload).length > 0) {
+            await supabase.from('decks').update(payload).eq('id', deckId);
+          }
+        }
+      }
+
+      if (replaceCards) {
+        await supabase.from('cards').delete().eq('deck_id', deckId);
+        const cardsToInsert = replaceCards.map(c => ({
+          id: c.id,
+          deck_id: deckId,
+          targetWord: c.targetWord,
+          sentence: c.sentence,
+          translation: c.translation,
+          forms: c.forms || null,
+          options: c.options,
+          masteryLevel: c.masteryLevel || 0,
+          isArchived: c.isArchived || false,
+          nextReviewDate: c.nextReviewDate || null,
+          interval: c.interval || 0,
+          repetitions: c.repetitions || 0,
+          baseWordInfo: c.baseWordInfo || null
+        }));
+        await supabase.from('cards').insert(cardsToInsert);
+      }
+    } catch (err) {
+      console.error("Supabase Update Deck Error:", err);
+    }
+  },
+
   deleteDeck: async (deckId) => {
     const previousDecks = get().decks;
     set({ decks: previousDecks.filter(d => d.id !== deckId) });
@@ -3550,10 +3660,11 @@ BookCard.displayName = "BookCard";
 
 
 const DeckCard = React.memo(({ 
-  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onViewTheory, onStartDictation, onStartShadowing
+  deck, isCompleted, activeTab, onCardClick, onRename, onEdit, onDelete, onViewTheory, onStartDictation, onStartShadowing
 }: { 
   deck: Deck; isCompleted: boolean; activeTab: string; 
-  onCardClick: (id: string) => void; onRename: (id: string, name: string) => void; 
+  onCardClick: (id: string) => void; onRename?: (id: string, name: string) => void; 
+  onEdit?: (deck: Deck) => void;
   onDelete: (id: string, name: string) => void; 
   onViewTheory: (id: string) => void; 
   onStartDictation: (id: string) => void;
@@ -3589,8 +3700,17 @@ const DeckCard = React.memo(({
         isCompleted && "opacity-75 hover:opacity-100"
       )}
     >
-      {/* Action Buttons (Delete only - Edit button removed for clean Apple UI) */}
+      {/* Action Buttons: Edit (Pencil) & Delete */}
       <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+        {onEdit && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); onEdit(deck); }}
+            className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
+            title="Lektion bearbeiten"
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+          </button>
+        )}
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
           className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
@@ -3658,6 +3778,721 @@ const DeckCard = React.memo(({
   );
 });
 DeckCard.displayName = "DeckCard";
+
+function parseCardsFromCSV(text: string, isRedemittel: boolean, isRapidMode: boolean): Flashcard[] {
+  const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+  const cards: Flashcard[] = [];
+  lines.forEach((line) => {
+    const parts = line.split(';').map(p => p.trim());
+    if (isRedemittel) {
+      if (parts.length >= 2) {
+        const fullText = parts[0];
+        const translation = parts[1];
+        const konstruktion = parts.length >= 3 ? parts[2] : "";
+        const beispielEnde = parts.length >= 4 ? parts[3] : "";
+        const chunksStr = parts.length >= 5 ? parts[4] : "";
+        const chunks = chunksStr ? chunksStr.split('|').map(c => c.trim()) : [];
+        cards.push({
+          id: crypto.randomUUID(),
+          targetWord: fullText,
+          sentence: chunksStr || konstruktion || fullText,
+          translation: translation,
+          options: [],
+          masteryLevel: 0,
+          isArchived: false,
+          nextReviewDate: null,
+          interval: 0,
+          repetitions: 0,
+          baseWordInfo: JSON.stringify({
+            chunks: chunks.length > 0 ? chunks : undefined,
+            fullText: fullText,
+            exampleEnde: beispielEnde || undefined
+          })
+        });
+      }
+    } else if (isRapidMode) {
+      if (parts.length >= 2) {
+        const hasSentence = parts.length >= 3;
+        const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
+        let rTranslation = hasSentence ? parts[1] : parts[1];
+        let rExample = hasSentence ? parts[2] : '-';
+        if (hasSentence && !cyr(rTranslation) && cyr(rExample)) {
+          [rTranslation, rExample] = [rExample, rTranslation];
+        }
+        let forms = parts.length >= 4 ? parts[3] : undefined;
+        cards.push({
+          id: crypto.randomUUID(),
+          targetWord: parts[0],
+          sentence: rExample,
+          translation: rTranslation,
+          forms: forms,
+          options: [],
+          masteryLevel: 0,
+          isArchived: false,
+          nextReviewDate: null,
+          interval: 0,
+          repetitions: 0
+        });
+      }
+    } else {
+      if (parts.length >= 6) {
+        const targetWord = parts[0];
+        const hasForms = parts.length >= 7;
+        const forms = hasForms ? parts[3] : undefined;
+        const optStart = hasForms ? 4 : 3;
+        const options = [targetWord, parts[optStart], parts[optStart+1], parts[optStart+2]].sort(() => Math.random() - 0.5);
+        cards.push({
+          id: crypto.randomUUID(),
+          targetWord,
+          sentence: parts[1],
+          translation: parts[2],
+          forms: forms,
+          options,
+          masteryLevel: 0,
+          isArchived: false,
+          nextReviewDate: null,
+          interval: 0,
+          repetitions: 0,
+          baseWordInfo: parts.length > (optStart+3) ? parts[optStart+3] : null
+        });
+      }
+    }
+  });
+  return cards;
+}
+
+interface DeckModalProps {
+  isOpen: boolean;
+  mode: 'create' | 'edit';
+  initialDeck?: Deck | null;
+  category: string;
+  level: CEFRLevel;
+  activeBookId?: string | null;
+  onClose: () => void;
+  onSuccess: (deckId?: string) => void;
+}
+
+function DeckModal({
+  isOpen,
+  mode,
+  initialDeck,
+  category,
+  level,
+  activeBookId,
+  onClose,
+  onSuccess
+}: DeckModalProps) {
+  useScrollLock(true);
+  const { addDeck, updateDeck, appLanguage } = useStore();
+
+  const [tab, setTab] = useState<'ai' | 'csv'>('ai');
+  const [title, setTitle] = useState(initialDeck?.name || '');
+  
+  // Load initial materials from deck or localStorage
+  const initialMaterials = useMemo(() => {
+    if (initialDeck?.materials && initialDeck.materials.length > 0) {
+      return initialDeck.materials;
+    }
+    if (initialDeck?.id && typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(`deck_materials_${initialDeck.id}`);
+        if (stored) return JSON.parse(stored);
+      } catch (e) {}
+    }
+    return [];
+  }, [initialDeck]);
+
+  const [materials, setMaterials] = useState<string[]>(initialMaterials);
+  const [cardCount, setCardCount] = useState<number>(initialDeck?.card_count || initialDeck?.cards?.length || 15);
+  
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
+  
+  // CSV tab states
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvCards, setCsvCards] = useState<Flashcard[]>([]);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+
+  const handleProcessImages = async (files: FileList | File[]) => {
+    const fileArr = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (fileArr.length === 0) return;
+
+    setIsCompressing(true);
+    try {
+      const compressedList = await Promise.all(
+        fileArr.map(f => compressImageToWebP(f, 1600, 0.8))
+      );
+      setMaterials(prev => [...prev, ...compressedList]);
+    } catch (e) {
+      toast.error("Не удалось сжать некоторые изображения.");
+    } finally {
+      setIsCompressing(false);
+      if (imageInputRef.current) imageInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveMaterial = (index: number) => {
+    setMaterials(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleProcessCsvFile = (file: File) => {
+    setCsvFile(file);
+    if (!title) {
+      setTitle(file.name.replace(/\.[^/.]+$/, ""));
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+      const isRedemittel = category.toLowerCase().includes('redemittel');
+      const isRapidMode = false;
+      const parsed = parseCardsFromCSV(text, isRedemittel, isRapidMode);
+      setCsvCards(parsed);
+      if (parsed.length > 0) {
+        toast.success(`Найдено ${parsed.length} карточек в CSV`);
+      } else {
+        toast.error("Не удалось распознать карточки в файле. Проверьте формат разделителя (;)");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleCreateOrUpdateAI = async () => {
+    if (!title.trim()) {
+      toast.error("Укажите название темы");
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      const res = await fetch('/api/generate-deck', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title.trim(),
+          category,
+          count: cardCount,
+          images: materials,
+          level
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success || !Array.isArray(json.cards) || json.cards.length === 0) {
+        throw new Error(json.error || "Не удалось сгенерировать карточки");
+      }
+
+      const generatedCards: Flashcard[] = json.cards.map((c: any) => ({
+        id: crypto.randomUUID(),
+        targetWord: c.targetWord,
+        sentence: c.sentence,
+        translation: c.translation,
+        forms: c.forms || undefined,
+        options: Array.isArray(c.options) && c.options.length > 0 ? c.options : [c.targetWord],
+        masteryLevel: 0,
+        isArchived: false,
+        nextReviewDate: null,
+        interval: 0,
+        repetitions: 0,
+        hint: c.hint || null
+      }));
+
+      if (mode === 'create') {
+        const newDeckId = crypto.randomUUID();
+        const bId = activeBookId || (appLanguage === 'EN' ? 'default-en' : 'default-de');
+        
+        const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
+        langMap[newDeckId] = appLanguage;
+        localStorage.setItem('deck_languages', JSON.stringify(langMap));
+
+        const bookMap = JSON.parse(localStorage.getItem('deck_books') || '{}');
+        bookMap[newDeckId] = bId;
+        localStorage.setItem('deck_books', JSON.stringify(bookMap));
+
+        if (materials.length > 0) {
+          try {
+            localStorage.setItem(`deck_materials_${newDeckId}`, JSON.stringify(materials));
+          } catch (e) {}
+        }
+
+        await addDeck({
+          id: newDeckId,
+          name: title.trim(),
+          category,
+          level,
+          cards: generatedCards,
+          language: appLanguage,
+          bookId: bId,
+          materials,
+          card_count: cardCount
+        });
+
+        toast.success(`Колода "${title.trim()}" создана (${generatedCards.length} карточек)`);
+        onSuccess(newDeckId);
+        onClose();
+      } else if (initialDeck) {
+        // Regenerate in edit mode: clear theory cache and update cards
+        localStorage.removeItem(`deck_theory_json_${initialDeck.id}`);
+        localStorage.removeItem(`deck_theory_${initialDeck.id}`);
+        if (materials.length > 0) {
+          try {
+            localStorage.setItem(`deck_materials_${initialDeck.id}`, JSON.stringify(materials));
+          } catch (e) {}
+        }
+
+        await updateDeck(initialDeck.id, {
+          name: title.trim(),
+          materials,
+          card_count: cardCount,
+          theory: null
+        }, generatedCards);
+
+        toast.success(`Колода обновлена и перегенерирована (${generatedCards.length} карточек)`);
+        onSuccess(initialDeck.id);
+        onClose();
+      }
+    } catch (err: any) {
+      console.error("Deck generation error:", err);
+      toast.error(err.message || "Ошибка при генерации карточек");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSaveEditOnly = async () => {
+    if (!initialDeck) return;
+    if (!title.trim()) {
+      toast.error("Укажите название темы");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      if (materials.length > 0) {
+        try {
+          localStorage.setItem(`deck_materials_${initialDeck.id}`, JSON.stringify(materials));
+        } catch (e) {}
+      }
+
+      await updateDeck(initialDeck.id, {
+        name: title.trim(),
+        materials,
+        card_count: cardCount
+      });
+
+      toast.success("Изменения успешно сохранены");
+      onSuccess(initialDeck.id);
+      onClose();
+    } catch (e) {
+      toast.error("Не удалось сохранить изменения");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleImportCsv = async () => {
+    if (!title.trim()) {
+      toast.error("Укажите название темы");
+      return;
+    }
+    if (csvCards.length === 0) {
+      toast.error("Сначала выберите CSV-файл с карточками");
+      return;
+    }
+
+    const newDeckId = crypto.randomUUID();
+    const bId = activeBookId || (appLanguage === 'EN' ? 'default-en' : 'default-de');
+
+    const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
+    langMap[newDeckId] = appLanguage;
+    localStorage.setItem('deck_languages', JSON.stringify(langMap));
+
+    const bookMap = JSON.parse(localStorage.getItem('deck_books') || '{}');
+    bookMap[newDeckId] = bId;
+    localStorage.setItem('deck_books', JSON.stringify(bookMap));
+
+    await addDeck({
+      id: newDeckId,
+      name: title.trim(),
+      category,
+      level,
+      cards: csvCards,
+      language: appLanguage,
+      bookId: bId,
+      card_count: csvCards.length
+    });
+
+    toast.success(`Импортировано ${csvCards.length} карточек`);
+    onSuccess(newDeckId);
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+      {/* Apple Backdrop */}
+      <motion.div 
+        initial={{ opacity: 0 }} 
+        animate={{ opacity: 1 }} 
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/70 backdrop-blur-md" 
+        onClick={onClose} 
+      />
+
+      {/* Apple HIG Modal Window */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 15 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+        transition={{ type: "spring", duration: 0.4, bounce: 0.15 }}
+        className="relative w-full max-w-xl bg-zinc-950/95 border border-white/10 rounded-3xl p-5 sm:p-7 shadow-[0_25px_70px_rgba(0,0,0,0.6)] z-10 text-white flex flex-col max-h-[92vh] overflow-hidden"
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between pb-4 border-b border-white/5">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+                {mode === 'create' ? 'Новая тема' : 'Настройки темы'}
+              </h2>
+              <span className="px-2.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-semibold">
+                {level}
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-400 text-xs">
+                {category}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400">
+              {mode === 'create' 
+                ? 'Создайте интерактивную колоду из учебника или загрузите CSV'
+                : 'Редактируйте материалы темы и запускайте перегенерацию'}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Apple Segmented Control (in create mode) */}
+        {mode === 'create' && (
+          <div className="grid grid-cols-2 p-1 bg-white/[0.04] border border-white/[0.08] rounded-2xl my-4 text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => setTab('ai')}
+              className={cn(
+                "py-2.5 px-3 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer",
+                tab === 'ai' 
+                  ? "bg-white/15 text-white shadow-sm font-semibold border border-white/10" 
+                  : "text-zinc-400 hover:text-white"
+              )}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+              <span>Генерация из книги (ИИ)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('csv')}
+              className={cn(
+                "py-2.5 px-3 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer",
+                tab === 'csv' 
+                  ? "bg-white/15 text-white shadow-sm font-semibold border border-white/10" 
+                  : "text-zinc-400 hover:text-white"
+              )}
+            >
+              <FileText className="w-3.5 h-3.5 text-amber-400" />
+              <span>Загрузить CSV</span>
+            </button>
+          </div>
+        )}
+
+        {/* Scrollable Body Content */}
+        <div className="overflow-y-auto space-y-5 pr-1 flex-1 py-2">
+          {/* 1. TITLE INPUT */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-zinc-300">
+              Название темы
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Например: Possessivartikel im Dativ"
+              className="w-full bg-white/[0.05] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/80 transition-all font-medium"
+            />
+          </div>
+
+          {(tab === 'ai' || mode === 'edit') && (
+            <>
+              {/* 2. TEXTBOOK SCREENSHOTS / MATERIALS DROPZONE */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-zinc-300 flex items-center gap-2">
+                    <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Страницы учебника (фото / скриншоты)</span>
+                  </label>
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    Groq Vision 11B
+                  </span>
+                </div>
+
+                {/* Dropzone container */}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true); }}
+                  onDragLeave={() => setIsDraggingOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDraggingOver(false);
+                    if (e.dataTransfer.files) handleProcessImages(e.dataTransfer.files);
+                  }}
+                  onClick={() => imageInputRef.current?.click()}
+                  className={cn(
+                    "border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-2.5 select-none",
+                    isDraggingOver
+                      ? "border-blue-500 bg-blue-500/10"
+                      : "border-white/15 hover:border-white/30 bg-white/[0.02] hover:bg-white/[0.04]"
+                  )}
+                >
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files) handleProcessImages(e.target.files);
+                    }}
+                  />
+                  {isCompressing ? (
+                    <div className="flex items-center gap-2 text-zinc-400 text-xs py-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                      <span>Сжимаем фото страниц (WebP)...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-zinc-300">
+                        <Upload className="w-4 h-4" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-medium text-zinc-200">
+                          Перетащите страницы учебника сюда или выберите файлы
+                        </p>
+                        <p className="text-[11px] text-zinc-500">
+                          Поддерживаются PNG, JPG, WebP. ИИ создаст карточки и теорию строго по ним.
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Gallery of thumbnails */}
+                {materials.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[11px] text-zinc-400">
+                      Прикреплено страниц: {materials.length}
+                    </span>
+                    <div className="grid grid-cols-4 sm:grid-cols-5 gap-2.5">
+                      {materials.map((mat, idx) => (
+                        <div
+                          key={idx}
+                          className="relative group/thumb aspect-[3/4] rounded-xl overflow-hidden border border-white/10 bg-zinc-900 shadow-sm"
+                        >
+                          <img
+                            src={mat}
+                            alt={`Страница ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveMaterial(idx);
+                            }}
+                            className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 hover:bg-rose-500 text-white flex items-center justify-center transition-all opacity-0 group-hover/thumb:opacity-100 cursor-pointer shadow"
+                            title="Удалить"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 3. CARD COUNT SELECTOR */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-zinc-300 flex items-center gap-2">
+                    <Sliders className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Количество карточек</span>
+                  </label>
+                  <span className="text-xs font-mono font-bold text-blue-400">
+                    {cardCount} предложений
+                  </span>
+                </div>
+
+                {/* Pills */}
+                <div className="grid grid-cols-5 gap-2">
+                  {[10, 15, 20, 25, 30].map(cnt => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setCardCount(cnt)}
+                      className={cn(
+                        "py-2 rounded-xl text-xs font-medium border transition-all cursor-pointer",
+                        cardCount === cnt
+                          ? "bg-blue-500/20 border-blue-500/40 text-blue-300 font-semibold"
+                          : "bg-white/[0.04] border-white/5 text-zinc-400 hover:text-white hover:bg-white/[0.08]"
+                      )}
+                    >
+                      {cnt}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Range Slider */}
+                <input
+                  type="range"
+                  min="5"
+                  max="40"
+                  step="5"
+                  value={cardCount}
+                  onChange={e => setCardCount(Number(e.target.value))}
+                  className="w-full accent-blue-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg appearance-none mt-1"
+                />
+              </div>
+            </>
+          )}
+
+          {tab === 'csv' && mode === 'create' && (
+            <div className="space-y-3">
+              <label className="text-xs font-medium text-zinc-300 flex items-center gap-2">
+                <FileText className="w-3.5 h-3.5 text-amber-400" />
+                <span>Файл карточек в формате CSV</span>
+              </label>
+
+              <div
+                onClick={() => csvInputRef.current?.click()}
+                className="border-2 border-dashed border-white/15 hover:border-white/30 bg-white/[0.02] hover:bg-white/[0.04] rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 select-none"
+              >
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleProcessCsvFile(f);
+                  }}
+                />
+                <FileText className="w-8 h-8 text-amber-400/80" />
+                <div className="space-y-0.5">
+                  <p className="text-xs font-medium text-zinc-200">
+                    {csvFile ? csvFile.name : "Выберите или перетащите CSV-файл"}
+                  </p>
+                  <p className="text-[11px] text-zinc-500">
+                    {csvCards.length > 0
+                      ? `Распознано карточек: ${csvCards.length}`
+                      : "Формат: Слово;Предложение;Перевод;Дистрактор1;Дистрактор2;Дистрактор3"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="pt-4 mt-2 border-t border-white/10 flex flex-col sm:flex-row gap-2.5 justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isGenerating || isSaving}
+            className="py-3 px-5 rounded-2xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            Отмена
+          </button>
+
+          {mode === 'create' ? (
+            tab === 'ai' ? (
+              <button
+                type="button"
+                onClick={handleCreateOrUpdateAI}
+                disabled={isGenerating || isCompressing || !title.trim()}
+                className="py-3 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Генерируем через ИИ...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-blue-200" />
+                    <span>✨ Сгенерировать ({cardCount} карточек)</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleImportCsv}
+                disabled={csvCards.length === 0 || !title.trim()}
+                className="py-3 px-6 rounded-2xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Импортировать CSV ({csvCards.length})</span>
+              </button>
+            )
+          ) : (
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <button
+                type="button"
+                onClick={handleCreateOrUpdateAI}
+                disabled={isGenerating || isSaving}
+                className="py-3 px-5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-white/10 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                    <span>Перегенерация...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCw className="w-3.5 h-3.5 text-blue-400" />
+                    <span>🔄 Перегенерировать карточки</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveEditOnly}
+                disabled={isGenerating || isSaving || !title.trim()}
+                className="py-3 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Сохранение...</span>
+                  </>
+                ) : (
+                  <span>Сохранить изменения</span>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
   useScrollLock(true);
@@ -4283,6 +5118,25 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           }
         } catch (e) {}
       }
+
+      // 4. Проверяем напрямую в Supabase, если в памяти/localStorage еще не успело обновиться
+      try {
+        const { data: remoteDeck } = await supabase.from('decks').select('theory, materials').eq('id', deckId).single();
+        if (remoteDeck && isValidTheory(remoteDeck.theory)) {
+          const p = typeof remoteDeck.theory === 'string' ? JSON.parse(remoteDeck.theory) : remoteDeck.theory;
+          if (isValidTheory(p)) {
+            setTheoryData(p);
+            setIsLoading(false);
+            useStore.setState(state => ({
+              decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p, materials: remoteDeck.materials || d.materials } : d)
+            }));
+            const strP = JSON.stringify(p);
+            localStorage.setItem(`deck_theory_json_${deckId}`, strP);
+            localStorage.setItem(`deck_theory_${deckId}`, strP);
+            return;
+          }
+        }
+      } catch (e) {}
     }
 
     // Принудительная или первичная генерация
@@ -4290,13 +5144,22 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     setError(null);
     try {
       const currentDeck = useStore.getState().decks.find(d => d.id === deckId);
+      let deckMaterials = currentDeck?.materials || [];
+      if ((!deckMaterials || deckMaterials.length === 0) && typeof window !== 'undefined') {
+        try {
+          const stored = localStorage.getItem(`deck_materials_${deckId}`);
+          if (stored) deckMaterials = JSON.parse(stored);
+        } catch (e) {}
+      }
+
       const res = await fetch('/api/generate-theory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topicId: deckId,
           topicTitle: currentDeck?.name || 'Grammatik',
-          level: currentDeck?.level || 'B1'
+          level: currentDeck?.level || 'B1',
+          materials: deckMaterials
         })
       });
 
@@ -6038,6 +6901,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [bookModal, setBookModal] = useState<{ id?: string } | null>(null);
+  const [deckModal, setDeckModal] = useState<{ mode: 'create' | 'edit'; deck?: Deck | null; category?: string; level?: CEFRLevel } | null>(null);
   
   const [uploadTarget, setUploadTarget] = useState<{ category: string, level: CEFRLevel } | null>(null);
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
@@ -6058,13 +6922,13 @@ export default function App() {
   const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
 
   useEffect(() => {
-    if (renameModal || deleteModal || bookModal || deleteBookModal) {
+    if (renameModal || deleteModal || bookModal || deleteBookModal || deckModal) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
     }
     return () => { document.body.style.overflow = 'unset'; };
-  }, [renameModal, deleteModal, bookModal, deleteBookModal]);
+  }, [renameModal, deleteModal, bookModal, deleteBookModal, deckModal]);
 
 
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
@@ -6076,16 +6940,6 @@ export default function App() {
 
   useEffect(() => {
     setIsMounted(true);
-    // Complete wipe of all old cached theories for fresh AI re-generation
-    if (typeof window !== 'undefined' && !localStorage.getItem('theory_v5_clean_reset_done')) {
-      localStorage.setItem('theory_v5_clean_reset_done', 'true');
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('deck_theory_') || key === 'cache_decks_v2')) {
-          localStorage.removeItem(key);
-        }
-      }
-    }
     const savedLang = localStorage.getItem('selected_language');
     if (savedLang === 'DE' || savedLang === 'EN') {
       setAppLanguage(savedLang);
@@ -6262,9 +7116,18 @@ try {
                 if (stored) deckTheory = JSON.parse(stored);
               } catch(e) {}
             }
+            let deckMaterials = d.materials || [];
+            if ((!deckMaterials || deckMaterials.length === 0) && typeof window !== 'undefined') {
+              try {
+                const storedM = localStorage.getItem(`deck_materials_${d.id}`);
+                if (storedM) deckMaterials = JSON.parse(storedM);
+              } catch (e) {}
+            }
             return {
               ...d,
               theory: deckTheory,
+              materials: deckMaterials,
+              card_count: d.card_count || d.cards?.length || 15,
               cards: d.cards ? d.cards.map((c: any) => ({
                 ...c,
                 baseWordInfo: c.baseWordInfo || null
@@ -6665,8 +7528,7 @@ try {
   };
 
   const handlePlusClick = (category: string, level: CEFRLevel) => {
-    setUploadTarget({ category, level });
-    fileInputRef.current?.click();
+    setDeckModal({ mode: 'create', category, level });
   };
 
   const toggleCategory = (cat: string) => {
@@ -6812,6 +7674,18 @@ try {
         <HeaderWidgets activeBook={activeBook} onBack={() => startTransition(() => setActiveBookId(null))} />
 
       <AnimatePresence>
+        {deckModal && (
+          <DeckModal
+            isOpen={!!deckModal}
+            mode={deckModal.mode}
+            initialDeck={deckModal.deck}
+            category={deckModal.category || activeTab}
+            level={deckModal.level || 'B1'}
+            activeBookId={activeBookId}
+            onClose={() => setDeckModal(null)}
+            onSuccess={() => setDeckModal(null)}
+          />
+        )}
         {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
         {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { initAudioCtx(); setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
         {dictationDeckId && <DictationPlayer deck={decks.find(d => d.id === dictationDeckId)!} onClose={() => setDictationDeckId(null)} />}
@@ -7109,6 +7983,7 @@ try {
                                   activeTab={activeTab} 
                                   onCardClick={handleDeckClick} 
                                   onRename={handleRenameClick}
+                                  onEdit={(d) => setDeckModal({ mode: 'edit', deck: d, category: d.category, level: d.level || 'B1' })}
                                   onStartDictation={(id) => setDictationDeckId(id)}
                                   onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                   onDelete={handleDeleteClick} 
@@ -7149,6 +8024,7 @@ try {
                                           activeTab={activeTab} 
                                           onCardClick={handleDeckClick} 
                                           onRename={handleRenameClick}
+                                          onEdit={(d) => setDeckModal({ mode: 'edit', deck: d, category: d.category, level: d.level || 'B1' })}
                                           onStartDictation={(id) => setDictationDeckId(id)}
                                           onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                           onDelete={handleDeleteClick} 

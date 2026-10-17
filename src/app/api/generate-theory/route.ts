@@ -5,14 +5,17 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export async function POST(req: Request) {
   try {
-    const { topicTitle, level = 'B1' } = await req.json();
+    const { topicTitle, level = 'B1', materials = [] } = await req.json();
 
     if (!topicTitle) {
       return NextResponse.json({ error: 'Topic title required' }, { status: 400 });
     }
 
+    const hasMaterials = Array.isArray(materials) && materials.length > 0;
+
     const systemPrompt = `Ты — строгий профессор и методист немецкого языка (Duden / Goethe-Institut), а также харизматичный наставник.
 Твоя цель — безупречная грамматическая точность и кристальная понятность по теме: "${topicTitle}" (${level}).
+${hasMaterials ? 'ВАЖНО: Используй правила, таблицы и примеры СТРОГО из прикрепленных страниц учебника! Объясни именно ту грамматику, которая дана на этих страницах.' : ''}
 
 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
 - Запрещено придумывать искусственные составные слова вроде "meinder", "meinedie", "meindas"! В немецком языке таких форм нет.
@@ -27,12 +30,12 @@ export async function POST(req: Request) {
 ГРАММАТИЧЕСКАЯ И МЕТОДИЧЕСКАЯ СТРУКТУРА:
 - Без академической скуки и воды. Объясняй логику: почему немцы так говорят, какая за этим стоит мысль, как это легко запомнить.
 - Все объяснения, переводы и подсказки пиши на русском языке. Все конструкции, схемы и примеры — на грамотном немецком языке.
-- КРИТИЧЕСКИ ВАЖНО: Весь контент должен быть СТРОГО о теме "${topicTitle}". Не упоминай модальные глаголы или другие темы, если тема запроса о другом!
+- КРИТИЧЕСКИ ВАЖНО: Весь контент должен быть СТРОГО о теме "${topicTitle}". Не упоминай посторонние темы, если тема запроса о другом!
 - ПРАВИЛО ПУНКТУАЦИИ В ПРИМЕРАХ: Не допускай пробелов перед знаками препинания в конце строки. Строго "... den Apfel." вместо "... den Apfel .".
 - В схемах используй правильную типографическую стрелку → вместо ->.
 - Верни ответ СТРОГО в виде валидного JSON без преамбул и markdown-обёрток.`;
 
-    const userPrompt = `Составь увлекательный, глубокий и безупречный конспект по теме: "${topicTitle}" (${level}).
+    const userPrompt = `Составь увлекательный, глубокий и безупречный конспект по теме: "${topicTitle}" (${level})${hasMaterials ? ' на основе прикрепленных страниц учебника' : ''}.
 Сформируй адаптивный JSON по следующей схеме:
 {
   "title": "${topicTitle}",
@@ -126,22 +129,34 @@ export async function POST(req: Request) {
   ]
 }`;
 
-    const candidateModels = [
-      'llama-3.3-70b-versatile',
-      'openai/gpt-oss-120b',
-      'qwen/qwen3.8-27b'
-    ];
+    const candidateModels = hasMaterials
+      ? ['llama-3.2-11b-vision-preview', 'llama-3.3-70b-versatile']
+      : ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
+
+    let userContent: any = userPrompt;
+    if (hasMaterials) {
+      userContent = [{ type: 'text', text: userPrompt }];
+      materials.forEach((imgBase64: string) => {
+        userContent.push({
+          type: 'image_url',
+          image_url: { url: imgBase64.startsWith('data:') ? imgBase64 : `data:image/jpeg;base64,${imgBase64}` }
+        });
+      });
+    }
 
     let completion = null;
     let lastError = null;
 
     for (const model of candidateModels) {
       try {
+        const isVisionModel = model.includes('vision');
+        const contentToSend = isVisionModel && hasMaterials ? userContent : userPrompt;
+
         completion = await groq.chat.completions.create({
           model,
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
+            { role: 'user', content: contentToSend }
           ],
           response_format: { type: 'json_object' },
           temperature: 0.25,
