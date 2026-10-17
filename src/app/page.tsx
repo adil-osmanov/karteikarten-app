@@ -910,9 +910,20 @@ const useStore = create<DeckState>()((set, get) => ({
         ...updates,
         ...(insertedCards ? { cards: insertedCards } : {})
       };
+      const newDecks = previousDecks.map(d => d.id === validDeckId ? updatedDeck : d);
       set({
-        decks: previousDecks.map(d => d.id === validDeckId ? updatedDeck : d)
+        decks: newDecks
       });
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('cache_decks_v2', JSON.stringify(newDecks));
+        } catch (e) {
+          try {
+            const lightweight = newDecks.map(d => ({ ...d, cards: [] }));
+            localStorage.setItem('cache_decks_v2', JSON.stringify(lightweight));
+          } catch (e2) {}
+        }
+      }
     }
   },
 
@@ -5209,126 +5220,188 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     return true;
   }, []);
 
-  // 1. Мгновенно вычисляем начальную теорию из памяти или localStorage, исключая повторные генерации
-  const initialTheory = useMemo(() => {
-    if (deck && isValidTheory(deck.theory)) {
-      return deck.theory as StructuredTheory;
-    }
-    if (typeof deck?.theory === 'string') {
-      try {
-        const p = JSON.parse(deck.theory);
-        if (isValidTheory(p)) return p;
-      } catch (e) {}
-    }
-    if (typeof window !== 'undefined') {
-      const raw = localStorage.getItem(`deck_theory_json_${deckId}`) || localStorage.getItem(`deck_theory_${deckId}`);
-      if (raw) {
+  // 1. Мгновенно вычисляем начальную теорию из памяти или localStorage (поддерживая как JSON, так и Markdown)
+  const initialData = useMemo(() => {
+    // А. Из объекта deck в store
+    if (deck?.theory) {
+      if (isValidTheory(deck.theory)) {
+        return { structured: deck.theory as StructuredTheory, legacy: "" };
+      }
+      if (typeof deck.theory === 'string') {
         try {
-          const p = JSON.parse(raw);
-          if (isValidTheory(p)) return p;
-          else {
-            localStorage.removeItem(`deck_theory_json_${deckId}`);
-            localStorage.removeItem(`deck_theory_${deckId}`);
-          }
+          const p = JSON.parse(deck.theory);
+          if (isValidTheory(p)) return { structured: p, legacy: "" };
         } catch (e) {}
+        if (deck.theory.trim().length > 0) {
+          return { structured: null, legacy: deck.theory };
+        }
       }
     }
-    return null;
+    // Б. Из localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        const jsonRaw = localStorage.getItem(`deck_theory_json_${deckId}`);
+        if (jsonRaw) {
+          const p = JSON.parse(jsonRaw);
+          if (isValidTheory(p)) return { structured: p, legacy: "" };
+        }
+      } catch (e) {}
+
+      try {
+        const raw = localStorage.getItem(`deck_theory_${deckId}`);
+        if (raw) {
+          try {
+            const p = JSON.parse(raw);
+            if (isValidTheory(p)) return { structured: p, legacy: "" };
+          } catch (e) {}
+          if (raw.trim().length > 0) {
+            return { structured: null, legacy: raw };
+          }
+        }
+      } catch (e) {}
+    }
+    return { structured: null, legacy: "" };
   }, [deck, deckId, isValidTheory]);
 
-  const [theoryData, setTheoryData] = useState<StructuredTheory | null>(initialTheory);
-  const [legacyText, setLegacyText] = useState<string>("");
-  const [isLoading, setIsLoading] = useState<boolean>(!initialTheory);
+  const [theoryData, setTheoryData] = useState<StructuredTheory | null>(initialData.structured);
+  const [legacyText, setLegacyText] = useState<string>(initialData.legacy);
+  const hasInitial = !!(initialData.structured || initialData.legacy);
+  const [isLoading, setIsLoading] = useState<boolean>(!hasInitial);
+  const [loadingStatus, setLoadingStatus] = useState<string>('Lade Theorie aus Datenbank...');
   const [error, setError] = useState<string | null>(null);
 
   const fetchTheory = useCallback(async (force = false) => {
     if (!deckId) return;
 
     if (!force) {
-      // 1. Если теория уже есть в состоянии — берем её
+      // 1. Если структурированная теория уже есть в состоянии
       if (theoryData && isValidTheory(theoryData)) {
         setIsLoading(false);
         return;
       }
-
-      // 2. Если в объекте темы
-      const currentDeck = useStore.getState().decks.find(d => d.id === deckId);
-      if (currentDeck && isValidTheory(currentDeck.theory)) {
-        setTheoryData(currentDeck.theory as StructuredTheory);
+      // 2. Если markdown-теория уже есть в состоянии
+      if (legacyText && legacyText.trim().length > 0) {
         setIsLoading(false);
         return;
       }
 
-      if (typeof currentDeck?.theory === 'string') {
-        try {
-          const p = JSON.parse(currentDeck.theory);
-          if (isValidTheory(p)) {
-            setTheoryData(p);
+      // 3. Проверяем в текущем объекте deck из Zustand store
+      const currentDeck = useStore.getState().decks.find(d => d.id === deckId);
+      if (currentDeck?.theory) {
+        if (isValidTheory(currentDeck.theory)) {
+          setTheoryData(currentDeck.theory as StructuredTheory);
+          setLegacyText("");
+          setIsLoading(false);
+          return;
+        }
+        if (typeof currentDeck.theory === 'string') {
+          try {
+            const p = JSON.parse(currentDeck.theory);
+            if (isValidTheory(p)) {
+              setTheoryData(p);
+              setLegacyText("");
+              setIsLoading(false);
+              return;
+            }
+          } catch (e) {}
+          if (currentDeck.theory.trim().length > 0) {
+            setLegacyText(currentDeck.theory);
+            setTheoryData(null);
             setIsLoading(false);
             return;
           }
-        } catch (e) {}
+        }
       }
 
-      // 3. Проверяем localStorage
-      const cached = localStorage.getItem(`deck_theory_json_${deckId}`) || localStorage.getItem(`deck_theory_${deckId}`);
-      if (cached) {
-        try {
-          const p = JSON.parse(cached);
+      // 4. Проверяем localStorage
+      try {
+        const jsonCached = localStorage.getItem(`deck_theory_json_${deckId}`);
+        if (jsonCached) {
+          const p = JSON.parse(jsonCached);
           if (isValidTheory(p)) {
             setTheoryData(p);
+            setLegacyText("");
             setIsLoading(false);
             useStore.setState(state => ({
               decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p } : d)
             }));
-            return;
-          } else {
-            localStorage.removeItem(`deck_theory_json_${deckId}`);
-            localStorage.removeItem(`deck_theory_${deckId}`);
-          }
-        } catch (e) {}
-      }
-
-      // 4. Проверяем напрямую в Supabase, если в памяти/localStorage еще не успело обновиться
-      try {
-        const { data: remoteDeck } = await supabase.from('decks').select('theory, materials').eq('id', deckId).single();
-        if (remoteDeck && isValidTheory(remoteDeck.theory)) {
-          const p = typeof remoteDeck.theory === 'string' ? JSON.parse(remoteDeck.theory) : remoteDeck.theory;
-          if (isValidTheory(p)) {
-            setTheoryData(p);
-            setIsLoading(false);
-            useStore.setState(state => ({
-              decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p, materials: remoteDeck.materials || d.materials } : d)
-            }));
-            const strP = JSON.stringify(p);
-            localStorage.setItem(`deck_theory_json_${deckId}`, strP);
-            localStorage.setItem(`deck_theory_${deckId}`, strP);
             return;
           }
         }
       } catch (e) {}
 
       try {
-        const { data: remoteTopic } = await supabase.from('topics').select('theory, materials').eq('id', deckId).single();
-        if (remoteTopic && isValidTheory(remoteTopic.theory)) {
-          const p = typeof remoteTopic.theory === 'string' ? JSON.parse(remoteTopic.theory) : remoteTopic.theory;
-          if (isValidTheory(p)) {
-            setTheoryData(p);
+        const cached = localStorage.getItem(`deck_theory_${deckId}`);
+        if (cached) {
+          try {
+            const p = JSON.parse(cached);
+            if (isValidTheory(p)) {
+              setTheoryData(p);
+              setLegacyText("");
+              setIsLoading(false);
+              useStore.setState(state => ({
+                decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p } : d)
+              }));
+              return;
+            }
+          } catch (e) {}
+          if (cached.trim().length > 0) {
+            setLegacyText(cached);
+            setTheoryData(null);
             setIsLoading(false);
             useStore.setState(state => ({
-              decks: state.decks.map(d => d.id === deckId ? { ...d, theory: p, materials: remoteTopic.materials || d.materials } : d)
+              decks: state.decks.map(d => d.id === deckId ? { ...d, theory: cached } : d)
             }));
-            const strP = JSON.stringify(p);
-            localStorage.setItem(`deck_theory_json_${deckId}`, strP);
-            localStorage.setItem(`deck_theory_${deckId}`, strP);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      // 5. Проверяем напрямую в Supabase decks.select('theory, materials')
+      setIsLoading(true);
+      setLoadingStatus('Lade Theorie aus Datenbank...');
+      try {
+        const { data: remoteDeck } = await supabase.from('decks').select('theory, materials').eq('id', deckId).single();
+        if (remoteDeck && remoteDeck.theory) {
+          const rawTh = remoteDeck.theory;
+          let parsedObj: any = null;
+          if (typeof rawTh === 'object') parsedObj = rawTh;
+          else if (typeof rawTh === 'string') {
+            try { parsedObj = JSON.parse(rawTh); } catch (e) {}
+          }
+
+          if (parsedObj && isValidTheory(parsedObj)) {
+            setTheoryData(parsedObj);
+            setLegacyText("");
+            setIsLoading(false);
+            useStore.setState(state => ({
+              decks: state.decks.map(d => d.id === deckId ? { ...d, theory: parsedObj, materials: remoteDeck.materials || d.materials } : d)
+            }));
+            const strP = JSON.stringify(parsedObj);
+            try {
+              localStorage.setItem(`deck_theory_json_${deckId}`, strP);
+              localStorage.setItem(`deck_theory_${deckId}`, strP);
+            } catch (e) {}
+            return;
+          } else if (typeof rawTh === 'string' && rawTh.trim().length > 0) {
+            setLegacyText(rawTh);
+            setTheoryData(null);
+            setIsLoading(false);
+            useStore.setState(state => ({
+              decks: state.decks.map(d => d.id === deckId ? { ...d, theory: rawTh, materials: remoteDeck.materials || d.materials } : d)
+            }));
+            try {
+              localStorage.setItem(`deck_theory_${deckId}`, rawTh);
+            } catch (e) {}
             return;
           }
         }
       } catch (e) {}
     }
 
-    // Принудительная или первичная генерация
+    // 6. Первичная генерация с помощью ИИ (только если теории действительно нет нигде!)
     setIsLoading(true);
+    setLoadingStatus('Theorie wird mit KI generiert...');
     setError(null);
     try {
       const currentDeck = useStore.getState().decks.find(d => d.id === deckId);
@@ -5360,30 +5433,19 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       }
 
       setTheoryData(generatedData);
+      setLegacyText("");
 
-      // Обновляем локальное состояние стора
-      useStore.setState(state => ({
-        decks: state.decks.map(d => d.id === deckId ? { ...d, theory: generatedData } : d)
-      }));
+      // Сохраняем в Supabase и стейт через updateDeck
+      await useStore.getState().updateDeck(deckId, { theory: generatedData });
 
-      // Сохраняем в localStorage для мгновенного доступа без сети
-      const stringified = JSON.stringify(generatedData);
-      localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
-      localStorage.setItem(`deck_theory_${deckId}`, stringified);
+      // Кешируем в localStorage
+      try {
+        const stringified = JSON.stringify(generatedData);
+        localStorage.setItem(`deck_theory_json_${deckId}`, stringified);
+        localStorage.setItem(`deck_theory_${deckId}`, stringified);
+      } catch (e) {}
 
       window.dispatchEvent(new Event('theory-update'));
-
-      // ФИЗИЧЕСКИ ЗАПИСЫВАЕМ ТЕОРИЮ В SUPABASE НАВСЕГДА (0 сетевых запросов при повторных открытиях)
-      try {
-        const { error: dbErrTopics } = await supabase.from('topics').update({ theory: generatedData }).eq('id', deckId);
-        if (dbErrTopics) console.error('[Supabase Save Theory Error (topics)]:', dbErrTopics);
-      } catch (e) {}
-
-      try {
-        const { error: dbErrDecks } = await supabase.from('decks').update({ theory: generatedData }).eq('id', deckId);
-        if (dbErrDecks) console.error('[Supabase Save Theory Error (decks)]:', dbErrDecks);
-      } catch (e) {}
-
       syncAppStateToCloud();
     } catch (err: any) {
       console.error('Failed to load theory:', err);
@@ -5391,21 +5453,49 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     } finally {
       setIsLoading(false);
     }
-  }, [deckId, theoryData, isValidTheory]);
+  }, [deckId, theoryData, legacyText, isValidTheory]);
 
   useEffect(() => {
-    // Если у темы в базе/памяти уже есть сохраненная теория — мгновенно рендерим её (0 сетевых запросов)
-    if (deck?.theory && typeof deck.theory === 'object' && Object.keys(deck.theory).length > 0) {
-      setTheoryData(deck.theory as StructuredTheory);
+    // 1. Если в deck уже есть структурированная или строковая теория
+    if (deck?.theory) {
+      if (isValidTheory(deck.theory)) {
+        setTheoryData(deck.theory as StructuredTheory);
+        setLegacyText("");
+        setIsLoading(false);
+        return;
+      }
+      if (typeof deck.theory === 'string') {
+        try {
+          const p = JSON.parse(deck.theory);
+          if (isValidTheory(p)) {
+            setTheoryData(p);
+            setLegacyText("");
+            setIsLoading(false);
+            return;
+          }
+        } catch (e) {}
+        if (deck.theory.trim().length > 0) {
+          setLegacyText(deck.theory);
+          setTheoryData(null);
+          setIsLoading(false);
+          return;
+        }
+      }
+    }
+    // 2. Если уже было вычислено initialData
+    if (initialData.structured) {
+      setTheoryData(initialData.structured);
+      setLegacyText("");
       setIsLoading(false);
       return;
     }
-    if (initialTheory && isValidTheory(initialTheory)) {
-      setTheoryData(initialTheory);
+    if (initialData.legacy) {
+      setLegacyText(initialData.legacy);
+      setTheoryData(null);
       setIsLoading(false);
       return;
     }
-    // Только если теории в базе действительно нет — запускаем первичную генерацию
+    // 3. Только если теории действительно нигде нет локально — запрашиваем базу
     fetchTheory(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckId, deck?.theory]);
@@ -5591,6 +5681,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
             <button
               onClick={() => {
                 setTheoryData(null);
+                setLegacyText("");
                 fetchTheory(true);
               }}
               title="Neu generieren"
@@ -5615,7 +5706,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
             <div className="space-y-6 animate-pulse py-2">
               <div className="flex items-center gap-2 text-xs text-blue-400 font-medium">
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                <span>Theorie wird mit KI generiert...</span>
+                <span>{loadingStatus}</span>
               </div>
 
               {/* Headline Skeleton */}
@@ -5645,20 +5736,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 <div className="h-24 rounded-2xl bg-zinc-900/60 border border-white/5" />
               </div>
             </div>
-          ) : (!theoryData || typeof theoryData !== 'object' || Object.keys(theoryData).length === 0) ? (
-            <div className="p-8 text-center flex flex-col items-center justify-center space-y-4 my-auto py-16">
-              <p className="text-zinc-400 text-sm">Не удалось загрузить теорию или данные повреждены.</p>
-              <button 
-                onClick={() => {
-                  setTheoryData(null);
-                  fetchTheory(true);
-                }}
-                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer active:scale-95"
-              >
-                Сгенерировать заново
-              </button>
-            </div>
-          ) : (
+          ) : (theoryData && typeof theoryData === 'object' && Object.keys(theoryData).length > 0) ? (
             <TheoryErrorBoundary
               fallback={(err, reset) => (
                 <div className="p-8 text-center flex flex-col items-center justify-center space-y-4 my-auto py-16">
@@ -5667,6 +5745,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                     onClick={() => {
                       reset();
                       setTheoryData(null);
+                      setLegacyText("");
                       fetchTheory(true);
                     }}
                     className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer active:scale-95"
@@ -5915,6 +5994,40 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 })()}
               </div>
             </TheoryErrorBoundary>
+          ) : legacyText ? (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                <span className="text-xs text-zinc-400 font-medium">Конспект грамматики</span>
+                <button
+                  onClick={() => {
+                    setTheoryData(null);
+                    setLegacyText("");
+                    fetchTheory(true);
+                  }}
+                  className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1.5 cursor-pointer py-1.5 px-3.5 rounded-full bg-blue-500/10 hover:bg-blue-500/20 active:scale-95"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Перегенерировать в Apple Guidebook
+                </button>
+              </div>
+              <div className="text-zinc-200">
+                {renderedLegacyContent}
+              </div>
+            </div>
+          ) : (
+            <div className="p-8 text-center flex flex-col items-center justify-center space-y-4 my-auto py-16">
+              <p className="text-zinc-400 text-sm">Теория для этой темы пока не создана.</p>
+              <button 
+                onClick={() => {
+                  setTheoryData(null);
+                  setLegacyText("");
+                  fetchTheory(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer active:scale-95"
+              >
+                Сгенерировать теорию с ИИ
+              </button>
+            </div>
           )}
         </div>
 
@@ -7337,8 +7450,11 @@ try {
           try {
             localStorage.setItem('cache_decks_v2', JSON.stringify(enhancedDecks));
           } catch(e) {
-            console.warn('Quota exceeded, clearing cache_decks_v2');
-            localStorage.removeItem('cache_decks_v2');
+            console.warn('Quota exceeded, fallback to lightweight cache_decks_v2');
+            try {
+              const lightweight = enhancedDecks.map((d: any) => ({ ...d, cards: [] }));
+              localStorage.setItem('cache_decks_v2', JSON.stringify(lightweight));
+            } catch (e2) {}
           }
         }
       } catch (err: any) {
