@@ -14,34 +14,31 @@ export async function POST(req: Request) {
     const isGrammar = category.toLowerCase().includes('grammatik');
     const targetCount = Math.max(5, Math.min(50, Number(count) || 15));
 
-    const systemPrompt = `Ты — ведущий составитель тестов по немецкому языку для учебников Klett (Aspekte Beruf B1/B2).
-Твоя цель — создать ровно ${targetCount} АТОМАРНЫХ учебных карточек на основе материалов скриншотов.
+    const systemPrompt = `Ты — ведущий немецкий филолог, составитель учебных тестов уровня B1/B2 (Klett / Duden).
+Твоя цель — создать ровно ${targetCount} АТОМАРНЫХ учебных карточек на основе материалов скриншотов учебника.
 
-КРИТИЧЕСКИЕ ПРАВИЛА СОСТАВЛЕНИЯ ПРЕДЛОЖЕНИЙ:
+ФУНДАМЕНТАЛЬНЫЕ ПРАВИЛА (ZERO HALLUCINATION & CLEAN SYNTAX):
 1. ПРАВИЛО ОДНОГО ПРЕДЛОЖЕНИЯ (СТРОГО):
    - 1 карточка = РОВНО 1 КОРОТКОЕ ЗАКОНЧЕННОЕ ПРЕДЛОЖЕНИЕ (8–14 слов).
    - КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО объединять несколько предложений в одну карточку!
-   - Если в тексте учебника идет длинная история — изолируй ТОЛЬКО ОДНО конкретное предложение с целевой грамматикой.
+   - Если в тексте учебника идет длинный связный рассказ — выдели ТОЛЬКО ОДНО конкретное предложение с целевой лексикой/грамматикой.
    - ❌ ЗАПРЕЩЕНО: "Mit fünf Jahren ging ich in die Vorschule. Das war 1998. Ein Jahr später kam ich in die Grundschule."
    - ✅ ИДЕАЛЬНО: "Ein Jahr später ___ ich in die Grundschule." (targetWord: "kam")
-   - ❌ ЗАПРЕЩЕНО: "Am Ende der zwölften Klasse legte ich die Prüfung ab. Das ist so ähnlich wie das Abitur. Die Prüfungen sind schwer."
-   - ✅ ИДЕАЛЬНО: "Am Ende der zwölften Klasse ___ ich die Abschlussprüfung ab." (targetWord: "legte")
 
-2. НЕМЕЦКАЯ РАМОЧНАЯ КОНСТРУКЦИЯ (SATZKLAMMER):
-   - Предложение обязано быть синтаксически завершенным!
-   - Если это Passiv или Perfekt о рождении — слово "geboren" ОБЯЗАНО стоять на конце:
-     "Ich ___ am 25. Oktober 1993 in Homs geboren." (targetWord: "wurde")
-   - Если это глагол с отделяемой приставкой — приставка стоит в конце предложения:
-     "Und so schloss ich meine Ausbildung mit der Note „Gut“ ___ ." (targetWord: "ab")
+2. НЕМЕЦКАЯ РАМОЧНАЯ КОНСТРУКЦИЯ (SATZKLAMMER & SYNTAX):
+   - Предложение ОБЯЗАНО быть синтаксически полным и естественным по нормам Duden.
+   - Если используется составное сказуемое (Perfekt, Passiv, модальные глаголы) — смысловой причастие/инфинитив ОБЯЗАТЕЛЬНО стоит на последнем месте:
+     "Ich ___ 1993 in Homs geboren." (targetWord: "wurde")
+   - Если глагол с отделяемой приставкой — приставка стоит строго в конце предложения:
+     "Und so schloss ich meine Ausbildung mit der Note 2 ___ ." (targetWord: "ab")
 
-3. РЕЖИМ ГЕНЕРАЦИИ:
-   - Grammatik: пропуском "___" является грамматическая форма темы (глагол в Präteritum, форма Perfekt/Plusquamperfekt, артикль или предлог).
-   - Wörter: пропуском "___" является ключевое слово или устойчивое сочетание (Nomen-Verb-Verbindung: z.B. "tätig", "Abschluss", "Erfahrung").
+3. ДИСТРАКТОРЫ (ВАРИАНТЫ ВЫБОРА):
+   - Все 4 варианта (1 правильный + 3 дистрактора) обязаны быть строго ОДНОЙ части речи и состоять строго из ОДНОГО слова.
+   - Запрещены составные фразы в вариантах ответа.
 
-4. ДИСТРАКТОРЫ (ВАРИАНТЫ ОТВЕТОВ):
-   - Все 4 варианта ответа обязаны быть строго ОДНОЙ части речи и состоять из ОДНОГО слова.
-   - ❌ Запрещено: ["hat", "ist", "war Ausbilder", "wurde"] (вариант "war Ausbilder" содержит 2 слова!).
-   - ✅ Правильно: ["hat", "ist", "war", "wurde"].
+4. РЕЖИМЫ:
+   - Grammatik: фокус на грамматических структурах темы (падежи, окончания, временные формы, предлоги).
+   - Wörter: фокус на ключевых лексических единицах, устойчивых выражениях (Nomen-Verb-Verbindungen).
 
 ФОРМАТ JSON:
 {
@@ -50,7 +47,7 @@ export async function POST(req: Request) {
     {
       "sentence": "Одно законченное предложение с пропуском ___",
       "targetWord": "пропущенное слово",
-      "translation": "Естественный русский перевод этого одного предложения",
+      "translation": "Качественный русский перевод этого одного предложения",
       "hint": "Краткая грамматическая подсказка",
       "options": ["правильное", "дистрактор1", "дистрактор2", "дистрактор3"]
     }
@@ -77,8 +74,8 @@ export async function POST(req: Request) {
     });
 
     // Модели на Groq:
-    // По ТЗ: llama-3.2-11b-vision-preview при наличии картинок (fallback qwen/qwen3.8-27b),
-    // или llama-3.3-70b-versatile без картинок (fallback openai/gpt-oss-120b)
+    // llama-3.2-11b-vision-preview при наличии изображений (fallback qwen/qwen3.8-27b),
+    // llama-3.3-70b-versatile для текста (fallback openai/gpt-oss-120b, qwen/qwen3.8-27b)
     const modelsToTry = hasImages 
       ? ['llama-3.2-11b-vision-preview', 'qwen/qwen3.8-27b'] 
       : ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
@@ -95,7 +92,7 @@ export async function POST(req: Request) {
             { role: 'user', content: hasImages ? (userContent as any) : `Тема: "${title}". Создай ровно ${targetCount} карточек строго по теме ${isGrammar ? 'Grammatik' : 'Wörter'}. 1 карточка = строго 1 короткое предложение.` }
           ],
           response_format: { type: 'json_object' },
-          temperature: 0.1,
+          temperature: 0.15,
         });
         if (completion?.choices?.[0]?.message?.content) {
           break;

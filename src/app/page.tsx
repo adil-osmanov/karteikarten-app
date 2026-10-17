@@ -4154,27 +4154,20 @@ function DeckModal({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
         transition={{ type: "spring", duration: 0.4, bounce: 0.15 }}
-        className="relative w-full max-w-xl bg-zinc-950/95 border border-white/10 rounded-3xl p-5 sm:p-7 shadow-[0_25px_70px_rgba(0,0,0,0.6)] z-10 text-white flex flex-col max-h-[92vh] overflow-hidden"
+        className="relative w-full max-w-lg rounded-3xl bg-zinc-950 border border-white/10 shadow-2xl flex flex-col overflow-hidden text-zinc-100 max-h-[88vh] z-10"
       >
         {/* Header */}
-        <div className="flex items-start justify-between pb-4 border-b border-white/5">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-                {mode === 'create' ? 'Новая колода' : 'Редактирование колоды'}
-              </h2>
-              <span className="px-2.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-semibold">
-                {category}
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-400 text-xs">
-                {level}
-              </span>
-            </div>
-            <p className="text-xs text-zinc-400">
-              {mode === 'create' 
-                ? 'Создайте интерактивную колоду из учебника или загрузите CSV'
-                : 'Редактируйте материалы темы и запускайте перегенерацию'}
-            </p>
+        <div className="px-7 pt-6 pb-4 border-b border-white/10 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl font-bold tracking-tight text-white">
+              {mode === 'create' ? 'Новая колода' : 'Редактирование темы'}
+            </h2>
+            <span className="px-2.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-semibold">
+              {category}
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-400 text-xs">
+              {level}
+            </span>
           </div>
           <button
             onClick={onClose}
@@ -4186,41 +4179,43 @@ function DeckModal({
 
         {/* Apple Segmented Control (in create mode) */}
         {mode === 'create' && (
-          <div className="grid grid-cols-2 p-1 bg-white/[0.04] border border-white/[0.08] rounded-2xl my-4 text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => setTab('ai')}
-              className={cn(
-                "py-2.5 px-3 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer",
-                tab === 'ai' 
-                  ? "bg-white/15 text-white shadow-sm font-semibold border border-white/10" 
-                  : "text-zinc-400 hover:text-white"
-              )}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-              <span>✨ Из материалов книги (ИИ)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('csv')}
-              className={cn(
-                "py-2.5 px-3 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer",
-                tab === 'csv' 
-                  ? "bg-white/15 text-white shadow-sm font-semibold border border-white/10" 
-                  : "text-zinc-400 hover:text-white"
-              )}
-            >
-              <FileText className="w-3.5 h-3.5 text-amber-400" />
-              <span>📄 Загрузить CSV</span>
-            </button>
+          <div className="px-7 pt-4 shrink-0">
+            <div className="grid grid-cols-2 p-1 bg-white/[0.04] border border-white/[0.08] rounded-2xl text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setTab('ai')}
+                className={cn(
+                  "py-2 px-3 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer",
+                  tab === 'ai' 
+                    ? "bg-white/15 text-white shadow-sm font-semibold border border-white/10" 
+                    : "text-zinc-400 hover:text-white"
+                )}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                <span>✨ Из материалов (ИИ)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('csv')}
+                className={cn(
+                  "py-2 px-3 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer",
+                  tab === 'csv' 
+                    ? "bg-white/15 text-white shadow-sm font-semibold border border-white/10" 
+                    : "text-zinc-400 hover:text-white"
+                )}
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-400" />
+                <span>📄 Загрузить CSV</span>
+              </button>
+            </div>
           </div>
         )}
 
         {/* Scrollable Body Content */}
-        <div className="overflow-y-auto space-y-5 pr-1 flex-1 py-2">
+        <div className="px-7 py-6 space-y-6 overflow-y-auto max-h-[82vh] [scrollbar-gutter:stable] pr-8 flex-1 custom-scrollbar">
           {/* 1. TITLE INPUT */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-zinc-300">
+          <div>
+            <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2 block">
               Название темы
             </label>
             <input
@@ -4228,23 +4223,17 @@ function DeckModal({
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder="Например: 1.1: Über Vergangenes berichten"
-              className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none transition-all font-medium text-sm"
+              className="w-full h-11 px-4 rounded-xl bg-zinc-900/60 border border-white/10 text-white font-medium placeholder:text-zinc-500 focus:outline-none focus:border-blue-500 transition-all text-sm"
             />
           </div>
 
           {(tab === 'ai' || mode === 'edit') && (
             <>
               {/* 2. TEXTBOOK SCREENSHOTS / MATERIALS DROPZONE */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-zinc-300 flex items-center gap-2">
-                    <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Страницы учебника (фото / скриншоты)</span>
-                  </label>
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                    Groq Vision 11B
-                  </span>
-                </div>
+              <div>
+                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2 block">
+                  Страницы учебника
+                </label>
 
                 {/* Dropzone container */}
                 <div
@@ -4257,10 +4246,10 @@ function DeckModal({
                   }}
                   onClick={() => imageInputRef.current?.click()}
                   className={cn(
-                    "border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-2.5 select-none",
+                    "border border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-1.5 select-none",
                     isDraggingOver
                       ? "border-blue-500 bg-blue-500/10"
-                      : "border-white/15 hover:border-white/30 bg-white/[0.02] hover:bg-white/[0.04]"
+                      : "border-white/15 hover:border-white/30 bg-zinc-900/30"
                   )}
                 >
                   <input
@@ -4280,15 +4269,15 @@ function DeckModal({
                     </div>
                   ) : (
                     <>
-                      <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-zinc-300">
+                      <div className="w-9 h-9 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400">
                         <Upload className="w-4 h-4" />
                       </div>
                       <div className="space-y-0.5">
                         <p className="text-xs font-medium text-zinc-200">
-                          Перетащите страницы учебника сюда или выберите файлы
+                          Перетащите страницы сюда или выберите файлы
                         </p>
                         <p className="text-[11px] text-zinc-500">
-                          Поддерживаются PNG, JPG, WebP. ИИ создаст карточки и теорию строго по ним.
+                          PNG, JPG, WebP. ИИ создаст карточки и теорию строго по ним.
                         </p>
                       </div>
                     </>
@@ -4297,15 +4286,15 @@ function DeckModal({
 
                 {/* Gallery of thumbnails */}
                 {materials.length > 0 && (
-                  <div className="space-y-1.5 pt-1">
+                  <div className="space-y-1.5 pt-3">
                     <span className="text-[11px] text-zinc-400">
                       Прикреплено страниц: {materials.length}
                     </span>
-                    <div className="grid grid-cols-4 sm:grid-cols-5 gap-2.5">
+                    <div className="flex flex-wrap gap-2.5">
                       {materials.map((mat, idx) => (
                         <div
                           key={idx}
-                          className="relative group/thumb aspect-[3/4] rounded-xl overflow-hidden border border-white/10 bg-zinc-900 shadow-sm"
+                          className="w-20 h-24 rounded-xl object-cover border border-white/10 relative overflow-hidden bg-zinc-900 shrink-0 group/thumb"
                         >
                           <img
                             src={mat}
@@ -4331,60 +4320,60 @@ function DeckModal({
               </div>
 
               {/* 3. CARD COUNT SELECTOR */}
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-zinc-300 flex items-center gap-2">
-                    <Sliders className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Количество карточек</span>
-                  </label>
-                  <span className="text-xs font-mono font-bold text-blue-400">
-                    {cardCount} предложений
-                  </span>
+              <div>
+                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2 block">
+                  Количество карточек
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="grid grid-cols-4 gap-2 flex-1">
+                    {[10, 15, 20, 25].map(cnt => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => setCardCount(cnt)}
+                        className={cn(
+                          "py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer",
+                          cardCount === cnt
+                            ? "bg-blue-600 text-white border-blue-500 shadow-sm"
+                            : "bg-zinc-900/60 border-white/10 text-zinc-300 hover:bg-zinc-800/80"
+                        )}
+                      >
+                        {cnt}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-zinc-900/60 border border-white/10 rounded-xl px-2.5 py-1">
+                    <span className="text-[11px] text-zinc-400 font-medium">Своё:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={cardCount}
+                      onChange={e => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val)) {
+                          setCardCount(Math.max(1, Math.min(60, val)));
+                        } else {
+                          setCardCount(1);
+                        }
+                      }}
+                      className="w-12 h-7 text-center rounded-lg bg-black/30 text-white font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
-
-                {/* Pills */}
-                <div className="grid grid-cols-5 gap-2">
-                  {[10, 15, 20, 25, 30].map(cnt => (
-                    <button
-                      key={cnt}
-                      type="button"
-                      onClick={() => setCardCount(cnt)}
-                      className={cn(
-                        "py-2 rounded-xl text-xs font-medium border transition-all cursor-pointer",
-                        cardCount === cnt
-                          ? "bg-blue-500/20 border-blue-500/40 text-blue-300 font-semibold"
-                          : "bg-white/[0.04] border-white/5 text-zinc-400 hover:text-white hover:bg-white/[0.08]"
-                      )}
-                    >
-                      {cnt}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Range Slider */}
-                <input
-                  type="range"
-                  min="5"
-                  max="40"
-                  step="5"
-                  value={cardCount}
-                  onChange={e => setCardCount(Number(e.target.value))}
-                  className="w-full accent-blue-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg appearance-none mt-1"
-                />
               </div>
             </>
           )}
 
           {tab === 'csv' && mode === 'create' && (
             <div className="space-y-3">
-              <label className="text-xs font-medium text-zinc-300 flex items-center gap-2">
-                <FileText className="w-3.5 h-3.5 text-amber-400" />
-                <span>Файл карточек в формате CSV</span>
+              <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2 block">
+                Файл карточек в формате CSV
               </label>
 
               <div
                 onClick={() => csvInputRef.current?.click()}
-                className="border-2 border-dashed border-white/15 hover:border-white/30 bg-white/[0.02] hover:bg-white/[0.04] rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 select-none"
+                className="border border-dashed border-white/15 hover:border-white/30 bg-zinc-900/30 rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 select-none"
               >
                 <input
                   ref={csvInputRef}
@@ -4413,12 +4402,12 @@ function DeckModal({
         </div>
 
         {/* Footer Actions */}
-        <div className="pt-4 mt-2 border-t border-white/10 flex flex-col sm:flex-row gap-2.5 justify-end">
+        <div className="px-7 py-4 border-t border-white/10 flex items-center justify-between gap-3 shrink-0">
           <button
             type="button"
             onClick={onClose}
             disabled={isGenerating || isSaving}
-            className="py-3 px-5 rounded-2xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+            className="bg-transparent hover:bg-white/5 text-zinc-400 hover:text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
           >
             Отмена
           </button>
@@ -4429,7 +4418,7 @@ function DeckModal({
                 type="button"
                 onClick={handleCreateOrUpdateAI}
                 disabled={isGenerating || isCompressing || !title.trim()}
-                className="py-3 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="py-2.5 px-6 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isGenerating ? (
                   <>
@@ -4439,7 +4428,7 @@ function DeckModal({
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-blue-200" />
-                    <span>✨ Сгенерировать колоду ({cardCount} карточек)</span>
+                    <span>Сгенерировать колоду ({cardCount})</span>
                   </>
                 )}
               </button>
@@ -4448,19 +4437,19 @@ function DeckModal({
                 type="button"
                 onClick={handleImportCsv}
                 disabled={csvCards.length === 0 || !title.trim()}
-                className="py-3 px-6 rounded-2xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="py-2.5 px-6 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <FileText className="w-4 h-4" />
                 <span>Импортировать CSV ({csvCards.length})</span>
               </button>
             )
           ) : (
-            <div className="flex flex-col sm:flex-row gap-2.5">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleCreateOrUpdateAI}
                 disabled={isGenerating || isSaving}
-                className="py-3 px-5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-white/10 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                className="py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-white/10 transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
                 {isGenerating ? (
                   <>
@@ -4470,7 +4459,7 @@ function DeckModal({
                 ) : (
                   <>
                     <RotateCw className="w-3.5 h-3.5 text-blue-400" />
-                    <span>🔄 Перегенерировать карточки</span>
+                    <span>🔄 Перегенерировать</span>
                   </>
                 )}
               </button>
@@ -4479,7 +4468,7 @@ function DeckModal({
                 type="button"
                 onClick={handleSaveEditOnly}
                 disabled={isGenerating || isSaving || !title.trim()}
-                className="py-3 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                className="py-2.5 px-5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 {isSaving ? (
                   <>
@@ -5204,13 +5193,19 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   }, [deckId, theoryData, isValidTheory]);
 
   useEffect(() => {
+    if (deck?.theory && typeof deck.theory === 'object' && Object.keys(deck.theory).length > 0) {
+      setTheoryData(deck.theory as StructuredTheory);
+      setIsLoading(false);
+      return;
+    }
     if (initialTheory && isValidTheory(initialTheory)) {
+      setTheoryData(initialTheory);
       setIsLoading(false);
       return;
     }
     fetchTheory(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckId]);
+  }, [deckId, deck]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -5480,17 +5475,12 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
             >
               {/* Apple Guidebook Sheet (max-w-4xl) */}
               <div className="space-y-6">
-                {/* 1. Заголовок и Инсайт (Catchy Headline) */}
-                <div>
-                  <h1 className="text-2xl font-bold tracking-tight text-white mb-2">
-                    {theoryData.title || displayTitle}
-                  </h1>
-                  {(theoryData.catchyHeadline || theoryData.oneLiner) && (
-                    <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900/30 to-indigo-900/20 border border-blue-500/30 text-blue-100 text-sm font-medium leading-relaxed shadow-sm">
-                      {theoryData.catchyHeadline || theoryData.oneLiner}
-                    </div>
-                  )}
-                </div>
+                {/* 1. Инсайт (Catchy Headline) */}
+                {(theoryData.catchyHeadline || theoryData.oneLiner) && (
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900/30 to-indigo-900/20 border border-blue-500/30 text-blue-100 text-sm font-medium leading-relaxed shadow-sm">
+                    {theoryData.catchyHeadline || theoryData.oneLiner}
+                  </div>
+                )}
 
                 {/* 2. Живое объяснение (Explanation) */}
                 {(theoryData.explanation || theoryData.coreConcept || theoryData.simpleExplanation) && (
