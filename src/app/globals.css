@@ -5,22 +5,6 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
 }
 
-:root {
-  color-scheme: dark;
-}
-
-html, body {
-  background-color: #000000 !important;
-  background: #000000 !important;
-  color: #f4f4f5;
-}
-
-html:not(.dark), html:not(.dark) body {
-  background-color: #FAFAFA !important;
-  background: #FAFAFA !important;
-  color: #18181b;
-}
-
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

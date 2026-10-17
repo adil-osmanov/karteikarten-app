@@ -2796,8 +2796,8 @@ function StudyCard({
           
           {phase === "Answer" ? (
             <span className={cn(
-              "inline-block align-baseline mx-1 px-3 py-0.5 rounded-lg border bg-white/5 transition-colors",
-              parsedTargetWord ? parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses : "border-blue-500/50 text-blue-600 dark:text-blue-400"
+              "inline-block align-baseline mx-1.5 border-b-2 bg-transparent px-2 py-0.5 font-medium transition-colors",
+              parsedTargetWord ? parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses : "border-blue-500 text-blue-600 dark:text-blue-400"
             )}>
               {parsedTargetWord ? (
                 <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {parsedTargetWord.rest}</>
@@ -2808,11 +2808,11 @@ function StudyCard({
           ) : (
             <>
               {isMultipleChoice ? (
-                <span className="inline-block align-baseline mx-1 min-w-[3rem] px-3 py-0.5 rounded-lg bg-white/5 border border-blue-500/30 text-transparent">
+                <span className="inline-block align-baseline mx-1.5 min-w-[90px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent">
                   {displayAnswerWord}
                 </span>
               ) : (
-                <span className="inline-block relative align-baseline mx-1 min-w-[4rem] px-3 py-1 rounded-lg bg-white/5 border border-blue-500/50 text-gray-900 dark:text-white placeholder:text-zinc-600 focus-within:outline-none focus-within:ring-2 focus-within:ring-blue-500/30 transition-all font-medium">
+                <span className="inline-block relative align-baseline border-b-2 border-blue-500 bg-transparent px-2 py-0.5 text-center font-medium text-zinc-900 dark:text-white placeholder:text-zinc-500 focus-within:border-blue-400 transition-colors mx-1.5 min-w-[90px]">
                   <span className="inline-block w-full text-center">
                     {renderInputChars()}
                   </span>
@@ -2839,7 +2839,7 @@ function StudyCard({
         </div>
 
         <div className="mt-4 mb-6 w-full text-center">
-          <p className="text-sm text-zinc-700 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
+          <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
             {card.translation}
           </p>
           
@@ -3419,18 +3419,18 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
             </div>
           )}
 
-          {/* Action Buttons: Micro glass pills */}
+          {/* Action Buttons: Native macOS Buttons */}
           <div className="absolute top-3 right-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-40">
             <button 
               onClick={onEdit} 
-              className="w-7 h-7 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-zinc-300 hover:text-white flex items-center justify-center transition-transform active:scale-95 shadow-md cursor-pointer"
+              className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
               title="Bearbeiten"
             >
               <Edit2 className="w-3.5 h-3.5" />
             </button>
             <button 
               onClick={onDelete} 
-              className="w-7 h-7 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-zinc-300 hover:text-red-400 flex items-center justify-center transition-transform active:scale-95 shadow-md cursor-pointer"
+              className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
               title="Löschen"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -3483,17 +3483,17 @@ const DeckCard = React.memo(({
       )}
     >
       {/* Action Buttons (Edit / Delete) */}
-      <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+      <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
         <button 
           onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-          className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white flex items-center justify-center transition-all cursor-pointer active:scale-95"
+          className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
           title="Umbenennen"
         >
           <Edit2 className="w-3.5 h-3.5" />
         </button>
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
-          className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/10 hover:bg-red-500/10 text-zinc-500 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400 flex items-center justify-center transition-all cursor-pointer active:scale-95"
+          className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
           title="Löschen"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -5555,7 +5555,7 @@ try {
 
   const activeBook = useMemo(() => books.find(b => b.id === activeBookId), [books, activeBookId]);
 
-  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-black" />;
+  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-white dark:bg-black" />;
 
 
   if (activeDeckId) {
@@ -6303,11 +6303,11 @@ try {
                           <div className="mt-4">
                             <button 
                               onClick={() => toggleCategory(sectionKey)}
-                              className="flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mx-2 mb-4"
+                              className="flex items-center gap-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors mx-2 mb-4 cursor-pointer"
                             >
-                              <ChevronRight className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-90")} />
+                              <ChevronRight className={cn("w-3.5 h-3.5 text-zinc-400 transition-transform duration-200", isExpanded && "rotate-90")} />
                               <span>{UI_TRANSLATIONS[appLanguage]?.archived || 'Archiv anzeigen'}</span>
-                              <span className="bg-black/5 dark:bg-white/10 text-gray-500 dark:text-gray-400 text-xs px-2 py-0.5 rounded-full ml-1">
+                              <span className="px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/5 text-zinc-500 dark:text-zinc-400 text-xs border border-black/5 dark:border-white/5 font-mono ml-1">
                                 {completedDecks.length}
                               </span>
                             </button>
