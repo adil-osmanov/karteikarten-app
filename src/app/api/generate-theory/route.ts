@@ -15,7 +15,7 @@ export async function POST(req: Request) {
 
     const systemPrompt = `Ты — строгий профессор и методист немецкого языка (Duden / Goethe-Institut), а также харизматичный наставник.
 Твоя цель — безупречная грамматическая точность и кристальная понятность по теме: "${topicTitle}" (${level}).
-${hasMaterials ? 'ВАЖНО: Используй правила, таблицы и примеры СТРОГО из прикрепленных страниц учебника! Объясни именно ту грамматику, которая дана на этих страницах.' : ''}
+${hasMaterials ? 'ВАЖНО: Используй грамматические правила, таблицы и примеры строго из предоставленных страниц учебника! Объясни именно ту грамматику, которая изучается на этих страницах.' : ''}
 
 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
 - Запрещено придумывать искусственные составные слова вроде "meinder", "meinedie", "meindas"! В немецком языке таких форм нет.
@@ -130,8 +130,8 @@ ${hasMaterials ? 'ВАЖНО: Используй правила, таблицы 
 }`;
 
     const candidateModels = hasMaterials
-      ? ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b']
-      : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b'];
+      ? ['llama-3.2-11b-vision-preview', 'qwen/qwen3.8-27b']
+      : ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'qwen/qwen3.8-27b'];
 
     let userContent: any = userPrompt;
     if (hasMaterials) {
@@ -149,8 +149,8 @@ ${hasMaterials ? 'ВАЖНО: Используй правила, таблицы 
 
     for (const model of candidateModels) {
       try {
-        const canSendImages = model === 'qwen/qwen3.8-27b';
-        const contentToSend = canSendImages && hasMaterials ? userContent : userPrompt;
+        const isVisionModel = model.includes('vision') || model.includes('qwen');
+        const contentToSend = isVisionModel && hasMaterials ? userContent : userPrompt;
 
         completion = await groq.chat.completions.create({
           model,
@@ -159,7 +159,7 @@ ${hasMaterials ? 'ВАЖНО: Используй правила, таблицы 
             { role: 'user', content: contentToSend }
           ],
           response_format: { type: 'json_object' },
-          temperature: 0.25,
+          temperature: 0.1,
         });
         if (completion?.choices?.[0]?.message?.content) {
           break;

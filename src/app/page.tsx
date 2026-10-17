@@ -2437,37 +2437,9 @@ function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: str
     return { parts: ["", ""], clozeWord: rawTargetWord, fullSentence: rawTargetWord, isCustomCloze: false };
   }
 
-  let sentence = rawSentence.trim();
-  let targetWord = rawTargetWord.trim();
-
-  // 1. Очистка типографики от пробелов перед знаками препинания: "слово ." -> "слово."
-  sentence = sentence.replace(/\s+([.,!?;:])/g, '$1').replace(/\s{2,}/g, ' ');
-
-  // 2. Исправление потери "geboren" в предложениях о рождении:
-  // Например: "Ich wurde am 25. Oktober 1993 in Homs." -> "Ich wurde am 25. Oktober 1993 in Homs geboren."
-  if (
-    !/geboren/i.test(sentence) && !/geboren/i.test(targetWord) &&
-    /\b(?:wurde|wurden|bin|ist|war|___)\b.*?\b(?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember|\d{4})\b.*?\bin\b/i.test(sentence)
-  ) {
-    sentence = sentence.replace(/\s*\.?$/, ' geboren.');
-  }
-
-  // 3. Замена неестественного "absolvieren"
-  if (/absolvier/i.test(sentence) || /absolvier/i.test(targetWord)) {
-    sentence = sentence
-      .replace(/das Studium absolvierte/gi, 'das Studium beendete')
-      .replace(/die Ausbildung absolvierte/gi, 'die Ausbildung beendete')
-      .replace(/das Studium absolvieren/gi, 'das Studium beenden')
-      .replace(/die Ausbildung absolvieren/gi, 'die Ausbildung beenden')
-      .replace(/absolvierte/gi, 'beendete')
-      .replace(/absolvieren/gi, 'beenden')
-      .replace(/absolviert/gi, 'beendet');
-
-    targetWord = targetWord
-      .replace(/absolvierte/gi, 'beendete')
-      .replace(/absolvieren/gi, 'beenden')
-      .replace(/absolviert/gi, 'beendet');
-  }
+  // Общая техническая типографика: удаление двойных пробелов и пробелов перед знаками препинания
+  const sentence = rawSentence.replace(/\s+([.,!?;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
+  const targetWord = rawTargetWord.trim();
 
   if (sentence.includes("___")) {
     const splitParts = sentence.split("___");
@@ -2640,17 +2612,6 @@ function StudyCard({
     return resolveCloze(card.sentence, card.targetWord, card.forms);
   }, [card.sentence, card.targetWord, card.forms]);
 
-  const sanitizedOptions = useMemo(() => {
-    if (!card.options || !Array.isArray(card.options)) return [];
-    return card.options.map(opt => 
-      String(opt)
-        .replace(/absolvierte/gi, 'beendete')
-        .replace(/absolvieren/gi, 'beenden')
-        .replace(/absolviert/gi, 'beendet')
-        .replace(/absolviere/gi, 'beende')
-    );
-  }, [card.options]);
-
   const { parts, clozeWord, fullSentence, isCustomCloze } = cloze;
   const shouldCapitalize = parts[0]?.trim() === "";
 
@@ -2712,7 +2673,7 @@ function StudyCard({
     return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
   }, [phase, forceInputMode, card.masteryLevel]);
 
-  const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2 && Boolean(sanitizedOptions && sanitizedOptions.length >= 2);
+  const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2 && Boolean(card.options && card.options.length >= 2);
 
   useEffect(() => {
     if (!isMobile && phase === "Question" && !isMultipleChoice && inputRef.current) {
@@ -2819,10 +2780,10 @@ function StudyCard({
       if (document.activeElement?.tagName === 'INPUT') return;
 
       if (phase === "Question" && isMultipleChoice) {
-        if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); handleOptionClick(sanitizedOptions[0]); }
-        if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); handleOptionClick(sanitizedOptions[1]); }
-        if (e.code === 'Digit3' || e.code === 'Numpad3') { e.preventDefault(); handleOptionClick(sanitizedOptions[2]); }
-        if (e.code === 'Digit4' || e.code === 'Numpad4') { e.preventDefault(); handleOptionClick(sanitizedOptions[3]); }
+        if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); handleOptionClick(card.options[0]); }
+        if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); handleOptionClick(card.options[1]); }
+        if (e.code === 'Digit3' || e.code === 'Numpad3') { e.preventDefault(); handleOptionClick(card.options[2]); }
+        if (e.code === 'Digit4' || e.code === 'Numpad4') { e.preventDefault(); handleOptionClick(card.options[3]); }
       }
 
       if (phase === "Answer") {
@@ -3151,7 +3112,7 @@ function StudyCard({
             exit={{ opacity: 0, scale: 0.95 }}
             className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mt-8"
           >
-            {sanitizedOptions.map((opt, idx) => {
+            {card.options.map((opt, idx) => {
               const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
               return (
                 <button
@@ -4200,13 +4161,13 @@ function DeckModal({
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-                {mode === 'create' ? 'Новая тема' : 'Настройки темы'}
+                {mode === 'create' ? 'Новая колода' : 'Редактирование колоды'}
               </h2>
               <span className="px-2.5 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-semibold">
-                {level}
+                {category}
               </span>
               <span className="px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-400 text-xs">
-                {category}
+                {level}
               </span>
             </div>
             <p className="text-xs text-zinc-400">
@@ -4237,7 +4198,7 @@ function DeckModal({
               )}
             >
               <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-              <span>Генерация из книги (ИИ)</span>
+              <span>✨ Из материалов книги (ИИ)</span>
             </button>
             <button
               type="button"
@@ -4250,7 +4211,7 @@ function DeckModal({
               )}
             >
               <FileText className="w-3.5 h-3.5 text-amber-400" />
-              <span>Загрузить CSV</span>
+              <span>📄 Загрузить CSV</span>
             </button>
           </div>
         )}
@@ -4266,8 +4227,8 @@ function DeckModal({
               type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
-              placeholder="Например: Possessivartikel im Dativ"
-              className="w-full bg-white/[0.05] border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/80 transition-all font-medium"
+              placeholder="Например: 1.1: Über Vergangenes berichten"
+              className="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none transition-all font-medium text-sm"
             />
           </div>
 
@@ -4478,7 +4439,7 @@ function DeckModal({
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-blue-200" />
-                    <span>✨ Сгенерировать ({cardCount} карточек)</span>
+                    <span>✨ Сгенерировать колоду ({cardCount} карточек)</span>
                   </>
                 )}
               </button>
@@ -4526,7 +4487,7 @@ function DeckModal({
                     <span>Сохранение...</span>
                   </>
                 ) : (
-                  <span>Сохранить изменения</span>
+                  <span>Сохранить</span>
                 )}
               </button>
             </div>
