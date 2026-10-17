@@ -11,118 +11,70 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Topic title required' }, { status: 400 });
     }
 
-    const systemPrompt = `Ты — ведущий немецкий методист уровня C2/Native и Apple Technical Writer. Твоя задача — формировать безупречные, академически точные и визуально структурированные грамматические конспекты уровня ${level}.
-СТРОГИЕ ПРАВИЛА ГРАММАТИКИ И ТИПОГРАФИКИ:
-1. Вопросы падежей: Akkusativ отвечает СТРОГО на вопросы «Wen?» (Кого?) / «Was?» (Что?). НИКОГДА не используй вопрос «Кто?» (Wer?) для Akkusativ — «Wer?» относится исключительно к Nominativ! Dativ отвечает строго на «Wem?» (Кому?).
-2. В массиве форм родов (forms) возвращай СТРОГО 3 полных элемента в виде массива строк: [определенный артикль, неопределенный артикль, притяжательное местоимение], например: ["den", "einen", "meinen"] для Maskulin Akkusativ; ["die", "eine", "meine"] для Feminin; ["das", "ein", "mein"] для Neutral; ["die", "-", "meine"] для Plural. Никаких пустых значений и никаких замыкающих слэшей!
-3. В схемах используй правильную типографскую стрелку → вместо -> и немецкие кавычки „...“.
-4. Объясняй все правила, нюансы и переводы на РУССКОМ языке, а термины, схемы, формы и примеры — на НЕМЕЦКОМ.
-Ответ верни СТРОГО в виде валидного JSON без разметки markdown и вступительного текста.`;
+    const systemPrompt = `Ты — лучший, самый харизматичный преподаватель немецкого языка в Германии.
+Твоя задача — объяснить тему "${topicTitle}" (${level}) так, чтобы студент понял её с первого раза и навсегда.
+Без академической скуки и воды. Объясняй логику: почему немцы так говорят, какая за этим стоит мысль, как это легко запомнить.
+Все объяснения, переводы и подсказки пиши на русском языке. Все конструкции, схемы и примеры — на немецком.
+КРИТИЧЕСКИ ВАЖНО: Весь контент должен быть СТРОГО о теме "${topicTitle}". Не упоминай модальные глаголы или другие темы, если тема запроса о другом!
+В примерах следи, чтобы перед точкой или знаком препинания в конце предложения не было лишнего пробела (пиши „... Buch.“, а не „... Buch .“).
+В схемах используй правильную типографическую стрелку → вместо ->.
+Верни ответ СТРОГО в виде валидного JSON без преамбул и markdown-обёрток.`;
 
-    const userPrompt = `Тема: "${topicTitle}" (Уровень: ${level}).
-Сформируй глубокий конспект по следующей JSON-структуре:
+    const userPrompt = `Составь увлекательный, глубокий и кристально понятный конспект по теме: "${topicTitle}" (${level}).
+Сформируй адаптивный JSON по следующей схеме:
 {
   "title": "${topicTitle}",
-  "catchyHeadline": "Короткий, запоминающийся заголовок-девиз темы (1 емкое предложение, отражающее суть правила)",
-  "coreConcept": "Фундаментальное объяснение сути правила простым языком без заумных терминов (2-3 емких абзаца). Для Akkusativ обязательно укажи вопросы «Wen? / Was?» (Кого? / Что?). Никаких «Кто?»!",
-  "formula": "Главная визуальная схема правила (например: Subjekt + Modalverb (Pos 2) + ... + Infinitiv (Ende))",
-  "genderMatrix": [
+  "catchyHeadline": "Яркая фраза-инсайт, которая за 3 секунды передает суть темы",
+  "explanation": "Живое, простое и понятное объяснение: в чем логика правила, в каких жизненных ситуациях оно нужно и как устроено",
+  "visualFormula": "Наглядная формула или схема правила (например: Subjekt + Verb + ... или форма изменения)",
+  "visualBreakdown": {
+    "type": "matrix",
+    "title": "Название наглядного блока (например: Склонение артиклей / Спряжение глагола / Порядок слов)",
+    "items": [
+      {
+        "label": "Категория (например: Мужской род / ich / Шаг 1)",
+        "badge": "der / глагол / маркер",
+        "value": "Ключевая форма или окончание",
+        "hint": "Важный комментарий или подсказка",
+        "accent": "sky"
+      }
+    ]
+  },
+  "keyRules": [
     {
-      "gender": "maskulin",
-      "article": "der",
-      "forms": ["den", "einen", "meinen"],
-      "note": "Меняет форму на -en!",
-      "color": "sky"
+      "title": "Главный нюанс / Правило 1",
+      "desc": "Четкое и понятное описание логики без лишней воды"
     },
     {
-      "gender": "neutral",
-      "article": "das",
-      "forms": ["das", "ein", "mein"],
-      "note": "Форма совпадает с Nominativ",
-      "color": "emerald"
-    },
-    {
-      "gender": "feminin",
-      "article": "die",
-      "forms": ["die", "eine", "meine"],
-      "note": "Форма совпадает с Nominativ",
-      "color": "rose"
-    },
-    {
-      "gender": "plural",
-      "article": "die",
-      "forms": ["die", "-", "meine"],
-      "note": "Окончание -e во всех формах",
-      "color": "amber"
-    }
-  ],
-  "structuralRules": [
-    {
-      "title": "Позиция в простом предложении",
-      "scheme": "Ich + muss + heute länger arbeiten.",
-      "explanation": "Спрягаемый глагол стоит строго на 2-й позиции, смысловой инфинитив уходит в абсолютный конец."
-    },
-    {
-      "title": "Позиция в вопросе",
-      "scheme": "Kannst + du + mir bitte helfen?",
-      "explanation": "Модальный глагол выходит на 1-е место."
-    },
-    {
-      "title": "В придаточном предложении (weil, dass)",
-      "scheme": "...weil ich heute Überstunden machen muss.",
-      "explanation": "Оба глагола уходят в конец: сначала смысловой инфинитив, затем модальный."
-    }
-  ],
-  "nuances": [
-    {
-      "title": "Смысловой оттенок: müssen vs sollen",
-      "desc": "Müssen — личная необходимость или объективный факт (надо спать, чтобы жить). Sollen — выполнение чужого поручения, совет врача или приказ начальства."
-    },
-    {
-      "title": "Dürfen vs Können",
-      "desc": "Können выражает физическую или интеллектуальную способность. Dürfen — наличие официального разрешения или строгого запрета (nicht dürfen)."
+      "title": "Главный нюанс / Правило 2",
+      "desc": "Следующий шаг или логика исключения"
     }
   ],
   "examples": [
     {
-      "de": "Ich habe einen neuen Laptop gekauft.",
-      "highlight": "einen neuen Laptop",
-      "gender": "maskulin",
-      "ru": "Я купил новый ноутбук.",
-      "note": "Мужской род в винительном падеже (der Laptop → einen Laptop)"
+      "de": "Живое немецкое предложение из реальной жизни",
+      "highlight": "Ключевая часть фразы, иллюстрирующая правило",
+      "ru": "Точный естественный русский перевод",
+      "note": "Краткое объяснение, почему здесь использована именно эта форма"
     },
     {
-      "de": "Wir brauchen das grüne Ticket.",
-      "highlight": "das grüne Ticket",
-      "gender": "neutral",
-      "ru": "Нам нужен зеленый билет.",
-      "note": "Средний род не меняется"
+      "de": "Второй наглядный пример",
+      "highlight": "Фрагмент для подсветки",
+      "ru": "Перевод на русский",
+      "note": "Пояснение"
     },
     {
-      "de": "Er sieht die schöne Stadt.",
-      "highlight": "die schöne Stadt",
-      "gender": "feminin",
-      "ru": "Он видит красивый город.",
-      "note": "Женский род остаётся die"
-    },
-    {
-      "de": "Ich nehme meine alten Bücher mit.",
-      "highlight": "meine alten Bücher",
-      "gender": "plural",
-      "ru": "Я беру с собой свои старые книги.",
-      "note": "Множественное число с окончанием -e"
+      "de": "Третий контрастный пример",
+      "highlight": "Фрагмент для подсветки",
+      "ru": "Перевод на русский",
+      "note": "Пояснение"
     }
   ],
   "traps": [
     {
-      "wrong": "Ich muss zu lernen.",
-      "right": "Ich muss lernen.",
-      "explanation": "С модальными глаголами частица ZU никогда не используется."
-    },
-    {
-      "wrong": "Er will kauft ein Auto.",
-      "right": "Er will ein Auto kaufen.",
-      "explanation": "Смысловой глагол в конце обязан стоять в форме чистого инфинитива."
+      "wrong": "Частая типичная ошибка иностранцев ❌",
+      "right": "Как сказать правильно ✅",
+      "explanation": "Почему именно так и как не попадаться в эту ловушку"
     }
   ]
 }`;
@@ -145,14 +97,14 @@ export async function POST(req: Request) {
             { role: 'user', content: userPrompt }
           ],
           response_format: { type: 'json_object' },
-          temperature: 0.2,
+          temperature: 0.25,
         });
         if (completion?.choices?.[0]?.message?.content) {
           break;
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`Groq model ${model} unavailable, trying fallback:`, err.message || err);
+        console.warn(`Groq model ${model} failed, trying fallback:`, err.message || err);
       }
     }
 
@@ -160,10 +112,21 @@ export async function POST(req: Request) {
       throw lastError || new Error('No completion returned from Groq');
     }
 
-    const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
+    let raw = completion.choices[0]?.message?.content || '{}';
+    raw = raw.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+    const parsed = JSON.parse(raw);
+
+    // Sanitize punctuation spacing in examples
+    if (parsed.examples && Array.isArray(parsed.examples)) {
+      parsed.examples = parsed.examples.map((ex: any) => ({
+        ...ex,
+        de: (ex.de || '').replace(/\s+([.,!?:;])/g, '$1').trim()
+      }));
+    }
+
     return NextResponse.json({ success: true, data: parsed });
   } catch (error) {
-    console.error('Groq Generation Error:', error);
-    return NextResponse.json({ success: false, error: 'Generation failed' }, { status: 500 });
+    console.error('Groq Error:', error);
+    return NextResponse.json({ success: false, error: 'Failed' }, { status: 500 });
   }
 }

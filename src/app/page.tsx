@@ -443,16 +443,41 @@ export interface TheoryTrapItem {
   explanation: string;
 }
 
+export interface VisualBreakdownItem {
+  label: string;
+  badge?: string;
+  value: string;
+  hint?: string;
+  accent?: 'sky' | 'emerald' | 'rose' | 'amber' | 'violet' | string;
+}
+
+export interface VisualBreakdown {
+  type?: 'matrix' | 'cards' | 'steps' | string;
+  title?: string;
+  items: VisualBreakdownItem[];
+}
+
+export interface KeyRuleItem {
+  title: string;
+  desc: string;
+}
+
 export interface StructuredTheory {
   title: string;
   catchyHeadline?: string;
+  explanation?: string;
+  visualFormula?: string;
+  visualBreakdown?: VisualBreakdown;
+  keyRules?: KeyRuleItem[];
+  examples?: TheoryExampleItem[];
+  traps?: TheoryTrapItem[];
+
+  // Backwards compatibility fields:
   coreConcept?: string;
   formula?: string;
   genderMatrix?: GenderMatrixItem[];
   structuralRules?: StructuralRuleItem[];
   nuances?: NuanceItem[];
-  examples?: TheoryExampleItem[];
-  traps?: TheoryTrapItem[];
   oneLiner?: string;
   simpleExplanation?: string;
   matrix?: {
@@ -3524,12 +3549,12 @@ BookCard.displayName = "BookCard";
 
 
 const DeckCard = React.memo(({ 
-  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onEditTheory, onViewTheory, onStartDictation, onStartShadowing
+  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onViewTheory, onStartDictation, onStartShadowing
 }: { 
   deck: Deck; isCompleted: boolean; activeTab: string; 
   onCardClick: (id: string) => void; onRename: (id: string, name: string) => void; 
   onDelete: (id: string, name: string) => void; 
-  onEditTheory: (id: string) => void; onViewTheory: (id: string) => void; 
+  onViewTheory: (id: string) => void; 
   onStartDictation: (id: string) => void;
   onStartShadowing: (id: string) => void;
 }) => {
@@ -3589,7 +3614,6 @@ const DeckCard = React.memo(({
             {showTheoryButton && (
               <DeckTheoryIndicator 
                 deckId={deck.id} 
-                onOpenEdit={(e) => { e.stopPropagation(); onEditTheory(deck.id); }} 
                 onOpenView={(e) => { e.stopPropagation(); onViewTheory(deck.id); }} 
               />
             )}
@@ -3896,91 +3920,16 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   );
 }
 
-function DeckTheoryIndicator({ deckId, onOpenEdit, onOpenView }: { deckId: string, onOpenEdit: (e:any)=>void, onOpenView: (e:any)=>void }) {
+function DeckTheoryIndicator({ deckId, onOpenView }: { deckId: string, onOpenView: (e: any) => void }) {
   return (
     <button 
       onClick={onOpenView} 
       className="px-2.5 py-1 rounded-md bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/5 dark:border-white/5 text-[11px] font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 transition-colors cursor-pointer select-none active:scale-95"
-      title="Theorie & Konzept"
+      title="Theorie"
     >
       <BookOpen className="w-3.5 h-3.5 opacity-70" />
       Theorie
     </button>
-  );
-}
-
-function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () => void }) {
-  useScrollLock(true);
-  const [text, setText] = useState("");
-  useEffect(() => {
-    setText(localStorage.getItem(`deck_theory_${deckId}`) || "");
-  }, [deckId]);
-
-  const handleSave = () => {
-    if (text.trim()) {
-      localStorage.setItem(`deck_theory_${deckId}`, text);
-    } else {
-      localStorage.removeItem(`deck_theory_${deckId}`);
-    }
-    window.dispatchEvent(new Event('theory-update'));
-    syncAppStateToCloud();
-    onClose();
-  };
-
-  const handleDelete = () => {
-    localStorage.removeItem(`deck_theory_${deckId}`);
-    window.dispatchEvent(new Event('theory-update'));
-    syncAppStateToCloud();
-    onClose();
-  };
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => setText(ev.target?.result as string);
-      reader.readAsText(file);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }} 
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        onClick={(e) => e.stopPropagation()}
-        className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-2xl p-5 max-w-lg w-full shadow-2xl flex flex-col"
-      >
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Konzept bearbeiten</h2>
-        <textarea 
-          value={text} 
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Вставьте конспект в формате Markdown (# Правило, > Формула, примеры)..."
-          className="w-full min-h-[150px] p-4 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-[#F5F5F7] placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors resize-y mb-4"
-        />
-        <div className="flex items-center justify-between mb-6">
-          <label className="cursor-pointer flex items-center gap-2 text-sm text-blue-600 dark:text-blue-500 hover:text-[#0056b3] transition-colors">
-            <Upload className="w-4 h-4" />
-            <span>.md laden</span>
-            <input type="file" accept=".md,.txt" className="hidden" onChange={handleFile} />
-          </label>
-        </div>
-        <div className="flex gap-3 mt-auto">
-          <button onClick={onClose} className="flex-1 py-3 font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors">
-            Abbrechen
-          </button>
-          {text && (
-            <button onClick={handleDelete} className="flex-1 py-3 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors">
-              Löschen
-            </button>
-          )}
-          <button onClick={handleSave} className="flex-1 py-3 font-semibold text-white bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 rounded-xl transition-colors">
-            Speichern
-          </button>
-        </div>
-      </motion.div>
-    </div>
   );
 }
 
@@ -4081,6 +4030,48 @@ function EndingsMatrixWidget({ data }: { data?: { m: string; n: string; f: strin
     </div>
   );
 }
+
+const getVisualBreakdownAccent = (accent: string = '') => {
+  const a = accent.toLowerCase().trim();
+  switch (a) {
+    case 'sky':
+      return {
+        card: 'border-sky-500/25 bg-sky-500/5 text-sky-300',
+        badge: 'text-sky-300 bg-sky-500/15 border-sky-500/25',
+        value: 'text-sky-200'
+      };
+    case 'emerald':
+      return {
+        card: 'border-emerald-500/25 bg-emerald-500/5 text-emerald-300',
+        badge: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/25',
+        value: 'text-emerald-200'
+      };
+    case 'rose':
+      return {
+        card: 'border-rose-500/25 bg-rose-500/5 text-rose-300',
+        badge: 'text-rose-300 bg-rose-500/15 border-rose-500/25',
+        value: 'text-rose-200'
+      };
+    case 'amber':
+      return {
+        card: 'border-amber-500/25 bg-amber-500/5 text-amber-300',
+        badge: 'text-amber-300 bg-amber-500/15 border-amber-500/25',
+        value: 'text-amber-200'
+      };
+    case 'violet':
+      return {
+        card: 'border-violet-500/25 bg-violet-500/5 text-violet-300',
+        badge: 'text-violet-300 bg-violet-500/15 border-violet-500/25',
+        value: 'text-violet-200'
+      };
+    default:
+      return {
+        card: 'border-sky-500/25 bg-sky-500/5 text-sky-300',
+        badge: 'text-sky-300 bg-sky-500/15 border-sky-500/25',
+        value: 'text-sky-200'
+      };
+  }
+};
 
 const getAppleGenderTokens = (genderStr: string = '') => {
   const g = genderStr.toLowerCase().trim();
@@ -4441,7 +4432,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-6 overscroll-contain touch-none" 
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:p-6 overscroll-contain touch-none" 
       onClick={onClose}
     >
       <motion.div 
@@ -4450,31 +4441,31 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         exit={{ opacity: 0, y: 60, scale: 0.98 }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-4xl h-[92vh] md:h-auto md:max-h-[88vh] mx-auto bg-white dark:bg-zinc-950 border border-zinc-200/80 dark:border-white/10 shadow-2xl rounded-t-3xl md:rounded-3xl flex flex-col overflow-hidden relative text-zinc-900 dark:text-zinc-100 transform-gpu"
+        className="w-full max-w-4xl h-[92vh] md:h-auto md:max-h-[88vh] mx-auto bg-zinc-950 border border-white/10 shadow-2xl rounded-t-3xl md:rounded-3xl flex flex-col overflow-hidden relative text-zinc-100 transform-gpu"
       >
         {/* Mobile Drag Handle */}
-        <div className="w-10 h-1 bg-zinc-300 dark:bg-white/20 rounded-full mx-auto mt-3 mb-1 shrink-0 md:hidden" />
+        <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mt-3 mb-1 shrink-0 md:hidden" />
 
         {/* Sticky Header */}
-        <div className="px-8 py-5 border-b border-black/5 dark:border-white/10 flex items-center justify-between bg-white/80 dark:bg-zinc-900/60 backdrop-blur-md sticky top-0 z-20 shrink-0">
-          <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
+        <div className="px-8 py-5 border-b border-white/10 flex items-center justify-between bg-zinc-900/60 backdrop-blur-md sticky top-0 z-20 shrink-0">
+          <h2 className="text-xl font-bold tracking-tight text-white">
             {displayTitle}
           </h2>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all cursor-pointer active:scale-95"
+            className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-all cursor-pointer active:scale-95"
             title="Schließen (Esc)"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Content Scroll Container with pb-14 bottom protection */}
-        <div className="overflow-y-auto px-8 pt-6 pb-14 space-y-6 flex-1 text-zinc-900 dark:text-zinc-100 custom-scrollbar">
+        {/* Content Scroll Container with pb-24 bottom protection */}
+        <div className="overflow-y-auto px-8 py-6 space-y-6 flex-1 text-zinc-100 scrollbar-thin pb-24 custom-scrollbar">
           {isLoading ? (
             /* Apple Skeleton Loader */
             <div className="space-y-6 animate-pulse py-2">
-              <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 font-medium">
+              <div className="flex items-center gap-2 text-xs text-blue-400 font-medium">
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
                 <span>Theorie wird mit KI generiert...</span>
               </div>
@@ -4484,66 +4475,116 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
               {/* Core Concept Skeleton */}
               <div className="space-y-2">
-                <div className="h-4 w-3/4 rounded bg-zinc-200 dark:bg-zinc-800" />
-                <div className="h-4 w-full rounded bg-zinc-200 dark:bg-zinc-800" />
-                <div className="h-4 w-5/6 rounded bg-zinc-200 dark:bg-zinc-800" />
+                <div className="h-4 w-3/4 rounded bg-zinc-800" />
+                <div className="h-4 w-full rounded bg-zinc-800" />
+                <div className="h-4 w-5/6 rounded bg-zinc-800" />
               </div>
 
               {/* Formula Skeleton */}
-              <div className="h-12 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-white/5" />
+              <div className="h-12 rounded-xl bg-zinc-900 border border-white/5" />
 
-              {/* Gender Matrix Skeleton (4 cards) */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="h-24 rounded-2xl bg-sky-500/10 border border-sky-500/20" />
-                <div className="h-24 rounded-2xl bg-emerald-500/10 border border-emerald-500/20" />
-                <div className="h-24 rounded-2xl bg-rose-500/10 border border-rose-500/20" />
-                <div className="h-24 rounded-2xl bg-amber-500/10 border border-amber-500/20" />
+              {/* Breakdown Skeleton (4 cards) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="h-28 rounded-2xl bg-sky-500/10 border border-sky-500/20" />
+                <div className="h-28 rounded-2xl bg-emerald-500/10 border border-emerald-500/20" />
+                <div className="h-28 rounded-2xl bg-rose-500/10 border border-rose-500/20" />
+                <div className="h-28 rounded-2xl bg-amber-500/10 border border-amber-500/20" />
               </div>
 
-              {/* Structural Rules Skeleton */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="h-28 rounded-2xl bg-zinc-100 dark:bg-zinc-900/60" />
-                <div className="h-28 rounded-2xl bg-zinc-100 dark:bg-zinc-900/60" />
-                <div className="h-28 rounded-2xl bg-zinc-100 dark:bg-zinc-900/60" />
+              {/* Rules Skeleton */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="h-24 rounded-2xl bg-zinc-900/60 border border-white/5" />
+                <div className="h-24 rounded-2xl bg-zinc-900/60 border border-white/5" />
               </div>
             </div>
           ) : theoryData ? (
             /* Apple Guidebook Sheet (max-w-4xl) */
             <div className="space-y-6">
-              {/* 1. Заголовок-девиз (Catchy Headline) */}
-              {(theoryData.catchyHeadline || theoryData.oneLiner) && (
-                <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-900 dark:text-blue-200 text-sm font-medium leading-relaxed shadow-sm">
-                  {theoryData.catchyHeadline || theoryData.oneLiner}
-                </div>
-              )}
-
-              {/* 2. Суть правила (Core Concept) */}
-              {(theoryData.coreConcept || theoryData.simpleExplanation) && (
-                <div className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-normal whitespace-pre-line space-y-2">
-                  {theoryData.coreConcept || theoryData.simpleExplanation}
-                </div>
-              )}
-
-              {/* 3. Визуальная формула (нативный Apple Sans вместо font-mono) */}
-              {theoryData.formula && (
-                <div className="p-4 rounded-2xl bg-zinc-100 dark:bg-zinc-900/80 border border-zinc-200/80 dark:border-white/10 text-zinc-900 dark:text-zinc-100 text-sm sm:text-base font-semibold tracking-normal text-center shadow-sm leading-relaxed">
-                  {(theoryData.formula || '').replace(/->/g, '→')}
-                </div>
-              )}
-
-              {/* 4. Цветовая матрица родов (4 колонки) без висячих слэшей */}
-              {theoryData.genderMatrix && theoryData.genderMatrix.length > 0 && (
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                    Цветовая матрица родов
+              {/* 1. Заголовок и Инсайт (Catchy Headline) */}
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-white mb-2">
+                  {theoryData.title || displayTitle}
+                </h1>
+                {(theoryData.catchyHeadline || theoryData.oneLiner) && (
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-900/30 to-indigo-900/20 border border-blue-500/30 text-blue-100 text-sm font-medium leading-relaxed shadow-sm">
+                    {theoryData.catchyHeadline || theoryData.oneLiner}
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                )}
+              </div>
+
+              {/* 2. Живое объяснение (Explanation) */}
+              {(theoryData.explanation || theoryData.coreConcept || theoryData.simpleExplanation) && (
+                <div className="text-zinc-300 text-sm leading-relaxed font-normal whitespace-pre-line space-y-2">
+                  {theoryData.explanation || theoryData.coreConcept || theoryData.simpleExplanation}
+                </div>
+              )}
+
+              {/* 3. Визуальная формула */}
+              {(theoryData.visualFormula || theoryData.formula) && (
+                <div className="p-3.5 rounded-xl bg-zinc-900/80 border border-white/10 text-center font-medium text-white text-sm tracking-wide shadow-sm leading-relaxed">
+                  {(theoryData.visualFormula || theoryData.formula || '').replace(/->/g, '→')}
+                </div>
+              )}
+
+              {/* 4. Наглядный блок (visualBreakdown.items) */}
+              {theoryData.visualBreakdown?.items && theoryData.visualBreakdown.items.length > 0 ? (
+                <div className="space-y-2.5">
+                  {theoryData.visualBreakdown.title && (
+                    <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
+                      {theoryData.visualBreakdown.title}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
+                    {theoryData.visualBreakdown.items.map((item, idx) => {
+                      const style = getVisualBreakdownAccent(item.accent);
+                      const forms = (item.value || '').split(/[\/\•\n]/).map(s => s.trim()).filter(Boolean);
+                      return (
+                        <div 
+                          key={idx} 
+                          className={cn("h-full p-4 rounded-2xl flex flex-col justify-between border bg-zinc-900/70 shadow-sm", style.card)}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className="text-xs font-semibold uppercase tracking-wider opacity-80 truncate">
+                                {item.label}
+                              </span>
+                              {item.badge && (
+                                <span className={cn("px-1.5 py-0.5 rounded text-[11px] font-bold border shrink-0", style.badge)}>
+                                  {item.badge}
+                                </span>
+                              )}
+                            </div>
+                            <div className="space-y-1 my-2">
+                              {forms.map((form, fIdx) => (
+                                <div key={fIdx} className={cn("text-sm font-semibold tracking-tight", style.value)}>
+                                  {form}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          {item.hint && (
+                            <p className="text-xs opacity-80 mt-2 leading-snug">
+                              {item.hint}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : theoryData.genderMatrix && theoryData.genderMatrix.length > 0 ? (
+                /* Backward compatibility: genderMatrix */
+                <div className="space-y-2.5">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
+                    Цветовая матрица форм
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
                     {theoryData.genderMatrix.map((item, idx) => {
                       const style = getAppleGenderTokens(item.gender);
                       return (
                         <div 
                           key={idx} 
-                          className={cn("p-4 rounded-2xl border flex flex-col justify-between shadow-sm", style.card)}
+                          className={cn("h-full p-4 rounded-2xl flex flex-col justify-between border bg-zinc-900/70 shadow-sm", style.card)}
                         >
                           <div>
                             <div className="flex items-center justify-between mb-1.5">
@@ -4566,169 +4607,76 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                     })}
                   </div>
                 </div>
-              )}
+              ) : null}
 
-              {/* Backward compatibility: Old Matrix Table */}
-              {!theoryData.genderMatrix && theoryData.matrix && (
-                <div className="space-y-2">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                    Матрица форм
+              {/* 5. Правила и нюансы (keyRules) */}
+              {theoryData.keyRules && theoryData.keyRules.length > 0 ? (
+                <div className="space-y-2.5">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
+                    Правила и нюансы
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {Array.isArray(theoryData.matrix) ? theoryData.matrix.map((cell: any, idx: number) => {
-                      const style = getAppleGenderTokens(cell.label);
-                      return (
-                        <div key={idx} className={cn("p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 shadow-sm", style.card)}>
-                          <span className="text-xs font-semibold uppercase opacity-80">{cell.label}</span>
-                          <span className={cn("font-bold text-lg", style.form)}>{cell.value}</span>
+                  <div className="space-y-2.5">
+                    {theoryData.keyRules.map((rule, idx) => (
+                      <div 
+                        key={idx}
+                        className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 space-y-1 shadow-sm"
+                      >
+                        <div className="text-sm font-semibold text-zinc-200">
+                          {rule.title}
                         </div>
-                      );
-                    }) : (theoryData.matrix as any)?.headers?.map((header: string, idx: number) => {
-                      const m = theoryData.matrix as any;
-                      const form = m?.forms?.[idx] || "";
-                      const pronoun = m?.pronouns?.[idx] || "";
-                      const style = getAppleGenderTokens(header);
-                      return (
-                        <div key={idx} className={cn("p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 shadow-sm", style.card)}>
-                          <span className="text-xs font-semibold uppercase opacity-80">{header}</span>
-                          <span className={cn("font-bold text-lg", style.form)}>{form}</span>
-                          {pronoun && (
-                            <span className="text-xs opacity-70 mt-0.5">{pronoun}</span>
-                          )}
+                        <div className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-normal">
+                          {rule.desc}
                         </div>
-                      );
-                    })}
+                      </div>
+                    ))}
                   </div>
                 </div>
-              )}
-
-              {/* 5. Правила структуры предложения (structuralRules) */}
-              {theoryData.structuralRules && theoryData.structuralRules.length > 0 && (
+              ) : theoryData.structuralRules && theoryData.structuralRules.length > 0 ? (
+                /* Backward compatibility: structuralRules */
                 <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
                     Правила структуры предложения
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     {theoryData.structuralRules.map((rule, idx) => (
                       <div 
                         key={idx}
-                        className="p-4 rounded-2xl bg-black/[0.02] dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/10 flex flex-col justify-between shadow-sm"
+                        className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 flex flex-col justify-between shadow-sm"
                       >
                         <div>
-                          <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 mb-2">
+                          <div className="text-xs font-semibold text-zinc-200 mb-2">
                             {rule.title}
                           </div>
-                          <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/60 dark:border-white/5 text-xs text-zinc-800 dark:text-zinc-200 mb-2.5 font-medium leading-relaxed">
+                          <div className="p-2.5 rounded-xl bg-zinc-900 border border-white/5 text-xs text-zinc-200 mb-2.5 font-medium leading-relaxed">
                             {rule.scheme}
                           </div>
                         </div>
-                        <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                        <div className="text-xs text-zinc-400 leading-relaxed font-normal">
                           {rule.explanation}
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
-              )}
+              ) : null}
 
-              {/* Backward compatibility: Legacy rules */}
-              {!theoryData.structuralRules && theoryData.rules && theoryData.rules.length > 0 && (
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                    Шаги и правила
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {theoryData.rules.map((rule, idx) => (
-                      <div key={idx} className="p-3.5 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-zinc-200/60 dark:border-white/5 text-sm">
-                        <div className="font-semibold text-zinc-900 dark:text-white mb-1">{rule.title}</div>
-                        <div className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">{rule.desc}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* 6. Смысловые нюансы (nuances) */}
-              {theoryData.nuances && theoryData.nuances.length > 0 && (
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                    Смысловые нюансы
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {theoryData.nuances.map((item, idx) => (
-                      <div 
-                        key={idx}
-                        className="p-4 rounded-2xl bg-violet-500/5 dark:bg-violet-950/20 border border-violet-500/20 text-violet-950 dark:text-violet-200 space-y-1.5 shadow-sm"
-                      >
-                        <div className="font-semibold text-sm text-violet-900 dark:text-violet-300">
-                          {item.title}
-                        </div>
-                        <div className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
-                          {item.desc}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Backward compatibility: triggers */}
-              {!theoryData.nuances && theoryData.triggers && (theoryData.triggers.verbs?.length || theoryData.triggers.prepositions?.length || theoryData.triggers.explanation) && (
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
-                    Триггеры правила
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-4 rounded-2xl bg-black/[0.02] dark:bg-zinc-900/60 border border-black/5 dark:border-white/5 space-y-3">
-                      {theoryData.triggers.prepositions && theoryData.triggers.prepositions.length > 0 && (
-                        <div>
-                          <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-2">Предлоги:</span>
-                          <div className="flex flex-wrap gap-2">
-                            {theoryData.triggers.prepositions.map((prep, idx) => (
-                              <span key={idx} className="bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 px-2.5 py-1 rounded-lg text-xs font-bold">{prep}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {theoryData.triggers.verbs && theoryData.triggers.verbs.length > 0 && (
-                        <div>
-                          <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-2">Глаголы-маркеры:</span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {theoryData.triggers.verbs.map((verb, idx) => (
-                              <span key={idx} className="bg-black/5 dark:bg-white/10 text-zinc-800 dark:text-zinc-200 px-2.5 py-1 rounded-md text-xs font-medium">{verb}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-4 rounded-2xl bg-black/[0.02] dark:bg-zinc-900/60 border border-black/5 dark:border-white/5 flex flex-col justify-center">
-                      <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mb-1.5">Когда и почему включается:</span>
-                      <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">{theoryData.triggers.explanation}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 7. Живые примеры (examples) */}
+              {/* 6. Живые примеры (examples) */}
               {theoryData.examples && theoryData.examples.length > 0 && (
                 <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase">
+                  <div className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">
                     Живые примеры
                   </div>
                   <div className="space-y-2.5">
                     {theoryData.examples.map((ex, idx) => {
-                      const style = getAppleGenderTokens(ex.gender || '');
-                      const highlightClass = cn(
-                        "px-2 py-0.5 rounded-md font-bold inline-block border mx-0.5 text-xs sm:text-sm",
-                        ex.gender ? style.highlight : "text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/20"
-                      );
+                      const cleanDe = (ex.de || '').replace(/\s+([.,!?:;])/g, '$1').trim();
+                      const highlightClass = "px-2 py-0.5 rounded-md font-bold inline-block border mx-0.5 text-xs sm:text-sm bg-blue-500/10 border-blue-500/30 text-blue-300";
 
-                      let parts: (string | React.ReactNode)[] = [ex.de];
-                      if (ex.highlight && ex.de.toLowerCase().includes(ex.highlight.toLowerCase())) {
-                        const idxStart = ex.de.toLowerCase().indexOf(ex.highlight.toLowerCase());
-                        const before = ex.de.slice(0, idxStart);
-                        const matched = ex.de.slice(idxStart, idxStart + ex.highlight.length);
-                        const after = ex.de.slice(idxStart + ex.highlight.length);
+                      let parts: (string | React.ReactNode)[] = [cleanDe];
+                      if (ex.highlight && cleanDe.toLowerCase().includes(ex.highlight.toLowerCase())) {
+                        const idxStart = cleanDe.toLowerCase().indexOf(ex.highlight.toLowerCase());
+                        const before = cleanDe.slice(0, idxStart);
+                        const matched = cleanDe.slice(idxStart, idxStart + ex.highlight.length);
+                        const after = cleanDe.slice(idxStart + ex.highlight.length);
                         parts = [
                           before,
                           <span key="hl" className={highlightClass}>{matched}</span>,
@@ -4739,16 +4687,16 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                       return (
                         <div 
                           key={idx}
-                          className="p-3.5 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-zinc-200/80 dark:border-white/10 space-y-1 shadow-sm"
+                          className="p-4 rounded-2xl bg-zinc-900/50 border border-white/5 space-y-1 shadow-sm"
                         >
-                          <div className="text-sm sm:text-base font-semibold text-zinc-900 dark:text-white leading-relaxed">
+                          <div className="text-sm sm:text-base font-semibold text-white leading-relaxed">
                             {parts}
                           </div>
-                          <div className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300">
+                          <div className="text-sm text-zinc-300">
                             {ex.ru}
                           </div>
                           {ex.note && (
-                            <div className="text-xs text-zinc-400 dark:text-zinc-500 italic pt-0.5">
+                            <div className="text-xs text-zinc-400 italic pt-0.5">
                               {ex.note}
                             </div>
                           )}
@@ -4759,31 +4707,31 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
                 </div>
               )}
 
-              {/* 8. Ловушки (Traps / Achtung) - чистая типографика Apple Sans */}
+              {/* 7. Ловушки (traps) */}
               {theoryData.traps && theoryData.traps.length > 0 && (
                 <div className="space-y-2.5">
-                  <div className="text-xs font-semibold tracking-wider text-amber-500 dark:text-amber-400 uppercase flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5" />
+                  <div className="text-xs font-semibold tracking-wider text-amber-400 uppercase flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
                     Типичные ловушки и ошибки (Achtung)
                   </div>
                   <div className="space-y-3">
                     {theoryData.traps.map((trap, idx) => (
                       <div 
                         key={idx}
-                        className="p-4 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 space-y-3 shadow-sm"
+                        className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-3 shadow-sm"
                       >
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-800 dark:text-rose-300 text-sm font-medium flex items-start gap-2.5">
+                          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm font-medium flex items-start gap-2.5">
                             <span className="shrink-0 text-base leading-none mt-0.5">❌</span>
                             <span className="leading-snug">{trap.wrong.replace(/[❌✅]/g, '').trim()}</span>
                           </div>
-                          <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-sm font-medium flex items-start gap-2.5">
+                          <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm font-medium flex items-start gap-2.5">
                             <span className="shrink-0 text-base leading-none mt-0.5">✅</span>
                             <span className="leading-snug">{trap.right.replace(/[❌✅]/g, '').trim()}</span>
                           </div>
                         </div>
                         {trap.explanation && (
-                          <p className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-normal">
+                          <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-normal">
                             {trap.explanation}
                           </p>
                         )}
@@ -4855,9 +4803,9 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           )}
         </div>
 
-        {/* Закреплённая стеклянная панель (Футер: матовое стекло, Starten only) */}
-        <div className="px-8 py-4 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl border-t border-black/5 dark:border-white/10 flex items-center justify-between sticky bottom-0 z-20 mt-auto shrink-0">
-          <div className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+        {/* Плавающий футер (Floating Action Bar) */}
+        <div className="px-8 py-4 bg-zinc-950/80 backdrop-blur-xl border-t border-white/10 flex items-center justify-between sticky bottom-0 z-20 mt-auto shrink-0">
+          <div className="text-xs text-zinc-400 font-medium">
             Готовы закрепить на практике?
           </div>
           <button 
@@ -6045,7 +5993,6 @@ export default function App() {
   const handleDeckClick = useCallback((id: string) => setActiveDeckId(id), []);
   const handleRenameClick = useCallback((id: string, name: string) => { setRenameInput(name); setRenameModal({ id, name }); }, []);
   const handleDeleteClick = useCallback((id: string, name: string) => setDeleteModal({ id, name }), []);
-  const handleEditTheory = useCallback((id: string) => setTheoryEditDeckId(id), []);
   const handleViewTheory = useCallback((id: string) => setTheoryViewDeckId(id), []);
   
   const handleBookClick = useCallback((id: string) => {
@@ -6065,7 +6012,6 @@ export default function App() {
   }, [renameModal, deleteModal, bookModal, deleteBookModal]);
 
 
-  const [theoryEditDeckId, setTheoryEditDeckId] = useState<string | null>(null);
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
 
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
@@ -6075,6 +6021,16 @@ export default function App() {
 
   useEffect(() => {
     setIsMounted(true);
+    // Complete wipe of all old cached theories for fresh AI re-generation
+    if (typeof window !== 'undefined' && !localStorage.getItem('theory_v4_clean_reset_done')) {
+      localStorage.setItem('theory_v4_clean_reset_done', 'true');
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('deck_theory_') || key === 'cache_decks_v2')) {
+          localStorage.removeItem(key);
+        }
+      }
+    }
     const savedLang = localStorage.getItem('selected_language');
     if (savedLang === 'DE' || savedLang === 'EN') {
       setAppLanguage(savedLang);
@@ -6802,8 +6758,7 @@ try {
 
       <AnimatePresence>
         {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
-        {theoryEditDeckId && <TheoryEditorModal deckId={theoryEditDeckId} onClose={() => setTheoryEditDeckId(null)} />}
-        {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { initAudioCtx(); setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} onEdit={() => { setTheoryEditDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
+        {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { initAudioCtx(); setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
         {dictationDeckId && <DictationPlayer deck={decks.find(d => d.id === dictationDeckId)!} onClose={() => setDictationDeckId(null)} />}
         {shadowingDeckId && <ShadowingPlayer deck={decks.find(d => d.id === shadowingDeckId)!} onClose={() => setShadowingDeckId(null)} />}
       </AnimatePresence>
@@ -7102,7 +7057,6 @@ try {
                                   onStartDictation={(id) => setDictationDeckId(id)}
                                   onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                   onDelete={handleDeleteClick} 
-                                  onEditTheory={handleEditTheory} 
                                   onViewTheory={handleViewTheory} 
                                 />
                               </div>
@@ -7143,7 +7097,6 @@ try {
                                           onStartDictation={(id) => setDictationDeckId(id)}
                                           onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                           onDelete={handleDeleteClick} 
-                                          onEditTheory={handleEditTheory} 
                                           onViewTheory={handleViewTheory} 
                                         />
                                       </div>
