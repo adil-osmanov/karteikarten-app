@@ -3926,12 +3926,125 @@ function TheoryEditorModal({ deckId, onClose }: { deckId: string, onClose: () =>
   );
 }
 
+const DEFAULT_THEORIES: Record<string, string> = {
+  "Possessivartikel": `Ключевой шаблон: mein / dein / sein + Окончание артикля ein
+
+| Maskulin | Neutral | Feminin | Plural |
+|---|---|---|---|
+| mein / -en | mein | meine | meine |
+
+Притяжательные местоимения склоняются точно так же, как неопределённый артикль ein. Во множественном числе они получают окончание -e (как определенный артикль die).
+
+### Примеры:
+* Das ist mein Vater (Maskulin Nominativ).
+* Ich sehe meinen Bruder (Maskulin Akkusativ: der ➔ den / -en).
+* Das ist meine Mutter (Feminin).
+* Das sind meine Kinder (Plural).`,
+
+  "Akkusativ": `Ключевой шаблон: Akkusativ меняет только мужской род (der ➔ den / einen)
+
+| Maskulin | Neutral | Feminin | Plural |
+|---|---|---|---|
+| den / einen | das / ein | die / eine | die / - |
+
+Akkusativ отвечает на вопросы Wen? (Кого?) и Was? (Что?). Это прямое дополнение. Средний, женский род и множественное число не меняют форму!
+
+### Примеры:
+* Ich habe einen Bruder (Maskulin: der ➔ einen).
+* Er liest das Buch (Neutral: не меняется).
+* Wir trinken die Limonade (Feminin: не меняется).`,
+
+  "Modalverben": `Ключевой шаблон: Subjekt + Modalverb (Pos 2) + ... + Infinitiv (Ende)
+
+Модальный глагол спрягается под подлежащее и всегда стоит на 2-й позиции в предложении. Смысловой глагол уходит в самый конец предложения в форме инфинитива.
+
+### Примеры:
+* Ich muss heute lange arbeiten.
+* Kannst du mir bitte helfen?
+* Wir wollen nach Deutschland fahren.`,
+
+  "Dativ": `Ключевой шаблон: Dativ меняет все артикли (dem / dem / der / den + -n)
+
+| Maskulin | Neutral | Feminin | Plural |
+|---|---|---|---|
+| dem / einem | dem / einem | der / einer | den + -n |
+
+Dativ отвечает на вопрос Wem? (Кому?) или Wo? (Где?). Косвенное дополнение. Во множественном числе существительное получает окончание -n (den Kindern).
+
+### Примеры:
+* Ich helfe dem Mann (Maskulin).
+* Er antwortet der Lehrerin (Feminin).
+* Wir gratulieren den Freunden (Plural + n).`,
+};
+
+function EndingsMatrixWidget({ data }: { data?: { m: string; n: string; f: string; pl: string } }) {
+  const m = data?.m || "mein / -en";
+  const n = data?.n || "mein";
+  const f = data?.f || "meine";
+  const pl = data?.pl || "meine";
+
+  const renderVal = (val: string) => {
+    if (val.includes("-en")) {
+      const parts = val.split("/");
+      return (
+        <span>
+          {parts[0].trim()} / <span className="text-blue-500 font-extrabold">{parts[1].trim()}</span>
+        </span>
+      );
+    }
+    if (val.endsWith("e") && val.length > 1) {
+      return (
+        <span>
+          {val.slice(0, -1)}<span className="text-blue-500 font-extrabold">e</span>
+        </span>
+      );
+    }
+    return <span>{val}</span>;
+  };
+
+  return (
+    <div className="grid grid-cols-4 gap-2 text-center text-xs my-4 select-none">
+      <div className="p-2.5 rounded-xl bg-black/[0.03] dark:bg-white/5 border border-black/5 dark:border-white/10">
+        <span className="text-zinc-400 block text-[10px] uppercase font-semibold">Maskulin</span>
+        <span className="font-bold text-base text-zinc-900 dark:text-white">{renderVal(m)}</span>
+      </div>
+      <div className="p-2.5 rounded-xl bg-black/[0.03] dark:bg-white/5 border border-black/5 dark:border-white/10">
+        <span className="text-zinc-400 block text-[10px] uppercase font-semibold">Neutral</span>
+        <span className="font-bold text-base text-zinc-900 dark:text-white">{renderVal(n)}</span>
+      </div>
+      <div className="p-2.5 rounded-xl bg-black/[0.03] dark:bg-white/5 border border-black/5 dark:border-white/10">
+        <span className="text-zinc-400 block text-[10px] uppercase font-semibold">Feminin</span>
+        <span className="font-bold text-base text-zinc-900 dark:text-white">{renderVal(f)}</span>
+      </div>
+      <div className="p-2.5 rounded-xl bg-black/[0.03] dark:bg-white/5 border border-black/5 dark:border-white/10">
+        <span className="text-zinc-400 block text-[10px] uppercase font-semibold">Plural</span>
+        <span className="font-bold text-base text-zinc-900 dark:text-white">{renderVal(pl)}</span>
+      </div>
+    </div>
+  );
+}
+
 function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: string, onClose: () => void, onStartSession: () => void, onEdit: () => void }) {
   useScrollLock(true);
+  const deck = useStore(state => state.decks.find(d => d.id === deckId));
   const [text, setText] = useState("");
+
   useEffect(() => {
-    setText(localStorage.getItem(`deck_theory_${deckId}`) || "");
-  }, [deckId]);
+    const saved = localStorage.getItem(`deck_theory_${deckId}`);
+    if (saved && saved.trim()) {
+      setText(saved);
+    } else {
+      const deckName = deck?.name || "";
+      let found: string | undefined = undefined;
+      for (const [key, val] of Object.entries(DEFAULT_THEORIES)) {
+        if (deckName.toLowerCase().includes(key.toLowerCase()) || key.toLowerCase().includes(deckName.toLowerCase())) {
+          found = val;
+          break;
+        }
+      }
+      setText(found || "");
+    }
+  }, [deckId, deck?.name]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -3945,38 +4058,85 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     return () => window.removeEventListener('keydown', down);
   }, [onClose, onStartSession]);
 
+  const extractedTitle = useMemo(() => {
+    const match = (text || "").match(/^#\s+(.+)$/m);
+    return match ? match[1].trim() : null;
+  }, [text]);
+
+  const displayTitle = extractedTitle || deck?.name || "Theorie";
+
   const MarkdownComponents = {
     p: ({ children }: any) => {
       const firstChild = Array.isArray(children) ? children[0] : children;
       if (typeof firstChild === 'string') {
         const textStr = firstChild.trim();
         if (textStr.startsWith('💡WIDGET_TEMPLATE💡')) {
-          const contentStr = textStr.replace('💡WIDGET_TEMPLATE💡', '');
-          const rest = Array.isArray(children) ? children.slice(1) : [];
+          const raw = textStr.replace('💡WIDGET_TEMPLATE💡', '').trim();
+          
+          let formula = raw;
+          let explanation = "";
+          const plusIdx = raw.indexOf('+');
+          if (plusIdx !== -1) {
+            const afterPlus = raw.substring(plusIdx + 1).trim();
+            const match = afterPlus.match(/^(Окончание(?:\s+[а-яёA-Za-z]+)?)\s*(.*)$/i);
+            if (match) {
+              formula = raw.substring(0, plusIdx).trim() + ' + ' + match[1].trim();
+              explanation = match[2]?.trim() || "";
+            }
+          }
+
           return (
-            <div className="bg-blue-50/50 dark:bg-blue-500/10 border border-blue-600/20 dark:border-blue-500/20 rounded-2xl px-5 py-5 my-6 shadow-sm">
-               <div className="text-[11px] font-semibold tracking-[0.15em] text-blue-600 dark:text-blue-500 uppercase mb-2">Ключевой шаблон</div>
-               <div className="text-[16px] font-medium text-gray-900 dark:text-white leading-relaxed">
-                 {contentStr}
-                 {rest}
-               </div>
+            <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-900 dark:text-blue-200 shadow-sm my-3 select-none">
+              <div className="text-[11px] font-semibold tracking-wider text-blue-600 dark:text-blue-400 uppercase mb-1.5">
+                Ключевой шаблон
+              </div>
+              <div className="font-mono font-semibold text-base text-blue-950 dark:text-blue-100 tracking-tight">
+                {formula}
+              </div>
+              {explanation && (
+                <div className="text-xs font-normal text-blue-800/80 dark:text-blue-200/80 mt-1.5 leading-relaxed">
+                  {explanation}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        if (textStr.startsWith('💡COMPACT_MATRIX💡')) {
+          const raw = textStr.replace('💡COMPACT_MATRIX💡', '').trim();
+          const [m = "", n = "", f = "", pl = ""] = raw.split('|');
+          return <EndingsMatrixWidget data={{ m, n, f, pl }} />;
+        }
+
+        if (textStr === '💡EXAMPLES_HEADER💡') {
+          return (
+            <div className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase mt-5 mb-1 select-none">
+              Примеры
             </div>
           );
         }
       }
-      return <p className="text-[15px] leading-relaxed text-gray-700 dark:text-white/80 my-3">{children}</p>;
+      return (
+        <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 font-normal my-2.5">
+          {children}
+        </p>
+      );
     },
-    strong: ({ children }: any) => <strong className="font-semibold text-gray-900 dark:text-white">{children}</strong>,
-    em: ({ children }: any) => <em className="italic text-gray-600 dark:text-white/70">{children}</em>,
-    h1: ({ children }: any) => <h1 className="text-xl font-bold tracking-tight text-black dark:text-white mt-8 mb-4">{children}</h1>,
-    h2: ({ children }: any) => <h2 className="text-lg font-bold tracking-tight text-black dark:text-white mt-8 mb-4">{children}</h2>,
-    h3: ({ children }: any) => <h3 className="text-xs font-semibold tracking-[0.15em] text-gray-500 dark:text-white/40 uppercase mt-8 mb-3">{children}</h3>,
-    ul: ({ children }: any) => <ul className="space-y-3 my-4 ml-5 list-disc marker:text-gray-400 dark:marker:text-white/30">{children}</ul>,
-    ol: ({ children }: any) => <ol className="space-y-3 my-4 ml-5 list-decimal marker:text-gray-900 dark:marker:text-white/50 font-medium">{children}</ol>,
-    li: ({ children }: any) => <li className="text-[15px] leading-relaxed text-gray-700 dark:text-white/80 pl-1">{children}</li>,
+    strong: ({ children }: any) => <strong className="font-semibold text-zinc-900 dark:text-white">{children}</strong>,
+    em: ({ children }: any) => <em className="italic text-zinc-600 dark:text-zinc-400">{children}</em>,
+    h1: ({ children }: any) => <h1 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white mt-5 mb-2">{children}</h1>,
+    h2: ({ children }: any) => <h2 className="text-base font-bold tracking-tight text-zinc-900 dark:text-white mt-4 mb-2">{children}</h2>,
+    h3: ({ children }: any) => <h3 className="text-xs font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 uppercase mt-4 mb-2">{children}</h3>,
+    ul: ({ children }: any) => <ul className="space-y-2 my-3 pl-0 list-none">{children}</ul>,
+    ol: ({ children }: any) => <ol className="space-y-2 my-3 ml-4 list-decimal marker:text-zinc-400 dark:marker:text-zinc-500 text-zinc-700 dark:text-zinc-300 font-medium">{children}</ol>,
+    li: ({ children }: any) => (
+      <li className="border-l-2 border-blue-500 pl-3 py-1 space-y-1 text-zinc-800 dark:text-zinc-200 my-1.5 text-sm bg-black/[0.015] dark:bg-white/[0.02] rounded-r-lg leading-relaxed">
+        {children}
+      </li>
+    ),
     blockquote: ({ children }: any) => {
       const checkAchtung = (node: any): boolean => {
-        if (typeof node === 'string') return node.includes('⚠️');
+        if (typeof node === 'string') return node.includes('⚠️') || node.toLowerCase().includes('achtung');
         if (Array.isArray(node)) return node.some(checkAchtung);
         if (node && node.props && node.props.children) return checkAchtung(node.props.children);
         return false;
@@ -3984,29 +4144,29 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       const isAchtung = checkAchtung(children);
       
       if (isAchtung) {
-         return (
-           <blockquote className="bg-amber-500/10 border border-amber-500/20 px-5 py-5 rounded-2xl my-6 shadow-sm">
-             <div className="text-[15px] leading-relaxed font-medium text-amber-600 dark:text-amber-500 [&>p]:my-0">{children}</div>
-           </blockquote>
-         );
+        return (
+          <blockquote className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200 my-3 text-xs leading-relaxed font-medium">
+            <div className="[&>p]:my-0">{children}</div>
+          </blockquote>
+        );
       }
       
       return (
-        <blockquote className="bg-blue-50/50 dark:bg-blue-500/10 border border-blue-600/20 dark:border-blue-500/20 px-5 py-5 rounded-2xl my-6 shadow-sm">
-          <div className="text-[15px] leading-relaxed text-gray-700 dark:text-white/80 [&>p]:my-0">{children}</div>
-        </blockquote>
+        <div className="border-l-2 border-blue-500 pl-3 py-1 space-y-1 text-zinc-800 dark:text-zinc-200 my-3 bg-black/[0.015] dark:bg-white/[0.02] rounded-r-lg">
+          <div className="text-sm leading-relaxed [&>p]:my-0">{children}</div>
+        </div>
       );
     },
     code: ({ node, inline, className, children, ...props }: any) => {
       if (!inline) {
         return (
-          <pre className="bg-gray-100 dark:bg-black/40 p-4 rounded-xl overflow-x-auto font-mono text-[13px] text-gray-800 dark:text-gray-300 my-4 border border-gray-200 dark:border-white/10 custom-scrollbar">
+          <pre className="bg-black/5 dark:bg-white/5 p-3.5 rounded-xl overflow-x-auto font-mono text-xs text-zinc-800 dark:text-zinc-200 my-3 border border-black/5 dark:border-white/10 custom-scrollbar">
             <code className={className} {...props}>{children}</code>
           </pre>
         );
       }
       return (
-        <code className="bg-gray-100 dark:bg-white/10 text-pink-600 dark:text-pink-400 px-1.5 py-0.5 rounded-md font-mono text-[13px]" {...props}>
+        <code className="bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-md font-mono text-xs font-semibold" {...props}>
           {children}
         </code>
       );
@@ -4015,52 +4175,105 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
   const renderedContent = useMemo(() => {
     let preprocessed = (text || '').replace(/^( {4,}|\t+)/gm, '  ');
-    
-    // Auto-wrap ⚠️ blocks into blockquotes until the next blank line
+
+    // 1. Strip the leading # Title if it matches displayTitle to prevent duplication
+    if (extractedTitle) {
+      preprocessed = preprocessed.replace(/^#\s+.+$/m, '').trim();
+    }
+
+    // 2. Fix typos and missing spaces like "артикляein"
+    preprocessed = preprocessed.replace(/артикл([а-яё]*)ein/gi, 'артикл$1 ein');
+    preprocessed = preprocessed.replace(/артикляein/gi, 'артикля ein');
+    preprocessed = preprocessed.replace(/артиклейein/gi, 'артиклей ein');
+    preprocessed = preprocessed.replace(/артикльein/gi, 'артикль ein');
+    preprocessed = preprocessed.replace(/артиклемein/gi, 'артиклем ein');
+
+    // 3. Auto-wrap ⚠️ blocks into blockquotes until the next blank line
     preprocessed = preprocessed.replace(/^(⚠️.*(?:\n(?!\s*\n).*)*)/gm, (match) => {
-       return match.split('\n').map(line => line.trim().startsWith('>') ? line : '> ' + line).join('\n');
+      return match.split('\n').map(line => line.trim().startsWith('>') ? line : '> ' + line).join('\n');
     });
 
-    // Super robust Widget Template catcher (catches with or without **, with or without >)
-    preprocessed = preprocessed.replace(/^[>\s]*(?:\*\*|__)?\s*(Ключевой шаблон|Шаблон)\s*(?:\*\*|__)?\s*[:\-]?\s*(.*)/gim, '💡WIDGET_TEMPLATE💡$2');
-    
+    // 4. Transform markdown table with Maskulin / Neutral / Feminin / Plural into COMPACT_MATRIX
+    const tableRegex = /\|?\s*Maskulin(?:um)?\s*\|\s*Neutr(?:al|um)?\s*\|\s*Feminin(?:um)?\s*\|\s*Plural\s*\|?\s*\n\|?[-:\s|]+\|?\s*\n\|?\s*([^|\n]+)\s*\|\s*([^|\n]+)\s*\|\s*([^|\n]+)\s*\|\s*([^|\n]+)\s*\|?/i;
+    const tableMatch = preprocessed.match(tableRegex);
+    if (tableMatch) {
+      const matrixToken = `💡COMPACT_MATRIX💡${tableMatch[1].trim()}|${tableMatch[2].trim()}|${tableMatch[3].trim()}|${tableMatch[4].trim()}`;
+      preprocessed = preprocessed.replace(tableRegex, matrixToken);
+    } else if (
+      (deck?.name?.toLowerCase().includes("possessiv") || preprocessed.toLowerCase().includes("possessiv")) &&
+      !preprocessed.includes("💡COMPACT_MATRIX💡")
+    ) {
+      preprocessed = preprocessed.replace(
+        /^[>\s]*(?:\*\*|__)?\s*(Ключевой шаблон|Шаблон|Формула)\s*(?:\*\*|__)?\s*[:\-]?\s*(.*)$/gim,
+        '💡WIDGET_TEMPLATE💡$2\n\n💡COMPACT_MATRIX💡mein / -en|mein|meine|meine'
+      );
+    }
+
+    // 5. Catch Key Template / Formula
+    preprocessed = preprocessed.replace(/^[>\s]*(?:\*\*|__)?\s*(Ключевой шаблон|Шаблон|Формула)\s*(?:\*\*|__)?\s*[:\-]?\s*(.*)$/gim, '💡WIDGET_TEMPLATE💡$2');
+
+    // 6. Catch Examples Header
+    preprocessed = preprocessed.replace(/^[#>\s]*(?:\*\*|__)?\s*(Примеры|Живые примеры|Beispiele)\s*(?:\*\*|__)?\s*[:\-]?\s*$/gim, '💡EXAMPLES_HEADER💡');
+
     return (
       <ReactMarkdown components={MarkdownComponents}>{preprocessed}</ReactMarkdown>
     );
-  }, [text]);
+  }, [text, extractedTitle, deck?.name]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4 overscroll-contain touch-none" onClick={onClose}>
+    <div 
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4 overscroll-contain touch-none" 
+      onClick={onClose}
+    >
       <motion.div 
-        initial={{ opacity: 0, y: 100 }} 
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 100 }}
+        initial={{ opacity: 0, y: 60, scale: 0.98 }} 
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 60, scale: 0.98 }}
+        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl mx-auto backdrop-blur-3xl bg-white/95 dark:bg-[#1C1C1E]/90 border border-black/5 dark:border-white/[0.08] rounded-t-[32px] md:rounded-[32px] p-6 shadow-2xl flex flex-col max-h-[85vh] transform-gpu will-change-[transform,opacity]" 
+        className="w-full max-w-xl mx-auto bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-white/10 shadow-2xl rounded-t-3xl md:rounded-3xl flex flex-col max-h-[90vh] md:max-h-[85vh] overflow-hidden relative transform-gpu"
       >
-        <div className="w-12 h-1.5 bg-gray-300 dark:bg-white/20 rounded-full mx-auto mb-5 shrink-0" />
-        
-        <div 
-          className="flex-1 overflow-y-auto pr-2 custom-scrollbar relative" 
-          style={{ 
-            maxHeight: '60vh', 
-            WebkitMaskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)', 
-            maskImage: 'linear-gradient(to bottom, black 85%, transparent 100%)' 
-          }}
+        {/* Mobile Drag Handle */}
+        <div className="w-10 h-1 bg-zinc-300 dark:bg-white/20 rounded-full mx-auto mt-3 mb-1 shrink-0 md:hidden" />
+
+        {/* Close Button (✕) */}
+        <button
+          onClick={onClose}
+          className="w-8 h-8 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-all absolute top-4 right-4 z-10 cursor-pointer active:scale-95"
+          title="Schließen (Esc)"
         >
-          <div className="pb-16">
-            {text ? renderedContent : (<div className="flex flex-col items-center justify-center py-20 opacity-50"><BookOpen className="w-12 h-12 mb-4" /><p>Keine Theorie für dieses Deck gefunden.</p></div>)}
-          </div>
+          <X className="w-4 h-4" />
+        </button>
+
+        {/* Modal Header Title */}
+        <div className="px-6 pt-6 pb-2 pr-12 shrink-0">
+          <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
+            {displayTitle}
+          </h2>
         </div>
-        
-        <div className="shrink-0 pt-5 mt-2 border-t border-black/5 dark:border-white/10 bg-transparent">
+
+        {/* Content Scroll Container */}
+        <div className="overflow-y-auto px-6 py-4 space-y-5 text-sm flex-1 pb-6 custom-scrollbar">
+          {text ? renderedContent : (
+            <div className="flex flex-col items-center justify-center py-16 text-zinc-400">
+              <BookOpen className="w-10 h-10 mb-3 opacity-40" />
+              <p className="text-xs">Keine Theorie für dieses Deck gefunden.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Fixed Footer */}
+        <div className="p-5 pt-3 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md border-t border-black/5 dark:border-white/10 flex flex-col gap-2 items-center w-full mt-auto shrink-0">
           <button 
             onClick={onStartSession}
-            className="w-full bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white font-semibold py-4 rounded-2xl transition-all shadow-[0_4px_14px_0_rgba(10,132,255,0.3)] dark:shadow-[0_4px_14px_0_rgba(10,132,255,0.35)] active:scale-[0.98] text-lg mb-3"
+            className="w-full h-12 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-white font-semibold text-base transition-all shadow-md flex items-center justify-center cursor-pointer select-none"
           >
             Start
           </button>
-          <button onClick={onEdit} className="w-full text-center text-xs font-medium text-gray-400 hover:text-gray-600 dark:text-white/30 dark:hover:text-white/80 transition-colors">
+          <button 
+            onClick={onEdit} 
+            className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors cursor-pointer select-none py-0.5"
+          >
             Konzept bearbeiten
           </button>
         </div>
