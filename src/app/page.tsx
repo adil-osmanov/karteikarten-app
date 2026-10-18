@@ -1975,7 +1975,7 @@ function RapidSession({
 }) {
   const answerCard = useStore(state => state.answerCard);
   const setCardProgress = useStore(state => state.setCardProgress);
-  const { stats, recordCardResult } = useDayStats();
+  const { stats, recordCardResult } = useDayStats({ isStudying: true });
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [wordProgress, setWordProgress] = useState<Record<string, number>>({});
@@ -2237,7 +2237,7 @@ function StudyInterface({
   trainingMode?: string
 }) {
   const { answerCard, decks, books } = useStore();
-  const { stats, recordCardResult } = useDayStats();
+  const { stats, recordCardResult } = useDayStats({ isStudying: true });
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
@@ -2834,6 +2834,7 @@ function StudyCard({
 }) {
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [hasErrored, setHasErrored] = useState(false);
+  const hasErroredRef = useRef(false);
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const playbackSpeed = useStore(state => state.playbackSpeed);
@@ -2931,7 +2932,10 @@ function StudyCard({
     if (phase !== "Question") return;
     const optLower = option.trim().toLowerCase();
     const correct = optLower === card.targetWord.trim().toLowerCase() || optLower === clozeWord.trim().toLowerCase();
-    if (!correct) setHasErrored(true);
+    if (!correct) {
+      setHasErrored(true);
+      hasErroredRef.current = true;
+    }
     playFeedbackSound(correct);
     onAnswer(correct, false);
     handleReveal();
@@ -2939,6 +2943,7 @@ function StudyCard({
 
   const handleHilfe = () => {
     setHasErrored(true);
+    hasErroredRef.current = true;
     onAnswer(false, true); // isHilfe = true
     handleReveal();
   };
@@ -2953,11 +2958,14 @@ function StudyCard({
     const lastCharIndex = value.length - 1;
     if (value.length > 0 && !lastCharValid) {
       playFeedbackSound(false);
+      setHasErrored(true);
+      hasErroredRef.current = true;
     }
 
     if (isValid && isComplete) {
       playFeedbackSound(true);
-      onAnswer(true, false);
+      const isCardCorrect = !hasErroredRef.current;
+      onAnswer(isCardCorrect, false);
       handleReveal();
     }
   };
@@ -3550,6 +3558,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
   const todayStr = new Date().toLocaleDateString('en-CA');
   const rawCount = daily[todayStr];
   const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
+  const displayTodayCount = Math.max(todayCount, stats?.cardsDone || 0);
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
   const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
@@ -3652,8 +3661,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
                 title="Статистика дня"
               >
                 <Layers className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
-                <span className="font-bold text-zinc-950 dark:text-white">{todayCount}</span>
-                <span className="text-zinc-500 dark:text-zinc-400 font-medium">{currentTranslations.today}</span>
+                <span className="font-bold text-zinc-950 dark:text-white font-mono tracking-tight text-xs sm:text-[13px]">{displayTodayCount}/200</span>
               </button>
 
               {/* Тонкий разделитель */}
@@ -5771,6 +5779,8 @@ function PrepStudyCard({
 }) {
   const [isSuccess, setIsSuccess] = useState(false);
   const [isHilfe, setIsHilfe] = useState(false);
+  const [hasErrored, setHasErrored] = useState(false);
+  const hasErroredRef = useRef(false);
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
   const originalVerb = card.targetWord;
@@ -5802,8 +5812,10 @@ function PrepStudyCard({
        setIsSuccess(true);
        playFeedbackSound(true);
        playAudio();
-       onAnswer(card.id, !isHilfe, isHilfe);
+       onAnswer(card.id, !isHilfe && !hasErroredRef.current, isHilfe);
     } else {
+       hasErroredRef.current = true;
+       setHasErrored(true);
        playFeedbackSound(false);
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
@@ -5811,6 +5823,8 @@ function PrepStudyCard({
   }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio]);
 
   const onHilfe = useCallback(() => {
+    hasErroredRef.current = true;
+    setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
     playAudio();
@@ -6012,7 +6026,8 @@ function VerbStudyCard({
 
   const [activeInput, setActiveInput] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
-  const hasErrored = false;
+  const [hasErrored, setHasErrored] = useState(false);
+  const hasErroredRef = useRef(false);
   const [isHilfe, setIsHilfe] = useState(false);
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
@@ -6053,15 +6068,18 @@ function VerbStudyCard({
     } else {
       setIsSuccess(true);
       playAudio();
-      onAnswer(!hasErrored, false);
+      onAnswer(!hasErroredRef.current && !isHilfe, false);
     }
-  }, [hasErrored, playAudio, onAnswer]);
+  }, [isHilfe, playAudio, onAnswer]);
 
   const handleSlotError = useCallback(() => {
-    // User requested infinite attempts without penalty
+    hasErroredRef.current = true;
+    setHasErrored(true);
   }, []);
 
   const handleHilfe = useCallback(() => {
+    hasErroredRef.current = true;
+    setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
     playAudio();

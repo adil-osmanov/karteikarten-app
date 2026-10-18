@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { X, CheckCircle2, RotateCcw, Clock, Target } from 'lucide-react';
+import { getTodayCompletedCardsCount } from '@/hooks/useDayStats';
 
 export interface StatsPopoverProps {
   isOpen: boolean;
@@ -11,11 +12,22 @@ export interface StatsPopoverProps {
 export function StatsPopover({ isOpen, onClose, stats, onReviewMistakes }: StatsPopoverProps) {
   useEffect(() => {
     if (!isOpen) return;
+
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
@@ -25,16 +37,24 @@ export function StatsPopover({ isOpen, onClose, stats, onReviewMistakes }: Stats
   const hours = Math.floor(minutes / 60);
   const timeDisplay = hours > 0 ? `${hours} ч ${minutes % 60} мин` : `${minutes} мин`;
 
-  const totalDone = typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0;
+  const realCardsCount = getTodayCompletedCardsCount();
+  const totalDone = Math.max(typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0, realCardsCount);
   const target = 200;
   const progressPercent = Math.min(Math.round((totalDone / target) * 100), 100);
-  const accuracy = totalDone > 0 ? Math.round(((stats?.correctCount || 0) / totalDone) * 100) : 100;
+  const correctCount = typeof stats?.correctCount === 'number' ? stats.correctCount : totalDone;
+  const accuracy = totalDone > 0 ? Math.min(100, Math.max(0, Math.round((correctCount / totalDone) * 100))) : 100;
   const mistakeCount = Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0;
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overscroll-contain touch-none animate-in fade-in duration-150 select-none"
       onClick={onClose}
+      onWheel={(e) => {
+        e.stopPropagation();
+      }}
+      onTouchMove={(e) => {
+        e.stopPropagation();
+      }}
     >
       <div 
         className="w-full max-w-sm rounded-3xl bg-zinc-900/95 border border-white/10 p-6 shadow-2xl backdrop-blur-2xl text-white relative animate-in zoom-in-95 duration-200"
@@ -73,11 +93,11 @@ export function StatsPopover({ isOpen, onClose, stats, onReviewMistakes }: Stats
           </div>
         </div>
 
-        {/* Прогресс за день (0 / 200) */}
+        {/* Прогресс за день (например, 278 / 200) */}
         <div className="mb-5 p-4 rounded-2xl bg-white/[0.03] border border-white/5">
           <div className="flex justify-between items-center text-xs mb-2">
             <span className="text-zinc-400 font-medium">Карточки сегодня</span>
-            <span className="text-zinc-200 font-semibold">
+            <span className="text-zinc-200 font-semibold font-mono">
               {totalDone} <span className="text-zinc-500 font-normal">/ {target}</span>
             </span>
           </div>
@@ -94,7 +114,7 @@ export function StatsPopover({ isOpen, onClose, stats, onReviewMistakes }: Stats
           <div className="flex items-center gap-2">
             <span className="text-xs text-zinc-400 font-medium">Банк ошибок:</span>
             {mistakeCount > 0 ? (
-              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono">
                 {mistakeCount}
               </span>
             ) : (
