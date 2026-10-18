@@ -6856,7 +6856,7 @@ export default function App() {
   useEffect(() => {
     setIsMounted(true);
     const savedLang = localStorage.getItem('selected_language');
-    if (savedLang === 'DE' || savedLang === 'EN') {
+    if (savedLang === 'DE' || savedLang === 'EN' || savedLang === 'RU') {
       setAppLanguage(savedLang);
     }
     try {
@@ -6885,9 +6885,15 @@ export default function App() {
       
       try {
         const cachedBooks = localStorage.getItem('cache_books_v2');
-        if (cachedBooks) setBooks(JSON.parse(cachedBooks));
+        if (cachedBooks) {
+          const pb = JSON.parse(cachedBooks);
+          if (Array.isArray(pb)) setBooks(pb);
+        }
         const cachedDecks = localStorage.getItem('cache_decks_v2');
-        if (cachedDecks) setDecks(JSON.parse(cachedDecks));
+        if (cachedDecks) {
+          const pd = JSON.parse(cachedDecks);
+          if (Array.isArray(pd)) setDecks(pd);
+        }
       } catch (e) {}
       
 try {
@@ -6900,7 +6906,13 @@ try {
         if (statsRes && !statsRes.error && statsRes.data) {
           const pushStats = (lang: string) => {
             const localKey = `daily_activity_${lang}`;
-            const localDaily = JSON.parse(localStorage.getItem(localKey) || '{}');
+            let localDaily: Record<string, any> = {};
+            try {
+              const parsed = JSON.parse(localStorage.getItem(localKey) || '{}');
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                localDaily = parsed;
+              }
+            } catch (e) {}
             const cloudStat = statsRes.data.find((s: any) => s.language === lang) || { daily_activity: {} };
             const cloudDaily = cloudStat.daily_activity || {};
             
@@ -6940,6 +6952,7 @@ try {
 
           pushStats('DE');
           pushStats('EN');
+          pushStats('RU');
           
           const globalStat = statsRes.data.find((s: any) => s.language === 'GLOBAL_APP_STATE');
           if (globalStat && globalStat.daily_activity) {

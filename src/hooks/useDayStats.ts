@@ -25,17 +25,19 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
     const stored = localStorage.getItem(`daily_activity_${lang}`);
     if (stored) {
       const parsed = JSON.parse(stored);
-      for (const k of dateKeys) {
-        const raw = parsed[k];
-        const count = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
-        if (count > maxFound) maxFound = count;
+      if (parsed && typeof parsed === 'object') {
+        for (const k of dateKeys) {
+          const raw = parsed[k];
+          const count = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
+          if (count > maxFound) maxFound = count;
+        }
       }
     }
 
     const savedAppStats = localStorage.getItem(getStorageKey(lang));
     if (savedAppStats) {
       const parsed = JSON.parse(savedAppStats);
-      if (typeof parsed?.cardsDone === 'number' && parsed.cardsDone > maxFound) {
+      if (parsed && typeof parsed?.cardsDone === 'number' && parsed.cardsDone > maxFound) {
         maxFound = parsed.cardsDone;
       }
     }
@@ -76,8 +78,9 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
-      const mistakesPool = Array.isArray(parsed.mistakesPool) ? parsed.mistakesPool : [];
-      if (parsed.date === todayKey) {
+      if (parsed && typeof parsed === 'object') {
+        const mistakesPool = Array.isArray(parsed.mistakesPool) ? parsed.mistakesPool : [];
+        if (parsed.date === todayKey) {
         const currentCards = Math.max(typeof parsed.cardsDone === 'number' ? parsed.cardsDone : 0, realTodayCards);
         
         const mistakesToday = typeof parsed.mistakesCountToday === 'number'
@@ -111,6 +114,7 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
         mistakesCountToday: 0,
         mistakesPool
       };
+      }
     } catch (e) {}
   }
 
