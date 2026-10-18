@@ -212,7 +212,7 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
     }
 
     const baseClasses =
-      "relative flex items-center justify-center rounded-lg shadow-sm h-11 sm:h-12 text-base sm:text-[18px] font-medium select-none touch-none transition-all duration-75";
+      "relative flex items-center justify-center rounded-lg shadow-sm h-10 sm:h-12 text-sm sm:text-base font-medium select-none touch-none transition-all duration-75";
 
     const keyColors = isFunctional
       ? "bg-zinc-700/80 active:bg-zinc-600 text-zinc-200"
@@ -229,6 +229,7 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
         type="button"
         tabIndex={-1}
         data-key={key}
+        onTouchStart={(e) => e.preventDefault()}
         style={{ flex: flexValue, touchAction: "none" }}
         className={cn(baseClasses, keyColors, pressedClasses)}
       >
@@ -242,14 +243,14 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
       ref={containerRef}
       onPointerDown={handlePointerDown}
       className={cn(
-        "w-full max-w-[620px] mx-auto p-2 sm:p-2.5 pb-[max(env(safe-area-inset-bottom),0.75rem)]",
-        "bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/80 rounded-2xl flex flex-col gap-2",
-        "select-none touch-none shadow-2xl",
+        "w-full max-w-full mx-auto p-1.5 sm:p-2.5",
+        "bg-zinc-900/95 dark:bg-[#161618] border border-zinc-800/80 dark:border-white/[0.08] rounded-2xl flex flex-col gap-1.5 sm:gap-2",
+        "select-none touch-none shadow-lg",
         className
       )}
     >
       {rows.map((row, idx) => (
-        <div key={idx} className="flex justify-center gap-1.5 w-full">
+        <div key={idx} className="flex justify-center gap-1 sm:gap-1.5 w-full">
           {row.map(key => renderKey(key))}
         </div>
       ))}

@@ -28,7 +28,14 @@ function cn(...inputs: ClassValue[]) {
 function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState(false);
   React.useEffect(() => {
-    setIsMobile('ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0));
+    const check = () => {
+      const hasTouch = 'ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+      const isNarrow = typeof window !== 'undefined' && window.innerWidth < 768;
+      setIsMobile(hasTouch || isNarrow);
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
   }, []);
   return isMobile;
 }
@@ -3026,7 +3033,7 @@ function StudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-3xl p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[420px] transition-colors duration-200"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-3xl p-4 sm:p-6 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[420px] transition-colors duration-200"
       onClick={() => {
         if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
           inputRef.current.focus();
@@ -3132,20 +3139,20 @@ function StudyCard({
                   <span className="inline-block w-full text-center">
                     {renderInputChars()}
                   </span>
-                  <input
-                    ref={inputRef}
-                    autoFocus={!isMobile}
-                    type="text"
-                    inputMode={isMobile ? "none" : "text"}
-                    readOnly={isMobile}
-                    value={inputText}
-                    onChange={handleInputChange}
-                    onKeyDown={handleKeyDown}
-                    className="absolute inset-0 opacity-0 cursor-text w-full h-full"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                  />
+                  {!isMobile && (
+                    <input
+                      ref={inputRef}
+                      autoFocus={false}
+                      type="text"
+                      value={inputText}
+                      onChange={handleInputChange}
+                      onKeyDown={handleKeyDown}
+                      className="absolute inset-0 opacity-0 cursor-text w-full h-full"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                  )}
                 </span>
               )}
             </>
@@ -3195,7 +3202,7 @@ function StudyCard({
           <motion.div 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="md:hidden mt-6 mb-2 w-[calc(100%+1.5rem)] -mx-3 sm:w-[calc(100%+2rem)] sm:-mx-4"
+            className="md:hidden mt-4 w-full"
           >
             <VirtualKeyboard 
               onKeyPress={handleVirtualKeyPress}
@@ -3498,7 +3505,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="h-9 px-3.5 rounded-full bg-white/80 hover:bg-white/95 dark:bg-zinc-900/80 dark:hover:bg-zinc-800/95 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 text-sm font-medium flex items-center gap-2 transition-all active:scale-95 cursor-pointer select-none"
+                className="h-9 px-3.5 rounded-full bg-white dark:bg-[#1C1C1E] hover:bg-zinc-50 dark:hover:bg-[#2C2C2E] border border-zinc-200/80 dark:border-white/15 shadow-sm text-zinc-900 dark:text-white text-sm font-medium flex items-center gap-2 transition-all active:scale-95 cursor-pointer select-none transform-gpu"
                 title="Zurück zur Übersicht"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
@@ -3509,12 +3516,12 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
                 <button
                   type="button"
                   onClick={() => setIsLangOpen(prev => !prev)}
-                  className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm text-zinc-800 dark:text-zinc-200 hover:bg-white/95 dark:hover:bg-zinc-800/95 transition-all duration-150 active:scale-95 cursor-pointer select-none"
+                  className="h-9 px-3 rounded-full flex items-center gap-2 bg-white dark:bg-[#1C1C1E] border border-zinc-200/80 dark:border-white/15 shadow-sm text-zinc-900 dark:text-white hover:bg-zinc-50 dark:hover:bg-[#2C2C2E] transition-all duration-150 active:scale-95 cursor-pointer select-none transform-gpu"
                   title="Sprache wählen"
                 >
                   <span className="text-base leading-none select-none">{currentLang.flag}</span>
-                  <span className="font-bold text-xs tracking-tight text-zinc-800 dark:text-zinc-200">{appLanguage}</span>
-                  <ChevronDown className={cn("w-3 h-3 text-zinc-400 dark:text-zinc-500 transition-transform duration-200", isLangOpen && "rotate-180")} />
+                  <span className="font-bold text-xs tracking-tight text-zinc-900 dark:text-white">{appLanguage}</span>
+                  <ChevronDown className={cn("w-3 h-3 text-zinc-500 dark:text-zinc-400 transition-transform duration-200", isLangOpen && "rotate-180")} />
                 </button>
 
                 <AnimatePresence>
@@ -3524,7 +3531,7 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.95, y: -4 }}
                       transition={{ duration: 0.15, ease: "easeOut" }}
-                      className="absolute left-0 top-full mt-2 w-36 rounded-xl p-1 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-xl border border-black/5 dark:border-white/10 z-50 flex flex-col gap-0.5 select-none"
+                      className="absolute left-0 top-full mt-2 w-36 rounded-xl p-1 bg-white dark:bg-[#1C1C1E] shadow-xl border border-zinc-200/80 dark:border-white/15 z-50 flex flex-col gap-0.5 select-none"
                     >
                       {LANGUAGES.map(lang => {
                         const isSelected = appLanguage === lang.code;
@@ -3560,26 +3567,26 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
           {/* 2. ПРАВЫЙ УГОЛ: ЕДИНЫЙ КАПСУЛЬНЫЙ ТУЛБАР (UNIFIED CONTROL ISLAND) */}
           <div className="flex items-center">
-            <div className="h-9 px-3 rounded-full flex items-center gap-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200/70 dark:border-white/10 shadow-sm select-none">
+            <div className="h-9 px-3 rounded-full flex items-center gap-2 bg-white dark:bg-[#1C1C1E] border border-zinc-200/80 dark:border-white/15 shadow-sm select-none transform-gpu">
               {/* 1. Карточки за сегодня */}
               <div 
                 onClick={(e) => { if (e.detail === 3) setAdminOpen(true); }}
-                className="flex items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300 cursor-default"
+                className="flex items-center gap-1.5 text-xs text-zinc-800 dark:text-zinc-200 cursor-default"
                 title="Gelernte Karten heute"
               >
-                <Layers className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400" />
-                <span className="font-semibold text-zinc-900 dark:text-zinc-100">{todayCount}</span>
-                <span className="text-zinc-400 dark:text-zinc-500 font-normal">{currentTranslations.today}</span>
+                <Layers className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
+                <span className="font-bold text-zinc-950 dark:text-white">{todayCount}</span>
+                <span className="text-zinc-500 dark:text-zinc-400 font-medium">{currentTranslations.today}</span>
               </div>
 
               {/* Тонкий разделитель */}
-              <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/10 mx-0.5" />
+              <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/15 mx-0.5" />
 
               {/* 2. Переключатель темы */}
               <button 
                 type="button"
                 onClick={toggleTheme}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-black/[0.05] dark:hover:bg-white/[0.08] active:scale-95 transition-all cursor-pointer"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-600 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white hover:bg-black/[0.05] dark:hover:bg-white/[0.08] active:scale-95 transition-all cursor-pointer"
                 aria-label="Toggle theme"
                 title={isDark ? "Heller Modus" : "Dunkler Modus"}
               >
@@ -4996,7 +5003,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:p-6 overscroll-contain touch-none" 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-0 md:p-6 overscroll-contain touch-none" 
       onClick={onClose}
     >
       <motion.div 
@@ -5005,13 +5012,10 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         exit={{ opacity: 0, y: 60, scale: 0.98 }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-4xl h-[92vh] md:h-auto md:max-h-[88vh] mx-auto bg-zinc-950 border border-white/10 shadow-2xl rounded-t-3xl md:rounded-3xl flex flex-col overflow-hidden relative text-zinc-100 transform-gpu"
+        className="w-full max-w-4xl h-[100dvh] md:h-auto md:max-h-[88vh] mx-auto bg-zinc-950 border-0 md:border md:border-white/10 shadow-2xl rounded-none md:rounded-3xl flex flex-col overflow-hidden relative text-zinc-100 transform-gpu"
       >
-        {/* Mobile Drag Handle */}
-        <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mt-3 mb-1 shrink-0 md:hidden" />
-
         {/* Sticky Header */}
-        <div className="px-8 py-5 border-b border-white/10 flex items-center justify-between bg-zinc-900/60 backdrop-blur-md sticky top-0 z-20 shrink-0">
+        <div className="px-5 sm:px-8 pt-[max(env(safe-area-inset-top),1rem)] pb-3.5 md:py-5 border-b border-white/10 flex items-center justify-between bg-zinc-900/90 md:bg-zinc-900/60 backdrop-blur-md sticky top-0 z-20 shrink-0">
           <h2 className="text-xl font-bold tracking-tight text-white">
             {displayTitle}
           </h2>
@@ -5132,8 +5136,8 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           )}
         </AnimatePresence>
 
-        {/* Content Scroll Container with pb-24 bottom protection */}
-        <div className="overflow-y-auto px-8 py-6 space-y-6 flex-1 text-zinc-100 scrollbar-thin pb-24 custom-scrollbar">
+        {/* Content Scroll Container with pb-28 bottom protection */}
+        <div className="overflow-y-auto px-5 sm:px-8 py-5 space-y-6 flex-1 text-zinc-100 scrollbar-thin pb-28 custom-scrollbar">
           {isLoading ? (
             /* Apple Skeleton Loader */
             <div className="space-y-6 animate-pulse py-2">
