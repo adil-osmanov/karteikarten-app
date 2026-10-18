@@ -607,9 +607,36 @@ interface DeckState {
   setPlaybackSpeed: (speed: number) => void;
 }
 
+const getInitialCachedBooks = (): BookMeta[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem('cached_app_books') || localStorage.getItem('cache_books_v2');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return [];
+};
+
+const getInitialCachedDecks = (): Deck[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem('cached_app_decks') || localStorage.getItem('cache_decks_v2');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return [];
+};
+
+const initialBooks = getInitialCachedBooks();
+const initialDecks = getInitialCachedDecks();
+
 const useStore = create<DeckState>()((set, get) => ({
-  decks: [],
-  isLoaded: false,
+  decks: initialDecks,
+  isLoaded: typeof window !== 'undefined' && (initialBooks.length > 0 || initialDecks.length > 0),
   appLanguage: 'DE',
   setAppLanguage: (lang) => {
     if (typeof window !== 'undefined') localStorage.setItem('selected_language', lang);
@@ -640,8 +667,16 @@ const useStore = create<DeckState>()((set, get) => ({
     set({ playbackSpeed: speed });
   },
   
-  books: [],
-  setBooks: (books) => set({ books }),
+  books: initialBooks,
+  setBooks: (books) => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('cached_app_books', JSON.stringify(books));
+        localStorage.setItem('cache_books_v2', JSON.stringify(books));
+      } catch (e) {}
+    }
+    set({ books, isLoaded: true });
+  },
   addBook: async (book) => {
     const previousBooks = get().books;
     set({ books: [...previousBooks, book] }); // Restore Optimistic UI
@@ -784,7 +819,15 @@ const useStore = create<DeckState>()((set, get) => ({
     }
   },
   
-  setDecks: (decks) => set({ decks, isLoaded: true }),
+  setDecks: (decks) => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('cached_app_decks', JSON.stringify(decks));
+        localStorage.setItem('cache_decks_v2', JSON.stringify(decks));
+      } catch (e) {}
+    }
+    set({ decks, isLoaded: true });
+  },
   
   addDeck: async (deck) => {
     const deckId = ensureUuid(deck.id);
@@ -3683,40 +3726,38 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
             )}
           </div>
 
-          {/* 2. ПРАВЫЙ УГОЛ: ЕДИНЫЙ КАПСУЛЬНЫЙ ТУЛБАР (UNIFIED CONTROL ISLAND) */}
-          <div className="flex items-center">
-            <div className="h-9 px-3 rounded-full flex items-center gap-2 bg-white dark:bg-[#1C1C1E] border border-zinc-200/80 dark:border-white/15 shadow-sm select-none transform-gpu">
-              {/* 1. Карточки за сегодня */}
-              <button 
-                type="button"
-                onClick={(e) => { 
-                  if (e.detail === 3) {
-                    setAdminOpen(true);
-                  } else {
-                    setIsStatsOpen(true);
-                  }
-                }}
-                className="flex items-center gap-1.5 text-xs text-zinc-800 dark:text-zinc-200 cursor-pointer active:scale-95 transition-transform"
-                title="Статистика дня"
-              >
-                <Layers className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
-                <span suppressHydrationWarning className="font-bold text-zinc-950 dark:text-white font-mono tracking-tight text-xs sm:text-[13px]">{displayTodayCount}/200</span>
-              </button>
+          {/* 2. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
+          <div className="flex items-center gap-2">
+            <button 
+              type="button"
+              onClick={(e) => { 
+                if (e.detail === 3) {
+                  setAdminOpen(true);
+                } else {
+                  setIsStatsOpen(true);
+                }
+              }}
+              className="h-9 px-3.5 rounded-full bg-zinc-900/80 hover:bg-zinc-800/90 border border-white/10 backdrop-blur-xl transition-all duration-200 active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
+              title="Статистика дня"
+            >
+              <svg className="w-4 h-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+              <span suppressHydrationWarning className="text-xs font-semibold text-zinc-200 tabular-nums tracking-tight">
+                {displayTodayCount} <span className="font-normal text-zinc-500">/ 200</span>
+              </span>
+            </button>
 
-              {/* Тонкий разделитель */}
-              <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/15 mx-0.5" />
-
-              {/* 2. Переключатель темы */}
-              <button 
-                type="button"
-                onClick={toggleTheme}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-600 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white hover:bg-black/[0.05] dark:hover:bg-white/[0.08] active:scale-95 transition-all cursor-pointer"
-                aria-label="Toggle theme"
-                title={isDark ? "Heller Modus" : "Dunkler Modus"}
-              >
-                {isDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
-              </button>
-            </div>
+            {/* Переключатель темы */}
+            <button 
+              type="button"
+              onClick={toggleTheme}
+              className="h-9 w-9 rounded-full bg-zinc-900/80 hover:bg-zinc-800/90 border border-white/10 backdrop-blur-xl flex items-center justify-center text-zinc-400 hover:text-white active:scale-95 transition-all shadow-lg cursor-pointer"
+              aria-label="Toggle theme"
+              title={isDark ? "Heller Modus" : "Dunkler Modus"}
+            >
+              {isDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+            </button>
           </div>
 
         </div>
@@ -6817,6 +6858,15 @@ export default function App() {
   const [isPending, startTransition] = useTransition();
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder } = useStore();
   const [isMounted, setIsMounted] = useState(false);
+  const [isLoadingBooks, setIsLoadingBooks] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const cached = localStorage.getItem('cached_app_books') || localStorage.getItem('cache_books_v2');
+      return !cached || JSON.parse(cached).length === 0;
+    } catch {
+      return true;
+    }
+  });
   const [draggedDeckId, setDraggedDeckId] = useState<string | null>(null);
   const [draggedBookId, setDraggedBookId] = useState<string | null>(null);
   const [dragOverBookId, setDragOverBookId] = useState<string | null>(null);
@@ -6895,15 +6945,18 @@ export default function App() {
     const fetchData = async () => {
       
       try {
-        const cachedBooks = localStorage.getItem('cache_books_v2');
+        const cachedBooks = localStorage.getItem('cached_app_books') || localStorage.getItem('cache_books_v2');
         if (cachedBooks) {
           const pb = JSON.parse(cachedBooks);
-          if (Array.isArray(pb)) setBooks(pb);
+          if (Array.isArray(pb) && pb.length > 0) {
+            setBooks(pb);
+            setIsLoadingBooks(false);
+          }
         }
-        const cachedDecks = localStorage.getItem('cache_decks_v2');
+        const cachedDecks = localStorage.getItem('cached_app_decks') || localStorage.getItem('cache_decks_v2');
         if (cachedDecks) {
           const pd = JSON.parse(cachedDecks);
-          if (Array.isArray(pd)) setDecks(pd);
+          if (Array.isArray(pd) && pd.length > 0) setDecks(pd);
         }
       } catch (e) {}
       useStore.setState({ isLoaded: true });
@@ -7021,7 +7074,9 @@ try {
           });
 
           setBooks(mappedBooks);
+          setIsLoadingBooks(false);
           try {
+            localStorage.setItem('cached_app_books', JSON.stringify(mappedBooks));
             localStorage.setItem('cache_books_v2', JSON.stringify(mappedBooks));
           } catch(e) {}
         } else if (!booksRes.error) {
@@ -7040,12 +7095,17 @@ try {
             await supabase.from('books').insert(lowercaseDefaults);
           }
           setBooks(defaultBooks);
+          setIsLoadingBooks(false);
+          try {
+            localStorage.setItem('cached_app_books', JSON.stringify(defaultBooks));
+            localStorage.setItem('cache_books_v2', JSON.stringify(defaultBooks));
+          } catch(e) {}
         }
 
         if (decksRes.error) {
           console.error("Supabase Fetch Decks Error:", decksRes.error.message);
           // Only clear decks if we are sure it's not a network error, but for offline robustness, do NOT wipe cache.
-          if (!localStorage.getItem('cache_decks_v2')) { setDecks([]); }
+          if (!localStorage.getItem('cached_app_decks') && !localStorage.getItem('cache_decks_v2')) { setDecks([]); }
         } else if (decksRes.data) {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
           const enhancedDecks = decksRes.data.map((d: any) => {
@@ -7078,11 +7138,13 @@ try {
           });
           setDecks(enhancedDecks as Deck[]);
           try {
+            localStorage.setItem('cached_app_decks', JSON.stringify(enhancedDecks));
             localStorage.setItem('cache_decks_v2', JSON.stringify(enhancedDecks));
           } catch(e) {
-            console.warn('Quota exceeded, fallback to lightweight cache_decks_v2');
+            console.warn('Quota exceeded, fallback to lightweight cache');
             try {
               const lightweight = enhancedDecks.map((d: any) => ({ ...d, cards: [] }));
+              localStorage.setItem('cached_app_decks', JSON.stringify(lightweight));
               localStorage.setItem('cache_decks_v2', JSON.stringify(lightweight));
             } catch (e2) {}
           }
@@ -7090,6 +7152,7 @@ try {
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
       } finally {
+        setIsLoadingBooks(false);
         useStore.setState({ isLoaded: true });
       }
     };
@@ -7188,7 +7251,7 @@ try {
 
   const activeBook = useMemo(() => books.find(b => b.id === activeBookId), [books, activeBookId]);
 
-  if (!isMounted || !isLoaded) return <main className="min-h-screen bg-white dark:bg-black" />;
+  if (!isMounted) return <main className="min-h-screen bg-white dark:bg-black" />;
 
 
   if (activeDeckId) {
@@ -7766,21 +7829,33 @@ try {
                 <DueCardsBadge count={dueCards.length} language={appLanguage} onClick={() => dueCards.length > 0 && setReviewCards(dueCards)} />
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
-                {displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map((book, idx) => (
-                  <div
-                    key={book.id}
-                    draggable
-                    onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
-                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
-                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
-                    onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
-                    className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
-                  >
-                    <div className="w-full h-full min-h-[250px] relative">
-                      <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                {isLoadingBooks && displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).length === 0 ? (
+                  [1, 2, 3, 4].map((i) => (
+                    <div 
+                      key={i} 
+                      className="h-80 rounded-[28px] bg-zinc-900/40 border border-white/5 animate-pulse flex flex-col justify-end p-5"
+                    >
+                      <div className="h-4 w-32 bg-white/10 rounded-md mb-2" />
+                      <div className="h-3 w-20 bg-white/5 rounded-md" />
                     </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map((book, idx) => (
+                    <div
+                      key={book.id}
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
+                      onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
+                      onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
+                      className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
+                    >
+                      <div className="w-full h-full min-h-[250px] relative">
+                        <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </section>
 
@@ -7798,21 +7873,33 @@ try {
                 {UI_TRANSLATIONS[appLanguage]?.trainingTitle || 'Blitzkarten & Training'}
               </h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
-                {displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).map((book, idx) => (
-                  <div
-                    key={book.id}
-                    draggable
-                    onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
-                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
-                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
-                    onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
-                    className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
-                  >
-                    <div className="w-full h-full min-h-[250px] relative">
-                      <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                {isLoadingBooks && displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).length === 0 ? (
+                  [1, 2, 3].map((i) => (
+                    <div 
+                      key={i} 
+                      className="h-80 rounded-[28px] bg-zinc-900/40 border border-white/5 animate-pulse flex flex-col justify-end p-5"
+                    >
+                      <div className="h-4 w-32 bg-white/10 rounded-md mb-2" />
+                      <div className="h-3 w-20 bg-white/5 rounded-md" />
                     </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).map((book, idx) => (
+                    <div
+                      key={book.id}
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
+                      onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
+                      onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
+                      className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
+                    >
+                      <div className="w-full h-full min-h-[250px] relative">
+                        <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
+                      </div>
+                    </div>
+                  ))
+                )}
                 
                 <div className="w-full h-full min-h-[250px]">
                   <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">

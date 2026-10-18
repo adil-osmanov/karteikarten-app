@@ -144,10 +144,10 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
   const mistakeCount = Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0;
 
   const accuracyColor = accuracy >= 80 
-    ? "text-emerald-400" 
+    ? "text-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.25)]" 
     : accuracy >= 60 
-    ? "text-amber-400" 
-    : "text-rose-400";
+    ? "text-amber-400 drop-shadow-[0_0_12px_rgba(251,191,36,0.25)]" 
+    : "text-rose-400 drop-shadow-[0_0_12px_rgba(244,63,94,0.25)]";
 
   return (
     <div 
@@ -161,14 +161,18 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
       }}
     >
       <div 
-        className="stats-modal-content w-full max-w-sm rounded-3xl bg-zinc-900/95 border border-white/10 p-6 shadow-2xl backdrop-blur-2xl text-white relative animate-in zoom-in-95 duration-200"
+        className="stats-modal-content w-full max-w-sm rounded-3xl bg-zinc-900/95 border border-white/10 p-6 shadow-2xl backdrop-blur-2xl text-white relative animate-in zoom-in-95 duration-200 font-sans"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-white/5">
+        {/* Заголовок */}
+        <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
           <div>
-            <h3 className="text-sm font-semibold tracking-tight text-zinc-100">{t.title}</h3>
-            <p className="text-[11px] text-zinc-500 font-medium">{t.resetSubtitle}</p>
+            <h3 className="text-[15px] font-semibold tracking-tight text-zinc-100 font-sans">
+              {t.title}
+            </h3>
+            <p className="text-[11px] font-normal text-zinc-500 tracking-normal mt-0.5">
+              {t.resetSubtitle}
+            </p>
           </div>
           <button 
             onClick={onClose}
@@ -180,30 +184,34 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
           </button>
         </div>
 
-        {/* 2 Главные метрики */}
+        {/* 2 Главные метрики: Время и Точность */}
         <div className="grid grid-cols-2 gap-3 my-5">
-          <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 flex flex-col items-center text-center">
-            <span className="text-xl font-bold tracking-tight text-white mb-0.5 font-mono">{timeDisplay}</span>
-            <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1">
+          <div className="p-4 rounded-2xl bg-zinc-800/40 border border-white/5 flex flex-col items-center justify-center">
+            <span className="text-2xl font-bold tracking-tight text-zinc-100 tabular-nums">
+              {timeDisplay}
+            </span>
+            <span className="text-[11px] font-medium tracking-wider text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
               <Clock className="w-3 h-3 text-zinc-500" /> {t.inFocus}
             </span>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 flex flex-col items-center text-center">
-            <span className={`text-xl font-bold tracking-tight mb-0.5 font-mono ${accuracyColor}`}>{accuracy}%</span>
-            <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1">
+          <div className="p-4 rounded-2xl bg-zinc-800/40 border border-white/5 flex flex-col items-center justify-center">
+            <span className={`text-2xl font-bold tracking-tight tabular-nums ${accuracyColor}`}>
+              {accuracy}%
+            </span>
+            <span className="text-[11px] font-medium tracking-wider text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
               <Target className="w-3 h-3 text-zinc-500" /> {t.accuracy}
             </span>
           </div>
         </div>
 
-        {/* Прогресс за день (например, 278 / 200) */}
-        <div className="mb-5 p-4 rounded-2xl bg-white/[0.03] border border-white/5">
-          <div className="flex justify-between items-center text-xs mb-2">
-            <span className="text-zinc-400 font-medium">{t.cardsToday}</span>
-            <span className="text-zinc-200 font-semibold font-mono">
-              {totalDone}<span className="text-zinc-500 font-normal">/{target}</span>
-            </span>
+        {/* Блок прогресса карточек */}
+        <div className="mb-5 p-4 rounded-2xl bg-zinc-800/40 border border-white/5">
+          <div className="flex justify-between items-baseline mb-2.5">
+            <span className="text-xs font-medium text-zinc-400">{t.cardsToday}</span>
+            <div className="text-xs font-semibold text-zinc-100 tabular-nums tracking-tight">
+              {totalDone} <span className="font-normal text-zinc-500">/ 200</span>
+            </div>
           </div>
           <div className="w-full h-1.5 rounded-full bg-zinc-800 overflow-hidden">
             <div 
@@ -213,17 +221,17 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
           </div>
         </div>
 
-        {/* Ошибки */}
-        <div className="pt-2 border-t border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-400 font-medium">{t.mistakesLabel}</span>
+        {/* Блок ошибок */}
+        <div className="pt-3 border-t border-white/[0.08] flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
+            <span>{t.mistakesLabel}</span>
             {mistakeCount > 0 ? (
-              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono">
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30 tabular-nums">
                 {mistakeCount}
               </span>
             ) : (
-              <span className="text-xs text-zinc-500 flex items-center gap-1 font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> {t.noMistakes}
+              <span className="text-emerald-400/90 flex items-center gap-1.5 text-xs font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> {t.noMistakes}
               </span>
             )}
           </div>
