@@ -1975,7 +1975,18 @@ function RapidSession({
 }) {
   const answerCard = useStore(state => state.answerCard);
   const setCardProgress = useStore(state => state.setCardProgress);
-  const { stats, recordCardResult } = useDayStats({ isStudying: true });
+  const appLanguage = useStore(state => state.appLanguage);
+  const studyLanguage = useMemo(() => {
+    const d = useStore.getState().decks.find(item => item.id === deckId);
+    if (d?.language) return d.language;
+    if (d?.bookId) {
+      const b = useStore.getState().books.find(item => item.id === d.bookId);
+      if (b?.language) return b.language;
+    }
+    return appLanguage;
+  }, [deckId, appLanguage]);
+
+  const { stats, recordCardResult } = useDayStats({ isStudying: true, language: studyLanguage });
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isMistakesReviewMode, setIsMistakesReviewMode] = useState(false);
   const isReviewingMistakesSession = Boolean(reviewCards && reviewCards.length > 0) || isMistakesReviewMode;
@@ -2050,7 +2061,7 @@ function RapidSession({
     const id = current.card.id;
     const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
 
-    recordCardResult(correct, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
+    recordCardResult(correct, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
 
     const newScore = correct ? (wordProgress[id] || 0) + 1 : 0;
     const learned = correct && newScore >= 4;
@@ -2146,6 +2157,7 @@ function RapidSession({
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         stats={stats}
+        language={studyLanguage}
         onReviewMistakes={handleReviewMistakes}
       />
     </div>
@@ -2240,8 +2252,7 @@ function StudyInterface({
   isDrillMode?: boolean,
   trainingMode?: string
 }) {
-  const { answerCard, decks, books } = useStore();
-  const { stats, recordCardResult } = useDayStats({ isStudying: true });
+  const { answerCard, decks, books, appLanguage } = useStore();
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isMistakesReviewMode, setIsMistakesReviewMode] = useState(false);
   const isReviewingMistakesSession = Boolean(reviewCards && reviewCards.length > 0) || isMistakesReviewMode;
@@ -2321,6 +2332,17 @@ function StudyInterface({
     if (!currentDeckId) return undefined;
     return decks.find(d => d.id === currentDeckId);
   }, [decks, currentDeckId]);
+
+  const studyLanguage = useMemo(() => {
+    if (currentDeck?.language) return currentDeck.language;
+    if (currentDeck?.bookId) {
+      const b = books.find(item => item.id === currentDeck.bookId);
+      if (b?.language) return b.language;
+    }
+    return appLanguage;
+  }, [currentDeck, books, appLanguage]);
+
+  const { stats, recordCardResult } = useDayStats({ isStudying: true, language: studyLanguage });
 
   const isGrammarDeck = useMemo(() => {
     return Boolean(
@@ -2494,7 +2516,7 @@ function StudyInterface({
               deckTitle={currentDeck?.name}
               onAnswer={(id, correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2513,7 +2535,7 @@ function StudyInterface({
               deckTitle={currentDeck?.name}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2534,7 +2556,7 @@ function StudyInterface({
               totalCards={activeCards.length}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2554,7 +2576,7 @@ function StudyInterface({
               isReview={Boolean(reviewCards || isInitialArchivedDeck || liveCard.isArchived)}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2575,7 +2597,7 @@ function StudyInterface({
               forceInputMode={!!reviewCards && !isDrillMode}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: currentCardSnapshot, ...currentCardSnapshot }, { isReviewingMistakes: isReviewingMistakesSession });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: currentCardSnapshot, ...currentCardSnapshot }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2595,6 +2617,7 @@ function StudyInterface({
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         stats={stats}
+        language={studyLanguage}
         onReviewMistakes={handleReviewMistakes}
       />
     </div>
@@ -3505,9 +3528,10 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
   const [isLangOpen, setIsLangOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
-  const { stats } = useDayStats();
   const langRef = useRef<HTMLDivElement>(null);
   const { appLanguage, setAppLanguage } = useStore();
+  const effectiveLang = activeBook?.language || appLanguage || 'DE';
+  const { stats } = useDayStats({ language: effectiveLang });
 
   useEffect(() => {
     const handleScroll = () => {
@@ -3695,6 +3719,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         stats={stats}
+        language={effectiveLang}
         onReviewMistakes={() => {
           setIsStatsOpen(false);
           if (onReviewMistakes) onReviewMistakes();
@@ -7567,7 +7592,8 @@ try {
           onBack={() => startTransition(() => setActiveBookId(null))} 
           onReviewMistakes={() => {
             try {
-              const saved = localStorage.getItem('app_daily_stats');
+              const lang = activeBook?.language || appLanguage || 'DE';
+              const saved = localStorage.getItem(`app_daily_stats_${lang}`) || localStorage.getItem('app_daily_stats');
               if (saved) {
                 const parsed = JSON.parse(saved);
                 if (Array.isArray(parsed.mistakesPool) && parsed.mistakesPool.length > 0) {

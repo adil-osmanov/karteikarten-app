@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export interface DailyStats {
   date: string;
@@ -9,9 +9,12 @@ export interface DailyStats {
   mistakesPool: any[];
 }
 
-const getTodayKey = () => new Date().toISOString().split('T')[0];
+export type SupportedLanguage = 'DE' | 'EN' | 'RU' | string;
 
-export function getTodayCompletedCardsCount(): number {
+const getTodayKey = () => new Date().toISOString().split('T')[0];
+const getStorageKey = (lang: string) => `app_daily_stats_${lang}`;
+
+export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
   if (typeof window === 'undefined') return 0;
   try {
     const todayStr = new Date().toLocaleDateString('en-CA');
@@ -19,19 +22,17 @@ export function getTodayCompletedCardsCount(): number {
     const dateKeys = [todayStr, todayIso];
 
     let maxFound = 0;
-    ['DE', 'EN', 'RU'].forEach(lang => {
-      const stored = localStorage.getItem(`daily_activity_${lang}`);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        for (const k of dateKeys) {
-          const raw = parsed[k];
-          const count = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
-          if (count > maxFound) maxFound = count;
-        }
+    const stored = localStorage.getItem(`daily_activity_${lang}`);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      for (const k of dateKeys) {
+        const raw = parsed[k];
+        const count = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
+        if (count > maxFound) maxFound = count;
       }
-    });
+    }
 
-    const savedAppStats = localStorage.getItem('app_daily_stats');
+    const savedAppStats = localStorage.getItem(getStorageKey(lang));
     if (savedAppStats) {
       const parsed = JSON.parse(savedAppStats);
       if (typeof parsed?.cardsDone === 'number' && parsed.cardsDone > maxFound) {
@@ -45,9 +46,9 @@ export function getTodayCompletedCardsCount(): number {
   }
 }
 
-function loadInitialStats(): DailyStats {
+function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
   const todayKey = getTodayKey();
-  const realTodayCards = getTodayCompletedCardsCount();
+  const realTodayCards = getTodayCompletedCardsCount(lang);
 
   if (typeof window === 'undefined') {
     return { 
@@ -60,7 +61,18 @@ function loadInitialStats(): DailyStats {
     };
   }
 
-  const saved = localStorage.getItem('app_daily_stats');
+  const key = getStorageKey(lang);
+  let saved = localStorage.getItem(key);
+
+  // Migration from legacy app_daily_stats for default German
+  if (!saved && lang === 'DE') {
+    const legacy = localStorage.getItem('app_daily_stats');
+    if (legacy) {
+      saved = legacy;
+      localStorage.setItem(key, legacy);
+    }
+  }
+
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
@@ -68,7 +80,6 @@ function loadInitialStats(): DailyStats {
       if (parsed.date === todayKey) {
         const currentCards = Math.max(typeof parsed.cardsDone === 'number' ? parsed.cardsDone : 0, realTodayCards);
         
-        // Recover from corrupt or missing accuracy data:
         const mistakesToday = typeof parsed.mistakesCountToday === 'number'
           ? Math.max(0, parsed.mistakesCountToday)
           : mistakesPool.length;
@@ -77,7 +88,6 @@ function loadInitialStats(): DailyStats {
           ? parsed.correctCount
           : Math.max(0, currentCards - mistakesToday);
 
-        // Self-healing: if correctCount is abnormally low compared to completed cards (e.g. 5 vs 287)
         if (currentCards > 0 && correctCount + mistakesToday < currentCards) {
           correctCount = Math.max(0, currentCards - mistakesToday);
         }
@@ -92,7 +102,7 @@ function loadInitialStats(): DailyStats {
         };
       }
 
-      // Новый день: сбрасываем дневные счетчики, но СОХРАНЯЕМ накопительный пул ошибок
+      // Новый день: сбрасываем дневные метрики, но сохраняем ошибки
       return {
         date: todayKey,
         activeSeconds: 0,
@@ -114,19 +124,31 @@ function loadInitialStats(): DailyStats {
   };
 }
 
-let globalStats: DailyStats = loadInitialStats();
-const listeners = new Set<(stats: DailyStats) => void>();
+// In-memory cache & listeners per language
+const statsByLang: Record<string, DailyStats> = {};
+const listenersByLang: Record<string, Set<(stats: DailyStats) => void>> = {};
+const activeStudyCounts: Record<string, number> = {};
+
 let timerInitialized = false;
-let activeStudyCount = 0;
 let lastActivityTime = Date.now();
 
-function notify() {
+function getOrCreateStats(lang: string = 'DE'): DailyStats {
+  if (!statsByLang[lang]) {
+    statsByLang[lang] = loadInitialStatsForLang(lang);
+  }
+  return statsByLang[lang];
+}
+
+function notifyLang(lang: string) {
+  const current = getOrCreateStats(lang);
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem('app_daily_stats', JSON.stringify(globalStats));
+      localStorage.setItem(getStorageKey(lang), JSON.stringify(current));
     } catch (e) {}
   }
-  listeners.forEach(fn => fn(globalStats));
+  if (listenersByLang[lang]) {
+    listenersByLang[lang].forEach(fn => fn(current));
+  }
 }
 
 function initGlobalTimer() {
@@ -138,82 +160,97 @@ function initGlobalTimer() {
   window.addEventListener('mousemove', onActivity, { passive: true });
   window.addEventListener('keydown', onActivity, { passive: true });
   window.addEventListener('touchstart', onActivity, { passive: true });
+  window.addEventListener('scroll', onActivity, { passive: true });
 
   setInterval(() => {
-    // 1. Таймер считает ТОЛЬКО когда пользователь находится внутри активной учебной сессии
-    if (activeStudyCount <= 0) return;
-
-    // 2. Вкладка не должна быть скрыта
+    // 1. Вкладка не должна быть скрыта
     if (document.hidden) return;
 
-    // 3. Защита от бездействия: если пользователь не прикасался к экрану/клавиатуре > 45 секунд — пауза
-    if (Date.now() - lastActivityTime > 45000) return;
+    // 2. Защита от бездействия: пауза при простое > 60 секунд
+    if (Date.now() - lastActivityTime > 60000) return;
 
     const today = getTodayKey();
-    if (globalStats.date !== today) {
-      const realCards = getTodayCompletedCardsCount();
-      globalStats = {
-        date: today,
-        activeSeconds: 1,
-        cardsDone: realCards,
-        correctCount: realCards,
-        mistakesCountToday: 0,
-        mistakesPool: globalStats.mistakesPool || []
-      };
-    } else {
-      globalStats = {
-        ...globalStats,
-        activeSeconds: (globalStats.activeSeconds || 0) + 1
-      };
-    }
-    notify();
+
+    // Проверяем все языки, в которых сейчас активна учебная сессия
+    Object.keys(activeStudyCounts).forEach(lang => {
+      if ((activeStudyCounts[lang] || 0) <= 0) return;
+
+      const current = getOrCreateStats(lang);
+      if (current.date !== today) {
+        const realCards = getTodayCompletedCardsCount(lang);
+        statsByLang[lang] = {
+          date: today,
+          activeSeconds: 1,
+          cardsDone: realCards,
+          correctCount: realCards,
+          mistakesCountToday: 0,
+          mistakesPool: current.mistakesPool || []
+        };
+      } else {
+        statsByLang[lang] = {
+          ...current,
+          activeSeconds: (current.activeSeconds || 0) + 1
+        };
+      }
+      notifyLang(lang);
+    });
   }, 1000);
 }
 
-export function useDayStats(options?: { isStudying?: boolean }) {
+export function useDayStats(options?: { isStudying?: boolean; language?: string }) {
   const isStudying = options?.isStudying ?? false;
+  const lang = options?.language || (typeof window !== 'undefined' ? (localStorage.getItem('selected_language') || 'DE') : 'DE');
 
   const [stats, setLocalStats] = useState<DailyStats>(() => {
-    if (typeof window !== 'undefined') {
-      const current = loadInitialStats();
-      globalStats = current;
-      return current;
-    }
-    return globalStats;
+    return getOrCreateStats(lang);
   });
 
-  // Управление активностью учебного таймера
+  // Синхронизация при смене языка
+  useEffect(() => {
+    setLocalStats(getOrCreateStats(lang));
+  }, [lang]);
+
+  // Управление активностью учебного таймера и подпиской на обновления языка
   useEffect(() => {
     initGlobalTimer();
 
     if (isStudying) {
-      activeStudyCount++;
+      activeStudyCounts[lang] = (activeStudyCounts[lang] || 0) + 1;
       lastActivityTime = Date.now();
     }
 
+    if (!listenersByLang[lang]) {
+      listenersByLang[lang] = new Set();
+    }
+
     const listener = (newStats: DailyStats) => setLocalStats(newStats);
-    listeners.add(listener);
+    listenersByLang[lang].add(listener);
 
     return () => {
-      listeners.delete(listener);
+      if (listenersByLang[lang]) {
+        listenersByLang[lang].delete(listener);
+      }
       if (isStudying) {
-        activeStudyCount = Math.max(0, activeStudyCount - 1);
+        activeStudyCounts[lang] = Math.max(0, (activeStudyCounts[lang] || 0) - 1);
       }
     };
-  }, [isStudying]);
+  }, [isStudying, lang]);
 
-  const setStats = (updater: any) => {
-    const next = typeof updater === 'function' ? updater(globalStats) : updater;
-    globalStats = next;
-    notify();
-  };
+  const setStats = useCallback((updater: any) => {
+    const current = getOrCreateStats(lang);
+    const next = typeof updater === 'function' ? updater(current) : updater;
+    statsByLang[lang] = next;
+    notifyLang(lang);
+  }, [lang]);
 
-  const recordCardResult = (
+  const recordCardResult = useCallback((
     isCorrect: boolean, 
     card: any, 
-    options?: { isReviewingMistakes?: boolean }
+    callOptions?: { isReviewingMistakes?: boolean; language?: string }
   ) => {
-    let updatedPool = [...(globalStats.mistakesPool || [])];
+    const targetLang = callOptions?.language || lang;
+    const current = getOrCreateStats(targetLang);
+    let updatedPool = [...(current.mistakesPool || [])];
     
     // Извлекаем идентификаторы карточки надежно
     const cardId = card?.id || card?.card?.id || '';
@@ -221,9 +258,10 @@ export function useDayStats(options?: { isStudying?: boolean }) {
 
     const matchFn = (c: any) => {
       const cId = c?.id || c?.card?.id || '';
-      const cWord = (c?.targetWord || c?.card?.targetWord || c?.sentence || '').trim();
-      if (cardId && cId && cId === cardId) return true;
-      if (targetWord && cWord && cWord.toLowerCase() === targetWord.toLowerCase()) return true;
+      if (cardId && cId && cardId === cId) return true;
+      const cWord = (c?.targetWord || c?.card?.targetWord || '').trim().toLowerCase();
+      const tWord = (card?.targetWord || card?.card?.targetWord || '').trim().toLowerCase();
+      if (tWord && cWord && tWord === cWord) return true;
       return false;
     };
 
@@ -232,11 +270,11 @@ export function useDayStats(options?: { isStudying?: boolean }) {
       if (!updatedPool.some(matchFn)) {
         const fullCardSnapshot = {
           deckId: card?.deckId || '',
-          id: cardId,
+          id: cardId || (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())),
           targetWord: targetWord || card?.targetWord || '',
           sentence: card?.sentence || card?.card?.sentence || '',
           translation: card?.translation || card?.card?.translation || '',
-          options: card?.options || card?.card?.options || [],
+          options: Array.isArray(card?.options) ? card.options : (Array.isArray(card?.card?.options) ? card.card.options : []),
           masteryLevel: card?.masteryLevel ?? card?.card?.masteryLevel ?? 0,
           isArchived: Boolean(card?.isArchived || card?.card?.isArchived),
           baseWordInfo: card?.baseWordInfo || card?.card?.baseWordInfo || '',
@@ -248,32 +286,35 @@ export function useDayStats(options?: { isStudying?: boolean }) {
       }
     } else {
       // При правильном ответе удаляем ТОЛЬКО если находимся в режиме тренировки ошибок!
-      if (options?.isReviewingMistakes) {
+      if (callOptions?.isReviewingMistakes) {
         updatedPool = updatedPool.filter(c => !matchFn(c));
       }
     }
 
     const today = getTodayKey();
-    const currentActivityCards = getTodayCompletedCardsCount();
-    const newCardsDone = Math.max((globalStats.cardsDone || 0) + (isCorrect ? 1 : 0), currentActivityCards);
+    const currentActivityCards = getTodayCompletedCardsCount(targetLang);
+    const newCardsDone = Math.max((current.cardsDone || 0) + 1, currentActivityCards + (isCorrect ? 0 : 1));
 
-    const prevMistakesToday = typeof globalStats.mistakesCountToday === 'number'
-      ? globalStats.mistakesCountToday
-      : (globalStats.mistakesPool?.length || 0);
+    const prevMistakesToday = typeof current.mistakesCountToday === 'number'
+      ? current.mistakesCountToday
+      : (current.mistakesPool?.length || 0);
     const newMistakesToday = isCorrect ? prevMistakesToday : prevMistakesToday + 1;
 
-    const newCorrectCount = Math.max(0, newCardsDone - newMistakesToday);
+    let newCorrectCount = (current.correctCount || 0) + (isCorrect ? 1 : 0);
+    if (newCorrectCount + newMistakesToday > newCardsDone) {
+      newCorrectCount = Math.max(0, newCardsDone - newMistakesToday);
+    }
 
-    globalStats = {
-      ...globalStats,
+    statsByLang[targetLang] = {
+      ...current,
       date: today,
       cardsDone: newCardsDone,
       correctCount: newCorrectCount,
       mistakesCountToday: newMistakesToday,
       mistakesPool: updatedPool
     };
-    notify();
-  };
+    notifyLang(targetLang);
+  }, [lang]);
 
   return { stats, setStats, recordCardResult };
 }
