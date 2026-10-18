@@ -20,6 +20,8 @@ import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
+import { useDayStats } from "@/hooks/useDayStats";
+import { StatsPopover } from "@/components/StatsPopover";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -1973,6 +1975,8 @@ function RapidSession({
 }) {
   const answerCard = useStore(state => state.answerCard);
   const setCardProgress = useStore(state => state.setCardProgress);
+  const { stats, recordCardResult } = useDayStats();
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [wordProgress, setWordProgress] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
@@ -1980,6 +1984,18 @@ function RapidSession({
   const [turn, setTurn] = useState(0);
   const [locked, setLocked] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleReviewMistakes = () => {
+    if (!stats.mistakesPool || stats.mistakesPool.length === 0) return;
+    const list = stats.mistakesPool.map((item: any) => ({
+      deckId: item.deckId || deckId || '',
+      card: item.card || item
+    }));
+    setQueue([...list].sort(() => Math.random() - 0.5));
+    setTotal(list.length);
+    setMastered(0);
+    setIsStatsOpen(false);
+  };
 
   useEffect(() => {
     getRapidSounds(); // preload so Safari has decoded buffers before the first answer
@@ -2029,6 +2045,8 @@ function RapidSession({
     const current = queue[0];
     const id = current.card.id;
     const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
+
+    recordCardResult(correct, { deckId: current.deckId, card: liveCard, ...liveCard });
 
     const newScore = correct ? (wordProgress[id] || 0) + 1 : 0;
     const learned = correct && newScore >= 4;
@@ -2090,9 +2108,14 @@ function RapidSession({
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="text-xs font-mono tabular-nums text-gray-400 dark:text-gray-500">
+          <button
+            type="button"
+            onClick={() => setIsStatsOpen(true)}
+            className="text-xs font-mono tabular-nums text-gray-400 hover:text-gray-900 dark:text-gray-500 dark:hover:text-zinc-200 transition-colors cursor-pointer py-1 px-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 select-none"
+            title="Статистика дня"
+          >
             {mastered} / {total}
-          </div>
+          </button>
         </div>
         <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div
@@ -2114,6 +2137,13 @@ function RapidSession({
           />
         </AnimatePresence>
       </div>
+
+      <StatsPopover
+        isOpen={isStatsOpen}
+        onClose={() => setIsStatsOpen(false)}
+        stats={stats}
+        onReviewMistakes={handleReviewMistakes}
+      />
     </div>
   );
 }
@@ -2207,6 +2237,8 @@ function StudyInterface({
   trainingMode?: string
 }) {
   const { answerCard, decks, books } = useStore();
+  const { stats, recordCardResult } = useDayStats();
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
@@ -2335,6 +2367,20 @@ function StudyInterface({
     }
   }, [currentIndex, activeCards.length, reviewCards, onBack, deckId, isInitialArchivedDeck, roundCounter]);
 
+  const handleReviewMistakes = () => {
+    if (!stats.mistakesPool || stats.mistakesPool.length === 0) return;
+    const list = stats.mistakesPool.map((item: any) => ({
+      deckId: item.deckId || currentDeckId || deckId || '',
+      card: item.card || item
+    }));
+    setActiveCards([...list].sort(() => Math.random() - 0.5));
+    setCurrentIndex(0);
+    setInitialTotal(list.length);
+    setMasteredInSession(0);
+    setRoundCounter(0);
+    setIsStatsOpen(false);
+  };
+
   // PRELOAD NEXT AUDIO
   useEffect(() => {
     if (activeCards.length > currentIndex + 1) {
@@ -2414,9 +2460,14 @@ function StudyInterface({
                 Runde {Math.min(4, roundCounter + 1)} / 4
               </span>
             )}
-            <div className="text-xs font-mono tabular-nums text-gray-400 dark:text-gray-500">
+            <button
+              type="button"
+              onClick={() => setIsStatsOpen(true)}
+              className="text-xs font-mono tabular-nums text-gray-400 hover:text-gray-900 dark:text-gray-500 dark:hover:text-zinc-200 transition-colors cursor-pointer py-1 px-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 select-none"
+              title="Статистика дня"
+            >
               {currentIndex + 1} / {activeCards.length}
-            </div>
+            </button>
           </div>
         </div>
         <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
@@ -2434,8 +2485,10 @@ function StudyInterface({
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
               onAnswer={(id, correct, isHilfe) => {
+                const isActualCorrect = correct && !isHilfe;
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (correct && !isHilfe) {
+                if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
                 } else {
                   if (!isDrillMode) {
@@ -2450,8 +2503,10 @@ function StudyInterface({
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
               onAnswer={(correct, isHilfe) => {
+                const isActualCorrect = correct && !isHilfe;
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (correct && !isHilfe) {
+                if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
                 } else {
                   if (!isDrillMode) {
@@ -2469,8 +2524,10 @@ function StudyInterface({
               cardIndex={currentIndex + 1}
               totalCards={activeCards.length}
               onAnswer={(correct, isHilfe) => {
+                const isActualCorrect = correct && !isHilfe;
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (correct && !isHilfe) {
+                if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
                 } else {
                   if (!isDrillMode) {
@@ -2486,8 +2543,10 @@ function StudyInterface({
               card={liveCard}
               isReview={Boolean(reviewCards || isInitialArchivedDeck || liveCard.isArchived)}
               onAnswer={(correct, isHilfe) => {
+                const isActualCorrect = correct && !isHilfe;
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (correct && !isHilfe) {
+                if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
                 } else {
                   if (!isDrillMode) {
@@ -2505,8 +2564,10 @@ function StudyInterface({
               isGrammar={isGrammarDeck}
               forceInputMode={!!reviewCards && !isDrillMode}
               onAnswer={(correct, isHilfe) => {
+                const isActualCorrect = correct && !isHilfe;
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: currentCardSnapshot, ...currentCardSnapshot });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (correct && !isHilfe) {
+                if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
                 } else {
                   if (!isDrillMode) {
@@ -2519,6 +2580,13 @@ function StudyInterface({
           )}
         </AnimatePresence>
       </div>
+
+      <StatsPopover
+        isOpen={isStatsOpen}
+        onClose={() => setIsStatsOpen(false)}
+        stats={stats}
+        onReviewMistakes={handleReviewMistakes}
+      />
     </div>
     </>
   );
@@ -3416,10 +3484,12 @@ const LANGUAGES = [
   { code: 'RU', flag: '🇷🇺', label: 'Русский' },
 ] as const;
 
-function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, onBack?: () => void }) {
+function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: BookMeta | null, onBack?: () => void, onReviewMistakes?: () => void }) {
   const [adminOpen, setAdminOpen] = useState(false);
   const [isLangOpen, setIsLangOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const { stats } = useDayStats();
   const langRef = useRef<HTMLDivElement>(null);
   const { appLanguage, setAppLanguage } = useStore();
 
@@ -3569,15 +3639,22 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
           <div className="flex items-center">
             <div className="h-9 px-3 rounded-full flex items-center gap-2 bg-white dark:bg-[#1C1C1E] border border-zinc-200/80 dark:border-white/15 shadow-sm select-none transform-gpu">
               {/* 1. Карточки за сегодня */}
-              <div 
-                onClick={(e) => { if (e.detail === 3) setAdminOpen(true); }}
-                className="flex items-center gap-1.5 text-xs text-zinc-800 dark:text-zinc-200 cursor-default"
-                title="Gelernte Karten heute"
+              <button 
+                type="button"
+                onClick={(e) => { 
+                  if (e.detail === 3) {
+                    setAdminOpen(true);
+                  } else {
+                    setIsStatsOpen(true);
+                  }
+                }}
+                className="flex items-center gap-1.5 text-xs text-zinc-800 dark:text-zinc-200 cursor-pointer active:scale-95 transition-transform"
+                title="Статистика дня"
               >
                 <Layers className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
                 <span className="font-bold text-zinc-950 dark:text-white">{todayCount}</span>
                 <span className="text-zinc-500 dark:text-zinc-400 font-medium">{currentTranslations.today}</span>
-              </div>
+              </button>
 
               {/* Тонкий разделитель */}
               <div className="h-3.5 w-[1px] bg-zinc-200 dark:bg-white/15 mx-0.5" />
@@ -3597,6 +3674,16 @@ function HeaderWidgets({ activeBook, onBack }: { activeBook?: BookMeta | null, o
 
         </div>
       </header>
+
+      <StatsPopover
+        isOpen={isStatsOpen}
+        onClose={() => setIsStatsOpen(false)}
+        stats={stats}
+        onReviewMistakes={() => {
+          setIsStatsOpen(false);
+          if (onReviewMistakes) onReviewMistakes();
+        }}
+      />
     </>
   );
 }
@@ -7438,7 +7525,26 @@ try {
         </div>
       )}
         
-        <HeaderWidgets activeBook={activeBook} onBack={() => startTransition(() => setActiveBookId(null))} />
+        <HeaderWidgets 
+          activeBook={activeBook} 
+          onBack={() => startTransition(() => setActiveBookId(null))} 
+          onReviewMistakes={() => {
+            try {
+              const saved = localStorage.getItem('app_daily_stats');
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed.mistakesPool) && parsed.mistakesPool.length > 0) {
+                  const list = parsed.mistakesPool.map((item: any) => ({
+                    deckId: item.deckId || (decks[0]?.id || ''),
+                    card: item.card || item
+                  }));
+                  initAudioCtx();
+                  setReviewCards(list);
+                }
+              }
+            } catch(e) {}
+          }}
+        />
 
       <AnimatePresence>
         {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
