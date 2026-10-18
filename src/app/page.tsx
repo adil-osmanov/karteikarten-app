@@ -6,7 +6,7 @@ import {
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, AlertTriangle,
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers,
-  ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders
+  ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders, Camera
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from 'sonner';
@@ -2678,31 +2678,66 @@ function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: str
   };
 }
 
-function renderFormattedHint(hint: string) {
-  if (!hint) return null;
-  const trimmed = hint.trim();
+type ParsedCardExtra = 
+  | { type: 'none' }
+  | { type: 'noun'; article: string; word: string; sub: string; articleClasses: string; textClasses: string }
+  | { type: 'other'; main: string; sub: string };
 
-  // Проверяем наличие артикля der / die / das в начале
-  const match = trimmed.match(/^(der|die|das)\b\s*(.*)/i);
+function parseCardExtraInfo(text: string | undefined | null): ParsedCardExtra {
+  if (!text) return { type: 'none' };
+  const trimmed = text.trim();
+  if (!trimmed) return { type: 'none' };
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return { type: 'none' };
+
+  let subText = "";
+  let mainText = trimmed;
+
+  const match = trimmed.match(/\(([^)]+)\)/);
   if (match) {
-    const art = match[1].toLowerCase();
-    const rest = match[2];
+    subText = match[1].split(',').map(s => s.trim()).join(' • ');
+    mainText = trimmed.replace(match[0], '').replace(/\s+,/g, ',').replace(/\s+—/g, ' —').replace(/  +/g, ' ').trim();
+  }
 
-    const artColor = 
-      art === 'der' ? 'text-sky-400 font-semibold' :
-      art === 'die' ? 'text-rose-400 font-semibold' :
+  const nounMatch = mainText.match(/^(der|die|das)\b\s*(.*)$/i);
+  if (nounMatch) {
+    const article = nounMatch[1].toLowerCase();
+    const articleClasses = 
+      article === 'der' ? 'text-sky-400 font-semibold' :
+      article === 'die' ? 'text-rose-400 font-semibold' :
       'text-emerald-400 font-semibold';
 
+    return {
+      type: 'noun',
+      article: nounMatch[1],
+      word: nounMatch[2].trim(),
+      sub: subText,
+      articleClasses,
+      textClasses: 'text-zinc-100 font-medium'
+    };
+  }
+
+  return {
+    type: 'other',
+    main: mainText.replace(/➔|->/g, '→').trim(),
+    sub: subText
+  };
+}
+
+function renderFormattedHint(hint: string) {
+  if (!hint) return null;
+  const parsed = parseCardExtraInfo(hint);
+  if (parsed.type === 'none') return null;
+
+  if (parsed.type === 'noun') {
     return (
       <span className="text-sm font-medium leading-relaxed">
-        <span className={artColor}>{match[1]}</span>{' '}
-        <span className="text-zinc-100">{rest}</span>
+        <span className={parsed.articleClasses}>{parsed.article}</span>{' '}
+        <span className="text-zinc-100">{parsed.word}</span>
       </span>
     );
   }
 
-  // Для глаголов и грамматических формул (нейтральный текст Apple)
-  return <span className="text-sm font-medium text-zinc-100 leading-relaxed">{trimmed}</span>;
+  return <span className="text-sm font-medium text-zinc-100 leading-relaxed">{parsed.main}</span>;
 }
 
 // --- STUDY CARD ---
@@ -2977,7 +3012,8 @@ function StudyCard({
   };
 
   const isAnswered = phase === "Answer";
-  const displayHint = (card.hint || card.forms || '').trim();
+  const extraInfoRaw = (card.baseWordInfo || card.hint || card.forms || '').trim();
+  const parsedExtra = useMemo(() => parseCardExtraInfo(extraInfoRaw), [extraInfoRaw]);
   const displayAnswerWord = shouldCapitalize ? clozeWord.charAt(0).toUpperCase() + clozeWord.slice(1) : clozeWord;
   const parsedTargetWord = phase === "Answer" 
     ? (parseTargetNoun(displayAnswerWord) || (!isCustomCloze ? parseTargetNoun(card.targetWord) : null))
@@ -3123,11 +3159,30 @@ function StudyCard({
             {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
           </p>
 
-          {isAnswered && displayHint && (
-            <div className="mt-5 flex justify-center animate-in fade-in zoom-in-95 duration-200">
-              <div className="px-6 py-2.5 rounded-full bg-zinc-800/90 border border-white/15 shadow-xl backdrop-blur-xl text-center inline-flex items-center justify-center gap-2 max-w-lg text-zinc-100">
-                {renderFormattedHint(displayHint)}
+          {isAnswered && parsedExtra.type !== 'none' && (
+            <div className="mt-5 flex flex-col items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200">
+              <div className={cn(
+                "px-5 py-2.5 rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-md mx-auto w-fit max-w-[95%] overflow-hidden relative transition-all",
+                parsedExtra.type === 'noun'
+                  ? "bg-zinc-800/90 dark:bg-[#2C2C2E]/90 border border-white/15 dark:border-white/10 text-white"
+                  : "bg-[#505969]/90 dark:bg-[#2C2C2E]/90 border border-white/10 dark:border-white/[0.08] text-slate-100"
+              )}>
+                {parsedExtra.type === 'noun' ? (
+                  <span className="text-sm font-medium leading-relaxed">
+                    <span className={parsedExtra.articleClasses}>{parsedExtra.article}</span>{' '}
+                    <span className="text-zinc-100">{parsedExtra.word}</span>
+                  </span>
+                ) : (
+                  <span className="text-sm font-medium leading-relaxed text-white dark:text-[#EBEBF5]">
+                    {parsedExtra.main}
+                  </span>
+                )}
               </div>
+              {parsedExtra.sub && (
+                <span className="text-xs sm:text-[13px] text-zinc-500 dark:text-[#8E8E93] font-medium tracking-wide">
+                  {parsedExtra.sub}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -3892,24 +3947,25 @@ function parseCardsFromCSV(text: string, isRedemittel: boolean, isRapidMode: boo
       }
     } else {
       if (parts.length >= 6) {
-        const targetWord = parts[0];
-        const hasForms = parts.length >= 7;
-        const forms = hasForms ? parts[3] : undefined;
-        const optStart = hasForms ? 4 : 3;
-        const options = [targetWord, parts[optStart], parts[optStart+1], parts[optStart+2]].sort(() => Math.random() - 0.5);
+        const targetWord = parts[0].trim();
+        const sentence = parts[1].trim();
+        const translation = parts[2].trim();
+        const options = [targetWord, parts[3].trim(), parts[4].trim(), parts[5].trim()].sort(() => Math.random() - 0.5);
+        const extraInfo = parts.length >= 7 && parts[6]?.trim() ? parts[6].trim() : null;
         cards.push({
           id: crypto.randomUUID(),
           targetWord,
-          sentence: parts[1],
-          translation: parts[2],
-          forms: forms,
+          sentence,
+          translation,
           options,
           masteryLevel: 0,
           isArchived: false,
           nextReviewDate: null,
           interval: 0,
           repetitions: 0,
-          baseWordInfo: parts.length > (optStart+3) ? parts[optStart+3] : null
+          baseWordInfo: extraInfo,
+          forms: extraInfo || undefined,
+          hint: extraInfo || undefined
         });
       }
     }
@@ -5270,7 +5326,52 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
   const [loadingStatus, setLoadingStatus] = useState<string>('Lade Theorie aus Datenbank...');
   const [error, setError] = useState<string | null>(null);
 
-  const fetchTheory = useCallback(async (force = false) => {
+  const [materials, setMaterials] = useState<string[]>(() => {
+    if (deck?.materials && deck.materials.length > 0) return deck.materials;
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(`deck_materials_${deckId}`);
+        if (stored) return JSON.parse(stored);
+      } catch (e) {}
+    }
+    return [];
+  });
+  const [showMaterialsPanel, setShowMaterialsPanel] = useState<boolean>(false);
+  const [isCompressingImages, setIsCompressingImages] = useState<boolean>(false);
+  const materialInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAddScreenshots = async (files: FileList | File[]) => {
+    const fileArr = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (fileArr.length === 0) return;
+
+    setIsCompressingImages(true);
+    try {
+      const compressed = await Promise.all(fileArr.map(f => compressImageForOcr(f)));
+      const updated = [...materials, ...compressed];
+      setMaterials(updated);
+      await useStore.getState().updateDeck(deckId, { materials: updated });
+      try {
+        localStorage.setItem(`deck_materials_${deckId}`, JSON.stringify(updated));
+      } catch (e) {}
+      toast.success(`${compressed.length} скриншот(ов) сохранено`);
+    } catch (err) {
+      console.error("Failed to compress screenshots:", err);
+      toast.error("Не удалось сжать некоторые изображения");
+    } finally {
+      setIsCompressingImages(false);
+    }
+  };
+
+  const handleRemoveScreenshot = async (indexToRemove: number) => {
+    const updated = materials.filter((_, idx) => idx !== indexToRemove);
+    setMaterials(updated);
+    await useStore.getState().updateDeck(deckId, { materials: updated });
+    try {
+      localStorage.setItem(`deck_materials_${deckId}`, JSON.stringify(updated));
+    } catch (e) {}
+  };
+
+  const fetchTheory = useCallback(async (force = false, customMaterials?: string[]) => {
     if (!deckId) return;
 
     if (!force) {
@@ -5405,7 +5506,10 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     setError(null);
     try {
       const currentDeck = useStore.getState().decks.find(d => d.id === deckId);
-      let deckMaterials = currentDeck?.materials || [];
+      let deckMaterials = customMaterials !== undefined ? customMaterials : materials;
+      if ((!deckMaterials || deckMaterials.length === 0) && currentDeck?.materials && currentDeck.materials.length > 0) {
+        deckMaterials = currentDeck.materials;
+      }
       if ((!deckMaterials || deckMaterials.length === 0) && typeof window !== 'undefined') {
         try {
           const stored = localStorage.getItem(`deck_materials_${deckId}`);
@@ -5436,7 +5540,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
       setLegacyText("");
 
       // Сохраняем в Supabase и стейт через updateDeck
-      await useStore.getState().updateDeck(deckId, { theory: generatedData });
+      await useStore.getState().updateDeck(deckId, { theory: generatedData, materials: deckMaterials });
 
       // Кешируем в localStorage
       try {
@@ -5453,7 +5557,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
     } finally {
       setIsLoading(false);
     }
-  }, [deckId, theoryData, legacyText, isValidTheory]);
+  }, [deckId, theoryData, legacyText, isValidTheory, materials]);
 
   useEffect(() => {
     // 1. Если в deck уже есть структурированная или строковая теория
@@ -5679,6 +5783,19 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           </h2>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowMaterialsPanel(prev => !prev)}
+              title="Скриншоты страниц учебника для теории"
+              className={cn(
+                "h-8 px-3 rounded-full flex items-center gap-1.5 text-xs font-medium transition-all cursor-pointer active:scale-95",
+                materials.length > 0
+                  ? "bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:bg-blue-500/30"
+                  : "bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white"
+              )}
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>{materials.length > 0 ? `${materials.length} фото` : '+ Скриншоты'}</span>
+            </button>
+            <button
               onClick={() => {
                 setTheoryData(null);
                 setLegacyText("");
@@ -5698,6 +5815,88 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
             </button>
           </div>
         </div>
+
+        {/* Materials / Textbook Screenshots Drawer */}
+        <AnimatePresence>
+          {showMaterialsPanel && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="border-b border-white/10 bg-zinc-900/90 px-8 py-4 overflow-hidden shrink-0 space-y-3"
+            >
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                  <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Страницы учебника для теории ({materials.length})</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="file"
+                    ref={materialInputRef}
+                    multiple
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files) handleAddScreenshots(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    onClick={() => materialInputRef.current?.click()}
+                    disabled={isCompressingImages}
+                    className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    {isCompressingImages ? "Сжатие..." : "Добавить страницы"}
+                  </button>
+                  {materials.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setTheoryData(null);
+                        setLegacyText("");
+                        fetchTheory(true, materials);
+                      }}
+                      disabled={isLoading}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {isLoading ? "Генерация..." : "Создать теорию по фото"}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {materials.length === 0 ? (
+                <div 
+                  onClick={() => materialInputRef.current?.click()}
+                  className="border border-dashed border-white/15 rounded-xl p-4 text-center cursor-pointer hover:border-blue-500/50 hover:bg-blue-500/5 transition-all text-xs text-zinc-400"
+                >
+                  Нажмите сюда или на «Добавить страницы», чтобы прикрепить скриншоты учебника (Vision-модель Qwen составит конспект строго по вашим страницам)
+                </div>
+              ) : (
+                <div className="flex items-center gap-2.5 overflow-x-auto py-1 custom-scrollbar">
+                  {materials.map((src, idx) => (
+                    <div key={idx} className="relative group shrink-0 w-20 h-24 rounded-lg overflow-hidden border border-white/15 bg-zinc-800">
+                      <img src={src} alt={`Page ${idx + 1}`} className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => handleRemoveScreenshot(idx)}
+                        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Удалить скриншот"
+                      >
+                        ×
+                      </button>
+                      <div className="absolute bottom-0 inset-x-0 bg-black/60 text-[9px] text-zinc-300 font-mono text-center py-0.5">
+                        Стр. {idx + 1}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Content Scroll Container with pb-24 bottom protection */}
         <div className="overflow-y-auto px-8 py-6 space-y-6 flex-1 text-zinc-100 scrollbar-thin pb-24 custom-scrollbar">
@@ -6017,16 +6216,29 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
           ) : (
             <div className="p-8 text-center flex flex-col items-center justify-center space-y-4 my-auto py-16">
               <p className="text-zinc-400 text-sm">Теория для этой темы пока не создана.</p>
-              <button 
-                onClick={() => {
-                  setTheoryData(null);
-                  setLegacyText("");
-                  fetchTheory(true);
-                }}
-                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer active:scale-95"
-              >
-                Сгенерировать теорию с ИИ
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button 
+                  onClick={() => {
+                    setTheoryData(null);
+                    setLegacyText("");
+                    fetchTheory(true);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Сгенерировать по теме
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowMaterialsPanel(true);
+                    setTimeout(() => materialInputRef.current?.click(), 100);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 border border-white/10"
+                >
+                  <Camera className="w-3.5 h-3.5 text-blue-400" />
+                  Загрузить скриншоты учебника
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -7786,24 +7998,25 @@ try {
           }
         } else {
           if (parts.length >= 6) {
-            const targetWord = parts[0];
-            const hasForms = parts.length >= 7;
-            const forms = hasForms ? parts[3] : undefined;
-            const optStart = hasForms ? 4 : 3;
-            const options = [targetWord, parts[optStart], parts[optStart+1], parts[optStart+2]].sort(() => Math.random() - 0.5);
+            const targetWord = parts[0].trim();
+            const sentence = parts[1].trim();
+            const translation = parts[2].trim();
+            const options = [targetWord, parts[3].trim(), parts[4].trim(), parts[5].trim()].sort(() => Math.random() - 0.5);
+            const extraInfo = parts.length >= 7 && parts[6]?.trim() ? parts[6].trim() : null;
             cards.push({
               id: crypto.randomUUID(),
               targetWord,
-              sentence: parts[1],
-              translation: parts[2],
-              forms: forms,
+              sentence,
+              translation,
               options,
               masteryLevel: 0,
               isArchived: false,
               nextReviewDate: null,
               interval: 0,
               repetitions: 0,
-              baseWordInfo: parts.length > (optStart+3) ? parts[optStart+3] : null
+              baseWordInfo: extraInfo,
+              forms: extraInfo || undefined,
+              hint: extraInfo || undefined
             });
           }
         }
