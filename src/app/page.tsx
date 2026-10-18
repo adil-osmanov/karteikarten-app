@@ -6895,6 +6895,7 @@ export default function App() {
           if (Array.isArray(pd)) setDecks(pd);
         }
       } catch (e) {}
+      useStore.setState({ isLoaded: true });
       
 try {
         const [booksRes, decksRes, statsRes] = await Promise.all([
@@ -7077,7 +7078,8 @@ try {
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
-        // Do nothing, let the cache render
+      } finally {
+        useStore.setState({ isLoaded: true });
       }
     };
     fetchData();
@@ -7592,7 +7594,9 @@ try {
   
 
   
-  const activeBookColor = activeBook?.tintColor || activeBook?.accentColor || activeBook?.coverValue || 'transparent';
+  const activeColorHex = (activeBook?.tintColor && activeBook.tintColor.startsWith('#')) 
+    ? activeBook.tintColor 
+    : ((activeBook?.accentColor && activeBook.accentColor.startsWith('#')) ? activeBook.accentColor : '#3B82F6');
 
   return (
       <>
@@ -7601,7 +7605,7 @@ try {
           <div 
             className="absolute left-1/2 top-0 -translate-x-1/2 w-[150vw] md:w-[120vw] h-[80vh] opacity-0 dark:opacity-30 transition-colors duration-1000 transform-gpu translate-z-0 will-change-transform"
             style={{
-              background: `radial-gradient(ellipse 70% 60% at 50% 0%, ${activeBookColor}40 0%, ${activeBookColor}10 45%, transparent 80%)`
+              background: `radial-gradient(ellipse 70% 60% at 50% 0%, ${activeColorHex}40 0%, ${activeColorHex}10 45%, transparent 80%)`
             }}
           />
         </div>
