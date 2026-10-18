@@ -45,7 +45,14 @@ function useIsMobile() {
 function ensureUuid(id?: string): string {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (id && uuidRegex.test(id)) return id;
-  return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 // Client-side image compression for OCR/Groq Vision (1200px max dimension, JPEG 0.72)
@@ -3693,7 +3700,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
                 title="Статистика дня"
               >
                 <Layers className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
-                <span className="font-bold text-zinc-950 dark:text-white font-mono tracking-tight text-xs sm:text-[13px]">{displayTodayCount}/200</span>
+                <span suppressHydrationWarning className="font-bold text-zinc-950 dark:text-white font-mono tracking-tight text-xs sm:text-[13px]">{displayTodayCount}/200</span>
               </button>
 
               {/* Тонкий разделитель */}

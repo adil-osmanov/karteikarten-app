@@ -270,7 +270,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       if (!updatedPool.some(matchFn)) {
         const fullCardSnapshot = {
           deckId: card?.deckId || '',
-          id: cardId || (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())),
+          id: cardId || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : String(Date.now())),
           targetWord: targetWord || card?.targetWord || '',
           sentence: card?.sentence || card?.card?.sentence || '',
           translation: card?.translation || card?.card?.translation || '',
