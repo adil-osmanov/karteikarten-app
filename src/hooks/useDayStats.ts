@@ -5,6 +5,7 @@ export interface DailyStats {
   activeSeconds: number;
   cardsDone: number;
   correctCount: number;
+  mistakesCountToday?: number;
   mistakesPool: any[];
 }
 
@@ -49,7 +50,14 @@ function loadInitialStats(): DailyStats {
   const realTodayCards = getTodayCompletedCardsCount();
 
   if (typeof window === 'undefined') {
-    return { date: todayKey, activeSeconds: 0, cardsDone: realTodayCards, correctCount: realTodayCards, mistakesPool: [] };
+    return { 
+      date: todayKey, 
+      activeSeconds: 0, 
+      cardsDone: realTodayCards, 
+      correctCount: realTodayCards, 
+      mistakesCountToday: 0, 
+      mistakesPool: [] 
+    };
   }
 
   const saved = localStorage.getItem('app_daily_stats');
@@ -59,25 +67,38 @@ function loadInitialStats(): DailyStats {
       const mistakesPool = Array.isArray(parsed.mistakesPool) ? parsed.mistakesPool : [];
       if (parsed.date === todayKey) {
         const currentCards = Math.max(typeof parsed.cardsDone === 'number' ? parsed.cardsDone : 0, realTodayCards);
-        const correctCount = typeof parsed.correctCount === 'number' && parsed.correctCount > 0
+        
+        // Recover from corrupt or missing accuracy data:
+        const mistakesToday = typeof parsed.mistakesCountToday === 'number'
+          ? Math.max(0, parsed.mistakesCountToday)
+          : mistakesPool.length;
+
+        let correctCount = typeof parsed.correctCount === 'number'
           ? parsed.correctCount
-          : Math.max(0, currentCards - mistakesPool.length);
+          : Math.max(0, currentCards - mistakesToday);
+
+        // Self-healing: if correctCount is abnormally low compared to completed cards (e.g. 5 vs 287)
+        if (currentCards > 0 && correctCount + mistakesToday < currentCards) {
+          correctCount = Math.max(0, currentCards - mistakesToday);
+        }
 
         return {
           date: todayKey,
           activeSeconds: typeof parsed.activeSeconds === 'number' ? parsed.activeSeconds : 0,
           cardsDone: currentCards,
           correctCount,
+          mistakesCountToday: mistakesToday,
           mistakesPool
         };
       }
 
-      // Новый день: сбрасываем день, но СОХРАНЯЕМ накопительный пул ошибок
+      // Новый день: сбрасываем дневные счетчики, но СОХРАНЯЕМ накопительный пул ошибок
       return {
         date: todayKey,
         activeSeconds: 0,
         cardsDone: realTodayCards,
-        correctCount: Math.max(0, realTodayCards - mistakesPool.length),
+        correctCount: realTodayCards,
+        mistakesCountToday: 0,
         mistakesPool
       };
     } catch (e) {}
@@ -88,6 +109,7 @@ function loadInitialStats(): DailyStats {
     activeSeconds: 0, 
     cardsDone: realTodayCards, 
     correctCount: realTodayCards, 
+    mistakesCountToday: 0, 
     mistakesPool: [] 
   };
 }
@@ -135,6 +157,7 @@ function initGlobalTimer() {
         activeSeconds: 1,
         cardsDone: realCards,
         correctCount: realCards,
+        mistakesCountToday: 0,
         mistakesPool: globalStats.mistakesPool || []
       };
     } else {
@@ -185,7 +208,11 @@ export function useDayStats(options?: { isStudying?: boolean }) {
     notify();
   };
 
-  const recordCardResult = (isCorrect: boolean, card: any) => {
+  const recordCardResult = (
+    isCorrect: boolean, 
+    card: any, 
+    options?: { isReviewingMistakes?: boolean }
+  ) => {
     let updatedPool = [...(globalStats.mistakesPool || [])];
     
     // Извлекаем идентификаторы карточки надежно
@@ -220,19 +247,29 @@ export function useDayStats(options?: { isStudying?: boolean }) {
         updatedPool.push(fullCardSnapshot);
       }
     } else {
-      // При правильном ответе — вычеркиваем из банка ошибок
-      updatedPool = updatedPool.filter(c => !matchFn(c));
+      // При правильном ответе удаляем ТОЛЬКО если находимся в режиме тренировки ошибок!
+      if (options?.isReviewingMistakes) {
+        updatedPool = updatedPool.filter(c => !matchFn(c));
+      }
     }
 
     const today = getTodayKey();
     const currentActivityCards = getTodayCompletedCardsCount();
-    const newCardsDone = Math.max((globalStats.cardsDone || 0) + 1, currentActivityCards);
+    const newCardsDone = Math.max((globalStats.cardsDone || 0) + (isCorrect ? 1 : 0), currentActivityCards);
+
+    const prevMistakesToday = typeof globalStats.mistakesCountToday === 'number'
+      ? globalStats.mistakesCountToday
+      : (globalStats.mistakesPool?.length || 0);
+    const newMistakesToday = isCorrect ? prevMistakesToday : prevMistakesToday + 1;
+
+    const newCorrectCount = Math.max(0, newCardsDone - newMistakesToday);
 
     globalStats = {
       ...globalStats,
       date: today,
       cardsDone: newCardsDone,
-      correctCount: isCorrect ? (globalStats.correctCount || 0) + 1 : (globalStats.correctCount || 0),
+      correctCount: newCorrectCount,
+      mistakesCountToday: newMistakesToday,
       mistakesPool: updatedPool
     };
     notify();

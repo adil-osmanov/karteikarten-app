@@ -1977,6 +1977,9 @@ function RapidSession({
   const setCardProgress = useStore(state => state.setCardProgress);
   const { stats, recordCardResult } = useDayStats({ isStudying: true });
   const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [isMistakesReviewMode, setIsMistakesReviewMode] = useState(false);
+  const isReviewingMistakesSession = Boolean(reviewCards && reviewCards.length > 0) || isMistakesReviewMode;
+
   const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [wordProgress, setWordProgress] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
@@ -1994,6 +1997,7 @@ function RapidSession({
     setQueue([...list].sort(() => Math.random() - 0.5));
     setTotal(list.length);
     setMastered(0);
+    setIsMistakesReviewMode(true);
     setIsStatsOpen(false);
   };
 
@@ -2046,7 +2050,7 @@ function RapidSession({
     const id = current.card.id;
     const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
 
-    recordCardResult(correct, { deckId: current.deckId, card: liveCard, ...liveCard });
+    recordCardResult(correct, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
 
     const newScore = correct ? (wordProgress[id] || 0) + 1 : 0;
     const learned = correct && newScore >= 4;
@@ -2239,6 +2243,8 @@ function StudyInterface({
   const { answerCard, decks, books } = useStore();
   const { stats, recordCardResult } = useDayStats({ isStudying: true });
   const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [isMistakesReviewMode, setIsMistakesReviewMode] = useState(false);
+  const isReviewingMistakesSession = Boolean(reviewCards && reviewCards.length > 0) || isMistakesReviewMode;
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
@@ -2378,6 +2384,7 @@ function StudyInterface({
     setInitialTotal(list.length);
     setMasteredInSession(0);
     setRoundCounter(0);
+    setIsMistakesReviewMode(true);
     setIsStatsOpen(false);
   };
 
@@ -2484,9 +2491,10 @@ function StudyInterface({
             <PrepStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
+              deckTitle={currentDeck?.name}
               onAnswer={(id, correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2502,9 +2510,10 @@ function StudyInterface({
             <VerbStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
+              deckTitle={currentDeck?.name}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2520,12 +2529,12 @@ function StudyInterface({
             <RedemittelStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
-              deckTitle={decks.find(d => d.id === currentDeckId)?.name}
+              deckTitle={decks.find(d => d.id === currentDeckId)?.name || currentDeck?.name}
               cardIndex={currentIndex + 1}
               totalCards={activeCards.length}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2541,10 +2550,11 @@ function StudyInterface({
             <RapidStudyCard
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
+              deckTitle={currentDeck?.name}
               isReview={Boolean(reviewCards || isInitialArchivedDeck || liveCard.isArchived)}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2565,7 +2575,7 @@ function StudyInterface({
               forceInputMode={!!reviewCards && !isDrillMode}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: currentCardSnapshot, ...currentCardSnapshot });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: currentCardSnapshot, ...currentCardSnapshot }, { isReviewingMistakes: isReviewingMistakesSession });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -2958,14 +2968,12 @@ function StudyCard({
     const lastCharIndex = value.length - 1;
     if (value.length > 0 && !lastCharValid) {
       playFeedbackSound(false);
-      setHasErrored(true);
-      hasErroredRef.current = true;
+      // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
     }
 
     if (isValid && isComplete) {
       playFeedbackSound(true);
-      const isCardCorrect = !hasErroredRef.current;
-      onAnswer(isCardCorrect, false);
+      onAnswer(true, false);
       handleReveal();
     }
   };
@@ -3153,7 +3161,7 @@ function StudyCard({
         </div>
         <div className="flex items-center gap-4">
           <AnimatePresence>
-            {hasErrored && deckTitle && (
+            {(hasErrored || phase === "Answer") && deckTitle && (
               <motion.span 
                 initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
                 animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
@@ -5880,6 +5888,18 @@ function PrepStudyCard({
           <Volume2 className="w-5 h-5" />
         </button>
         <div className="flex items-center gap-4">
+          <AnimatePresence>
+            {(hasErrored || isSuccess || isHilfe) && deckTitle && (
+              <motion.span 
+                initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
+                animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
+                exit={{ opacity: 0 }}
+                className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
+              >
+                {deckTitle}
+              </motion.span>
+            )}
+          </AnimatePresence>
           <button 
             onClick={onHilfe}
             disabled={isSuccess || isHilfe}
@@ -6073,8 +6093,7 @@ function VerbStudyCard({
   }, [isHilfe, playAudio, onAnswer]);
 
   const handleSlotError = useCallback(() => {
-    hasErroredRef.current = true;
-    setHasErrored(true);
+    // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
   }, []);
 
   const handleHilfe = useCallback(() => {
@@ -6111,7 +6130,7 @@ function VerbStudyCard({
         </button>
         <div className="flex items-center gap-4">
           <AnimatePresence>
-            {hasErrored && deckTitle && (
+            {(hasErrored || isSuccess || isHilfe) && deckTitle && (
               <motion.span 
                 initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
                 animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}

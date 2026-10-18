@@ -41,9 +41,24 @@ export function StatsPopover({ isOpen, onClose, stats, onReviewMistakes }: Stats
   const totalDone = Math.max(typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0, realCardsCount);
   const target = 200;
   const progressPercent = Math.min(Math.round((totalDone / target) * 100), 100);
-  const correctCount = typeof stats?.correctCount === 'number' ? stats.correctCount : totalDone;
-  const accuracy = totalDone > 0 ? Math.min(100, Math.max(0, Math.round((correctCount / totalDone) * 100))) : 100;
+
+  const mistakesToday = typeof stats?.mistakesCountToday === 'number'
+    ? stats.mistakesCountToday
+    : (Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0);
+
+  const totalAttempts = Math.max(totalDone, totalDone + mistakesToday);
+  const correctAttempts = Math.max(0, totalAttempts - mistakesToday);
+  const accuracy = totalAttempts > 0 
+    ? Math.min(100, Math.max(0, Math.round((correctAttempts / totalAttempts) * 100))) 
+    : 100;
+
   const mistakeCount = Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0;
+
+  const accuracyColor = accuracy >= 80 
+    ? "text-emerald-400" 
+    : accuracy >= 60 
+    ? "text-amber-400" 
+    : "text-rose-400";
 
   return (
     <div 
@@ -86,7 +101,7 @@ export function StatsPopover({ isOpen, onClose, stats, onReviewMistakes }: Stats
           </div>
 
           <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 flex flex-col items-center text-center">
-            <span className="text-xl font-bold tracking-tight text-emerald-400 mb-0.5">{accuracy}%</span>
+            <span className={`text-xl font-bold tracking-tight mb-0.5 font-mono ${accuracyColor}`}>{accuracy}%</span>
             <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1">
               <Target className="w-3 h-3 text-zinc-500" /> Точность
             </span>
