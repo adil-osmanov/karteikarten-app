@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { X, CheckCircle2, RotateCcw, Clock, Target } from 'lucide-react';
-import { getTodayCompletedCardsCount } from '@/hooks/useDayStats';
+import { getTodayCompletedCardsCount, normalizeLanguage } from '@/hooks/useDayStats';
 
 export interface StatsPopoverProps {
   isOpen: boolean;
@@ -110,7 +110,8 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
 
   if (!isOpen) return null;
 
-  const currentLang = (language && STATS_I18N[language]) ? language : 'DE';
+  const normalized = normalizeLanguage(language);
+  const currentLang = STATS_I18N[normalized] ? normalized : 'DE';
   const t = STATS_I18N[currentLang];
 
   const totalSeconds = typeof stats?.activeSeconds === 'number' ? stats.activeSeconds : 0;

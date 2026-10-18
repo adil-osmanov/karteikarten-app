@@ -20,7 +20,7 @@ import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
-import { useDayStats } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 
 function cn(...inputs: ClassValue[]) {
@@ -634,13 +634,26 @@ const getInitialCachedDecks = (): Deck[] => {
 const initialBooks = getInitialCachedBooks();
 const initialDecks = getInitialCachedDecks();
 
+const getInitialLanguage = (): 'DE' | 'EN' | 'RU' => {
+  if (typeof window === 'undefined') return 'DE';
+  try {
+    const saved = localStorage.getItem('selected_language');
+    if (saved) {
+      const norm = normalizeLanguage(saved);
+      if (norm === 'DE' || norm === 'EN' || norm === 'RU') return norm as 'DE' | 'EN' | 'RU';
+    }
+  } catch {}
+  return 'DE';
+};
+
 const useStore = create<DeckState>()((set, get) => ({
   decks: initialDecks,
   isLoaded: typeof window !== 'undefined' && (initialBooks.length > 0 || initialDecks.length > 0),
-  appLanguage: 'DE',
+  appLanguage: getInitialLanguage(),
   setAppLanguage: (lang) => {
-    if (typeof window !== 'undefined') localStorage.setItem('selected_language', lang);
-    set({ appLanguage: lang });
+    const norm = normalizeLanguage(lang);
+    if (typeof window !== 'undefined') localStorage.setItem('selected_language', norm);
+    set({ appLanguage: norm as any });
   },
   dailyProgress: {},
   syncError: null,
@@ -2028,12 +2041,12 @@ function RapidSession({
   const appLanguage = useStore(state => state.appLanguage);
   const studyLanguage = useMemo(() => {
     const d = useStore.getState().decks.find(item => item.id === deckId);
-    if (d?.language) return d.language;
-    if (d?.bookId) {
+    let raw = d?.language;
+    if (!raw && d?.bookId) {
       const b = useStore.getState().books.find(item => item.id === d.bookId);
-      if (b?.language) return b.language;
+      if (b?.language) raw = b.language;
     }
-    return appLanguage;
+    return normalizeLanguage(raw || appLanguage || 'DE');
   }, [deckId, appLanguage]);
 
   const { stats, recordCardResult } = useDayStats({ isStudying: true, language: studyLanguage });
@@ -2277,6 +2290,7 @@ function StudyEntry(props: {
   onBack: () => void;
   reviewCards?: { deckId: string, card: Flashcard }[];
   isDrillMode?: boolean;
+  isMistakesReview?: boolean;
   trainingMode?: string;
 }) {
   if (props.deckId && !props.reviewCards && props.trainingMode === 'rapid_flashcards') {
@@ -2294,18 +2308,20 @@ function StudyInterface({
   onBack,
   reviewCards,
   isDrillMode,
+  isMistakesReview,
   trainingMode
 }: { 
   deckId?: string, 
   onBack: () => void,
   reviewCards?: { deckId: string, card: Flashcard }[],
   isDrillMode?: boolean,
+  isMistakesReview?: boolean,
   trainingMode?: string
 }) {
   const { answerCard, decks, books, appLanguage } = useStore();
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isMistakesReviewMode, setIsMistakesReviewMode] = useState(false);
-  const isReviewingMistakesSession = Boolean(reviewCards && reviewCards.length > 0) || isMistakesReviewMode;
+  const isReviewingMistakesSession = Boolean(isMistakesReview) || isMistakesReviewMode;
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
@@ -2384,12 +2400,12 @@ function StudyInterface({
   }, [decks, currentDeckId]);
 
   const studyLanguage = useMemo(() => {
-    if (currentDeck?.language) return currentDeck.language;
-    if (currentDeck?.bookId) {
+    let raw = currentDeck?.language;
+    if (!raw && currentDeck?.bookId) {
       const b = books.find(item => item.id === currentDeck.bookId);
-      if (b?.language) return b.language;
+      if (b?.language) raw = b.language;
     }
-    return appLanguage;
+    return normalizeLanguage(raw || appLanguage || 'DE');
   }, [currentDeck, books, appLanguage]);
 
   const { stats, recordCardResult } = useDayStats({ isStudying: true, language: studyLanguage });
@@ -2647,7 +2663,7 @@ function StudyInterface({
               forceInputMode={!!reviewCards && !isDrillMode}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: currentCardSnapshot, ...currentCardSnapshot }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
+                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
                 answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
                 if (isActualCorrect) {
                   setMasteredInSession(prev => prev + 1);
@@ -3580,7 +3596,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const langRef = useRef<HTMLDivElement>(null);
   const { appLanguage, setAppLanguage } = useStore();
-  const effectiveLang = activeBook?.language || appLanguage || 'DE';
+  const effectiveLang = normalizeLanguage(activeBook?.language || appLanguage || 'DE');
   const { stats } = useDayStats({ language: effectiveLang });
 
   useEffect(() => {
@@ -6874,6 +6890,7 @@ export default function App() {
   const [dictationDeckId, setDictationDeckId] = useState<string | null>(null);
   const [shadowingDeckId, setShadowingDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
+  const [isReviewingMistakes, setIsReviewingMistakes] = useState(false);
   const [drillCards, setDrillCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
@@ -7274,7 +7291,11 @@ try {
 
   if (reviewCards) {
     return (
-      <StudyEntry reviewCards={reviewCards} onBack={() => setReviewCards(null)} />
+      <StudyEntry 
+        reviewCards={reviewCards} 
+        isMistakesReview={isReviewingMistakes}
+        onBack={() => { setReviewCards(null); setIsReviewingMistakes(false); }} 
+      />
     );
   }
 
@@ -7690,17 +7711,26 @@ try {
           onBack={() => startTransition(() => setActiveBookId(null))} 
           onReviewMistakes={() => {
             try {
-              const lang = activeBook?.language || appLanguage || 'DE';
-              const saved = localStorage.getItem(`app_daily_stats_${lang}`) || localStorage.getItem('app_daily_stats');
-              if (saved) {
-                const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed.mistakesPool) && parsed.mistakesPool.length > 0) {
-                  const list = parsed.mistakesPool.map((item: any) => ({
-                    deckId: item.deckId || (decks[0]?.id || ''),
-                    card: item.card || item
-                  }));
-                  initAudioCtx();
-                  setReviewCards(list);
+              const lang = normalizeLanguage(activeBook?.language || appLanguage || 'DE');
+              const candidateKeys = [
+                `app_daily_stats_${lang}`,
+                `app_daily_stats_${lang.toLowerCase()}`
+              ];
+              if (lang === 'DE') candidateKeys.push('app_daily_stats');
+              for (const k of candidateKeys) {
+                const saved = localStorage.getItem(k);
+                if (saved) {
+                  const parsed = JSON.parse(saved);
+                  if (Array.isArray(parsed.mistakesPool) && parsed.mistakesPool.length > 0) {
+                    const list = parsed.mistakesPool.map((item: any) => ({
+                      deckId: item.deckId || (decks[0]?.id || ''),
+                      card: item.card || item
+                    }));
+                    initAudioCtx();
+                    setIsReviewingMistakes(true);
+                    setReviewCards(list);
+                    break;
+                  }
                 }
               }
             } catch(e) {}
@@ -7826,7 +7856,7 @@ try {
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
                   {UI_TRANSLATIONS[appLanguage]?.libraryTitle || 'Lehrbücher'}
                 </h2>
-                <DueCardsBadge count={dueCards.length} language={appLanguage} onClick={() => dueCards.length > 0 && setReviewCards(dueCards)} />
+                <DueCardsBadge count={dueCards.length} language={appLanguage} onClick={() => { if (dueCards.length > 0) { setIsReviewingMistakes(false); setReviewCards(dueCards); } }} />
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
                 {isLoadingBooks && displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).length === 0 ? (
@@ -7991,7 +8021,7 @@ try {
                       {/* Справа: компактная пилюля повторения */}
                       {levelIdx === 0 && dueCards.length > 0 && (
                         <button 
-                          onClick={() => { initAudioCtx(); setReviewCards(dueCards); }}
+                          onClick={() => { initAudioCtx(); setIsReviewingMistakes(false); setReviewCards(dueCards); }}
                           className="h-8 px-3 rounded-full flex items-center gap-2 text-xs font-medium transition-all active:scale-95 shadow-sm bg-white border border-zinc-200/80 text-zinc-800 hover:bg-zinc-100 active:bg-zinc-200 dark:bg-blue-500/15 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/25 cursor-pointer select-none group"
                         >
                           <RotateCcw className="w-3 h-3 text-blue-600 dark:text-blue-400 transition-transform duration-300 group-hover:-rotate-45" />
