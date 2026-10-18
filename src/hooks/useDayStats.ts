@@ -68,11 +68,13 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
 
   // Migration from legacy app_daily_stats for default German
   if (!saved && lang === 'DE') {
-    const legacy = localStorage.getItem('app_daily_stats');
-    if (legacy) {
-      saved = legacy;
-      localStorage.setItem(key, legacy);
-    }
+    try {
+      const legacy = localStorage.getItem('app_daily_stats');
+      if (legacy) {
+        saved = legacy;
+        localStorage.setItem(key, legacy);
+      }
+    } catch (e) {}
   }
 
   if (saved) {

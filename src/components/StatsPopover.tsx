@@ -85,7 +85,9 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
     document.body.style.touchAction = 'none';
 
     const preventDefault = (e: Event) => {
-      e.preventDefault();
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('.stats-modal-content')) return;
+      if (e.cancelable) e.preventDefault();
     };
 
     window.addEventListener('wheel', preventDefault, { passive: false });
@@ -159,7 +161,7 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
       }}
     >
       <div 
-        className="w-full max-w-sm rounded-3xl bg-zinc-900/95 border border-white/10 p-6 shadow-2xl backdrop-blur-2xl text-white relative animate-in zoom-in-95 duration-200"
+        className="stats-modal-content w-full max-w-sm rounded-3xl bg-zinc-900/95 border border-white/10 p-6 shadow-2xl backdrop-blur-2xl text-white relative animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

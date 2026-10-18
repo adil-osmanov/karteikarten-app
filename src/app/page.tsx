@@ -6391,7 +6391,18 @@ export function parseRedemittelCard(card: Flashcard): RedemittelCardData {
       : card.targetWord;
     const cleanSentence = (rawSource || '').replace(/___/g, card.targetWord || '').trim();
     if (cleanSentence) {
-      const clauses = cleanSentence.split(/(?<=[,;:\.\?!])\s+/).filter(Boolean);
+      // Safari-safe clause splitting without regex lookbehind
+      const clauses: string[] = [];
+      const parts = cleanSentence.split(/([,;:\.\?!]+\s+)/);
+      let tempClause = '';
+      for (const part of parts) {
+        tempClause += part;
+        if (/[,;:\.\?!]+\s+$/.test(tempClause)) {
+          if (tempClause.trim()) clauses.push(tempClause.trim());
+          tempClause = '';
+        }
+      }
+      if (tempClause.trim()) clauses.push(tempClause.trim());
       const resultChunks: string[] = [];
       for (const clause of clauses) {
         const words = clause.trim().split(/\s+/).filter(Boolean);
