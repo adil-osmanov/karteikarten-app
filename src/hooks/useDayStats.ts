@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 
 export interface DailyStats {
   date: string;
@@ -29,6 +30,30 @@ export const getTodayKey = (): string => {
 };
 
 export const getStorageKey = (lang: string) => `app_daily_stats_${normalizeLanguage(lang)}`;
+
+// --- CLEAN CARD SNAPSHOT ---
+export function cleanCardSnapshot(card: any): any {
+  if (!card) return null;
+  const id = card.id || card.card?.id || '';
+  const targetWord = (card.targetWord || card.card?.targetWord || card.sentence || '').trim();
+  const sentence = card.sentence || card.card?.sentence || '';
+  const translation = card.translation || card.card?.translation || '';
+  const stableId = id || `${card?.deckId || 'deck'}::${targetWord}::${sentence}` || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : String(Date.now()));
+
+  return {
+    deckId: card.deckId || card.card?.deckId || '',
+    id: stableId,
+    targetWord: targetWord || card.targetWord || '',
+    sentence,
+    translation,
+    options: Array.isArray(card.options) ? card.options : (Array.isArray(card.card?.options) ? card.card.options : []),
+    masteryLevel: card.masteryLevel ?? card.card?.masteryLevel ?? 0,
+    isArchived: Boolean(card.isArchived || card.card?.isArchived),
+    baseWordInfo: card.baseWordInfo || card.card?.baseWordInfo || '',
+    hint: card.hint || card.card?.hint || '',
+    forms: card.forms || card.card?.forms || ''
+  };
+}
 
 // --- INDEXEDDB STORAGE BACKUP (SAFARI PERSISTENCE) ---
 const IDB_NAME = 'karten_db';
@@ -90,6 +115,119 @@ export async function getStatsFromIDB(lang: string): Promise<DailyStats | null> 
   } catch {
     return null;
   }
+}
+
+// --- SUPABASE CLOUD DATABASE STORAGE ---
+let cloudSyncTimeout: ReturnType<typeof setTimeout> | null = null;
+
+export async function syncStatsToSupabase(lang: string, stats: DailyStats, immediate: boolean = false): Promise<void> {
+  const normLang = normalizeLanguage(lang);
+  const performSync = async () => {
+    try {
+      const payload = {
+        date: stats.date,
+        activeSeconds: stats.activeSeconds || 0,
+        cardsDone: stats.cardsDone || 0,
+        correctCount: stats.correctCount || 0,
+        mistakesCountToday: stats.mistakesCountToday || 0,
+        mistakesPool: Array.isArray(stats.mistakesPool) ? stats.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : []
+      };
+      await supabase.from('user_stats').upsert({
+        language: `DAY_STATS_${normLang}`,
+        daily_activity: payload
+      }, { onConflict: 'language' });
+    } catch (e) {
+      console.warn('Supabase stats sync notice:', e);
+    }
+  };
+
+  if (immediate) {
+    if (cloudSyncTimeout) {
+      clearTimeout(cloudSyncTimeout);
+      cloudSyncTimeout = null;
+    }
+    await performSync();
+  } else {
+    if (cloudSyncTimeout) clearTimeout(cloudSyncTimeout);
+    cloudSyncTimeout = setTimeout(() => {
+      performSync();
+      cloudSyncTimeout = null;
+    }, 1500);
+  }
+}
+
+export async function fetchStatsFromSupabase(lang: string): Promise<DailyStats | null> {
+  try {
+    const normLang = normalizeLanguage(lang);
+    const { data, error } = await supabase
+      .from('user_stats')
+      .select('daily_activity')
+      .eq('language', `DAY_STATS_${normLang}`)
+      .maybeSingle();
+
+    if (error || !data || !data.daily_activity) return null;
+    const raw = data.daily_activity;
+    if (raw && typeof raw === 'object') {
+      return raw as DailyStats;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats {
+  const normLang = normalizeLanguage(lang);
+  const current = getOrCreateStats(normLang);
+  if (!cloudRaw || typeof cloudRaw !== 'object') return current;
+
+  const todayKey = getTodayKey();
+  const todayIso = new Date().toISOString().split('T')[0];
+
+  const cloudPool = Array.isArray(cloudRaw.mistakesPool) ? cloudRaw.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : [];
+  const mergedPool = mergeMistakesPools(current.mistakesPool || [], cloudPool);
+
+  const isCloudToday = cloudRaw.date === todayKey || cloudRaw.date === todayIso;
+
+  let maxActiveSeconds = current.activeSeconds || 0;
+  let maxCardsDone = current.cardsDone || 0;
+  let maxCorrectCount = current.correctCount || 0;
+  let maxMistakesToday = current.mistakesCountToday || 0;
+
+  if (isCloudToday) {
+    if (typeof cloudRaw.activeSeconds === 'number' && cloudRaw.activeSeconds > maxActiveSeconds) {
+      maxActiveSeconds = cloudRaw.activeSeconds;
+    }
+    if (typeof cloudRaw.cardsDone === 'number' && cloudRaw.cardsDone > maxCardsDone) {
+      maxCardsDone = cloudRaw.cardsDone;
+    }
+    if (typeof cloudRaw.correctCount === 'number' && cloudRaw.correctCount > maxCorrectCount) {
+      maxCorrectCount = cloudRaw.correctCount;
+    }
+    const cloudMistakes = typeof cloudRaw.mistakesCountToday === 'number' ? cloudRaw.mistakesCountToday : cloudPool.length;
+    maxMistakesToday = Math.max(maxMistakesToday, cloudMistakes, mergedPool.length);
+  } else {
+    maxMistakesToday = Math.max(maxMistakesToday, mergedPool.length);
+  }
+
+  const updated: DailyStats = {
+    date: todayKey,
+    activeSeconds: maxActiveSeconds,
+    cardsDone: maxCardsDone,
+    correctCount: maxCorrectCount,
+    mistakesCountToday: maxMistakesToday,
+    mistakesPool: mergedPool
+  };
+
+  statsByLang[normLang] = updated;
+  notifyLang(normLang, { skipCloudSync: true });
+  return updated;
+}
+
+export function getMistakesPool(lang: string): any[] {
+  const normLang = normalizeLanguage(lang);
+  const current = getOrCreateStats(normLang);
+  return current.mistakesPool || [];
 }
 
 // Robust localStorage writer with Safari Quota recovery
@@ -163,7 +301,7 @@ export const mergeMistakesPools = (poolA: any[] = [], poolB: any[] = []): any[] 
     if (!item) continue;
     const exists = result.some(existing => isSameCard(existing, item));
     if (!exists) {
-      result.push(item);
+      result.push(cleanCardSnapshot(item));
     }
   }
   return result;
@@ -233,7 +371,7 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
     };
   }
 
-  // Check canonical key, lowercase key, and (for DE) legacy un-suffixed key
+  // Canonical key and fallbacks
   const candidateKeys = [
     `app_daily_stats_${normLang}`,
     `app_daily_stats_${normLang.toLowerCase()}`
@@ -285,6 +423,11 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
     } catch (e) {}
   }
 
+  // Clean up legacy non-namespaced key so it doesn't corrupt state on subsequent loads
+  try {
+    localStorage.removeItem('app_daily_stats');
+  } catch (e) {}
+
   if (foundAnySaved) {
     const finalMistakesToday = Math.max(maxMistakesToday, mergedPool.length);
     const finalCardsDone = Math.max(maxCardsDone, realTodayCards);
@@ -302,10 +445,9 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
       mistakesPool: mergedPool
     };
 
-    // Save consolidated canonical state using safeSetStorage
+    // Save consolidated canonical state
     const serialized = JSON.stringify(result);
     safeSetStorage(`app_daily_stats_${normLang}`, serialized);
-    safeSetStorage(`app_daily_stats_${normLang.toLowerCase()}`, serialized);
     setStatsInIDB(normLang, result);
 
     return result;
@@ -337,7 +479,7 @@ function getOrCreateStats(lang: string = 'DE'): DailyStats {
   return statsByLang[normLang];
 }
 
-function notifyLang(lang: string) {
+function notifyLang(lang: string, options?: { skipCloudSync?: boolean }) {
   const normLang = normalizeLanguage(lang);
   const current = getOrCreateStats(normLang);
   if (typeof window !== 'undefined') {
@@ -346,6 +488,9 @@ function notifyLang(lang: string) {
     safeSetStorage(`app_daily_stats_${normLang.toLowerCase()}`, serialized);
     setStatsInIDB(normLang, current);
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
+  }
+  if (!options?.skipCloudSync) {
+    syncStatsToSupabase(normLang, current, false);
   }
   if (listenersByLang[normLang]) {
     listenersByLang[normLang].forEach(fn => fn(current));
@@ -363,13 +508,14 @@ function initGlobalTimer() {
   window.addEventListener('touchstart', onActivity, { passive: true });
   window.addEventListener('scroll', onActivity, { passive: true });
 
-  // Safari unload/pagehide flush
+  // Safari unload/pagehide flush to local & Supabase
   const flushAll = () => {
     Object.keys(statsByLang).forEach(l => {
       const s = statsByLang[l];
       if (s) {
         safeSetStorage(getStorageKey(l), JSON.stringify(s));
         setStatsInIDB(l, s);
+        syncStatsToSupabase(l, s, true);
       }
     });
   };
@@ -435,9 +581,20 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
           mistakesCountToday: Math.max(current.mistakesCountToday || 0, idbStats.mistakesCountToday || 0, mergedPool.length)
         };
         statsByLang[lang] = mergedStats;
-        notifyLang(lang);
+        notifyLang(lang, { skipCloudSync: true });
         setLocalStats(mergedStats);
       }
+    });
+    return () => { isCancelled = true; };
+  }, [lang]);
+
+  // Supabase Cloud recovery: fetch canonical database stats on mount
+  useEffect(() => {
+    let isCancelled = false;
+    fetchStatsFromSupabase(lang).then(cloudStats => {
+      if (isCancelled || !cloudStats) return;
+      const updated = reconcileStatsFromCloud(lang, cloudStats);
+      setLocalStats(updated);
     });
     return () => { isCancelled = true; };
   }, [lang]);
@@ -482,6 +639,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     const next = typeof updater === 'function' ? updater(current) : updater;
     statsByLang[lang] = next;
     notifyLang(lang);
+    syncStatsToSupabase(lang, next, true);
   }, [lang]);
 
   const recordCardResult = useCallback((
@@ -517,22 +675,10 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     if (!isCorrect) {
       // Add to mistakes pool (deduplicating only exact card instances)
       if (!updatedPool.some(matchFn)) {
-        const stableId = cardId || `${card?.deckId || 'deck'}::${targetWord}::${sentence}` || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : String(Date.now()));
-        // Clean snapshot without recursive bloated objects
-        const fullCardSnapshot = {
-          deckId: card?.deckId || '',
-          id: stableId,
-          targetWord: targetWord || card?.targetWord || '',
-          sentence: sentence,
-          translation: translation,
-          options: Array.isArray(card?.options) ? card.options : (Array.isArray(card?.card?.options) ? card.card.options : []),
-          masteryLevel: card?.masteryLevel ?? card?.card?.masteryLevel ?? 0,
-          isArchived: Boolean(card?.isArchived || card?.card?.isArchived),
-          baseWordInfo: card?.baseWordInfo || card?.card?.baseWordInfo || '',
-          hint: card?.hint || card?.card?.hint || '',
-          forms: card?.forms || card?.card?.forms || ''
-        };
-        updatedPool.push(fullCardSnapshot);
+        const cleanCard = cleanCardSnapshot(card);
+        if (cleanCard) {
+          updatedPool.push(cleanCard);
+        }
       }
     } else {
       // Remove ONLY if explicitly in mistakes review mode!
@@ -555,7 +701,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       newCorrectCount = Math.max(0, newCardsDone - newMistakesToday);
     }
 
-    statsByLang[targetLang] = {
+    const nextStats: DailyStats = {
       ...current,
       date: today,
       cardsDone: newCardsDone,
@@ -563,7 +709,11 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       mistakesCountToday: newMistakesToday,
       mistakesPool: updatedPool
     };
+
+    statsByLang[targetLang] = nextStats;
     notifyLang(targetLang);
+    // Instant sync to Supabase database so reload never loses anything
+    syncStatsToSupabase(targetLang, nextStats, true);
   }, [lang]);
 
   return { stats, setStats, recordCardResult };

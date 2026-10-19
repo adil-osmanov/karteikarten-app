@@ -16,11 +16,11 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
-import { useDayStats, normalizeLanguage, safeSetStorage } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 
 function cn(...inputs: ClassValue[]) {
@@ -96,9 +96,7 @@ async function compressImageForOcr(file: File): Promise<string> {
   });
 }
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder";
-const supabase = createClient(supabaseUrl, supabaseKey);
+// supabase client is imported from '@/lib/supabase'
 
 // --- AUDIO FEEDBACK ---
 
@@ -7034,6 +7032,14 @@ try {
           pushStats('DE');
           pushStats('EN');
           pushStats('RU');
+
+          // Reconcile daily stats and mistakes from Supabase cloud database
+          ['DE', 'EN', 'RU'].forEach(l => {
+            const cloudDayStat = statsRes.data.find((s: any) => s.language === `DAY_STATS_${l}`);
+            if (cloudDayStat && cloudDayStat.daily_activity) {
+              reconcileStatsFromCloud(l, cloudDayStat.daily_activity);
+            }
+          });
           
           const globalStat = statsRes.data.find((s: any) => s.language === 'GLOBAL_APP_STATE');
           if (globalStat && globalStat.daily_activity) {
@@ -7695,26 +7701,15 @@ try {
           onReviewMistakes={() => {
             try {
               const lang = normalizeLanguage(activeBook?.language || appLanguage || 'DE');
-              const candidateKeys = [
-                `app_daily_stats_${lang}`,
-                `app_daily_stats_${lang.toLowerCase()}`
-              ];
-              if (lang === 'DE') candidateKeys.push('app_daily_stats');
-              for (const k of candidateKeys) {
-                const saved = localStorage.getItem(k);
-                if (saved) {
-                  const parsed = JSON.parse(saved);
-                  if (Array.isArray(parsed.mistakesPool) && parsed.mistakesPool.length > 0) {
-                    const list = parsed.mistakesPool.map((item: any) => ({
-                      deckId: item.deckId || (decks[0]?.id || ''),
-                      card: item.card || item
-                    }));
-                    initAudioCtx();
-                    setIsReviewingMistakes(true);
-                    setReviewCards(list);
-                    break;
-                  }
-                }
+              const pool = getMistakesPool(lang);
+              if (Array.isArray(pool) && pool.length > 0) {
+                const list = pool.map((item: any) => ({
+                  deckId: item.deckId || (decks[0]?.id || ''),
+                  card: item.card || item
+                }));
+                initAudioCtx();
+                setIsReviewingMistakes(true);
+                setReviewCards(list);
               }
             } catch(e) {}
           }}
