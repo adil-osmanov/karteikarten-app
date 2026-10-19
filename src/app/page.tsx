@@ -1855,20 +1855,32 @@ function AutoFitGermanHeading({
   );
 }
 
-export function getMaskedSentence(sentence: string, targetWord: string): string {
+export function getSmartMaskedSentence(sentence: string, targetWord: string): string {
   if (!sentence || !targetWord) return sentence;
-  const cleanWord = targetWord.replace(/^(der|die|das)\s+/i, '').replace(/\|/g, '').trim();
-  if (!cleanWord) return sentence;
 
-  const escaped = cleanWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`\\b${escaped}[a-zäöüß]*\\b`, 'gi');
+  // 1. Очищаем целевую фразу от служебных глаголов, местоимений и артиклей
+  const stopWords = ['sein', 'haben', 'werden', 'sich', 'der', 'die', 'das', 'dem', 'den', 'des', 'ein', 'eine', 'einen', 'einem', 'einer'];
+  const cleanWord = targetWord.replace(/\|/g, ' ').trim();
+  const rawParts = cleanWord
+    .toLowerCase()
+    .replace(/[^a-zäöüß\s]/g, '')
+    .split(/\s+/)
+    .filter(word => word.length > 2 && !stopWords.includes(word));
+
+  // Если после очистки ничего не осталось, берем первое длинное слово
+  const coreWord = rawParts[0] || cleanWord.split(' ')[0];
+  if (!coreWord || coreWord.length < 3) return sentence;
+
+  // Берем корень (первые 4-5 букв для учета окончаний и падежей)
+  const root = coreWord.slice(0, Math.min(coreWord.length, 5));
+
+  // 2. Ищем и маскируем в предложении
+  const regex = new RegExp(`\\b${root}[a-zäöüß]*\\b`, 'gi');
   const masked = sentence.replace(regex, '[...]');
-  if (masked === sentence && sentence.toLowerCase().includes(cleanWord.toLowerCase())) {
-    const fallbackRegex = new RegExp(escaped, 'gi');
-    return sentence.replace(fallbackRegex, '[...]');
-  }
+
   return masked;
 }
+export const getMaskedSentence = getSmartMaskedSentence;
 
 export const RU_TO_DE_MAP: Record<string, string> = {
   'й':'q','ц':'w','у':'e','к':'r','е':'t','н':'z','г':'u','ш':'i','щ':'o','з':'p','х':'ü',
@@ -2042,7 +2054,7 @@ function RapidFlashcardMode({
   const [typedValue, setTypedValue] = useState("");
   const [isErrorMismatch, setIsErrorMismatch] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
-  const [isTypingSuccess, setIsTypingSuccess] = useState(false);
+  const [isSuccessFeedback, setIsSuccessFeedback] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2053,7 +2065,7 @@ function RapidFlashcardMode({
     setTypedValue("");
     setIsErrorMismatch(false);
     setIsShaking(false);
-    setIsTypingSuccess(false);
+    setIsSuccessFeedback(false);
     setIsSurrendered(false);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
@@ -2096,7 +2108,7 @@ function RapidFlashcardMode({
   }, [card?.targetWord, card?.hint, card?.forms]);
 
   const handleSuccessAnswer = useCallback(() => {
-    setIsTypingSuccess(true);
+    setIsSuccessFeedback(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
     playFeedbackSound(true);
@@ -2106,8 +2118,11 @@ function RapidFlashcardMode({
     }
 
     typingTimerRef.current = setTimeout(() => {
+      setIsSuccessFeedback(false);
+      setTypedValue('');
+      setIsErrorMismatch(false);
       onAnswer(true, false);
-    }, 400);
+    }, 600);
   }, [speak, onAnswer]);
 
   const triggerErrorShake = useCallback(() => {
@@ -2124,7 +2139,7 @@ function RapidFlashcardMode({
   }, []);
 
   const handleInputChange = (rawVal: string) => {
-    if (locked || isTypingSuccess || isSurrendered) return;
+    if (locked || isSuccessFeedback || isSurrendered) return;
 
     // Automatic Russian -> German layout mapping and digraph replacements
     const val = convertRuToDeLayout(rawVal, parsedNoun.full || card.targetWord);
@@ -2152,7 +2167,7 @@ function RapidFlashcardMode({
   };
 
   const handleEnterSubmit = () => {
-    if (locked || isTypingSuccess || isSurrendered) return;
+    if (locked || isSuccessFeedback || isSurrendered) return;
     const trimmedInput = typedValue.toLowerCase().trim();
     const targetA = parsedNoun.noun.toLowerCase().trim();
     const targetB = parsedNoun.full.toLowerCase().trim();
@@ -2165,7 +2180,7 @@ function RapidFlashcardMode({
   };
 
   const handleGiveUp = () => {
-    if (locked || isTypingSuccess || isSurrendered) return;
+    if (locked || isSuccessFeedback || isSurrendered) return;
     setIsSurrendered(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
@@ -2182,9 +2197,10 @@ function RapidFlashcardMode({
   };
 
   const maskedSentence = useMemo(() => {
-    if (!example) return '';
-    return getMaskedSentence(example, card?.targetWord || '');
-  }, [example, card?.targetWord]);
+    const s = example || card?.sentence || '';
+    if (!s) return '';
+    return getSmartMaskedSentence(s, card?.targetWord || '');
+  }, [example, card?.sentence, card?.targetWord]);
 
   useEffect(() => {
     if (isTypingRound) return;
@@ -2321,7 +2337,7 @@ function RapidFlashcardMode({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
-                  disabled={locked || isTypingSuccess || isSurrendered}
+                  disabled={locked || isSuccessFeedback || isSurrendered}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
                   title="Aufgeben / Wort anzeigen (-1)"
                 >
@@ -2339,12 +2355,12 @@ function RapidFlashcardMode({
 
               {/* Context sentence with masked target word */}
               {maskedSentence && (
-                <div className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 font-normal text-center max-w-md mx-auto mb-6 italic line-clamp-2 px-3">
+                <p className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 italic mb-6 max-w-lg mx-auto font-normal leading-relaxed text-center select-none line-clamp-2 px-3">
                   &ldquo;{maskedSentence}&rdquo;
-                </div>
+                </p>
               )}
 
-              {/* Monolithic Apple Spotlight input line */}
+              {/* Monolithic Apple Spotlight input line without blinking caret */}
               <div className="w-full max-w-md relative px-2">
                 <input
                   ref={inputRef}
@@ -2358,19 +2374,21 @@ function RapidFlashcardMode({
                       handleEnterSubmit();
                     }
                   }}
-                  readOnly={isSurrendered || locked || isTypingSuccess}
+                  readOnly={isSurrendered || locked || isSuccessFeedback}
                   autoFocus
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
                   placeholder={isSurrendered ? '' : 'Auf Deutsch eingeben...'}
                   className={cn(
-                    "w-full text-center text-xl sm:text-2xl font-medium tracking-wide rounded-2xl py-3.5 px-6 outline-none transition-all duration-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 bg-zinc-100/90 dark:bg-white/[0.04] border",
-                    isSurrendered
-                      ? "text-amber-500 dark:text-amber-300 border-amber-500/50 bg-amber-500/10 shadow-[0_0_20px_rgba(245,158,11,0.15)] font-semibold"
+                    "w-full text-center text-xl sm:text-2xl font-medium tracking-wide rounded-2xl py-3.5 px-6 outline-none transition-all duration-200 caret-transparent placeholder:text-zinc-400 dark:placeholder:text-zinc-600 border",
+                    isSuccessFeedback
+                      ? "text-emerald-500 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] font-semibold"
+                      : isSurrendered
+                      ? "text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05] font-medium"
                       : isErrorMismatch
                       ? "text-rose-500 dark:text-rose-400 border-rose-500/50 bg-rose-500/5"
-                      : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 focus:border-sky-500 dark:focus:border-sky-400/60 focus:bg-white dark:focus:bg-white/[0.06]",
+                      : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-100/90 dark:bg-white/[0.04] focus:border-sky-500 dark:focus:border-sky-400/60 focus:bg-white dark:focus:bg-white/[0.06]",
                     isShaking && "animate-shake"
                   )}
                 />
