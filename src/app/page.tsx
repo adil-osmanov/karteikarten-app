@@ -6962,7 +6962,7 @@ export default function App() {
 
     // 1. Check existing story if not force regenerating
     if (!forceRegenerate) {
-      if ((deck as any).story?.paragraphs) {
+      if ((deck as any).story?.dialogue || (deck as any).story?.paragraphs) {
         setStoryData((deck as any).story);
         return;
       }
@@ -6971,7 +6971,7 @@ export default function App() {
         const cached = localStorage.getItem(`story_${deckId}`);
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (parsed?.paragraphs) {
+          if (parsed?.dialogue || parsed?.paragraphs) {
             setStoryData(parsed);
             return;
           }
@@ -6985,7 +6985,7 @@ export default function App() {
           .eq('language', `STORY_${deckId}`)
           .maybeSingle();
 
-        if (data?.daily_activity?.paragraphs) {
+        if (data?.daily_activity?.dialogue || data?.daily_activity?.paragraphs) {
           setStoryData(data.daily_activity);
           try {
             localStorage.setItem(`story_${deckId}`, JSON.stringify(data.daily_activity));
@@ -7001,7 +7001,7 @@ export default function App() {
           .eq('id', deckId)
           .maybeSingle();
 
-        if (data?.story?.paragraphs) {
+        if (data?.story?.dialogue || data?.story?.paragraphs) {
           setStoryData(data.story);
           return;
         }
