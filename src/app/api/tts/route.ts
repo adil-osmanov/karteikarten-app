@@ -47,7 +47,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Empty text" }, { status: 400 });
     }
 
-    const requestedVoice = (typeof voice === 'string' && voice.trim()) ? voice.trim() : "de-DE-KatjaNeural";
+    let requestedVoice = (typeof voice === 'string' && voice.trim()) ? voice.trim() : "de-DE-KillianNeural";
+    if (requestedVoice.toLowerCase().includes("katja") || requestedVoice.toLowerCase().includes("female")) {
+      requestedVoice = "de-DE-KillianNeural";
+    }
     const cacheKey = `${requestedVoice}_${cleanText}`;
 
     // 1. Check in-memory RAM cache (instant 0ms)

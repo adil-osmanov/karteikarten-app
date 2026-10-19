@@ -147,10 +147,10 @@ export function StoryReaderModal({
       setIsLoadingAudio(true);
       const voice =
         (topic?.language || language || 'DE') === 'EN'
-          ? 'en-US-JennyNeural'
+          ? 'en-US-GuyNeural'
           : (topic?.language || language || 'DE') === 'RU'
-          ? 'ru-RU-SvetlanaNeural'
-          : 'de-DE-KatjaNeural';
+          ? 'ru-RU-DmitryNeural'
+          : 'de-DE-KillianNeural';
 
       const res = await fetch('/api/tts', {
         method: 'POST',

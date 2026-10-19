@@ -20,7 +20,7 @@ import { supabase } from "@/lib/supabase";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
-import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 
@@ -1670,7 +1670,7 @@ export async function playGermanSpeech(text: string, options?: PlaySpeechOptions
     const res = await fetch('/api/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: cleanText }),
+      body: JSON.stringify({ text: cleanText, voice: 'de-DE-KillianNeural' }),
       signal: abortCtrl.signal,
     });
     clearTimeout(timeoutId);
@@ -1746,7 +1746,7 @@ export function prefetchGermanSpeech(text: string) {
   fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: clean }),
+    body: JSON.stringify({ text: clean, voice: 'de-DE-KillianNeural' }),
   })
     .then((res) => {
       const ct = res.headers.get('content-type') || '';
@@ -2177,7 +2177,7 @@ function RapidFlashcardMode({
       setTypedValue('');
       setIsErrorMismatch(false);
       onAnswer(true, false);
-    }, 320);
+    }, 1800);
   }, [speak, onAnswer]);
 
   const triggerErrorShake = useCallback(() => {
@@ -4228,8 +4228,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
   const todayStr = getLocalTodayDateString();
   const rawCount = daily[todayStr];
   const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
-  const statsDone = stats?.date === todayStr ? (stats?.cardsDone || 0) : 0;
-  const displayTodayCount = Math.max(todayCount, statsDone, dailyLearnedCount);
+  const displayTodayCount = Math.max(todayCount, dailyLearnedCount);
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
   const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
@@ -7699,7 +7698,22 @@ export default function App() {
     } catch (e) {}
     
     const fetchData = async () => {
-      
+      // 1. Instant load from IndexedDB (Unlimited capacity, loads entire 6.7MB library in 10ms)
+      try {
+        const [idbDecks, idbBooks] = await Promise.all([
+          getIDBItem<Deck[]>('app_decks'),
+          getIDBItem<BookMeta[]>('app_books')
+        ]);
+        if (idbBooks && idbBooks.length > 0) {
+          setBooks(idbBooks);
+          setIsLoadingBooks(false);
+        }
+        if (idbDecks && idbDecks.length > 0) {
+          setDecks(idbDecks);
+        }
+      } catch (e) {}
+
+      // 2. Legacy fallback to localStorage
       try {
         const cachedBooks = localStorage.getItem('cached_app_books') || localStorage.getItem('cache_books_v2');
         if (cachedBooks) {
@@ -7717,12 +7731,19 @@ export default function App() {
       } catch (e) {}
       useStore.setState({ isLoaded: true });
       
-try {
-        const [booksRes, decksRes, statsRes] = await Promise.all([
+      // 3. Background Cloud Fetch with 12s timeout to prevent infinite freezes
+      try {
+        const timeoutPromise = new Promise<{ booksRes: any, decksRes: any, statsRes: any }>((_, reject) => 
+          setTimeout(() => reject(new Error('Supabase fetch timeout')), 12000)
+        );
+
+        const fetchPromise = Promise.all([
           supabase.from('books').select('*').order('created_at', { ascending: true }),
           supabase.from('decks').select('*, cards(*)').order('created_at', { ascending: true }),
           supabase.from('user_stats').select('*')
-        ]);
+        ]).then(([booksRes, decksRes, statsRes]) => ({ booksRes, decksRes, statsRes }));
+
+        const { booksRes, decksRes, statsRes } = await Promise.race([fetchPromise, timeoutPromise]);
 
         if (statsRes && !statsRes.error && statsRes.data) {
           const pushStats = (lang: string) => {
@@ -7839,6 +7860,7 @@ try {
 
           setBooks(mappedBooks);
           setIsLoadingBooks(false);
+          setIDBItem('app_books', mappedBooks);
           safeSetStorage('cached_app_books', JSON.stringify(mappedBooks));
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
@@ -7905,6 +7927,7 @@ try {
             };
           });
           setDecks(enhancedDecks as Deck[]);
+          setIDBItem('app_decks', enhancedDecks);
           safeSetStorage('cached_app_decks', JSON.stringify(enhancedDecks));
         }
       } catch (err: any) {
@@ -7919,10 +7942,25 @@ try {
 
   const filteredDecksList = useMemo(() => {
     return decks.filter(d => {
-      if (activeBookId) return d.bookId === activeBookId;
+      const deckBookId = d.bookId || (d as any).book_id;
+      if (activeBookId) return deckBookId === activeBookId;
       return (d.language || 'DE') === appLanguage;
     });
   }, [decks, activeBookId, appLanguage]);
+
+  // If a book has only vocabulary decks and 0 grammar decks, auto-switch to "Wörter" so decks are visible immediately
+  useEffect(() => {
+    if (activeBookId) {
+      const bookDecks = decks.filter(d => (d.bookId || (d as any).book_id) === activeBookId);
+      const hasGrammar = bookDecks.some(d => !(d.category && d.category.toLowerCase().includes('wört')));
+      const hasWoerter = bookDecks.some(d => d.category && d.category.toLowerCase().includes('wört'));
+      if (!hasGrammar && hasWoerter) {
+        setActiveTab('Wörter');
+      } else if (hasGrammar && !hasWoerter) {
+        setActiveTab('Grammatik');
+      }
+    }
+  }, [activeBookId, decks]);
 
   const handleGlobalDrill = useCallback((level: LanguageLevel, category: "Grammatik" | "Wörter") => {
     initAudioCtx();
@@ -8891,8 +8929,11 @@ try {
               };
 
               return cefrLevels.map((level, levelIdx) => {
+                const isSpecialBook = activeBook?.training_mode && activeBook.training_mode !== 'standard_cloze';
                 const sectionKey = `${activeTab}-${level}`;
-                const sortedDecks = groupedDecks[`${activeTab}-${level}`] || [];
+                const sortedDecks = isSpecialBook
+                  ? filteredDecksList.filter(d => (d.level || 'A1') === level)
+                  : (groupedDecks[`${activeTab}-${level}`] || []);
 
                 const limit = visibleLimits[sectionKey] || 10;
                 const visibleDecks = sortedDecks.slice(0, limit);

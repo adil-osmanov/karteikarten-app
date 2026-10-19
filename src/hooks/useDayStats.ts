@@ -65,8 +65,9 @@ export function cleanCardSnapshot(card: any): any {
 
 // --- INDEXEDDB STORAGE BACKUP (SAFARI PERSISTENCE) ---
 const IDB_NAME = 'karten_db';
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
 const IDB_STORE = 'day_stats';
+const IDB_CACHE_STORE = 'app_cache';
 
 function getDB(): Promise<IDBDatabase | null> {
   if (typeof window === 'undefined' || !window.indexedDB) return Promise.resolve(null);
@@ -77,6 +78,9 @@ function getDB(): Promise<IDBDatabase | null> {
         const db = request.result;
         if (!db.objectStoreNames.contains(IDB_STORE)) {
           db.createObjectStore(IDB_STORE, { keyPath: 'lang' });
+        }
+        if (!db.objectStoreNames.contains(IDB_CACHE_STORE)) {
+          db.createObjectStore(IDB_CACHE_STORE, { keyPath: 'key' });
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -114,6 +118,38 @@ export async function getStatsFromIDB(lang: string): Promise<DailyStats | null> 
           } else {
             resolve(null);
           }
+        };
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function setIDBItem<T>(key: string, value: T): Promise<void> {
+  try {
+    const db = await getDB();
+    if (!db) return;
+    const tx = db.transaction(IDB_CACHE_STORE, 'readwrite');
+    const store = tx.objectStore(IDB_CACHE_STORE);
+    store.put({ key, value });
+  } catch (e) {}
+}
+
+export async function getIDBItem<T>(key: string): Promise<T | null> {
+  try {
+    const db = await getDB();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(IDB_CACHE_STORE, 'readonly');
+        const store = tx.objectStore(IDB_CACHE_STORE);
+        const req = store.get(key);
+        req.onsuccess = () => {
+          resolve(req.result ? (req.result.value as T) : null);
         };
         req.onerror = () => resolve(null);
       } catch {
@@ -194,21 +230,29 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
   const mergedPool = mergeMistakesPools(current.mistakesPool || [], cloudPool);
 
   const isCloudToday = cloudRaw.date === todayKey;
+  const todayActual = getTodayCompletedCardsCount(normLang);
 
   let maxActiveSeconds = current.date === todayKey ? (current.activeSeconds || 0) : 0;
-  let maxCardsDone = current.date === todayKey ? (current.cardsDone || 0) : 0;
-  let maxCorrectCount = current.date === todayKey ? (current.correctCount || 0) : 0;
+  let maxCardsDone = current.date === todayKey ? (current.cardsDone || 0) : todayActual;
+  let maxCorrectCount = current.date === todayKey ? (current.correctCount || 0) : todayActual;
   let maxMistakesToday = current.date === todayKey ? (current.mistakesCountToday || 0) : 0;
 
   if (isCloudToday) {
     if (typeof cloudRaw.activeSeconds === 'number' && cloudRaw.activeSeconds > maxActiveSeconds) {
       maxActiveSeconds = cloudRaw.activeSeconds;
     }
-    if (typeof cloudRaw.cardsDone === 'number' && cloudRaw.cardsDone > maxCardsDone) {
-      maxCardsDone = cloudRaw.cardsDone;
+    if (typeof cloudRaw.cardsDone === 'number') {
+      // Guard against old un-reset cloud counters:
+      if (todayActual > 0 && cloudRaw.cardsDone > todayActual * 4 && cloudRaw.cardsDone > 30) {
+        maxCardsDone = Math.max(maxCardsDone, todayActual);
+      } else {
+        maxCardsDone = Math.max(maxCardsDone, cloudRaw.cardsDone, todayActual);
+      }
+    } else {
+      maxCardsDone = Math.max(maxCardsDone, todayActual);
     }
-    if (typeof cloudRaw.correctCount === 'number' && cloudRaw.correctCount > maxCorrectCount) {
-      maxCorrectCount = cloudRaw.correctCount;
+    if (typeof cloudRaw.correctCount === 'number') {
+      maxCorrectCount = Math.min(maxCardsDone, Math.max(maxCorrectCount, cloudRaw.correctCount));
     }
     const cloudMistakes = typeof cloudRaw.mistakesCountToday === 'number' ? cloudRaw.mistakesCountToday : cloudPool.length;
     maxMistakesToday = Math.max(maxMistakesToday, cloudMistakes, mergedPool.length);
