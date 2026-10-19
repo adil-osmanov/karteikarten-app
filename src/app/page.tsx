@@ -4188,117 +4188,6 @@ function parseCardsFromCSV(text: string, isRedemittel: boolean, isRapidMode: boo
   return cards;
 }
 
-function CreateTopicModal({
-  isOpen,
-  onClose,
-  level,
-  category,
-  onCreate,
-  onImportFile
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  level: CEFRLevel;
-  category: string;
-  onCreate: (title: string, level: CEFRLevel) => Promise<void>;
-  onImportFile: () => void;
-}) {
-  useScrollLock(isOpen);
-  const [title, setTitle] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      setTitle('');
-      setIsSubmitting(false);
-    }
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  const handleSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!title.trim() || isSubmitting) return;
-    setIsSubmitting(true);
-    try {
-      await onCreate(title.trim(), level);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 dark:bg-black/70 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-3xl bg-white dark:bg-[#1C1C1E] p-6 sm:p-8 shadow-2xl border border-black/5 dark:border-white/10 text-zinc-900 dark:text-[#F2F2F7] relative"
-      >
-        <button
-          onClick={onClose}
-          className="absolute top-6 right-6 w-8 h-8 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors cursor-pointer"
-        >
-          <X className="w-4 h-4" />
-        </button>
-
-        <div className="flex items-center gap-2 mb-2">
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-mono">
-            {level}
-          </span>
-          <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">
-            {category}
-          </span>
-        </div>
-
-        <h3 className="text-xl font-bold tracking-tight mb-1">
-          Neues Thema erstellen
-        </h3>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-6">
-          Gib einen Namen ein oder importiere Karten aus einer Datei.
-        </p>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-              Name des Themas
-            </label>
-            <input
-              type="text"
-              autoFocus
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="z. B. Konjunktiv II, Im Restaurant..."
-              className="w-full px-4 py-3 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium transition-all"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2 pt-2">
-            <button
-              type="submit"
-              disabled={!title.trim() || isSubmitting}
-              className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-all active:scale-[0.98] shadow-md shadow-blue-500/20 disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              <span>Thema erstellen</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onImportFile}
-              className="w-full py-3 rounded-2xl bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-zinc-700 dark:text-zinc-300 font-medium text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <FileUp className="w-4 h-4 text-zinc-400" />
-              <span>CSV / TXT importieren...</span>
-            </button>
-          </div>
-        </form>
-      </motion.div>
-    </div>
-  );
-}
-
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
   useScrollLock(true);
   const router = useRouter();
@@ -7031,8 +6920,8 @@ export default function App() {
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [bookModal, setBookModal] = useState<{ id?: string } | null>(null);
   
-  const [uploadTarget, setUploadTarget] = useState<{ category: string, level: CEFRLevel } | null>(null);
-  const [createTopicModal, setCreateTopicModal] = useState<{ category: string, level: CEFRLevel } | null>(null);
+  const [targetLevelForUpload, setTargetLevelForUpload] = useState<CEFRLevel>('B1');
+  const [isUploadingCSV, setIsUploadingCSV] = useState(false);
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteBookModal, setDeleteBookModal] = useState<{ id: string, title: string } | null>(null);
@@ -7051,13 +6940,13 @@ export default function App() {
   const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
 
   useEffect(() => {
-    if (renameModal || deleteModal || bookModal || deleteBookModal || createTopicModal) {
+    if (renameModal || deleteModal || bookModal || deleteBookModal) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
     }
     return () => { document.body.style.overflow = 'unset'; };
-  }, [renameModal, deleteModal, bookModal, deleteBookModal, createTopicModal]);
+  }, [renameModal, deleteModal, bookModal, deleteBookModal]);
 
 
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
@@ -7563,12 +7452,14 @@ try {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !uploadTarget) return;
+    if (!file) return;
 
+    setIsUploadingCSV(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
-      const rawText = (event.target?.result as string) || '';
-      const text = rawText.replace(/^\uFEFF/, '');
+      try {
+        const rawText = (event.target?.result as string) || '';
+        const text = rawText.replace(/^\uFEFF/, '');
       const lines = text.split('\n').filter(line => line.trim().length > 0);
       
       const cards: Flashcard[] = [];
@@ -7889,11 +7780,12 @@ try {
       });
 
       if (cards.length > 0) {
-        const defaultName = file.name.replace(/\.(csv|txt)$/i, '');
+        const defaultName = file.name.replace(/\.[^/.]+$/, '').trim();
         const newDeckId = crypto.randomUUID();
         const activeBook = books.find(b => b.id === activeBookId);
         const targetLang = (activeBook?.language as any) || useStore.getState().appLanguage || 'DE';
         const targetBookId = activeBookId || (targetLang === 'EN' ? 'default-en' : 'default-de');
+        const category = (activeTab && activeTab.toLowerCase().includes('wört')) ? 'Wörter' : 'Grammatik';
         
         const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
         langMap[newDeckId] = targetLang;
@@ -7903,117 +7795,65 @@ try {
         bookMap[newDeckId] = targetBookId;
         localStorage.setItem('deck_books', JSON.stringify(bookMap));
         
+        const optimisticDeck: Deck = {
+          id: newDeckId,
+          name: defaultName,
+          category: category,
+          level: targetLevelForUpload,
+          cards,
+          card_count: cards.length,
+          language: targetLang,
+          bookId: targetBookId,
+          materials: []
+        };
+        const previousDecks = useStore.getState().decks;
+        useStore.setState({ decks: [optimisticDeck, ...previousDecks] });
+
         try {
           await addDeck({
             id: newDeckId,
             name: defaultName,
-            category: uploadTarget.category,
-            level: uploadTarget.level,
+            category: category,
+            level: targetLevelForUpload,
             cards,
             language: targetLang,
             bookId: targetBookId
           });
+
+          // Also attempt insert into topics if public.topics table exists for compatibility
+          try {
+            await supabase.from('topics').insert([{
+              id: newDeckId,
+              book_id: targetBookId,
+              title: defaultName,
+              name: defaultName,
+              level: targetLevelForUpload,
+              category: category.toLowerCase().includes('wört') ? 'woerter' : 'grammatik',
+              cards: cards,
+              created_at: new Date().toISOString()
+            }]);
+          } catch (_) {}
         } catch (err: any) {
           console.error("Error saving deck:", err);
+          useStore.setState({ decks: previousDecks });
           alert("Fehler beim Speichern des Decks: " + (err?.message || err));
         }
       } else {
         alert("Fehler: Keine gültigen Karten in der Datei gefunden.");
       }
-      
+    } finally {
+      setIsUploadingCSV(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      setUploadTarget(null);
-    };
-    reader.readAsText(file, 'UTF-8');
+    }
   };
+  reader.readAsText(file, 'UTF-8');
+};
 
-  const handlePlusClick = (category: string, level: CEFRLevel) => {
-    setCreateTopicModal({ category, level });
-  };
-
-  const handleCreateTopic = async (title: string, level: CEFRLevel) => {
-    if (!title.trim()) return;
-
-    const newTopicId = crypto.randomUUID();
-    const activeBook = books.find(b => b.id === activeBookId);
-    const currentBookId = activeBookId || (useStore.getState().appLanguage === 'EN' ? 'default-en' : 'default-de');
-    const targetLang = (activeBook?.language as any) || useStore.getState().appLanguage || 'DE';
-    const category = (activeTab && activeTab.toLowerCase().includes('wört')) ? 'Wörter' : 'Grammatik';
-
-    // 1. Optimistic Update on client
-    const optimisticDeck: Deck = {
-      id: newTopicId,
-      name: title.trim(),
-      category: category,
-      level: level,
-      cards: [],
-      card_count: 0,
-      language: targetLang,
-      bookId: currentBookId,
-      materials: []
-    };
-
-    const previousDecks = useStore.getState().decks;
-    useStore.setState({ decks: [optimisticDeck, ...previousDecks] });
-    setCreateTopicModal(null);
-
-    // 2. Persist to Supabase
-    try {
-      const payload: any = {
-        id: newTopicId,
-        name: title.trim(),
-        category: category,
-        level: level,
-        book_id: currentBookId,
-        language: targetLang,
-        card_count: 0
-      };
-
-      console.log('[Supabase] Inserting topic/deck into decks:', payload);
-
-      const { data, error } = await supabase
-        .from('decks')
-        .insert([payload])
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Ошибка добавления темы в Supabase (decks):', error.message, error.details);
-        // Also try topics table if public.topics exists
-        const { error: topicsError } = await supabase
-          .from('topics')
-          .insert([{
-            id: newTopicId,
-            book_id: currentBookId,
-            title: title.trim(),
-            name: title.trim(),
-            level: level,
-            category: category.toLowerCase().includes('wört') ? 'woerter' : 'grammatik',
-            cards: [],
-            created_at: new Date().toISOString()
-          }]);
-
-        if (topicsError) {
-          console.error('Ошибка добавления темы в Supabase (topics):', topicsError.message, topicsError.details);
-          // Rollback on error
-          useStore.setState({ decks: previousDecks });
-          alert(`Ошибка добавления темы: ${error.message || topicsError.message}`);
-          return;
-        }
-      }
-
-      console.log('Тема успешно сохранена в Supabase:', newTopicId);
-
-      // Local storage cache
-      if (typeof window !== 'undefined') {
-        try {
-          safeSetStorage('cached_app_decks', JSON.stringify([optimisticDeck, ...previousDecks]));
-        } catch (e) {}
-      }
-    } catch (err: any) {
-      console.error('Критический сбой создания:', err);
-      useStore.setState({ decks: previousDecks });
-      alert(`Критический сбой создания: ${err?.message || err}`);
+  const handlePlusClick = (level: CEFRLevel) => {
+    setTargetLevelForUpload(level);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
     }
   };
 
@@ -8193,26 +8033,6 @@ try {
             onRegenerate={() => handleOpenStory(storyReaderDeckId, true)}
             isGenerating={isGeneratingStory}
             language={appLanguage}
-          />
-        )}
-        {createTopicModal && (
-          <CreateTopicModal
-            isOpen={Boolean(createTopicModal)}
-            onClose={() => setCreateTopicModal(null)}
-            level={createTopicModal.level}
-            category={createTopicModal.category}
-            onCreate={handleCreateTopic}
-            onImportFile={() => {
-              const target = { ...createTopicModal };
-              setCreateTopicModal(null);
-              setUploadTarget(target);
-              setTimeout(() => {
-                if (fileInputRef.current) {
-                  fileInputRef.current.value = "";
-                  fileInputRef.current.click();
-                }
-              }, 50);
-            }}
           />
         )}
       </AnimatePresence>
@@ -8483,11 +8303,17 @@ try {
                           <Play className="w-3 h-3 fill-current" />
                         </button>
                         <button 
-                          onClick={() => handlePlusClick(activeTab, level)}
-                          className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer"
-                          title="Neues Deck"
+                          type="button"
+                          onClick={() => handlePlusClick(level)}
+                          disabled={isUploadingCSV}
+                          className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer disabled:opacity-50"
+                          title="CSV / TXT importieren"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          {isUploadingCSV && targetLevelForUpload === level ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                          ) : (
+                            <Plus className="w-3.5 h-3.5" />
+                          )}
                         </button>
                       </div>
 
