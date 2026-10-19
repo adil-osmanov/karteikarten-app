@@ -846,16 +846,18 @@ const useStore = create<DeckState>()((set, get) => ({
       } catch (e) {}
     }
 
+    const normalizedCategory = (deck.category && deck.category.toLowerCase().includes('wört')) ? 'Wörter' : 'Grammatik';
+
     const payload: any = {
       id: deckId,
       name: deck.name.trim(),
-      category: deck.category || 'grammatik',
+      category: normalizedCategory,
       level: deck.level || 'B1',
       book_id: deck.bookId || 'default-de',
       language: deck.language || 'DE'
     };
     if (deck.materials && deck.materials.length > 0) payload.materials = deck.materials;
-    if (deck.card_count) payload.card_count = deck.card_count;
+    payload.card_count = deck.cards?.length || deck.card_count || 0;
     
     console.log('[Supabase] Inserting deck:', deckId, payload.name);
     const { error: deckError } = await supabase.from('decks').insert([payload]);
@@ -868,28 +870,32 @@ const useStore = create<DeckState>()((set, get) => ({
     const cardsToInsert = (deck.cards || []).map(c => ({
       id: ensureUuid(c.id),
       deck_id: deckId,
-      targetWord: c.targetWord,
-      sentence: c.sentence,
-      translation: c.translation,
+      targetWord: (c.targetWord || '').trim(),
+      sentence: (c.sentence || c.targetWord || '—').trim(),
+      translation: (c.translation || '—').trim(),
       forms: c.forms || (c as any).hint || null,
-      options: Array.isArray(c.options) && c.options.length > 0 ? c.options : [c.targetWord],
+      options: Array.isArray(c.options) && c.options.length > 0 ? c.options : [(c.targetWord || '').trim() || '—'],
       masteryLevel: c.masteryLevel || 0,
       isArchived: c.isArchived || false,
       nextReviewDate: c.nextReviewDate || null,
       interval: c.interval || 0,
       repetitions: c.repetitions || 0,
       baseWordInfo: c.baseWordInfo || null
-    }));
+    })).filter(c => c.targetWord.length > 0);
     
     if (cardsToInsert.length > 0) {
       console.log('[Supabase] Inserting cards for deck:', deckId, cardsToInsert.length);
-      const { error: cardsError } = await supabase.from('cards').insert(cardsToInsert);
-      
-      if (cardsError) {
-        console.error('[Supabase Insert Cards Error]:', cardsError);
-        // Rollback deck insert if cards fail
-        await supabase.from('decks').delete().eq('id', deckId);
-        throw new Error(`Ошибка сохранения карточек в базу данных: ${cardsError.message} (${cardsError.details || ''})`);
+      const chunkSize = 100;
+      for (let i = 0; i < cardsToInsert.length; i += chunkSize) {
+        const chunk = cardsToInsert.slice(i, i + chunkSize);
+        const { error: cardsError } = await supabase.from('cards').insert(chunk);
+        
+        if (cardsError) {
+          console.error('[Supabase Insert Cards Error]:', cardsError);
+          // Rollback deck insert if cards fail
+          await supabase.from('decks').delete().eq('id', deckId);
+          throw new Error(`Ошибка сохранения карточек в базу данных: ${cardsError.message} (${cardsError.details || ''})`);
+        }
       }
     }
     
@@ -899,9 +905,17 @@ const useStore = create<DeckState>()((set, get) => ({
     const savedDeck: Deck = {
       ...deck,
       id: deckId,
+      category: normalizedCategory,
+      card_count: cardsToInsert.length,
       cards: cardsToInsert
     };
-    set({ decks: [...get().decks, savedDeck] });
+    set({ decks: [...get().decks.filter(d => d.id !== deckId), savedDeck] });
+
+    if (typeof window !== 'undefined') {
+      try {
+        safeSetStorage('cached_app_decks', JSON.stringify([...get().decks]));
+      } catch (e) {}
+    }
   },
   
   updateDeck: async (deckId, updates, replaceCards) => {
@@ -7354,7 +7368,8 @@ try {
   const groupedDecks = useMemo(() => {
     const map: Record<string, Deck[]> = {};
     filteredDecksList.forEach(d => {
-      const key = `${d.category}-${d.level || 'A1'}`;
+      const cat = (d.category && d.category.toLowerCase().includes('wört')) ? 'Wörter' : 'Grammatik';
+      const key = `${cat}-${d.level || 'A1'}`;
       if (!map[key]) map[key] = [];
       map[key].push(d);
     });
@@ -7434,13 +7449,14 @@ try {
     );
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !uploadTarget) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
+    reader.onload = async (event) => {
+      const rawText = (event.target?.result as string) || '';
+      const text = rawText.replace(/^\uFEFF/, '');
       const lines = text.split('\n').filter(line => line.trim().length > 0);
       
       const cards: Flashcard[] = [];
@@ -7469,24 +7485,49 @@ try {
         return parts;
       };
 
-      lines.forEach((line) => {
-        const delimiter = line.includes(';') ? ';' : ',';
+      const activeBook = books.find(b => b.id === activeBookId);
+      const trainingMode = activeBook?.training_mode || 'standard_cloze';
+      const isPrepBookObj = trainingMode === 'preposition_drill' || activeBookId === 'prep-verbs-de' || (activeBook?.title || '').toLowerCase().includes('präposition');
+      const isVerbBookObj = trainingMode === 'starke_verben' || activeBookId === 'verbs-de';
+      const isRapidMode = trainingMode === 'rapid_flashcards';
+      const isRedemittelMode = trainingMode === 'redemittel' || (activeBook?.title || '').toLowerCase().includes('redemittel');
+      const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
+
+      lines.forEach((line, lineIndex) => {
+        const delimiter = line.includes('\t') ? '\t' : (line.includes(';') ? ';' : ',');
         const parts = parseCSVLine(line, delimiter);
-        const activeBook = books.find(b => b.id === activeBookId);
-        const trainingMode = activeBook?.training_mode || 'standard_cloze';
-        const isPrepBookObj = trainingMode === 'preposition_drill' || activeBookId === 'prep-verbs-de' || (activeBook?.title || '').toLowerCase().includes('präposition');
-        const isVerbBookObj = trainingMode === 'starke_verben' || activeBookId === 'verbs-de';
-        const isRapidMode = trainingMode === 'rapid_flashcards';
-        const isRedemittelMode = trainingMode === 'redemittel' || (activeBook?.title || '').toLowerCase().includes('redemittel');
+        if (parts.length === 0 || !parts[0]) return;
+
+        // Header check for row 0
+        if (lineIndex === 0) {
+          const c0 = parts[0].toLowerCase();
+          const c1 = (parts[1] || '').toLowerCase();
+          if (c0.includes('wort') || c0.includes('word') || c0.includes('target') || c0.includes('infinitiv') || c0.includes('konstruktion') || c1.includes('chunks') || c0.includes('question')) {
+            return;
+          }
+        }
         
         if (isPrepBookObj) {
           if (parts.length >= 4) {
             cards.push({
               id: crypto.randomUUID(),
-              targetWord: parts[0],
-              sentence: `${parts[1]} | ${parts[2].toUpperCase()}`,
-              translation: parts[3],
-              options: [],
+              targetWord: parts[0].trim(),
+              sentence: `${parts[1].trim()} | ${parts[2].trim().toUpperCase()}`,
+              translation: parts[3].trim(),
+              options: [parts[0].trim()],
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0
+            });
+          } else if (parts.length >= 2) {
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord: parts[0].trim(),
+              sentence: (parts[2] || parts[0]).trim(),
+              translation: parts[1].trim(),
+              options: [parts[0].trim()],
               masteryLevel: 0,
               isArchived: false,
               nextReviewDate: null,
@@ -7496,18 +7537,18 @@ try {
           }
         } else if (isVerbBookObj) {
           if (parts.length >= 5) {
-            const infinitiv = parts[0];
-            const praesens = parts[1];
-            const praeteritum = parts[2];
-            const perfekt = parts[3];
-            const translation = parts[4];
+            const infinitiv = parts[0].trim();
+            const praesens = parts[1].trim();
+            const praeteritum = parts[2].trim();
+            const perfekt = parts[3].trim();
+            const translation = parts[4].trim();
             
             cards.push({
               id: crypto.randomUUID(),
               targetWord: infinitiv,
               sentence: "VERB_DRILL",
               translation: translation,
-              options: [],
+              options: [infinitiv],
               masteryLevel: 0,
               isArchived: false,
               nextReviewDate: null,
@@ -7515,16 +7556,26 @@ try {
               repetitions: 0,
               baseWordInfo: JSON.stringify({ infinitiv, praesens, praeteritum, perfekt })
             });
+          } else if (parts.length >= 2) {
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord: parts[0].trim(),
+              sentence: "VERB_DRILL",
+              translation: parts[1].trim(),
+              options: [parts[0].trim()],
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0
+            });
           }
         } else if (isRedemittelMode) {
-          // Skip header row if present
           const col0 = (parts[0] || '').toLowerCase();
           const col1 = (parts[1] || '').toLowerCase();
           if (col0.includes('konstruktion') || col0.includes('chunks') || col1.includes('chunks') || col0.includes('übersetzung')) {
             return;
           }
-
-          const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
 
           let konstruktion = '';
           let chunksStr = '';
@@ -7532,7 +7583,6 @@ try {
           let beispielEnde = '';
 
           if (parts.length >= 4) {
-            // User table: Konstruktion, Chunks, Übersetzung, Beispiel_Ende
             konstruktion = parts[0].trim();
             chunksStr = parts[1].trim();
 
@@ -7591,8 +7641,8 @@ try {
               id: crypto.randomUUID(),
               targetWord: fullText,
               sentence: chunksStr || konstruktion || fullText,
-              translation: translation,
-              options: [],
+              translation: translation || '—',
+              options: [fullText],
               masteryLevel: 0,
               isArchived: false,
               nextReviewDate: null,
@@ -7608,19 +7658,20 @@ try {
         } else if (isRapidMode) {
           if (parts.length >= 2) {
              const hasSentence = parts.length >= 3;
-             const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
-             let rTranslation = hasSentence ? parts[1] : parts[1];
-             let rExample = hasSentence ? parts[2] : '-';
-             if (hasSentence && !cyr(rTranslation) && cyr(rExample)) { [rTranslation, rExample] = [rExample, rTranslation]; }
+             let rTranslation = hasSentence ? parts[1].trim() : parts[1].trim();
+             let rExample = hasSentence ? parts[2].trim() : '-';
+             if (hasSentence && !cyr(rTranslation) && cyr(rExample)) { 
+               [rTranslation, rExample] = [rExample, rTranslation]; 
+             }
              
-             let forms = parts.length >= 4 ? parts[3] : undefined;
+             let forms = parts.length >= 4 ? parts[3].trim() : undefined;
              cards.push({
                 id: crypto.randomUUID(),
-                targetWord: parts[0],
-                sentence: rExample,
-                translation: rTranslation,
+                targetWord: parts[0].trim(),
+                sentence: rExample || '-',
+                translation: rTranslation || '—',
                 forms: forms,
-                options: [],
+                options: [parts[0].trim()],
                 masteryLevel: 0,
                 isArchived: false,
                 nextReviewDate: null,
@@ -7629,6 +7680,7 @@ try {
              });
           }
         } else {
+          // Standard cloze and general vocabulary decks
           if (parts.length >= 6) {
             const targetWord = parts[0].trim();
             const sentence = parts[1].trim();
@@ -7650,33 +7702,111 @@ try {
               forms: extraInfo || undefined,
               hint: extraInfo || undefined
             });
+          } else if (parts.length === 5) {
+            const targetWord = parts[0].trim();
+            const sentence = parts[1].trim();
+            const translation = parts[2].trim();
+            const options = [targetWord, parts[3].trim(), parts[4].trim()].sort(() => Math.random() - 0.5);
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord,
+              sentence,
+              translation,
+              options,
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0
+            });
+          } else if (parts.length === 4) {
+            const targetWord = parts[0].trim();
+            const sentence = parts[1].trim();
+            const translation = parts[2].trim();
+            const extraInfo = parts[3].trim();
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord,
+              sentence,
+              translation,
+              options: [targetWord],
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0,
+              forms: extraInfo || undefined,
+              hint: extraInfo || undefined
+            });
+          } else if (parts.length === 3) {
+            const targetWord = parts[0].trim();
+            let sentence = parts[1].trim();
+            let translation = parts[2].trim();
+            if (cyr(sentence) && !cyr(translation)) {
+              [sentence, translation] = [translation, sentence];
+            }
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord,
+              sentence: sentence || targetWord,
+              translation: translation || '—',
+              options: [targetWord],
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0
+            });
+          } else if (parts.length >= 2) {
+            const targetWord = parts[0].trim();
+            const translation = parts[1].trim();
+            cards.push({
+              id: crypto.randomUUID(),
+              targetWord,
+              sentence: targetWord,
+              translation: translation || '—',
+              options: [targetWord],
+              masteryLevel: 0,
+              isArchived: false,
+              nextReviewDate: null,
+              interval: 0,
+              repetitions: 0
+            });
           }
         }
       });
 
       if (cards.length > 0) {
-        const defaultName = file.name.replace('.csv', '');
+        const defaultName = file.name.replace(/\.(csv|txt)$/i, '');
         const newDeckId = crypto.randomUUID();
+        const activeBook = books.find(b => b.id === activeBookId);
+        const targetLang = (activeBook?.language as any) || useStore.getState().appLanguage || 'DE';
+        const targetBookId = activeBookId || (targetLang === 'EN' ? 'default-en' : 'default-de');
+        
         const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
-        langMap[newDeckId] = useStore.getState().appLanguage;
+        langMap[newDeckId] = targetLang;
         localStorage.setItem('deck_languages', JSON.stringify(langMap));
         
         const bookMap = JSON.parse(localStorage.getItem('deck_books') || '{}');
-        // If we are currently inside a book, save to that book, else use default book for language
-        bookMap[newDeckId] = activeBookId || (useStore.getState().appLanguage === 'EN' ? 'default-en' : 'default-de');
+        bookMap[newDeckId] = targetBookId;
         localStorage.setItem('deck_books', JSON.stringify(bookMap));
         
-        addDeck({
-          id: newDeckId,
-          name: defaultName,
-          category: uploadTarget.category,
-          level: uploadTarget.level,
-          cards,
-          language: useStore.getState().appLanguage,
-          bookId: activeBookId || (useStore.getState().appLanguage === 'EN' ? 'default-en' : 'default-de')
-        });
+        try {
+          await addDeck({
+            id: newDeckId,
+            name: defaultName,
+            category: uploadTarget.category,
+            level: uploadTarget.level,
+            cards,
+            language: targetLang,
+            bookId: targetBookId
+          });
+        } catch (err: any) {
+          console.error("Error saving deck:", err);
+          alert("Fehler beim Speichern des Decks: " + (err?.message || err));
+        }
       } else {
-        alert("Fehler: Keine gültigen Karten gefunden.");
+        alert("Fehler: Keine gültigen Karten in der Datei gefunden.");
       }
       
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -7964,7 +8094,7 @@ try {
         )}
       </AnimatePresence>
 
-      <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+      <input type="file" accept=".csv,.txt" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
 
       <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-6 pb-12 md:pt-8 md:pb-24">
         {!activeBookId ? (
@@ -8097,17 +8227,6 @@ try {
                 );
               })}
             </div>
-            )}
-
-            {filteredDecksList.length > 0 && (
-              <button
-                onClick={() => handleOpenStory(filteredDecksList[0].id)}
-                className="h-9 px-4 rounded-full bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/25 text-xs font-semibold flex items-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer backdrop-blur-md select-none"
-                title="Lesetext (Story Reader)"
-              >
-                <BookOpen className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
-                <span>Lesetext</span>
-              </button>
             )}
           </div>
 

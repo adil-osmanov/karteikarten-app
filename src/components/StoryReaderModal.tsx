@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Volume2, VolumeX, RotateCcw, BookOpen, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Volume2, VolumeX, RotateCcw, BookOpen, Sparkles, Loader2 } from 'lucide-react';
 
 export interface StorySentence {
   text: string;
@@ -32,6 +32,28 @@ interface StoryReaderModalProps {
   language?: string;
 }
 
+function renderFormattedHint(hint: string) {
+  if (!hint) return null;
+  const match = hint.match(/^(der|die|das)\b(.*)$/i);
+  if (!match) {
+    return <span>{hint}</span>;
+  }
+  const article = match[1];
+  const rest = match[2];
+  const lower = article.toLowerCase();
+  let articleColor = 'text-sky-400';
+  if (lower === 'der') articleColor = 'text-sky-400';
+  else if (lower === 'die') articleColor = 'text-rose-400';
+  else if (lower === 'das') articleColor = 'text-emerald-400';
+
+  return (
+    <span>
+      <span className={`${articleColor} font-bold mr-1`}>{article}</span>
+      <span>{rest}</span>
+    </span>
+  );
+}
+
 export function StoryReaderModal({
   isOpen,
   onClose,
@@ -42,8 +64,9 @@ export function StoryReaderModal({
   language = 'DE'
 }: StoryReaderModalProps) {
   const [activeSentence, setActiveSentence] = useState<string | null>(null);
-  const [activeTooltip, setActiveTooltip] = useState<{ word: string; hint: string; x: number; y: number } | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Lock body scroll when modal is open
   useEffect(() => {
@@ -68,31 +91,44 @@ export function StoryReaderModal({
       document.body.style.touchAction = prevTouchAction;
       document.body.style.overscrollBehavior = prevOverscroll;
       window.removeEventListener('keydown', handleKeyDown);
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
       }
     };
   }, [isOpen, onClose]);
 
-  // Clean audio on close
+  // Stop audio on close or when regenerating
   useEffect(() => {
-    if (!isOpen && typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+    if (!isOpen || isGenerating) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
       setIsPlayingAudio(false);
+      setIsLoadingAudio(false);
     }
-  }, [isOpen]);
+  }, [isOpen, isGenerating]);
 
   if (!isOpen) return null;
 
   const topicTitle = storyData?.title || topic?.name || topic?.title || 'Lesetext';
   const langCode = (topic?.language || language || 'DE').toUpperCase();
 
-  const handlePlayAudio = () => {
-    if (!storyData || typeof window === 'undefined' || !window.speechSynthesis) return;
+  const handlePlayAudio = async () => {
+    if (!storyData || isGenerating) return;
 
     if (isPlayingAudio) {
-      window.speechSynthesis.cancel();
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
       setIsPlayingAudio(false);
+      return;
+    }
+
+    if (audioRef.current && audioRef.current.src && audioRef.current.currentTime > 0 && !audioRef.current.ended) {
+      audioRef.current.play();
+      setIsPlayingAudio(true);
       return;
     }
 
@@ -103,28 +139,46 @@ export function StoryReaderModal({
 
     if (!fullText) return;
 
-    const utterance = new SpeechSynthesisUtterance(fullText);
-    if (langCode === 'EN') utterance.lang = 'en-US';
-    else if (langCode === 'RU') utterance.lang = 'ru-RU';
-    else utterance.lang = 'de-DE';
+    setIsLoadingAudio(true);
+    try {
+      const voice = langCode === 'EN' ? 'en-US-JennyNeural' : langCode === 'RU' ? 'ru-RU-SvetlanaNeural' : 'de-DE-KatjaNeural';
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: fullText, voice })
+      });
 
-    utterance.rate = 0.9;
-    utterance.onend = () => setIsPlayingAudio(false);
-    utterance.onerror = () => setIsPlayingAudio(false);
+      if (!res.ok) throw new Error('TTS synthesis failed');
 
-    setIsPlayingAudio(true);
-    window.speechSynthesis.speak(utterance);
+      const blob = await res.blob();
+      const audioUrl = URL.createObjectURL(blob);
+
+      if (audioRef.current) {
+        audioRef.current.src = audioUrl;
+        audioRef.current.play();
+        setIsPlayingAudio(true);
+      }
+    } catch (err) {
+      console.error('Audio playback error:', err);
+      setIsPlayingAudio(false);
+    } finally {
+      setIsLoadingAudio(false);
+    }
   };
 
   const renderSentenceWithGlossary = (sentence: StorySentence) => {
     const text = sentence?.text || '';
     const glossary = storyData?.glossary || [];
+    const isSelected = activeSentence === sentence.translation;
 
     return (
       <span
         onClick={() => setActiveSentence(sentence.translation)}
-        className="cursor-pointer hover:bg-black/[0.04] dark:hover:bg-white/[0.06] rounded px-1 py-0.5 transition-colors inline"
-        title="Нажмите, чтобы увидеть перевод предложения"
+        className={`cursor-pointer rounded-lg px-1 py-0.5 transition-colors inline ${
+          isSelected
+            ? 'bg-sky-500/15 dark:bg-sky-500/20 text-sky-950 dark:text-sky-100 font-medium'
+            : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
+        }`}
       >
         {text.split(/(\s+|[,.:;!?"«»—]+)/).map((part: string, idx: number) => {
           const clean = part.trim().toLowerCase();
@@ -142,32 +196,17 @@ export function StoryReaderModal({
 
           if (match) {
             return (
-              <span
-                key={idx}
-                onMouseEnter={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  setActiveTooltip({
-                    word: match.baseWord || match.word,
-                    hint: match.hint,
-                    x: rect.left + rect.width / 2,
-                    y: rect.top - 36
-                  });
-                }}
-                onMouseLeave={() => setActiveTooltip(null)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveSentence(sentence.translation);
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  setActiveTooltip({
-                    word: match.baseWord || match.word,
-                    hint: match.hint,
-                    x: rect.left + rect.width / 2,
-                    y: rect.top - 36
-                  });
-                }}
-                className="text-sky-600 dark:text-sky-400 font-semibold underline decoration-sky-500/40 underline-offset-4 cursor-pointer hover:text-sky-500 dark:hover:text-sky-300 transition-colors"
-              >
-                {part}
+              <span key={idx} className="relative inline-block group cursor-pointer">
+                <span className="text-sky-600 dark:text-sky-400 font-semibold underline decoration-sky-500/40 underline-offset-4 hover:text-sky-500 dark:hover:text-sky-300 transition-colors">
+                  {part}
+                </span>
+                {/* Pure CSS popover tooltip centered on word */}
+                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex flex-col items-center z-50 pointer-events-none">
+                  <span className="px-3 py-1.5 rounded-xl bg-zinc-900/95 dark:bg-black/95 text-white text-xs backdrop-blur-xl border border-white/10 shadow-2xl whitespace-nowrap">
+                    {renderFormattedHint(match.hint)}
+                  </span>
+                  <span className="w-2 h-2 rotate-45 bg-zinc-900 dark:bg-black border-r border-b border-white/10 -mt-1" />
+                </span>
               </span>
             );
           }
@@ -182,6 +221,16 @@ export function StoryReaderModal({
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/40 dark:bg-black/70 backdrop-blur-md animate-in fade-in duration-200 select-none overscroll-contain touch-none"
       onClick={onClose}
     >
+      <audio
+        ref={audioRef}
+        onEnded={() => setIsPlayingAudio(false)}
+        onPause={() => setIsPlayingAudio(false)}
+        onError={() => {
+          setIsPlayingAudio(false);
+          setIsLoadingAudio(false);
+        }}
+      />
+
       <div
         className="w-full max-w-2xl max-h-[88vh] rounded-[32px] bg-white/95 dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-6 sm:p-8 shadow-2xl backdrop-blur-2xl text-zinc-900 dark:text-white flex flex-col relative animate-in zoom-in-95 duration-200 font-sans"
         onClick={(e) => e.stopPropagation()}
@@ -205,7 +254,7 @@ export function StoryReaderModal({
           <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               onClick={handlePlayAudio}
-              disabled={isGenerating || !storyData}
+              disabled={isGenerating || !storyData || isLoadingAudio}
               className={`w-8 h-8 rounded-full border border-black/[0.06] dark:border-white/10 flex items-center justify-center transition active:scale-95 cursor-pointer ${
                 isPlayingAudio
                   ? 'bg-sky-500 text-white shadow-sm'
@@ -213,7 +262,13 @@ export function StoryReaderModal({
               }`}
               title={isPlayingAudio ? 'Остановить аудио' : 'Слушать историю'}
             >
-              {isPlayingAudio ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              {isLoadingAudio ? (
+                <Loader2 className="w-4 h-4 animate-spin text-sky-500" />
+              ) : isPlayingAudio ? (
+                <VolumeX className="w-4 h-4" />
+              ) : (
+                <Volume2 className="w-4 h-4" />
+              )}
             </button>
 
             <button
@@ -272,16 +327,6 @@ export function StoryReaderModal({
               : 'Нажмите на любое предложение, чтобы увидеть перевод всей фразы целиком.'}
           </span>
         </div>
-
-        {/* Всплывающий тултип над словом */}
-        {activeTooltip && (
-          <div
-            className="fixed z-[70] px-3.5 py-1.5 rounded-xl bg-white/95 dark:bg-zinc-800/95 border border-black/[0.08] dark:border-white/15 shadow-2xl backdrop-blur-xl text-xs font-medium text-zinc-900 dark:text-zinc-100 pointer-events-none -translate-x-1/2 animate-in fade-in zoom-in-95 duration-150"
-            style={{ left: activeTooltip.x, top: activeTooltip.y }}
-          >
-            {activeTooltip.hint}
-          </div>
-        )}
       </div>
     </div>
   );

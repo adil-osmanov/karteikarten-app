@@ -29,14 +29,14 @@ const FALLBACK_VOICES = [
   "de-DE-FlorianMultilingualNeural",
 ];
 
-function getCacheFilename(text: string): string {
-  const hash = crypto.createHash("md5").update(text.toLowerCase().trim()).digest("hex");
+function getCacheFilename(text: string, voice: string = "default"): string {
+  const hash = crypto.createHash("md5").update(`${voice}_${text.toLowerCase().trim()}`).digest("hex");
   return path.join(DISK_CACHE_DIR, `${hash}.mp3`);
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { text } = await req.json();
+    const { text, voice } = await req.json();
 
     if (!text || typeof text !== "string") {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
@@ -47,8 +47,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Empty text" }, { status: 400 });
     }
 
+    const requestedVoice = (typeof voice === 'string' && voice.trim()) ? voice.trim() : "de-DE-KatjaNeural";
+    const cacheKey = `${requestedVoice}_${cleanText}`;
+
     // 1. Check in-memory RAM cache (instant 0ms)
-    const ramBuffer = serverTtsCache.get(cleanText);
+    const ramBuffer = serverTtsCache.get(cacheKey);
     if (ramBuffer) {
       return new NextResponse(ramBuffer as unknown as BodyInit, {
         headers: {
@@ -60,7 +63,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Check persistent disk cache (instant ~1ms)
-    const diskPath = getCacheFilename(cleanText);
+    const diskPath = getCacheFilename(cleanText, requestedVoice);
     try {
       if (fs.existsSync(diskPath)) {
         const diskBuffer = fs.readFileSync(diskPath);
@@ -70,7 +73,7 @@ export async function POST(req: NextRequest) {
             const oldestKey = serverTtsCache.keys().next().value;
             if (oldestKey) serverTtsCache.delete(oldestKey);
           }
-          serverTtsCache.set(cleanText, diskBuffer);
+          serverTtsCache.set(cacheKey, diskBuffer);
 
           return new NextResponse(diskBuffer as unknown as BodyInit, {
             headers: {
@@ -86,11 +89,16 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Network synthesis via EdgeTTS with voice fallback
+    const voiceCandidates = [
+      requestedVoice,
+      ...FALLBACK_VOICES.filter((v) => v !== requestedVoice),
+    ];
+    const lang = requestedVoice.split('-').slice(0, 2).join('-') || "de-DE";
     let audioBuffer: Buffer | null = null;
     let lastError: any = null;
 
-    for (let attempt = 0; attempt < FALLBACK_VOICES.length; attempt++) {
-      const voice = FALLBACK_VOICES[attempt];
+    for (let attempt = 0; attempt < voiceCandidates.length; attempt++) {
+      const vName = voiceCandidates[attempt];
       const tempFilePath = path.join(
         os.tmpdir(),
         `tts-${Date.now()}-${Math.random().toString(36).substring(7)}.mp3`
@@ -98,8 +106,8 @@ export async function POST(req: NextRequest) {
 
       try {
         const tts = new EdgeTTS({
-          voice,
-          lang: "de-DE",
+          voice: vName,
+          lang,
           outputFormat: "audio-24khz-48kbitrate-mono-mp3",
           rate: "-4%",
           timeout: 4500,
@@ -111,7 +119,6 @@ export async function POST(req: NextRequest) {
           const tempBuf = fs.readFileSync(tempFilePath);
           if (tempBuf && tempBuf.length > 100) {
             audioBuffer = tempBuf;
-            // Write to persistent disk cache asynchronously/safely
             try {
               fs.writeFileSync(diskPath, tempBuf);
             } catch (err) {}
@@ -139,7 +146,7 @@ export async function POST(req: NextRequest) {
       const oldestKey = serverTtsCache.keys().next().value;
       if (oldestKey) serverTtsCache.delete(oldestKey);
     }
-    serverTtsCache.set(cleanText, audioBuffer);
+    serverTtsCache.set(cacheKey, audioBuffer);
 
     return new NextResponse(audioBuffer as unknown as BodyInit, {
       headers: {
