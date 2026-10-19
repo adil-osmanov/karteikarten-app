@@ -1977,7 +1977,212 @@ function RapidFlashcardMode({
     onAnswer(correct, true);
   }, [locked, flip, onAnswer]);
 
+  const isTypingRound = progress >= 2 || (card?.masteryLevel || 0) >= 2;
+  const [typedValue, setTypedValue] = useState("");
+  const [hasInputError, setHasInputError] = useState(false);
+  const [isTypingSuccess, setIsTypingSuccess] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset typing state on new card
   useEffect(() => {
+    setTypedValue("");
+    setHasInputError(false);
+    setIsTypingSuccess(false);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+  }, [card?.id]);
+
+  // Autofocus input in typing mode
+  useEffect(() => {
+    if (isTypingRound && !locked) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 80);
+      return () => clearTimeout(timer);
+    }
+  }, [isTypingRound, card?.id, locked]);
+
+  const parsedNoun = useMemo(() => {
+    let raw = (card?.targetWord || '').replace(/\|/g, '').trim();
+    const directMatch = raw.match(/^(der|die|das)\s+(.+)$/i);
+    if (directMatch) {
+      return {
+        article: directMatch[1].toLowerCase(),
+        noun: directMatch[2].trim(),
+        full: raw
+      };
+    }
+    const hintText = (card?.hint || card?.forms || '').trim();
+    const hintMatch = hintText.match(/^(der|die|das)\b/i);
+    if (hintMatch && /^[A-ZÄÖÜ]/.test(raw)) {
+      return {
+        article: hintMatch[1].toLowerCase(),
+        noun: raw,
+        full: `${hintMatch[1]} ${raw}`
+      };
+    }
+    return {
+      article: null,
+      noun: raw,
+      full: raw
+    };
+  }, [card?.targetWord, card?.hint, card?.forms]);
+
+  const placeholderText = useMemo(() => {
+    if (parsedNoun.article) {
+      return `${parsedNoun.article} ...`;
+    }
+    if (parsedNoun.noun.length > 2) {
+      return `${parsedNoun.noun[0]}...`;
+    }
+    return "Tippen...";
+  }, [parsedNoun]);
+
+  const checkTypingValidation = useCallback((val: string) => {
+    const v = val.trim();
+    if (!v) return { isValid: true, isComplete: false, activeTarget: parsedNoun.noun };
+
+    const normV = v.toLowerCase();
+    const targetA = parsedNoun.noun.toLowerCase();
+    const targetB = parsedNoun.full.toLowerCase();
+
+    // Check transliterated versions (ä -> ae, ö -> oe, ü -> ue, ß -> ss)
+    const translitV = normV.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+    const translitA = targetA.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+    const translitB = targetB.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+
+    const matchesPrefixA = targetA.startsWith(normV) || translitA.startsWith(translitV);
+    const matchesPrefixB = targetB.startsWith(normV) || translitB.startsWith(translitV);
+
+    const isCompleteA = normV === targetA || translitV === translitA;
+    const isCompleteB = normV === targetB || translitV === translitB;
+
+    const activeTarget = (matchesPrefixB && !matchesPrefixA) ? parsedNoun.full : parsedNoun.noun;
+    const isValid = matchesPrefixA || matchesPrefixB;
+    const isComplete = isCompleteA || isCompleteB;
+
+    return { isValid, isComplete, activeTarget };
+  }, [parsedNoun]);
+
+  const handleTypingSuccess = useCallback(() => {
+    setIsTypingSuccess(true);
+    setHasInputError(false);
+    playFeedbackSound(true);
+    speak();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(40); } catch(e) {}
+    }
+
+    typingTimerRef.current = setTimeout(() => {
+      onAnswer(true, false);
+    }, 400);
+  }, [speak, onAnswer]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (locked || isTypingSuccess) return;
+    const val = e.target.value;
+    setTypedValue(val);
+    playTockSound();
+
+    const { isValid, isComplete } = checkTypingValidation(val);
+
+    if (!isValid && val.length > 0) {
+      setHasInputError(true);
+      playFeedbackSound(false);
+    } else {
+      setHasInputError(false);
+    }
+
+    if (isValid && isComplete) {
+      handleTypingSuccess();
+    }
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const { isComplete } = checkTypingValidation(typedValue);
+      if (isComplete) {
+        handleTypingSuccess();
+      } else {
+        setHasInputError(true);
+        playFeedbackSound(false);
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          try { navigator.vibrate([30, 40, 30]); } catch(e) {}
+        }
+      }
+    }
+  };
+
+  const handleAppendChar = (char: string) => {
+    if (locked || isTypingSuccess) return;
+    playTockSound();
+    const nextVal = typedValue + char;
+    setTypedValue(nextVal);
+    const { isValid, isComplete } = checkTypingValidation(nextVal);
+    if (!isValid) {
+      setHasInputError(true);
+      playFeedbackSound(false);
+    } else {
+      setHasInputError(false);
+    }
+    if (isValid && isComplete) {
+      handleTypingSuccess();
+    }
+    inputRef.current?.focus();
+  };
+
+  const handleSurrender = () => {
+    if (locked || isTypingSuccess) return;
+    setHasInputError(true);
+    playFeedbackSound(false);
+    speak();
+    setTypedValue(parsedNoun.noun);
+    typingTimerRef.current = setTimeout(() => {
+      onAnswer(false, false);
+    }, 1200);
+  };
+
+  const renderTypingDisplay = () => {
+    if (typedValue.length === 0) {
+      return (
+        <span className="text-zinc-400 dark:text-zinc-500 font-normal tracking-wide text-lg sm:text-xl select-none">
+          {placeholderText}
+        </span>
+      );
+    }
+
+    const { activeTarget } = checkTypingValidation(typedValue);
+    return (
+      <span className="inline-flex items-center">
+        {Array.from(typedValue).map((char, i) => {
+          const expectedChar = activeTarget[i];
+          const isCharMatch = expectedChar && char.toLowerCase() === expectedChar.toLowerCase();
+          return (
+            <span
+              key={i}
+              className={cn(
+                "transition-colors duration-150 font-medium",
+                isCharMatch
+                  ? isTypingSuccess
+                    ? "text-emerald-500 dark:text-emerald-400 font-semibold"
+                    : "text-zinc-900 dark:text-white"
+                  : "text-rose-500 font-semibold underline decoration-rose-500"
+              )}
+            >
+              {char}
+            </span>
+          );
+        })}
+        {!isTypingSuccess && (
+          <span className="inline-block w-0.5 h-6 bg-sky-500 dark:bg-sky-400 ml-0.5 animate-pulse" />
+        )}
+      </span>
+    );
+  };
+
+  useEffect(() => {
+    if (isTypingRound) return;
     const handleKey = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
       if (e.repeat) return;
@@ -2005,7 +2210,7 @@ function RapidFlashcardMode({
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [flip, answer, speak]);
+  }, [isTypingRound, flip, answer, speak]);
 
   const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
@@ -2069,6 +2274,129 @@ function RapidFlashcardMode({
       )}
     </div>
   );
+
+  if (isTypingRound) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: 40 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: -40 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        className="w-full flex flex-col items-center"
+      >
+        <div className="w-full relative">
+          <div className="relative w-full min-h-[420px] md:min-h-[480px] p-6 sm:p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col justify-between items-center">
+            {/* Top Header */}
+            <div className="w-full flex justify-between items-center z-10">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); speak(); }}
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Aussprache anhören (R)"
+                >
+                  <Volume2 className="w-[18px] h-[18px]" />
+                </button>
+              </div>
+              <div className="flex items-center gap-2 pr-1">
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700")} />
+                ))}
+              </div>
+            </div>
+
+            {/* Central Content */}
+            <div className="flex-1 flex flex-col items-center justify-center w-full my-4">
+              {/* Noun Article Badge */}
+              {parsedNoun.article && (
+                <div className="flex justify-center mb-3">
+                  <span className={cn(
+                    "text-xs sm:text-sm font-semibold uppercase tracking-wider px-3.5 py-1 rounded-full border shadow-sm transition-colors",
+                    parsedNoun.article === 'der' && "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30 shadow-sky-500/5",
+                    parsedNoun.article === 'die' && "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 shadow-rose-500/5",
+                    parsedNoun.article === 'das' && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 shadow-emerald-500/5"
+                  )}>
+                    {parsedNoun.article}
+                  </span>
+                </div>
+              )}
+
+              {/* Translation Meaning */}
+              <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-zinc-900 dark:text-white text-center leading-snug px-2 mb-2">
+                {translation}
+              </div>
+
+              {/* Context / Hint if available */}
+              {(example || card.hint) && (
+                <div className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 font-normal text-center max-w-md mx-auto mb-5 italic line-clamp-2 px-3">
+                  {example ? `"${example}"` : (card.hint || '')}
+                </div>
+              )}
+
+              {/* Interactive Typing Box with per-character visual feedback */}
+              <div className="relative w-full max-w-sm sm:max-w-md flex items-center justify-center my-1">
+                <div
+                  onClick={() => inputRef.current?.focus()}
+                  className={cn(
+                    "w-full flex items-center justify-center min-h-[58px] sm:min-h-[64px] px-5 py-3 rounded-2xl cursor-text transition-all duration-200",
+                    "bg-zinc-100/90 dark:bg-white/[0.05] border",
+                    hasInputError
+                      ? "border-rose-500/80 dark:border-rose-500/80 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
+                      : isTypingSuccess
+                      ? "border-emerald-500/80 dark:border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+                      : "border-zinc-200 dark:border-white/10 hover:border-zinc-300 dark:hover:border-white/20 focus-within:border-sky-500 dark:focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-500/20"
+                  )}
+                >
+                  <div className="text-xl sm:text-2xl font-semibold tracking-wider text-center flex items-center justify-center overflow-x-auto whitespace-nowrap py-0.5">
+                    {renderTypingDisplay()}
+                  </div>
+                </div>
+
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={typedValue}
+                  onChange={handleInputChange}
+                  onKeyDown={handleInputKeyDown}
+                  disabled={locked || isTypingSuccess}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="absolute inset-0 opacity-0 w-full h-full cursor-text text-base sm:text-lg"
+                  style={{ fontSize: '18px' }}
+                />
+              </div>
+
+              {/* Quick Umlaut Bar for Mobile Keyboards */}
+              <div className="flex gap-2.5 mt-3 justify-center items-center">
+                {['ä', 'ö', 'ü', 'ß'].map((char) => (
+                  <button
+                    key={char}
+                    type="button"
+                    onClick={() => handleAppendChar(char)}
+                    className="w-10 h-10 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 text-zinc-800 dark:text-white font-medium active:scale-90 transition text-base flex items-center justify-center select-none shadow-sm cursor-pointer"
+                  >
+                    {char}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Bottom Row: Assistance */}
+            <div className="w-full flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={handleSurrender}
+                className="text-xs text-zinc-400 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300 font-medium tracking-wide py-1.5 px-3.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+              >
+                Hilfe anzeigen
+              </button>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
