@@ -66,8 +66,8 @@ const STATS_I18N: Record<string, {
     accuracy: "Точность",
     cardsToday: "Карточки",
     mistakesLabel: "Ошибки:",
-    noMistakes: "Ошибок нет",
-    reviewButton: "Закрепить",
+    noMistakes: "Нет ошибок",
+    reviewButton: "Повторить",
     closeTooltip: "Закрыть",
   }
 };
@@ -76,32 +76,22 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
   useEffect(() => {
     if (!isOpen) return;
 
-    const originalOverflow = document.body.style.overflow;
-    const originalHtmlOverflow = document.documentElement.style.overflow;
-    const originalTouchAction = document.body.style.touchAction;
-    
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.touchAction = 'none';
-
-    const preventDefault = (e: Event) => {
-      const target = e.target as HTMLElement | null;
-      if (target && target.closest('.stats-modal-content')) return;
-      if (e.cancelable) e.preventDefault();
-    };
-
-    window.addEventListener('wheel', preventDefault, { passive: false });
-    window.addEventListener('touchmove', preventDefault, { passive: false });
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
+
+    const preventDefault = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest('.stats-modal-content')) {
+        e.preventDefault();
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('wheel', preventDefault, { passive: false });
+    window.addEventListener('touchmove', preventDefault, { passive: false });
 
     return () => {
-      document.body.style.overflow = originalOverflow;
-      document.documentElement.style.overflow = originalHtmlOverflow;
-      document.body.style.touchAction = originalTouchAction;
       window.removeEventListener('wheel', preventDefault);
       window.removeEventListener('touchmove', preventDefault);
       window.removeEventListener('keydown', handleKeyDown);
@@ -144,109 +134,96 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
 
   const mistakeCount = Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0;
 
-  const accuracyColor = accuracy >= 80 
-    ? "text-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.25)]" 
-    : accuracy >= 60 
-    ? "text-amber-400 drop-shadow-[0_0_12px_rgba(251,191,36,0.25)]" 
-    : "text-rose-400 drop-shadow-[0_0_12px_rgba(244,63,94,0.25)]";
-
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overscroll-contain touch-none animate-in fade-in duration-150 select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-150 select-none overscroll-contain touch-none"
       onClick={onClose}
-      onWheel={(e) => {
-        e.stopPropagation();
-      }}
-      onTouchMove={(e) => {
-        e.stopPropagation();
-      }}
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
     >
       <div 
-        className="stats-modal-content w-full max-w-sm rounded-3xl bg-zinc-900/95 border border-white/10 p-6 shadow-2xl backdrop-blur-2xl text-white relative animate-in zoom-in-95 duration-200 font-sans"
+        className="stats-modal-content w-full max-w-sm rounded-[28px] bg-white/95 dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-6 shadow-2xl backdrop-blur-2xl text-zinc-900 dark:text-white relative animate-in zoom-in-95 duration-200 font-sans"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Заголовок */}
-        <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
+        {/* Шапка модалки */}
+        <div className="flex items-center justify-between pb-4 border-b border-black/[0.06] dark:border-white/[0.08]">
           <div>
-            <h3 className="text-[15px] font-semibold tracking-tight text-zinc-100 font-sans">
+            <h3 className="text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 font-sans">
               {t.title}
             </h3>
-            <p className="text-[11px] font-normal text-zinc-500 tracking-normal mt-0.5">
+            <p className="text-[11px] font-normal text-zinc-400 dark:text-zinc-500 mt-0.5">
               {t.resetSubtitle}
             </p>
           </div>
           <button 
             onClick={onClose}
             type="button"
-            className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer"
+            className="w-7 h-7 rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition active:scale-95 cursor-pointer"
             title={t.closeTooltip}
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-3.5 h-3.5"/>
           </button>
         </div>
 
-        {/* 2 Главные метрики: Время и Точность */}
+        {/* 2 Карточки метрик (Время и Точность) */}
         <div className="grid grid-cols-2 gap-3 my-5">
-          <div className="p-4 rounded-2xl bg-zinc-800/40 border border-white/5 flex flex-col items-center justify-center">
-            <span className="text-2xl font-bold tracking-tight text-zinc-100 tabular-nums">
+          <div className="p-4 rounded-2xl bg-zinc-100/80 dark:bg-zinc-800/40 border border-black/[0.04] dark:border-white/5 flex flex-col items-center justify-center">
+            <span className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">
               {timeDisplay}
             </span>
-            <span className="text-[11px] font-medium tracking-wider text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
-              <Clock className="w-3 h-3 text-zinc-500" /> {t.inFocus}
+            <span className="text-[11px] font-medium tracking-wider text-zinc-500 dark:text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
+              <Clock className="w-3 h-3 text-zinc-400 dark:text-zinc-500"/> {t.inFocus}
             </span>
           </div>
 
-          <div className="p-4 rounded-2xl bg-zinc-800/40 border border-white/5 flex flex-col items-center justify-center">
-            <span className={`text-2xl font-bold tracking-tight tabular-nums ${accuracyColor}`}>
+          <div className="p-4 rounded-2xl bg-zinc-100/80 dark:bg-zinc-800/40 border border-black/[0.04] dark:border-white/5 flex flex-col items-center justify-center">
+            <span className="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums">
               {accuracy}%
             </span>
-            <span className="text-[11px] font-medium tracking-wider text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
-              <Target className="w-3 h-3 text-zinc-500" /> {t.accuracy}
+            <span className="text-[11px] font-medium tracking-wider text-zinc-500 dark:text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
+              <Target className="w-3 h-3 text-zinc-400 dark:text-zinc-500"/> {t.accuracy}
             </span>
           </div>
         </div>
 
         {/* Блок прогресса карточек */}
-        <div className="mb-5 p-4 rounded-2xl bg-zinc-800/40 border border-white/5">
+        <div className="mb-5 p-4 rounded-2xl bg-zinc-100/80 dark:bg-zinc-800/40 border border-black/[0.04] dark:border-white/5">
           <div className="flex justify-between items-baseline mb-2.5">
-            <span className="text-xs font-medium text-zinc-400">{t.cardsToday}</span>
-            <div className="text-xs font-semibold text-zinc-100 tabular-nums tracking-tight">
-              {totalDone} <span className="font-normal text-zinc-500">/ 200</span>
+            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t.cardsToday}</span>
+            <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
+              {totalDone} <span className="font-normal text-zinc-400 dark:text-zinc-500">/ {target}</span>
             </div>
           </div>
-          <div className="w-full h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+          <div className="w-full h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
             <div 
-              className="h-full bg-sky-500 rounded-full transition-all duration-500 shadow-sm shadow-sky-500/50" 
+              className="h-full bg-sky-500 rounded-full transition-all duration-500 shadow-sm shadow-sky-500/30"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
         </div>
 
         {/* Блок ошибок */}
-        <div className="pt-3 border-t border-white/[0.08] flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
+        <div className="pt-3 border-t border-black/[0.06] dark:border-white/[0.08] flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
             <span>{t.mistakesLabel}</span>
             {mistakeCount > 0 ? (
-              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30 tabular-nums">
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500/30 tabular-nums">
                 {mistakeCount}
               </span>
             ) : (
-              <span className="text-emerald-400/90 flex items-center gap-1.5 text-xs font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> {t.noMistakes}
+              <span className="text-emerald-600 dark:text-emerald-400/90 flex items-center gap-1.5 text-xs font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5"/> {t.noMistakes}
               </span>
             )}
           </div>
 
           {mistakeCount > 0 && (
             <button
+              onClick={() => { onClose(); onReviewMistakes(); }}
               type="button"
-              onClick={() => {
-                onClose();
-                onReviewMistakes();
-              }}
-              className="h-8 px-3.5 rounded-xl bg-white/10 hover:bg-white/15 active:scale-95 text-xs font-medium text-white transition flex items-center gap-1.5 cursor-pointer"
+              className="h-8 px-3.5 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white/10 dark:hover:bg-white/15 dark:text-zinc-100 active:scale-95 text-xs font-medium transition flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
-              <RotateCcw className="w-3 h-3 text-sky-400" />
+              <RotateCcw className="w-3 h-3 text-sky-400"/>
               <span>{t.reviewButton}</span>
             </button>
           )}

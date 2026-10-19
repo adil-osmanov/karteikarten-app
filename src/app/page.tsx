@@ -20,7 +20,7 @@ import { createClient } from "@supabase/supabase-js";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
-import { useDayStats, normalizeLanguage } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 
 function cn(...inputs: ClassValue[]) {
@@ -611,6 +611,7 @@ const getInitialCachedBooks = (): BookMeta[] => {
   if (typeof window === 'undefined') return [];
   try {
     const cached = localStorage.getItem('cached_app_books') || localStorage.getItem('cache_books_v2');
+    try { localStorage.removeItem('cache_books_v2'); } catch {}
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -623,6 +624,7 @@ const getInitialCachedDecks = (): Deck[] => {
   if (typeof window === 'undefined') return [];
   try {
     const cached = localStorage.getItem('cached_app_decks') || localStorage.getItem('cache_decks_v2');
+    try { localStorage.removeItem('cache_decks_v2'); } catch {}
     if (cached) {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -683,10 +685,7 @@ const useStore = create<DeckState>()((set, get) => ({
   books: initialBooks,
   setBooks: (books) => {
     if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('cached_app_books', JSON.stringify(books));
-        localStorage.setItem('cache_books_v2', JSON.stringify(books));
-      } catch (e) {}
+      safeSetStorage('cached_app_books', JSON.stringify(books));
     }
     set({ books, isLoaded: true });
   },
@@ -834,10 +833,7 @@ const useStore = create<DeckState>()((set, get) => ({
   
   setDecks: (decks) => {
     if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('cached_app_decks', JSON.stringify(decks));
-        localStorage.setItem('cache_decks_v2', JSON.stringify(decks));
-      } catch (e) {}
+      safeSetStorage('cached_app_decks', JSON.stringify(decks));
     }
     set({ decks, isLoaded: true });
   },
@@ -3744,6 +3740,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
 
           {/* 2. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
           <div className="flex items-center gap-2">
+            {/* Капсула счетчика */}
             <button 
               type="button"
               onClick={(e) => { 
@@ -3753,22 +3750,24 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
                   setIsStatsOpen(true);
                 }
               }}
-              className="h-9 px-3.5 rounded-full bg-zinc-900/80 hover:bg-zinc-800/90 border border-white/10 backdrop-blur-xl transition-all duration-200 active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
+              className="h-9 px-3.5 rounded-full bg-white/80 dark:bg-zinc-900/80 hover:bg-white dark:hover:bg-zinc-800/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-xl transition-all duration-200 active:scale-95 flex items-center gap-2 shadow-sm dark:shadow-lg text-zinc-800 dark:text-zinc-200 cursor-pointer"
               title="Статистика дня"
             >
-              <svg className="w-4 h-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              <svg className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="m12 3-9 5 9 5 9-5-9-5z" />
+                <path d="m3 12 9 5 9-5" />
+                <path d="m3 17 9 5 9-5" />
               </svg>
-              <span suppressHydrationWarning className="text-xs font-semibold text-zinc-200 tabular-nums tracking-tight">
-                {displayTodayCount} <span className="font-normal text-zinc-500">/ 200</span>
+              <span suppressHydrationWarning className="text-xs font-semibold tabular-nums tracking-tight font-sans">
+                {displayTodayCount} <span className="text-zinc-400 dark:text-zinc-500 font-normal">/ 200</span>
               </span>
             </button>
 
-            {/* Переключатель темы */}
+            {/* Кнопка переключения темы */}
             <button 
               type="button"
               onClick={toggleTheme}
-              className="h-9 w-9 rounded-full bg-zinc-900/80 hover:bg-zinc-800/90 border border-white/10 backdrop-blur-xl flex items-center justify-center text-zinc-400 hover:text-white active:scale-95 transition-all shadow-lg cursor-pointer"
+              className="w-9 h-9 rounded-full bg-white/80 dark:bg-zinc-900/80 hover:bg-white dark:hover:bg-zinc-800/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-xl flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition shadow-sm active:scale-95 cursor-pointer"
               aria-label="Toggle theme"
               title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
@@ -7092,10 +7091,7 @@ try {
 
           setBooks(mappedBooks);
           setIsLoadingBooks(false);
-          try {
-            localStorage.setItem('cached_app_books', JSON.stringify(mappedBooks));
-            localStorage.setItem('cache_books_v2', JSON.stringify(mappedBooks));
-          } catch(e) {}
+          safeSetStorage('cached_app_books', JSON.stringify(mappedBooks));
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'], category: 'book', training_mode: 'standard_cloze' },
@@ -7113,16 +7109,13 @@ try {
           }
           setBooks(defaultBooks);
           setIsLoadingBooks(false);
-          try {
-            localStorage.setItem('cached_app_books', JSON.stringify(defaultBooks));
-            localStorage.setItem('cache_books_v2', JSON.stringify(defaultBooks));
-          } catch(e) {}
+          safeSetStorage('cached_app_books', JSON.stringify(defaultBooks));
         }
 
         if (decksRes.error) {
           console.error("Supabase Fetch Decks Error:", decksRes.error.message);
           // Only clear decks if we are sure it's not a network error, but for offline robustness, do NOT wipe cache.
-          if (!localStorage.getItem('cached_app_decks') && !localStorage.getItem('cache_decks_v2')) { setDecks([]); }
+          if (!localStorage.getItem('cached_app_decks')) { setDecks([]); }
         } else if (decksRes.data) {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
           const enhancedDecks = decksRes.data.map((d: any) => {
@@ -7154,17 +7147,7 @@ try {
             };
           });
           setDecks(enhancedDecks as Deck[]);
-          try {
-            localStorage.setItem('cached_app_decks', JSON.stringify(enhancedDecks));
-            localStorage.setItem('cache_decks_v2', JSON.stringify(enhancedDecks));
-          } catch(e) {
-            console.warn('Quota exceeded, fallback to lightweight cache');
-            try {
-              const lightweight = enhancedDecks.map((d: any) => ({ ...d, cards: [] }));
-              localStorage.setItem('cached_app_decks', JSON.stringify(lightweight));
-              localStorage.setItem('cache_decks_v2', JSON.stringify(lightweight));
-            } catch (e2) {}
-          }
+          safeSetStorage('cached_app_decks', JSON.stringify(enhancedDecks));
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
@@ -8022,11 +8005,11 @@ try {
                       {levelIdx === 0 && dueCards.length > 0 && (
                         <button 
                           onClick={() => { initAudioCtx(); setIsReviewingMistakes(false); setReviewCards(dueCards); }}
-                          className="h-8 px-3 rounded-full flex items-center gap-2 text-xs font-medium transition-all active:scale-95 shadow-sm bg-white border border-zinc-200/80 text-zinc-800 hover:bg-zinc-100 active:bg-zinc-200 dark:bg-blue-500/15 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/25 cursor-pointer select-none group"
+                          className="h-8 px-3.5 rounded-full flex items-center gap-2 text-xs font-medium transition-all duration-200 active:scale-95 shadow-sm bg-white/80 dark:bg-zinc-900/80 border border-black/[0.08] dark:border-white/10 backdrop-blur-xl hover:bg-white hover:shadow-md hover:shadow-black/[0.04] hover:border-black/[0.12] dark:hover:bg-zinc-800/90 dark:hover:border-white/20 text-zinc-800 dark:text-zinc-200 cursor-pointer select-none group"
                         >
-                          <RotateCcw className="w-3 h-3 text-blue-600 dark:text-blue-400 transition-transform duration-300 group-hover:-rotate-45" />
-                          <span className="font-semibold text-zinc-900 dark:text-white font-mono">{dueCards.length}</span>
-                          <span className="hidden sm:inline text-zinc-600 dark:text-blue-300/80 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
+                          <RotateCcw className="w-3 h-3 text-blue-600 dark:text-blue-400 transition-transform duration-300 group-hover:-rotate-45 shrink-0" />
+                          <span className="font-semibold text-zinc-900 dark:text-white font-mono tabular-nums">{dueCards.length}</span>
+                          <span className="hidden sm:inline text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
                             {appLanguage === 'RU' ? 'повторить' : appLanguage === 'EN' ? 'review' : 'wiederholen'}
                           </span>
                         </button>

@@ -30,6 +30,100 @@ export const getTodayKey = (): string => {
 
 export const getStorageKey = (lang: string) => `app_daily_stats_${normalizeLanguage(lang)}`;
 
+// --- INDEXEDDB STORAGE BACKUP (SAFARI PERSISTENCE) ---
+const IDB_NAME = 'karten_db';
+const IDB_VERSION = 1;
+const IDB_STORE = 'day_stats';
+
+function getDB(): Promise<IDBDatabase | null> {
+  if (typeof window === 'undefined' || !window.indexedDB) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      const request = window.indexedDB.open(IDB_NAME, IDB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE, { keyPath: 'lang' });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+export async function setStatsInIDB(lang: string, stats: DailyStats): Promise<void> {
+  try {
+    const db = await getDB();
+    if (!db) return;
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    const store = tx.objectStore(IDB_STORE);
+    store.put({ lang: normalizeLanguage(lang), ...stats });
+  } catch (e) {}
+}
+
+export async function getStatsFromIDB(lang: string): Promise<DailyStats | null> {
+  try {
+    const db = await getDB();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const store = tx.objectStore(IDB_STORE);
+        const req = store.get(normalizeLanguage(lang));
+        req.onsuccess = () => {
+          const res = req.result;
+          if (res) {
+            const { lang: _, ...stats } = res;
+            resolve(stats as DailyStats);
+          } else {
+            resolve(null);
+          }
+        };
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+// Robust localStorage writer with Safari Quota recovery
+export function safeSetStorage(key: string, value: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    // Safari QuotaExceeded recovery: free up redundant cache keys
+    try {
+      localStorage.removeItem('cache_decks_v2');
+      localStorage.removeItem('cache_books_v2');
+      localStorage.removeItem('app_daily_stats');
+
+      // Strip cards from cached decks to recover multiple megabytes immediately
+      const rawDecks = localStorage.getItem('cached_app_decks');
+      if (rawDecks) {
+        try {
+          const parsed = JSON.parse(rawDecks);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const lightweight = parsed.map((d: any) => ({ ...d, cards: [] }));
+            localStorage.setItem('cached_app_decks', JSON.stringify(lightweight));
+          }
+        } catch {}
+      }
+      localStorage.setItem(key, value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export const isSameCard = (a: any, b: any): boolean => {
   if (!a || !b) return false;
   
@@ -208,12 +302,11 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
       mistakesPool: mergedPool
     };
 
-    // Keep storage consolidated and synchronized across both casings
-    try {
-      const serialized = JSON.stringify(result);
-      localStorage.setItem(`app_daily_stats_${normLang}`, serialized);
-      localStorage.setItem(`app_daily_stats_${normLang.toLowerCase()}`, serialized);
-    } catch (e) {}
+    // Save consolidated canonical state using safeSetStorage
+    const serialized = JSON.stringify(result);
+    safeSetStorage(`app_daily_stats_${normLang}`, serialized);
+    safeSetStorage(`app_daily_stats_${normLang.toLowerCase()}`, serialized);
+    setStatsInIDB(normLang, result);
 
     return result;
   }
@@ -248,12 +341,11 @@ function notifyLang(lang: string) {
   const normLang = normalizeLanguage(lang);
   const current = getOrCreateStats(normLang);
   if (typeof window !== 'undefined') {
-    try {
-      const serialized = JSON.stringify(current);
-      localStorage.setItem(`app_daily_stats_${normLang}`, serialized);
-      localStorage.setItem(`app_daily_stats_${normLang.toLowerCase()}`, serialized);
-      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
-    } catch (e) {}
+    const serialized = JSON.stringify(current);
+    safeSetStorage(`app_daily_stats_${normLang}`, serialized);
+    safeSetStorage(`app_daily_stats_${normLang.toLowerCase()}`, serialized);
+    setStatsInIDB(normLang, current);
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
   }
   if (listenersByLang[normLang]) {
     listenersByLang[normLang].forEach(fn => fn(current));
@@ -270,6 +362,19 @@ function initGlobalTimer() {
   window.addEventListener('keydown', onActivity, { passive: true });
   window.addEventListener('touchstart', onActivity, { passive: true });
   window.addEventListener('scroll', onActivity, { passive: true });
+
+  // Safari unload/pagehide flush
+  const flushAll = () => {
+    Object.keys(statsByLang).forEach(l => {
+      const s = statsByLang[l];
+      if (s) {
+        safeSetStorage(getStorageKey(l), JSON.stringify(s));
+        setStatsInIDB(l, s);
+      }
+    });
+  };
+  window.addEventListener('pagehide', flushAll);
+  window.addEventListener('beforeunload', flushAll);
 
   setInterval(() => {
     if (document.hidden) return;
@@ -314,6 +419,27 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
   // Synchronize on language change
   useEffect(() => {
     setLocalStats(getOrCreateStats(lang));
+  }, [lang]);
+
+  // Safari recovery: background check from IndexedDB
+  useEffect(() => {
+    let isCancelled = false;
+    getStatsFromIDB(lang).then(idbStats => {
+      if (isCancelled || !idbStats) return;
+      const current = getOrCreateStats(lang);
+      const mergedPool = mergeMistakesPools(current.mistakesPool || [], idbStats.mistakesPool || []);
+      if (mergedPool.length > (current.mistakesPool?.length || 0)) {
+        const mergedStats: DailyStats = {
+          ...current,
+          mistakesPool: mergedPool,
+          mistakesCountToday: Math.max(current.mistakesCountToday || 0, idbStats.mistakesCountToday || 0, mergedPool.length)
+        };
+        statsByLang[lang] = mergedStats;
+        notifyLang(lang);
+        setLocalStats(mergedStats);
+      }
+    });
+    return () => { isCancelled = true; };
   }, [lang]);
 
   // Manage study activity timer & listener subscriptions
@@ -392,6 +518,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       // Add to mistakes pool (deduplicating only exact card instances)
       if (!updatedPool.some(matchFn)) {
         const stableId = cardId || `${card?.deckId || 'deck'}::${targetWord}::${sentence}` || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : String(Date.now()));
+        // Clean snapshot without recursive bloated objects
         const fullCardSnapshot = {
           deckId: card?.deckId || '',
           id: stableId,
@@ -403,8 +530,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
           isArchived: Boolean(card?.isArchived || card?.card?.isArchived),
           baseWordInfo: card?.baseWordInfo || card?.card?.baseWordInfo || '',
           hint: card?.hint || card?.card?.hint || '',
-          forms: card?.forms || card?.card?.forms || '',
-          card: card?.card || card
+          forms: card?.forms || card?.card?.forms || ''
         };
         updatedPool.push(fullCardSnapshot);
       }
