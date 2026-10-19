@@ -23,9 +23,9 @@ export const normalizeLanguage = (lang?: string | null): SupportedLanguage => {
 
 export const getTodayKey = (): string => {
   try {
-    return new Date().toLocaleDateString('en-CA');
+    return new Date().toISOString().slice(0, 10);
   } catch {
-    return new Date().toISOString().split('T')[0];
+    return '2026-10-19';
   }
 };
 
@@ -342,7 +342,8 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
       const savedAppStats = localStorage.getItem(sKey);
       if (savedAppStats) {
         const parsed = JSON.parse(savedAppStats);
-        if (parsed && typeof parsed?.cardsDone === 'number' && parsed.cardsDone > maxFound) {
+        const isToday = parsed && (parsed.date === todayStr || parsed.date === todayIso);
+        if (isToday && typeof parsed?.cardsDone === 'number' && parsed.cardsDone > maxFound) {
           maxFound = parsed.cardsDone;
         }
       }

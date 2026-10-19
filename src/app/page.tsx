@@ -917,17 +917,25 @@ const useStore = create<DeckState>()((set, get) => ({
   incrementDailyProgress: () => {
     if (typeof window !== 'undefined') {
       const { appLanguage } = get();
-      const todayStr = new Date().toLocaleDateString('en-CA');
+      const todayStr = new Date().toISOString().slice(0, 10);
       const key = `daily_activity_${appLanguage}`;
-      const stored = localStorage.getItem(key);
-      const progress = stored ? JSON.parse(stored) : {};
+      let progress: Record<string, any> = {};
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored) progress = JSON.parse(stored);
+      } catch (e) {}
       
       const rawCount = progress[todayStr];
       const currentCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
       
       progress[todayStr] = currentCount + 1;
       
-      localStorage.setItem(key, JSON.stringify(progress));
+      safeSetStorage(key, JSON.stringify(progress));
+      try {
+        const curLearned = parseInt(localStorage.getItem('daily_learned_count') || '0', 10) || 0;
+        localStorage.setItem('daily_learned_count', String(curLearned + 1));
+        localStorage.setItem('last_active_date', todayStr);
+      } catch (e) {}
       window.dispatchEvent(new Event('storage-update'));
       
       supabase.from('user_stats').upsert({
@@ -1862,11 +1870,42 @@ export function getMaskedSentence(sentence: string, targetWord: string): string 
   return masked;
 }
 
+export const RU_TO_DE_MAP: Record<string, string> = {
+  'й':'q','ц':'w','у':'e','к':'r','е':'t','н':'z','г':'u','ш':'i','щ':'o','з':'p','х':'ü',
+  'ф':'a','ы':'s','в':'d','а':'f','п':'g','р':'h','о':'j','л':'k','д':'l','э':'ä',
+  'я':'y','ч':'x','с':'c','м':'v','и':'b','т':'n','ь':'m',
+  'Й':'Q','Ц':'W','У':'E','К':'R','Е':'T','Н':'Z','Г':'U','Ш':'I','Щ':'O','З':'P','Х':'Ü',
+  'Ф':'A','Ы':'S','В':'D','А':'F','П':'G','Р':'H','О':'J','Л':'K','Д':'L','Э':'Ä',
+  'Я':'Y','Ч':'X','С':'C','М':'V','И':'B','Т':'N','Ь':'M'
+};
+
+export function convertRuToDeLayout(text: string, target?: string): string {
+  let res = text.split('').map(char => RU_TO_DE_MAP[char] || char).join('');
+  if (target) {
+    if (target.includes('ä') || target.includes('Ä')) {
+      res = res.replace(/ae/g, 'ä').replace(/Ae/g, 'Ä').replace(/AE/g, 'Ä');
+    }
+    if (target.includes('ö') || target.includes('Ö')) {
+      res = res.replace(/oe/g, 'ö').replace(/Oe/g, 'Ö').replace(/OE/g, 'Ö');
+    }
+    if (target.includes('ü') || target.includes('Ü')) {
+      res = res.replace(/ue/g, 'ü').replace(/Ue/g, 'Ü').replace(/UE/g, 'Ü');
+    }
+    if (target.includes('ß')) {
+      res = res.replace(/ss/g, 'ß');
+    }
+  } else {
+    res = res.replace(/ae/g, 'ä').replace(/oe/g, 'ö').replace(/ue/g, 'ü').replace(/ss/g, 'ß');
+  }
+  return res;
+}
+
 function RapidFlashcardMode({
   card,
   progress,
   locked,
   onAnswer,
+  onHintPenalty,
   deckTitle,
   reverse: forcedReverse,
 }: {
@@ -1874,6 +1913,7 @@ function RapidFlashcardMode({
   progress: number;
   locked: boolean;
   onAnswer: (correct: boolean, wasFlipped: boolean) => void;
+  onHintPenalty?: () => void;
   deckTitle?: string;
   reverse?: boolean;
 }) {
@@ -1992,32 +2032,40 @@ function RapidFlashcardMode({
     onAnswer(correct, true);
   }, [locked, flip, onAnswer]);
 
-  const isTypingRound = progress >= 2 || (card?.masteryLevel || 0) >= 2;
-  const [inputValue, setInputValue] = useState("");
+  // Lock typing round mode to card.id so progress incrementing on answer does NOT cause the leaving card to mutate
+  const [isTypingRound, setIsTypingRound] = useState(() => progress >= 2 || (card?.masteryLevel || 0) >= 2);
+
+  useEffect(() => {
+    setIsTypingRound(progress >= 2 || (card?.masteryLevel || 0) >= 2);
+  }, [card?.id]);
+
+  const [typedValue, setTypedValue] = useState("");
   const [isError, setIsError] = useState(false);
   const [isTypingSuccess, setIsTypingSuccess] = useState(false);
+  const [showHint, setShowHint] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset typing state on new card
   useEffect(() => {
-    setInputValue("");
+    setTypedValue("");
     setIsError(false);
     setIsTypingSuccess(false);
+    setShowHint(false);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
   }, [card?.id]);
 
   // Autofocus input in typing mode
   useEffect(() => {
-    if (isTypingRound && !locked) {
+    if (isTypingRound && !locked && !showHint) {
       const timer = setTimeout(() => {
         inputRef.current?.focus();
       }, 80);
       return () => clearTimeout(timer);
     }
-  }, [isTypingRound, card?.id, locked]);
+  }, [isTypingRound, card?.id, locked, showHint]);
 
   const parsedNoun = useMemo(() => {
     let raw = (card?.targetWord || '').replace(/\|/g, '').trim();
@@ -2045,34 +2093,19 @@ function RapidFlashcardMode({
     };
   }, [card?.targetWord, card?.hint, card?.forms]);
 
-  const checkAnswerMatch = useCallback((val: string) => {
-    const v = val.trim().toLowerCase();
-    if (!v) return { isValid: true, isComplete: false };
+  const activeTarget = useMemo(() => {
+    if (
+      parsedNoun.article &&
+      typedValue.length > 0 &&
+      parsedNoun.noun.toLowerCase().startsWith(typedValue[0].toLowerCase()) &&
+      !parsedNoun.full.toLowerCase().startsWith(typedValue[0].toLowerCase())
+    ) {
+      return parsedNoun.noun;
+    }
+    return parsedNoun.full || parsedNoun.noun;
+  }, [parsedNoun, typedValue]);
 
-    const targetA = parsedNoun.noun.trim().toLowerCase();
-    const targetB = parsedNoun.full.trim().toLowerCase();
-
-    // Check transliterated versions (ä -> ae, ö -> oe, ü -> ue, ß -> ss)
-    const translit = (s: string) => s
-      .replace(/ä/g, 'ae')
-      .replace(/ö/g, 'oe')
-      .replace(/ü/g, 'ue')
-      .replace(/ß/g, 'ss');
-
-    const translitV = translit(v);
-    const translitA = translit(targetA);
-    const translitB = translit(targetB);
-
-    const isCompleteA = v === targetA || translitV === translitA;
-    const isCompleteB = v === targetB || translitV === translitB;
-    const isComplete = isCompleteA || isCompleteB;
-
-    const matchesPrefixA = targetA.startsWith(v) || translitA.startsWith(translitV);
-    const matchesPrefixB = targetB.startsWith(v) || translitB.startsWith(translitV);
-    const isValid = matchesPrefixA || matchesPrefixB;
-
-    return { isValid, isComplete };
-  }, [parsedNoun]);
+  const targetLetters = useMemo(() => Array.from(activeTarget), [activeTarget]);
 
   const handleTypingSuccess = useCallback(() => {
     setIsTypingSuccess(true);
@@ -2100,25 +2133,22 @@ function RapidFlashcardMode({
     }, 500);
   }, []);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (locked || isTypingSuccess) return;
-    const val = e.target.value;
-    setInputValue(val);
-    playTockSound();
-    if (isError) setIsError(false);
-
-    const { isValid, isComplete } = checkAnswerMatch(val);
-    if (isValid && isComplete) {
-      handleTypingSuccess();
+  const handleCharValidate = useCallback((val: string, targetStr: string) => {
+    if (val.length === targetStr.length) {
+      const isAllMatch = val.split('').every((char, i) => char.toLowerCase() === targetStr[i]?.toLowerCase());
+      if (isAllMatch) {
+        handleTypingSuccess();
+      }
     }
-  };
+  }, [handleTypingSuccess]);
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation();
     if (e.key === 'Enter') {
       e.preventDefault();
-      const { isComplete } = checkAnswerMatch(inputValue);
-      if (isComplete) {
+      const isAllMatch = typedValue.length === activeTarget.length &&
+        typedValue.split('').every((char, i) => char.toLowerCase() === activeTarget[i]?.toLowerCase());
+      if (isAllMatch) {
         handleTypingSuccess();
       } else {
         triggerError();
@@ -2127,32 +2157,19 @@ function RapidFlashcardMode({
   };
 
   const handleTriggerHint = () => {
-    if (locked || isTypingSuccess) return;
-    const targetA = parsedNoun.noun;
-    const targetB = parsedNoun.full;
+    if (locked || isTypingSuccess || showHint) return;
+    setShowHint(true);
+    setTypedValue("");
+    playFeedbackSound(false);
+    speak();
 
-    let nextVal = "";
-    if (inputValue.length === 0) {
-      const target = targetB || targetA;
-      nextVal = target.slice(0, 1);
-    } else if (targetB.toLowerCase().startsWith(inputValue.toLowerCase()) && inputValue.length < targetB.length) {
-      nextVal = targetB.slice(0, inputValue.length + 1);
-    } else if (targetA.toLowerCase().startsWith(inputValue.toLowerCase()) && inputValue.length < targetA.length) {
-      nextVal = targetA.slice(0, inputValue.length + 1);
-    } else {
-      const target = (targetB.toLowerCase().startsWith(inputValue[0]?.toLowerCase())) ? targetB : targetA;
-      nextVal = target.slice(0, 1);
-    }
+    // Call penalty: card.masteryLevel - 1, re-queue card to end of session
+    onHintPenalty?.();
 
-    setInputValue(nextVal);
-    playTockSound();
-    setIsError(false);
-
-    const { isValid, isComplete } = checkAnswerMatch(nextVal);
-    if (isValid && isComplete) {
-      handleTypingSuccess();
-    }
-    inputRef.current?.focus();
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+    errorTimeoutRef.current = setTimeout(() => {
+      setShowHint(false);
+    }, 1800);
   };
 
   const maskedSentence = useMemo(() => {
@@ -2264,9 +2281,12 @@ function RapidFlashcardMode({
         className="w-full flex flex-col items-center"
       >
         <div className="w-full relative">
-          <div className="relative w-full min-h-[420px] md:min-h-[480px] p-6 sm:p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col justify-between items-center">
+          <div 
+            onClick={() => inputRef.current?.focus()}
+            className="relative w-full min-h-[420px] md:min-h-[480px] p-6 sm:p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col justify-between items-center cursor-text"
+          >
             {/* Top Header */}
-            <div className="w-full flex justify-between items-center z-10">
+            <div className="w-full flex justify-between items-center z-20">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -2292,8 +2312,9 @@ function RapidFlashcardMode({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleTriggerHint(); }}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
-                  title="Tipp: Nächsten Buchstaben aufdecken"
+                  disabled={locked || isTypingSuccess || showHint}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
+                  title="Tipp: Richtiges Wort anzeigen (-1)"
                 >
                   <HelpCircle className="w-[18px] h-[18px]" />
                 </button>
@@ -2309,34 +2330,78 @@ function RapidFlashcardMode({
 
               {/* Context sentence with masked target word */}
               {maskedSentence && (
-                <div className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 font-normal text-center max-w-md mx-auto mb-6 italic line-clamp-2 px-3">
+                <div className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 font-normal text-center max-w-md mx-auto mb-4 italic line-clamp-2 px-3">
                   "{maskedSentence}"
                 </div>
               )}
 
-              {/* Interactive Typing Input */}
-              <div className="relative w-full max-w-sm sm:max-w-md flex flex-col items-center my-2">
+              {/* Floating Scientific Hint (1.8s duration) */}
+              <AnimatePresence>
+                {showHint && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                    className="mb-4 px-5 py-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-500 dark:text-amber-300 font-semibold text-lg sm:text-xl tracking-wide shadow-lg backdrop-blur-md flex items-center gap-2 select-none"
+                  >
+                    <span>{activeTarget}</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Interactive Input without blinking caret & per-character visual feedback */}
+              <div className="relative flex items-center justify-center my-4 max-w-full">
+                {/* Real hidden input for native mobile/desktop typing */}
                 <input
                   ref={inputRef}
                   type="text"
-                  value={inputValue}
-                  onChange={handleInputChange}
+                  value={typedValue}
+                  onChange={(e) => {
+                    if (locked || isTypingSuccess || showHint) return;
+                    const converted = convertRuToDeLayout(e.target.value, activeTarget);
+                    if (converted.length > activeTarget.length) return;
+                    setTypedValue(converted);
+                    playTockSound();
+                    if (isError) setIsError(false);
+                    handleCharValidate(converted, activeTarget);
+                  }}
                   onKeyDown={handleInputKeyDown}
-                  disabled={locked || isTypingSuccess}
+                  disabled={locked || isTypingSuccess || showHint}
+                  autoFocus
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  placeholder="Auf Deutsch eingeben..."
-                  className={cn(
-                    "w-full text-center text-xl sm:text-2xl font-medium tracking-wide py-3.5 px-4 rounded-2xl outline-none transition-all duration-200",
-                    "bg-zinc-100/90 dark:bg-white/[0.05] text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-600 border",
-                    isTypingSuccess
-                      ? "border-emerald-500/80 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
-                      : isError
-                      ? "border-rose-500/50 animate-shake"
-                      : "border-zinc-200 dark:border-white/10 hover:border-zinc-300 dark:hover:border-white/20 focus:border-sky-500/80 dark:focus:border-sky-400/80 focus:ring-2 focus:ring-sky-500/20"
-                  )}
+                  className="absolute inset-0 w-full h-full opacity-0 caret-transparent cursor-text z-10"
                 />
+
+                {/* Visual letter cells with per-letter coloring */}
+                <div className={cn(
+                  "flex items-center gap-1.5 flex-wrap justify-center pointer-events-none select-none transition-transform",
+                  isError && "animate-shake"
+                )}>
+                  {targetLetters.map((targetChar, idx) => {
+                    if (targetChar === ' ') {
+                      return <span key={idx} className="w-3 sm:w-4" />;
+                    }
+                    const userChar = typedValue[idx];
+                    let color = 'text-zinc-400 dark:text-zinc-500 border-zinc-200 dark:border-zinc-700/80 bg-zinc-50 dark:bg-white/[0.02]';
+                    if (userChar !== undefined) {
+                      if (userChar.toLowerCase() === targetChar.toLowerCase()) {
+                        color = 'text-emerald-500 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_12px_rgba(16,185,129,0.15)]';
+                      } else {
+                        color = 'text-rose-500 dark:text-rose-400 border-rose-500/50 bg-rose-500/10 shadow-[0_0_12px_rgba(244,63,94,0.15)]';
+                      }
+                    }
+                    return (
+                      <span
+                        key={idx}
+                        className={`w-8 h-10 sm:w-9 sm:h-11 md:w-10 md:h-12 rounded-xl border flex items-center justify-center text-lg sm:text-xl font-semibold transition-all ${color}`}
+                      >
+                        {userChar || '•'}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -2542,6 +2607,30 @@ function RapidSession({
     }, 450);
   }, [locked, queue, wordProgress, answerCard, setCardProgress]);
 
+  const handleHintPenalty = useCallback(() => {
+    if (locked || !queue || queue.length === 0) return;
+    const current = queue[0];
+    const id = current.card.id;
+    const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
+    const currentProgress = wordProgress[id] ?? liveCard.masteryLevel ?? 0;
+    const penalizedProgress = Math.max(0, currentProgress - 1);
+
+    // 1) Update progress and persist penalty immediately
+    setCardProgress(current.deckId, id, penalizedProgress);
+    setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
+    setLocked(true);
+
+    // 2) Record mistake in daily stats pool for focused repetition
+    recordCardResult(false, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
+
+    // 3) After 1.8s (hint overlay display time), push card to END of current session queue
+    timerRef.current = setTimeout(() => {
+      setQueue(q => (q ? [...q.filter(item => item.card.id !== id), current] : q));
+      setTurn(t => t + 1);
+      setLocked(false);
+    }, 1800);
+  }, [locked, queue, wordProgress, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
+
   if (queue === null) return null;
 
   if (queue.length === 0) {
@@ -2598,6 +2687,7 @@ function RapidSession({
             progress={wordProgress[current.card.id] || 0}
             locked={locked}
             onAnswer={handleAnswer}
+            onHintPenalty={handleHintPenalty}
             reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
           />
         </AnimatePresence>
@@ -2665,6 +2755,7 @@ function RapidStudyCard({
         progress={progress}
         locked={locked}
         onAnswer={handleAnswer}
+        onHintPenalty={() => handleAnswer(false)}
         deckTitle={deckTitle}
         reverse={isReverse}
       />
@@ -4027,8 +4118,22 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
     };
   }, [isLangOpen]);
 
+  const [dailyLearnedCount, setDailyLearnedCount] = useState<number>(0);
   const [daily, setDaily] = useState<Record<string, any>>({});
   useEffect(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    try {
+      const lastActiveDate = localStorage.getItem('last_active_date');
+      if (lastActiveDate !== todayStr) {
+        localStorage.setItem('last_active_date', todayStr);
+        localStorage.setItem('daily_learned_count', '0');
+        setDailyLearnedCount(0);
+      } else {
+        const storedCount = localStorage.getItem('daily_learned_count');
+        if (storedCount) setDailyLearnedCount(parseInt(storedCount, 10) || 0);
+      }
+    } catch (e) {}
+
     const loadProgress = () => {
       try {
         const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
@@ -4041,10 +4146,10 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
     return () => window.removeEventListener('storage-update', loadProgress);
   }, [appLanguage]);
 
-  const todayStr = new Date().toLocaleDateString('en-CA');
+  const todayStr = new Date().toISOString().slice(0, 10);
   const rawCount = daily[todayStr];
   const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
-  const displayTodayCount = Math.max(todayCount, stats?.cardsDone || 0);
+  const displayTodayCount = Math.max(todayCount, stats?.cardsDone || 0, dailyLearnedCount);
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
   const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
@@ -7464,10 +7569,12 @@ export default function App() {
 
   useEffect(() => {
     setIsMounted(true);
-    const savedLang = localStorage.getItem('selected_language');
-    if (savedLang === 'DE' || savedLang === 'EN' || savedLang === 'RU') {
-      setAppLanguage(savedLang);
-    }
+    try {
+      const savedLang = localStorage.getItem('selected_language');
+      if (savedLang === 'DE' || savedLang === 'EN' || savedLang === 'RU') {
+        setAppLanguage(savedLang);
+      }
+    } catch (e) {}
     try {
       const savedBookOrder = localStorage.getItem('book_order');
       if (savedBookOrder) {
@@ -7475,20 +7582,22 @@ export default function App() {
         if (Array.isArray(parsedB)) useStore.setState({ bookOrder: parsedB });
       }
     } catch (e) {}
-    const savedOrder = localStorage.getItem('deck_order');
-    if (savedOrder) {
-      try {
+    try {
+      const savedOrder = localStorage.getItem('deck_order');
+      if (savedOrder) {
         const parsed = JSON.parse(savedOrder);
         if (Array.isArray(parsed)) {
           useStore.getState().setDeckOrder(parsed);
         }
-      } catch(e) {}
-    }
-    const savedSpeed = localStorage.getItem('playback_speed');
-    if (savedSpeed) {
-      const speed = parseFloat(savedSpeed);
-      if (!isNaN(speed)) useStore.getState().setPlaybackSpeed(speed);
-    }
+      }
+    } catch(e) {}
+    try {
+      const savedSpeed = localStorage.getItem('playback_speed');
+      if (savedSpeed) {
+        const speed = parseFloat(savedSpeed);
+        if (!isNaN(speed)) useStore.getState().setPlaybackSpeed(speed);
+      }
+    } catch (e) {}
     
     const fetchData = async () => {
       
@@ -7552,7 +7661,7 @@ try {
             });
 
             if (localChanged) {
-              localStorage.setItem(localKey, JSON.stringify(localDaily));
+              safeSetStorage(localKey, JSON.stringify(localDaily));
               window.dispatchEvent(new Event('storage-update'));
             }
             if (cloudChanged) {
@@ -7579,16 +7688,16 @@ try {
           if (globalStat && globalStat.daily_activity) {
             const state = globalStat.daily_activity;
             if (state.deckOrder && Array.isArray(state.deckOrder)) {
-              localStorage.setItem('deck_order', JSON.stringify(state.deckOrder));
+              safeSetStorage('deck_order', JSON.stringify(state.deckOrder));
               useStore.getState().setDeckOrder(state.deckOrder);
             }
             if (state.bookOrder && Array.isArray(state.bookOrder)) {
-              localStorage.setItem('book_order', JSON.stringify(state.bookOrder));
+              safeSetStorage('book_order', JSON.stringify(state.bookOrder));
               useStore.setState({ bookOrder: state.bookOrder });
             }
             if (state.theory) {
               for (const [key, val] of Object.entries(state.theory)) {
-                if (typeof val === 'string') localStorage.setItem(key, val);
+                if (typeof val === 'string') safeSetStorage(key, val);
               }
               window.dispatchEvent(new Event('theory-update'));
             }
