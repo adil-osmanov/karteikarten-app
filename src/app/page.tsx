@@ -463,15 +463,122 @@ export interface Flashcard {
   sentence: string;
   translation: string;
   options: string[];
-  masteryLevel: number; // 0 to 3
+  masteryLevel: number; // 0 to 4
   isArchived: boolean;
   nextReviewDate: number | null;
   interval: number;
   repetitions: number;
+  easeFactor?: number;
   baseWordInfo?: string | null;
   forms?: string | null;
   hint?: string | null;
 }
+
+export interface CardSRSUpdate {
+  masteryLevel: number;
+  isArchived: boolean;
+  repetitions: number;
+  interval: number;
+  easeFactor: number;
+  nextReviewDate: number | null;
+}
+
+export function calculateNextSRSState(
+  card: any,
+  isCorrect: boolean,
+  isHilfe: boolean
+): CardSRSUpdate {
+  const currentEase = typeof card.easeFactor === 'number' ? card.easeFactor : 2.2;
+  const currentReps = card.repetitions || 0;
+  const currentInterval = card.interval || 0;
+  const currentMastery = card.masteryLevel || 0;
+  const isArchived = Boolean(card.isArchived);
+
+  // -------------------------------------------------------------
+  // ФАЗА 1: ПЕРВИЧНОЕ ОСВОЕНИЕ (Карточка еще не в архиве SRS)
+  // -------------------------------------------------------------
+  if (!isArchived) {
+    if (isCorrect && !isHilfe) {
+      const newMastery = currentMastery + 1;
+      
+      // Выпуск в долгосрочную память (порог 4 успешных ответа)
+      if (newMastery >= 4) {
+        return {
+          masteryLevel: 4,
+          isArchived: true,
+          repetitions: 1,
+          interval: 1,
+          easeFactor: currentEase,
+          nextReviewDate: Date.now() + 1 * 86400000 // Завтра (+24ч)
+        };
+      }
+
+      return {
+        masteryLevel: newMastery,
+        isArchived: false,
+        repetitions: 0,
+        interval: 0,
+        easeFactor: currentEase,
+        nextReviewDate: null
+      };
+    } else {
+      // Ошибка на первичном этапе: мягкий штраф
+      return {
+        masteryLevel: Math.max(0, currentMastery - 1),
+        isArchived: false,
+        repetitions: 0,
+        interval: 0,
+        easeFactor: Number(Math.max(1.3, currentEase - 0.1).toFixed(2)),
+        nextReviewDate: null
+      };
+    }
+  }
+
+  // -------------------------------------------------------------
+  // ФАЗА 2: ДОЛГОСРОЧНОЕ ПОВТОРЕНИЕ (SRS для карточек из архива)
+  // -------------------------------------------------------------
+  if (isCorrect && !isHilfe) {
+    // Успешное извлечение из памяти
+    const newReps = currentReps + 1;
+    let nextInterval = 1;
+
+    if (newReps === 1) {
+      nextInterval = 1;
+    } else if (newReps === 2) {
+      nextInterval = 3;
+    } else {
+      // Экспоненциальный рост с учетом индивидуальной легкости слова
+      nextInterval = Math.max(newReps >= 3 ? 6 : 3, Math.round(currentInterval * currentEase));
+    }
+
+    // Легкость слова слегка повышается (макс 2.8)
+    const newEase = Math.min(2.8, currentEase + 0.05);
+
+    return {
+      masteryLevel: 4,
+      isArchived: true,
+      repetitions: newReps,
+      interval: nextInterval,
+      easeFactor: Number(newEase.toFixed(2)),
+      nextReviewDate: Date.now() + nextInterval * 86400000
+    };
+  } else {
+    // ЗАБЫВАНИЕ (Lapse): Сбой при долгосрочном повторении
+    // Критически важно: интервал сбрасывается на 1 день (реконсолидация следа),
+    // а easeFactor снижается, чтобы слово росло медленнее.
+    const newEase = Math.max(1.3, currentEase - 0.2);
+
+    return {
+      masteryLevel: 3, // откат в предвыпускное состояние
+      isArchived: true,
+      repetitions: 0,  // сброс серии
+      interval: 1,     // ОБЯЗАТЕЛЬНО повторить завтра!
+      easeFactor: Number(newEase.toFixed(2)),
+      nextReviewDate: Date.now() + 1 * 86400000
+    };
+  }
+}
+
 
 export interface GenderMatrixItem {
   gender: 'maskulin' | 'neutral' | 'feminin' | 'plural' | string;
@@ -880,6 +987,7 @@ const useStore = create<DeckState>()((set, get) => ({
       nextReviewDate: c.nextReviewDate || null,
       interval: c.interval || 0,
       repetitions: c.repetitions || 0,
+      easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : 2.2,
       baseWordInfo: c.baseWordInfo || null
     })).filter(c => c.targetWord.length > 0);
     
@@ -888,8 +996,14 @@ const useStore = create<DeckState>()((set, get) => ({
       const chunkSize = 100;
       for (let i = 0; i < cardsToInsert.length; i += chunkSize) {
         const chunk = cardsToInsert.slice(i, i + chunkSize);
-        const { error: cardsError } = await supabase.from('cards').insert(chunk);
+        let { error: cardsError } = await supabase.from('cards').insert(chunk);
         
+        if (cardsError && (cardsError.code === 'PGRST204' || cardsError.message?.includes('easeFactor'))) {
+          const fallbackChunk = chunk.map(({ easeFactor, ...rest }: any) => rest);
+          const retry = await supabase.from('cards').insert(fallbackChunk);
+          cardsError = retry.error;
+        }
+
         if (cardsError) {
           console.error('[Supabase Insert Cards Error]:', cardsError);
           // Rollback deck insert if cards fail
@@ -969,10 +1083,16 @@ const useStore = create<DeckState>()((set, get) => ({
         nextReviewDate: c.nextReviewDate || null,
         interval: c.interval || 0,
         repetitions: c.repetitions || 0,
+        easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : 2.2,
         baseWordInfo: c.baseWordInfo || null
       }));
 
-      const { error: insertCardsError } = await supabase.from('cards').insert(cardsToInsert);
+      let { error: insertCardsError } = await supabase.from('cards').insert(cardsToInsert);
+      if (insertCardsError && (insertCardsError.code === 'PGRST204' || insertCardsError.message?.includes('easeFactor'))) {
+        const fallbackCards = cardsToInsert.map(({ easeFactor, ...rest }: any) => rest);
+        const retry = await supabase.from('cards').insert(fallbackCards);
+        insertCardsError = retry.error;
+      }
       if (insertCardsError) {
         console.error('[Supabase Insert Replacement Cards Error]:', insertCardsError);
         throw new Error(`Не удалось сохранить новые карточки: ${insertCardsError.message} (${insertCardsError.details || ''})`);
@@ -1038,7 +1158,7 @@ const useStore = create<DeckState>()((set, get) => ({
       get().incrementDailyProgress();
     }
     const previousDecks = get().decks;
-    let updatedCard: any = null;
+    let updatedCard: Flashcard | null = null;
 
     set((state) => {
       const newDecks = [...state.decks];
@@ -1049,58 +1169,8 @@ const useStore = create<DeckState>()((set, get) => ({
       if (cardIndex === -1) return state;
 
       const card = { ...deck.cards[cardIndex] };
-
-      if (card.isArchived) {
-        if (isCorrect && !isHilfe) {
-          card.repetitions = (card.repetitions || 0) + 1;
-          const r = card.repetitions;
-          if (r === 1) card.interval = 1;
-          else if (r === 2) card.interval = 3;
-          else if (r === 3) card.interval = 7;
-          else if (r === 4) card.interval = 14;
-          else if (r === 5) card.interval = 30;
-          else if (r === 6) card.interval = 60;
-          else if (r === 7) card.interval = 120;
-          else card.interval = (card.interval || 120) * 2;
-          card.nextReviewDate = Date.now() + card.interval * 86400000;
-        } else {
-          // SRS Penalty: Drop by 2 repetition levels instead of full reset
-          card.repetitions = Math.max(0, (card.repetitions || 1) - 2);
-          
-          if (card.repetitions === 0) {
-            // Drop back to learning phase, but keep mastery high (2) so they just review it a bit
-            card.isArchived = false;
-            card.masteryLevel = 2;
-            card.interval = 0;
-            card.nextReviewDate = null;
-          } else {
-            const r = card.repetitions;
-            if (r === 1) card.interval = 1;
-            else if (r === 2) card.interval = 3;
-            else if (r === 3) card.interval = 7;
-            else if (r === 4) card.interval = 14;
-            else if (r === 5) card.interval = 30;
-            else if (r === 6) card.interval = 60;
-            else if (r === 7) card.interval = 120;
-            else card.interval = Math.max(1, Math.floor((card.interval || 120) * 0.5));
-            // nextReviewDate remains unchanged or will be updated when they answer correctly later in this session
-          }
-        }
-      } else {
-        if (isCorrect && !isHilfe) {
-          card.masteryLevel += 1;
-          if (card.masteryLevel > 3) {
-            card.masteryLevel = 3;
-            card.isArchived = true;
-            card.repetitions = 1;
-            card.interval = 1;
-            card.nextReviewDate = Date.now() + 86400000;
-          }
-        } else {
-          // Penalty: only drop 1 mastery level for any mistake (wrong option or Hilfe)
-          card.masteryLevel = Math.max(0, card.masteryLevel - 1);
-        }
-      }
+      const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe);
+      Object.assign(card, srsUpdate);
 
       deck.cards[cardIndex] = card;
       updatedCard = card;
@@ -1109,13 +1179,29 @@ const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (updatedCard) {
-      const { error } = await supabase.from('cards').update({
-        masteryLevel: updatedCard.masteryLevel,
-        isArchived: updatedCard.isArchived,
-        nextReviewDate: updatedCard.nextReviewDate,
-        interval: updatedCard.interval,
-        repetitions: updatedCard.repetitions
-      }).eq('id', cardId);
+      const validCard = updatedCard as Flashcard;
+      try {
+        const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
+        localFactors[cardId] = validCard.easeFactor ?? 2.2;
+        localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
+      } catch (e) {}
+
+      const fullUpdate = {
+        masteryLevel: validCard.masteryLevel,
+        isArchived: validCard.isArchived,
+        nextReviewDate: validCard.nextReviewDate,
+        interval: validCard.interval,
+        repetitions: validCard.repetitions,
+        easeFactor: validCard.easeFactor
+      };
+
+      let { error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId);
+
+      if (error && (error.code === 'PGRST204' || error.message?.includes('easeFactor'))) {
+        const { easeFactor, ...withoutEase } = fullUpdate;
+        const retry = await supabase.from('cards').update(withoutEase).eq('id', cardId);
+        error = retry.error;
+      }
       
       if (error) {
         console.error("Supabase Update Card Error:", error.message);
@@ -1127,7 +1213,7 @@ const useStore = create<DeckState>()((set, get) => ({
   // Rapid flashcards: persist the 0-4 round score of a word. 4 => archived (learned).
   setCardProgress: async (deckId, cardId, score) => {
     const previousDecks = get().decks;
-    let updatedCard: any = null;
+    let updatedCard: Flashcard | null = null;
     if (score >= 4) get().incrementDailyProgress();
 
     set((state) => {
@@ -1138,11 +1224,8 @@ const useStore = create<DeckState>()((set, get) => ({
       if (ci === -1) return state;
       const card = { ...deck.cards[ci] };
       if (score >= 4) {
-        card.masteryLevel = 3;
-        card.isArchived = true;
-        card.repetitions = 1;
-        card.interval = 1;
-        card.nextReviewDate = Date.now() + 86400000;
+        const srsUpdate = calculateNextSRSState({ ...card, masteryLevel: 3, isArchived: false }, true, false);
+        Object.assign(card, srsUpdate);
       } else {
         card.masteryLevel = Math.max(0, Math.min(3, score));
       }
@@ -1154,13 +1237,30 @@ const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (updatedCard) {
-      const { error } = await supabase.from('cards').update({
-        masteryLevel: updatedCard.masteryLevel,
-        isArchived: updatedCard.isArchived,
-        nextReviewDate: updatedCard.nextReviewDate,
-        interval: updatedCard.interval,
-        repetitions: updatedCard.repetitions
-      }).eq('id', cardId);
+      const validCard = updatedCard as Flashcard;
+      try {
+        const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
+        localFactors[cardId] = validCard.easeFactor ?? 2.2;
+        localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
+      } catch (e) {}
+
+      const fullUpdate = {
+        masteryLevel: validCard.masteryLevel,
+        isArchived: validCard.isArchived,
+        nextReviewDate: validCard.nextReviewDate,
+        interval: validCard.interval,
+        repetitions: validCard.repetitions,
+        easeFactor: validCard.easeFactor
+      };
+
+      let { error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId);
+
+      if (error && (error.code === 'PGRST204' || error.message?.includes('easeFactor'))) {
+        const { easeFactor, ...withoutEase } = fullUpdate;
+        const retry = await supabase.from('cards').update(withoutEase).eq('id', cardId);
+        error = retry.error;
+      }
+
       if (error) {
         console.error("Supabase Update Card Error:", error.message);
         set({ decks: previousDecks });
@@ -2649,6 +2749,7 @@ function StudyInterface({
               card={liveCard}
               deckTitle={currentDeck?.name}
               isReview={Boolean(reviewCards || isInitialArchivedDeck || liveCard.isArchived)}
+              reverse={Boolean(reviewCards) ? true : undefined}
               onAnswer={(correct, isHilfe) => {
                 const isActualCorrect = correct && !isHilfe;
                 recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
@@ -7299,10 +7400,20 @@ try {
               theory: deckTheory,
               materials: deckMaterials,
               card_count: d.card_count || d.cards?.length || 15,
-              cards: d.cards ? d.cards.map((c: any) => ({
-                ...c,
-                baseWordInfo: c.baseWordInfo || null
-              })) : [],
+              cards: d.cards ? d.cards.map((c: any) => {
+                let ease = typeof c.easeFactor === 'number' ? c.easeFactor : undefined;
+                if (ease === undefined && typeof window !== 'undefined') {
+                  try {
+                    const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
+                    ease = localFactors[c.id];
+                  } catch (e) {}
+                }
+                return {
+                  ...c,
+                  baseWordInfo: c.baseWordInfo || null,
+                  easeFactor: typeof ease === 'number' ? ease : 2.2
+                };
+              }) : [],
               language: d.language || langMap[d.id] || 'DE',
               bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
             };
