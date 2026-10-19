@@ -2428,7 +2428,7 @@ function RapidFlashcardMode({
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  placeholder={isSurrendered ? '' : 'Auf Deutsch eingeben...'}
+                  placeholder=""
                   className={cn(
                     "w-full text-center text-xl sm:text-2xl font-medium tracking-wide rounded-2xl py-3.5 px-6 outline-none transition-all duration-200 caret-transparent placeholder:text-zinc-400 dark:placeholder:text-zinc-600 border",
                     isSuccessFeedback
@@ -8637,6 +8637,7 @@ try {
             onRegenerate={() => handleOpenStory(storyReaderDeckId, true)}
             isGenerating={isGeneratingStory}
             language={appLanguage}
+            onFeedbackSound={playFeedbackSound}
           />
         )}
       </AnimatePresence>
