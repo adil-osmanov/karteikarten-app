@@ -4057,31 +4057,31 @@ const DeckCard = React.memo(({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); initAudioCtx(); onOpenStory(deck.id); }}
-                className="h-6 px-2 rounded-md bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/20 text-xs font-medium flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
-                title="Lesetext (Story Reader)"
+                className="w-8 h-8 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] active:scale-95 border border-black/[0.06] dark:border-white/[0.06] flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
+                title="Lesetext (Режим чтения)"
               >
-                <BookOpen className="w-3 h-3 text-sky-500 dark:text-sky-400" />
-                <span className="text-[11px] font-semibold tracking-tight">Lesetext</span>
+                <BookOpen className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />
               </button>
             )}
             {!isVerbBook && (
-              <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-black/5 dark:bg-white/5 text-zinc-500 dark:text-zinc-400 text-xs">
+              <>
                 <button
+                  type="button"
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
-                  className="hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
-                  title="Diktat-Modus"
+                  className="w-8 h-8 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] active:scale-95 border border-black/[0.06] dark:border-white/[0.06] flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
+                  title="Diktat / Schreiben (Письмо)"
                 >
-                  <Keyboard className="w-3.5 h-3.5" />
+                  <Keyboard className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />
                 </button>
-                <div className="h-2.5 w-[1px] bg-black/10 dark:bg-white/10" />
                 <button
+                  type="button"
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
-                  className="hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
-                  title="Shadowing-Modus"
+                  className="w-8 h-8 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] active:scale-95 border border-black/[0.06] dark:border-white/[0.06] flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
+                  title="Shadowing / Hören (Аудио)"
                 >
-                  <Mic className="w-3.5 h-3.5" />
+                  <Mic className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />
                 </button>
-              </div>
+              </>
             )}
           </div>
           <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400 ml-auto tabular-nums">
@@ -4186,6 +4186,117 @@ function parseCardsFromCSV(text: string, isRedemittel: boolean, isRapidMode: boo
     }
   });
   return cards;
+}
+
+function CreateTopicModal({
+  isOpen,
+  onClose,
+  level,
+  category,
+  onCreate,
+  onImportFile
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  level: CEFRLevel;
+  category: string;
+  onCreate: (title: string, level: CEFRLevel) => Promise<void>;
+  onImportFile: () => void;
+}) {
+  useScrollLock(isOpen);
+  const [title, setTitle] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setTitle('');
+      setIsSubmitting(false);
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!title.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onCreate(title.trim(), level);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 dark:bg-black/70 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-3xl bg-white dark:bg-[#1C1C1E] p-6 sm:p-8 shadow-2xl border border-black/5 dark:border-white/10 text-zinc-900 dark:text-[#F2F2F7] relative"
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-6 right-6 w-8 h-8 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        <div className="flex items-center gap-2 mb-2">
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-mono">
+            {level}
+          </span>
+          <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">
+            {category}
+          </span>
+        </div>
+
+        <h3 className="text-xl font-bold tracking-tight mb-1">
+          Neues Thema erstellen
+        </h3>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-6">
+          Gib einen Namen ein oder importiere Karten aus einer Datei.
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+              Name des Themas
+            </label>
+            <input
+              type="text"
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="z. B. Konjunktiv II, Im Restaurant..."
+              className="w-full px-4 py-3 rounded-2xl bg-zinc-100 dark:bg-white/5 border border-black/5 dark:border-white/10 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium transition-all"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2 pt-2">
+            <button
+              type="submit"
+              disabled={!title.trim() || isSubmitting}
+              className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-all active:scale-[0.98] shadow-md shadow-blue-500/20 disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              <span>Thema erstellen</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onImportFile}
+              className="w-full py-3 rounded-2xl bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-zinc-700 dark:text-zinc-300 font-medium text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <FileUp className="w-4 h-4 text-zinc-400" />
+              <span>CSV / TXT importieren...</span>
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </div>
+  );
 }
 
 function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
@@ -6921,6 +7032,7 @@ export default function App() {
   const [bookModal, setBookModal] = useState<{ id?: string } | null>(null);
   
   const [uploadTarget, setUploadTarget] = useState<{ category: string, level: CEFRLevel } | null>(null);
+  const [createTopicModal, setCreateTopicModal] = useState<{ category: string, level: CEFRLevel } | null>(null);
   const [renameModal, setRenameModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ id: string, name: string } | null>(null);
   const [deleteBookModal, setDeleteBookModal] = useState<{ id: string, title: string } | null>(null);
@@ -6939,13 +7051,13 @@ export default function App() {
   const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
 
   useEffect(() => {
-    if (renameModal || deleteModal || bookModal || deleteBookModal) {
+    if (renameModal || deleteModal || bookModal || deleteBookModal || createTopicModal) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
     }
     return () => { document.body.style.overflow = 'unset'; };
-  }, [renameModal, deleteModal, bookModal, deleteBookModal]);
+  }, [renameModal, deleteModal, bookModal, deleteBookModal, createTopicModal]);
 
 
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
@@ -7816,10 +7928,92 @@ try {
   };
 
   const handlePlusClick = (category: string, level: CEFRLevel) => {
-    setUploadTarget({ category, level });
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-      fileInputRef.current.click();
+    setCreateTopicModal({ category, level });
+  };
+
+  const handleCreateTopic = async (title: string, level: CEFRLevel) => {
+    if (!title.trim()) return;
+
+    const newTopicId = crypto.randomUUID();
+    const activeBook = books.find(b => b.id === activeBookId);
+    const currentBookId = activeBookId || (useStore.getState().appLanguage === 'EN' ? 'default-en' : 'default-de');
+    const targetLang = (activeBook?.language as any) || useStore.getState().appLanguage || 'DE';
+    const category = (activeTab && activeTab.toLowerCase().includes('wört')) ? 'Wörter' : 'Grammatik';
+
+    // 1. Optimistic Update on client
+    const optimisticDeck: Deck = {
+      id: newTopicId,
+      name: title.trim(),
+      category: category,
+      level: level,
+      cards: [],
+      card_count: 0,
+      language: targetLang,
+      bookId: currentBookId,
+      materials: []
+    };
+
+    const previousDecks = useStore.getState().decks;
+    useStore.setState({ decks: [optimisticDeck, ...previousDecks] });
+    setCreateTopicModal(null);
+
+    // 2. Persist to Supabase
+    try {
+      const payload: any = {
+        id: newTopicId,
+        name: title.trim(),
+        category: category,
+        level: level,
+        book_id: currentBookId,
+        language: targetLang,
+        card_count: 0
+      };
+
+      console.log('[Supabase] Inserting topic/deck into decks:', payload);
+
+      const { data, error } = await supabase
+        .from('decks')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Ошибка добавления темы в Supabase (decks):', error.message, error.details);
+        // Also try topics table if public.topics exists
+        const { error: topicsError } = await supabase
+          .from('topics')
+          .insert([{
+            id: newTopicId,
+            book_id: currentBookId,
+            title: title.trim(),
+            name: title.trim(),
+            level: level,
+            category: category.toLowerCase().includes('wört') ? 'woerter' : 'grammatik',
+            cards: [],
+            created_at: new Date().toISOString()
+          }]);
+
+        if (topicsError) {
+          console.error('Ошибка добавления темы в Supabase (topics):', topicsError.message, topicsError.details);
+          // Rollback on error
+          useStore.setState({ decks: previousDecks });
+          alert(`Ошибка добавления темы: ${error.message || topicsError.message}`);
+          return;
+        }
+      }
+
+      console.log('Тема успешно сохранена в Supabase:', newTopicId);
+
+      // Local storage cache
+      if (typeof window !== 'undefined') {
+        try {
+          safeSetStorage('cached_app_decks', JSON.stringify([optimisticDeck, ...previousDecks]));
+        } catch (e) {}
+      }
+    } catch (err: any) {
+      console.error('Критический сбой создания:', err);
+      useStore.setState({ decks: previousDecks });
+      alert(`Критический сбой создания: ${err?.message || err}`);
     }
   };
 
@@ -7999,6 +8193,26 @@ try {
             onRegenerate={() => handleOpenStory(storyReaderDeckId, true)}
             isGenerating={isGeneratingStory}
             language={appLanguage}
+          />
+        )}
+        {createTopicModal && (
+          <CreateTopicModal
+            isOpen={Boolean(createTopicModal)}
+            onClose={() => setCreateTopicModal(null)}
+            level={createTopicModal.level}
+            category={createTopicModal.category}
+            onCreate={handleCreateTopic}
+            onImportFile={() => {
+              const target = { ...createTopicModal };
+              setCreateTopicModal(null);
+              setUploadTarget(target);
+              setTimeout(() => {
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = "";
+                  fileInputRef.current.click();
+                }
+              }, 50);
+            }}
           />
         )}
       </AnimatePresence>
