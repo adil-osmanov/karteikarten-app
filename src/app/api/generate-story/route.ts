@@ -40,7 +40,7 @@ function getGroqApiKeys(): string[] {
 
 export async function POST(req: NextRequest) {
   try {
-    const { topicId, title, words, direction = 'de-ru' } = await req.json();
+    const { topicId, title, words = [] } = await req.json();
 
     if (!words || !Array.isArray(words) || words.length === 0) {
       return NextResponse.json({ error: 'Список слов пуст' }, { status: 400 });
@@ -52,35 +52,31 @@ export async function POST(req: NextRequest) {
       .slice(0, 30)
       .join('\n');
 
-    const prompt = `Ты — автор аутентичных диалогов для подготовки к экзаменам telc/Goethe B2.
-На основе переданных слов составь ЖИВОЙ ДИАЛОГ из реальной профессиональной жизни в Германии (собеседование, общение коллег, звонок клиенту, производственная ситуация) на тему "${title || 'Praxis-Dialog'}".
-
-ТРЕБОВАНИЯ:
-1. Живой, естественный диалог между двумя собеседниками (6-10 содержательных реплик).
-2. Органично вплети как можно больше целевых слов из списка ниже.
-3. Каждая реплика содержит естественный перевод на русский язык.
-4. В поле "highlightWords" укажи точные слова из списка, использованные в реплике (в начальной или словоизменительной форме).
-5. "situation" — емкое введение в контекст ситуации на немецком (1-2 предложения).
-6. "keyTakeaway" — главное практическое правило/фраза из диалога для уровня B2 (например: "Merke: ...").
-
-СПИСОК ЦЕЛЕВЫХ СЛОВ:
+    const prompt = `Ты — профессиональный немецкий публицист и преподаватель уровня B1-B2.
+Напиши связный, живой, увлекательный немецкий рассказ или статью (150–200 слов) на тему: "${title || 'Geschichte'}".
+ОБЯЗАТЕЛЬНО органично и грамматически корректно используй все указанные слова:
 ${wordsList}
 
-ФОРМАТ ВЫХОДНОГО JSON (СТРОГО ВАЛИДНЫЙ JSON БЕЗ ЛИШНЕГО ТЕКСТА И БЕЗ MARKDOWN):
+ТРЕБОВАНИЯ К ФОРМАТУ:
+- Это должен быть СВЯЗНЫЙ ТЕКСТ (не диалог с "Erzähler", а настоящая история или статья из жизни/работы в Германии).
+- Разбей текст на 2–3 логических абзаца (paragraphs).
+- Каждое предложение должно иметь естественный русский перевод.
+
+ФОРМАТ JSON:
 {
-  "title": "${title || 'Vorstellungsgespräch bei Futurix'}",
-  "situation": "Краткое описание контекста ситуации на немецком (1-2 емких предложения)",
-  "dialogue": [
+  "title": "${title || 'Lesetext'}",
+  "paragraphs": [
     {
-      "speaker": "Имя или роль (напр. Herr Wagner, Personalleiter)",
-      "avatar": "HW",
-      "text": "Реплика на немецком языке.",
-      "translation": "Естественный русский перевод реплики.",
-      "highlightWords": ["слово1", "слово2"]
+      "sentences": [
+        {
+          "text": "Текст предложения на немецком с правильной пунктуацией.",
+          "translation": "Естественный русский перевод этого предложения."
+        }
+      ]
     }
-  ],
-  "keyTakeaway": "Главное практическое правило/фраза из диалога для уровня B2"
-}`;
+  ]
+}
+Строго валидный JSON без markdown оберток.`;
 
     const keys = getGroqApiKeys();
     if (keys.length === 0) {
@@ -112,13 +108,13 @@ ${wordsList}
               model,
               messages: [{ role: 'user', content: prompt }],
               response_format: { type: 'json_object' },
-              temperature: 0.4
+              temperature: 0.5
             })
           });
 
           if (res.ok) {
             const json = await res.json();
-            responseText = json.choices?.[0]?.message?.content || '';
+            responseText = json.choices[0]?.message?.content || '';
             if (responseText) break;
           } else {
             const errJson = await res.json().catch(() => null);
