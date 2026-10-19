@@ -190,17 +190,15 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
   if (!cloudRaw || typeof cloudRaw !== 'object') return current;
 
   const todayKey = getTodayKey();
-  const todayIso = new Date().toISOString().split('T')[0];
-
   const cloudPool = Array.isArray(cloudRaw.mistakesPool) ? cloudRaw.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : [];
   const mergedPool = mergeMistakesPools(current.mistakesPool || [], cloudPool);
 
-  const isCloudToday = cloudRaw.date === todayKey || cloudRaw.date === todayIso;
+  const isCloudToday = cloudRaw.date === todayKey;
 
-  let maxActiveSeconds = current.activeSeconds || 0;
-  let maxCardsDone = current.cardsDone || 0;
-  let maxCorrectCount = current.correctCount || 0;
-  let maxMistakesToday = current.mistakesCountToday || 0;
+  let maxActiveSeconds = current.date === todayKey ? (current.activeSeconds || 0) : 0;
+  let maxCardsDone = current.date === todayKey ? (current.cardsDone || 0) : 0;
+  let maxCorrectCount = current.date === todayKey ? (current.correctCount || 0) : 0;
+  let maxMistakesToday = current.date === todayKey ? (current.mistakesCountToday || 0) : 0;
 
   if (isCloudToday) {
     if (typeof cloudRaw.activeSeconds === 'number' && cloudRaw.activeSeconds > maxActiveSeconds) {
@@ -320,8 +318,6 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
   try {
     const normLang = normalizeLanguage(lang);
     const todayStr = getTodayKey();
-    const todayIso = new Date().toISOString().split('T')[0];
-    const dateKeys = [todayStr, todayIso];
 
     let maxFound = 0;
     const activityKeys = [
@@ -333,11 +329,9 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed && typeof parsed === 'object') {
-          for (const k of dateKeys) {
-            const raw = parsed[k];
-            const count = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
-            if (count > maxFound) maxFound = count;
-          }
+          const raw = parsed[todayStr];
+          const count = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
+          if (count > maxFound) maxFound = count;
         }
       }
     }
@@ -350,7 +344,7 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
       const savedAppStats = localStorage.getItem(sKey);
       if (savedAppStats) {
         const parsed = JSON.parse(savedAppStats);
-        const isToday = parsed && (parsed.date === todayStr || parsed.date === todayIso);
+        const isToday = parsed && parsed.date === todayStr;
         if (isToday && typeof parsed?.cardsDone === 'number' && parsed.cardsDone > maxFound) {
           maxFound = parsed.cardsDone;
         }
@@ -366,7 +360,6 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
 function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
   const normLang = normalizeLanguage(lang);
   const todayKey = getTodayKey();
-  const todayIso = new Date().toISOString().split('T')[0];
   const realTodayCards = getTodayCompletedCardsCount(normLang);
 
   if (typeof window === 'undefined') {
@@ -390,12 +383,11 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
   }
 
   let mergedPool: any[] = [];
-  let bestDate = todayKey;
   let maxActiveSeconds = 0;
   let maxCardsDone = realTodayCards;
   let maxMistakesToday = 0;
   let maxCorrectCount = realTodayCards;
-  let foundAnySaved = false;
+  let foundTodaySaved = false;
 
   for (const key of candidateKeys) {
     try {
@@ -403,16 +395,15 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
       if (!raw) continue;
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') continue;
-      foundAnySaved = true;
 
       // Merge mistake cards safely
       if (Array.isArray(parsed.mistakesPool)) {
         mergedPool = mergeMistakesPools(mergedPool, parsed.mistakesPool);
       }
 
-      const isCurrentDay = parsed.date === todayKey || parsed.date === todayIso;
+      const isCurrentDay = parsed.date === todayKey;
       if (isCurrentDay) {
-        bestDate = todayKey;
+        foundTodaySaved = true;
         if (typeof parsed.activeSeconds === 'number' && parsed.activeSeconds > maxActiveSeconds) {
           maxActiveSeconds = parsed.activeSeconds;
         }
@@ -437,39 +428,28 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
     localStorage.removeItem('app_daily_stats');
   } catch (e) {}
 
-  if (foundAnySaved) {
-    const finalMistakesToday = Math.max(maxMistakesToday, mergedPool.length);
-    const finalCardsDone = Math.max(maxCardsDone, realTodayCards);
-    let finalCorrectCount = Math.max(maxCorrectCount, finalCardsDone - finalMistakesToday);
-    if (finalCardsDone > 0 && finalCorrectCount + finalMistakesToday < finalCardsDone) {
-      finalCorrectCount = Math.max(0, finalCardsDone - finalMistakesToday);
-    }
-
-    const result: DailyStats = {
-      date: bestDate,
-      activeSeconds: maxActiveSeconds,
-      cardsDone: finalCardsDone,
-      correctCount: finalCorrectCount,
-      mistakesCountToday: finalMistakesToday,
-      mistakesPool: mergedPool
-    };
-
-    // Save consolidated canonical state
-    const serialized = JSON.stringify(result);
-    safeSetStorage(`app_daily_stats_${normLang}`, serialized);
-    setStatsInIDB(normLang, result);
-
-    return result;
+  const finalMistakesToday = foundTodaySaved ? Math.max(maxMistakesToday, mergedPool.length) : mergedPool.length;
+  const finalCardsDone = foundTodaySaved ? Math.max(maxCardsDone, realTodayCards) : realTodayCards;
+  let finalCorrectCount = foundTodaySaved ? Math.max(maxCorrectCount, finalCardsDone - finalMistakesToday) : realTodayCards;
+  if (finalCardsDone > 0 && finalCorrectCount + finalMistakesToday < finalCardsDone) {
+    finalCorrectCount = Math.max(0, finalCardsDone - finalMistakesToday);
   }
 
-  return { 
-    date: todayKey, 
-    activeSeconds: 0, 
-    cardsDone: realTodayCards, 
-    correctCount: realTodayCards, 
-    mistakesCountToday: 0, 
-    mistakesPool: [] 
+  const result: DailyStats = {
+    date: todayKey,
+    activeSeconds: foundTodaySaved ? maxActiveSeconds : 0,
+    cardsDone: finalCardsDone,
+    correctCount: finalCorrectCount,
+    mistakesCountToday: foundTodaySaved ? maxMistakesToday : 0,
+    mistakesPool: mergedPool
   };
+
+  // Save consolidated canonical state
+  const serialized = JSON.stringify(result);
+  safeSetStorage(`app_daily_stats_${normLang}`, serialized);
+  setStatsInIDB(normLang, result);
+
+  return result;
 }
 
 // In-memory cache & listeners per language
@@ -480,10 +460,51 @@ const activeStudyCounts: Record<string, number> = {};
 let timerInitialized = false;
 let lastActivityTime = Date.now();
 
+export function resetDayStatsToZero(lang?: string) {
+  if (typeof window === 'undefined') return;
+  const todayKey = getTodayKey();
+  const langs = lang ? [normalizeLanguage(lang)] : ['DE', 'EN', 'RU'];
+  langs.forEach(l => {
+    const cur = statsByLang[l] || { mistakesPool: [] };
+    const resetStats: DailyStats = {
+      date: todayKey,
+      activeSeconds: 0,
+      cardsDone: 0,
+      correctCount: 0,
+      mistakesCountToday: 0,
+      mistakesPool: cur.mistakesPool || []
+    };
+    statsByLang[l] = resetStats;
+    safeSetStorage(`app_daily_stats_${l}`, JSON.stringify(resetStats));
+    safeSetStorage(`app_daily_stats_${l.toLowerCase()}`, JSON.stringify(resetStats));
+    setStatsInIDB(l, resetStats);
+    if (listenersByLang[l]) {
+      listenersByLang[l].forEach(fn => fn(resetStats));
+    }
+  });
+  window.dispatchEvent(new CustomEvent('stats-update'));
+}
+
 function getOrCreateStats(lang: string = 'DE'): DailyStats {
   const normLang = normalizeLanguage(lang);
   if (!statsByLang[normLang]) {
     statsByLang[normLang] = loadInitialStatsForLang(normLang);
+  }
+  const current = statsByLang[normLang];
+  const today = getTodayKey();
+  if (current.date !== today) {
+    const realToday = getTodayCompletedCardsCount(normLang);
+    statsByLang[normLang] = {
+      date: today,
+      activeSeconds: 0,
+      cardsDone: realToday,
+      correctCount: realToday,
+      mistakesCountToday: 0,
+      mistakesPool: current.mistakesPool || []
+    };
+    safeSetStorage(`app_daily_stats_${normLang}`, JSON.stringify(statsByLang[normLang]));
+    safeSetStorage(`app_daily_stats_${normLang.toLowerCase()}`, JSON.stringify(statsByLang[normLang]));
+    setStatsInIDB(normLang, statsByLang[normLang]);
   }
   return statsByLang[normLang];
 }

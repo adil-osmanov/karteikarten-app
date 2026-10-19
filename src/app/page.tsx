@@ -20,7 +20,7 @@ import { supabase } from "@/lib/supabase";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
-import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 
@@ -47,6 +47,21 @@ export const checkAndResetDailyProgress = () => {
       localStorage.setItem('app_daily_counter_date', todayStr);
       localStorage.setItem('last_active_date', todayStr);
       localStorage.setItem('daily_learned_count', '0');
+
+      ['DE', 'EN', 'RU'].forEach(lang => {
+        try {
+          const actKey = `daily_activity_${lang}`;
+          const stored = localStorage.getItem(actKey);
+          let progress: Record<string, any> = {};
+          if (stored) progress = JSON.parse(stored);
+          if (progress[todayStr] === undefined) {
+            progress[todayStr] = 0;
+            localStorage.setItem(actKey, JSON.stringify(progress));
+          }
+        } catch (e) {}
+      });
+
+      resetDayStatsToZero();
       window.dispatchEvent(new Event('storage-update'));
     }
   } catch (err) {
@@ -2067,19 +2082,6 @@ function RapidFlashcardMode({
     });
   }, [locked]);
 
-  const [cardAnimation, setCardAnimation] = useState<'idle' | 'slide-out' | 'slide-in-prep' | 'slide-in'>('slide-in-prep');
-
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => {
-      setCardAnimation('slide-in');
-      const timer = setTimeout(() => {
-        setCardAnimation('idle');
-      }, 300);
-      return () => clearTimeout(timer);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [card?.id]);
-
   const answer = useCallback((correct: boolean) => {
     if (locked) return;
     if (!isFlippedRef.current) {
@@ -2094,16 +2096,7 @@ function RapidFlashcardMode({
     const s = getRapidSounds();
     if (correct) s?.success.play(); else s?.error.play();
 
-    // Physical card swipe transition (slide-out to the left)
-    setCardAnimation('slide-out');
-    setTimeout(() => {
-      onAnswer(correct, true);
-      setCardAnimation('slide-in-prep');
-      requestAnimationFrame(() => {
-        setCardAnimation('slide-in');
-        setTimeout(() => setCardAnimation('idle'), 300);
-      });
-    }, 280);
+    onAnswer(correct, true);
   }, [locked, flip, onAnswer]);
 
   // Lock typing round mode to card.id so progress incrementing on answer does NOT cause the leaving card to mutate
@@ -2179,26 +2172,12 @@ function RapidFlashcardMode({
       try { navigator.vibrate(40); } catch(e) {}
     }
 
-    // 1. Короткий импульс успеха (350ms)
     typingTimerRef.current = setTimeout(() => {
-      // 2. Запуск физического перелистывания (улет влево)
-      setCardAnimation('slide-out');
-
-      setTimeout(() => {
-        // 3. Переключение на следующую карточку
-        setIsSuccessFeedback(false);
-        setTypedValue('');
-        setIsErrorMismatch(false);
-        onAnswer(true, false);
-
-        // Подготовка следующей карты справа
-        setCardAnimation('slide-in-prep');
-        requestAnimationFrame(() => {
-          setCardAnimation('slide-in');
-          setTimeout(() => setCardAnimation('idle'), 300);
-        });
-      }, 280);
-    }, 350);
+      setIsSuccessFeedback(false);
+      setTypedValue('');
+      setIsErrorMismatch(false);
+      onAnswer(true, false);
+    }, 320);
   }, [speak, onAnswer]);
 
   const triggerErrorShake = useCallback(() => {
@@ -2270,11 +2249,6 @@ function RapidFlashcardMode({
 
     // 3. Penalty -1 mastery round and re-queue card to end of session
     onHintPenalty?.();
-
-    // 4. Physical slide-out right before card advances
-    setTimeout(() => {
-      setCardAnimation('slide-out');
-    }, 1500);
   };
 
   const maskedSentence = useMemo(() => {
@@ -2379,18 +2353,7 @@ function RapidFlashcardMode({
 
   if (isTypingRound) {
     return (
-      <div
-        className={cn(
-          "w-full flex flex-col items-center transition-all duration-300",
-          cardAnimation === 'slide-out'
-            ? "-translate-x-[110%] -rotate-6 opacity-0 pointer-events-none"
-            : cardAnimation === 'slide-in-prep'
-            ? "translate-x-[80%] rotate-6 opacity-0"
-            : cardAnimation === 'slide-in'
-            ? "translate-x-0 rotate-0 opacity-100 duration-300 ease-out"
-            : "translate-x-0 rotate-0 opacity-100"
-        )}
-      >
+      <div className="w-full flex flex-col items-center">
         <div className="w-full relative">
           <div 
             onClick={() => inputRef.current?.focus()}
@@ -2490,18 +2453,7 @@ function RapidFlashcardMode({
   }
 
   return (
-    <div
-      className={cn(
-        "w-full flex flex-col items-center transition-all duration-300",
-        cardAnimation === 'slide-out'
-          ? "-translate-x-[110%] -rotate-6 opacity-0 pointer-events-none"
-          : cardAnimation === 'slide-in-prep'
-          ? "translate-x-[80%] rotate-6 opacity-0"
-          : cardAnimation === 'slide-in'
-          ? "translate-x-0 rotate-0 opacity-100 duration-300 ease-out"
-          : "translate-x-0 rotate-0 opacity-100"
-      )}
-    >
+    <div className="w-full flex flex-col items-center">
       <div className="w-full relative" style={{ perspective: '1200px' }}>
         <motion.div
           className="relative w-full min-h-[420px] md:min-h-[480px] cursor-pointer select-none"
@@ -2676,6 +2628,7 @@ function RapidSession({
     setLocked(true);
 
     // 3) After a short beat so the filled dot is visible: learned -> remove, otherwise -> end of queue
+    const advanceDelay = wasFlipped ? 380 : 60;
     timerRef.current = setTimeout(() => {
       if (learned) {
         setMastered(m => m + 1);
@@ -2685,7 +2638,7 @@ function RapidSession({
       }
       setTurn(t => t + 1);
       setLocked(false);
-    }, 450);
+    }, advanceDelay);
   }, [locked, queue, wordProgress, answerCard, setCardProgress]);
 
   const handleHintPenalty = useCallback(() => {
@@ -2760,16 +2713,26 @@ function RapidSession({
         </div>
       </div>
 
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4 overflow-hidden">
-        <RapidFlashcardMode
-          key={`${current.card.id}-${turn}`}
-          card={liveCard}
-          progress={wordProgress[current.card.id] || 0}
-          locked={locked}
-          onAnswer={handleAnswer}
-          onHintPenalty={handleHintPenalty}
-          reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
-        />
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4 overflow-hidden relative">
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div
+            key={`${current.card.id}-${turn}`}
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -140, rotate: -4 }}
+            transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
+            className="w-full flex flex-col items-center"
+          >
+            <RapidFlashcardMode
+              card={liveCard}
+              progress={wordProgress[current.card.id] || 0}
+              locked={locked}
+              onAnswer={handleAnswer}
+              onHintPenalty={handleHintPenalty}
+              reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
+            />
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       <StatsPopover
@@ -2810,14 +2773,15 @@ function RapidStudyCard({
 
   const progress = card.isArchived ? 4 : Math.max(0, Math.min(3, card.masteryLevel || 0));
 
-  const handleAnswer = useCallback((correct: boolean) => {
+  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = true) => {
     if (locked) return;
     setLocked(true);
     onAnswer(correct, false);
+    const delay = wasFlipped ? 380 : 60;
     timerRef.current = setTimeout(() => {
       onNext();
       setLocked(false);
-    }, 450);
+    }, delay);
   }, [locked, onAnswer, onNext]);
 
   // When repeating cards (in a review session or if already archived),
@@ -2827,17 +2791,27 @@ function RapidStudyCard({
     : (isReview || card.isArchived || progress >= 2);
 
   return (
-    <div className="w-full flex justify-center px-4 overflow-hidden">
-      <RapidFlashcardMode
-        key={card.id}
-        card={card}
-        progress={progress}
-        locked={locked}
-        onAnswer={handleAnswer}
-        onHintPenalty={() => handleAnswer(false)}
-        deckTitle={deckTitle}
-        reverse={isReverse}
-      />
+    <div className="w-full flex justify-center px-4 overflow-hidden relative">
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.div
+          key={card.id}
+          initial={{ opacity: 0, x: 50 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -140, rotate: -4 }}
+          transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
+          className="w-full flex flex-col items-center"
+        >
+          <RapidFlashcardMode
+            card={card}
+            progress={progress}
+            locked={locked}
+            onAnswer={handleAnswer}
+            onHintPenalty={() => handleAnswer(false)}
+            deckTitle={deckTitle}
+            reverse={isReverse}
+          />
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
@@ -4254,7 +4228,8 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
   const todayStr = getLocalTodayDateString();
   const rawCount = daily[todayStr];
   const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
-  const displayTodayCount = Math.max(todayCount, stats?.cardsDone || 0, dailyLearnedCount);
+  const statsDone = stats?.date === todayStr ? (stats?.cardsDone || 0) : 0;
+  const displayTodayCount = Math.max(todayCount, statsDone, dailyLearnedCount);
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
   const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
