@@ -22,6 +22,7 @@ import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
+import { StoryReaderModal } from "@/components/StoryReaderModal";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3960,7 +3961,7 @@ BookCard.displayName = "BookCard";
 
 
 const DeckCard = React.memo(({ 
-  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onViewTheory, onStartDictation, onStartShadowing
+  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onViewTheory, onStartDictation, onStartShadowing, onOpenStory
 }: { 
   deck: Deck; isCompleted: boolean; activeTab: string; 
   onCardClick: (id: string) => void; onRename?: (id: string, name: string) => void; 
@@ -3968,6 +3969,7 @@ const DeckCard = React.memo(({
   onViewTheory: (id: string) => void; 
   onStartDictation: (id: string) => void;
   onStartShadowing: (id: string) => void;
+  onOpenStory?: (id: string) => void;
 }) => {
   const isVerbBook = deck.bookId === 'verbs-de';
   const books = useStore(state => state.books);
@@ -4036,6 +4038,17 @@ const DeckCard = React.memo(({
                 deckId={deck.id} 
                 onOpenView={(e) => { e.stopPropagation(); onViewTheory(deck.id); }} 
               />
+            )}
+            {onOpenStory && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); initAudioCtx(); onOpenStory(deck.id); }}
+                className="h-6 px-2 rounded-md bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/20 text-xs font-medium flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                title="Lesetext (Story Reader)"
+              >
+                <BookOpen className="w-3 h-3 text-sky-500 dark:text-sky-400" />
+                <span className="text-[11px] font-semibold tracking-tight">Lesetext</span>
+              </button>
             )}
             {!isVerbBook && (
               <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-black/5 dark:bg-white/5 text-zinc-500 dark:text-zinc-400 text-xs">
@@ -6922,6 +6935,133 @@ export default function App() {
 
 
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
+  const [storyReaderDeckId, setStoryReaderDeckId] = useState<string | null>(null);
+  const [storyData, setStoryData] = useState<any | null>(null);
+  const [isGeneratingStory, setIsGeneratingStory] = useState(false);
+
+  const handleOpenStory = useCallback(async (deckId: string, forceRegenerate = false) => {
+    const deck = useStore.getState().decks.find(d => d.id === deckId);
+    if (!deck) return;
+
+    setStoryReaderDeckId(deckId);
+
+    // 1. Check existing story if not force regenerating
+    if (!forceRegenerate) {
+      if ((deck as any).story?.paragraphs) {
+        setStoryData((deck as any).story);
+        return;
+      }
+
+      try {
+        const cached = localStorage.getItem(`story_${deckId}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.paragraphs) {
+            setStoryData(parsed);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      try {
+        const { data } = await supabase
+          .from('user_stats')
+          .select('daily_activity')
+          .eq('language', `STORY_${deckId}`)
+          .maybeSingle();
+
+        if (data?.daily_activity?.paragraphs) {
+          setStoryData(data.daily_activity);
+          try {
+            localStorage.setItem(`story_${deckId}`, JSON.stringify(data.daily_activity));
+          } catch (e) {}
+          return;
+        }
+      } catch (e) {}
+
+      try {
+        const { data } = await supabase
+          .from('topics')
+          .select('story')
+          .eq('id', deckId)
+          .maybeSingle();
+
+        if (data?.story?.paragraphs) {
+          setStoryData(data.story);
+          return;
+        }
+      } catch (e) {}
+    }
+
+    // 2. Generate with Groq
+    setIsGeneratingStory(true);
+    setStoryData(null);
+
+    try {
+      const b = deck.bookId ? useStore.getState().books.find(item => item.id === deck.bookId) : null;
+      const rawLang = deck.language || b?.language || appLanguage || 'DE';
+      const normLang = normalizeLanguage(rawLang);
+
+      let direction = 'de-ru';
+      if (normLang === 'EN') direction = 'en-ru';
+      else if (normLang === 'RU') direction = 'ru-de';
+      else direction = 'de-ru';
+
+      const words = (deck.cards || []).slice(0, 30).map((c: any) => ({
+        targetWord: c.targetWord || c.sentence || '',
+        hint: c.translation || c.hint || c.forms || ''
+      }));
+
+      const res = await fetch('/api/generate-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicId: deckId,
+          title: deck.name,
+          words,
+          direction
+        })
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success || !json.story) {
+        throw new Error(json.error || 'Failed to generate story');
+      }
+
+      const newStory = json.story;
+      setStoryData(newStory);
+
+      // 3. Persist story (Supabase + localStorage + Zustand)
+      try {
+        await supabase.from('topics').update({ story: newStory }).eq('id', deckId);
+      } catch (e) {}
+
+      try {
+        await supabase.from('decks').update({ story: newStory }).eq('id', deckId);
+      } catch (e) {}
+
+      try {
+        await supabase.from('user_stats').upsert({
+          language: `STORY_${deckId}`,
+          daily_activity: newStory
+        }, { onConflict: 'language' });
+      } catch (e) {}
+
+      try {
+        localStorage.setItem(`story_${deckId}`, JSON.stringify(newStory));
+      } catch (e) {}
+
+      const allDecks = useStore.getState().decks;
+      const updatedDecks = allDecks.map(d => d.id === deckId ? { ...d, story: newStory } : d);
+      useStore.getState().setDecks(updatedDecks);
+
+    } catch (err: any) {
+      console.error('Story generation error:', err);
+      alert('Не удалось сгенерировать историю: ' + (err.message || 'Ошибка'));
+    } finally {
+      setIsGeneratingStory(false);
+    }
+  }, [appLanguage]);
 
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [visibleLimits, setVisibleLimits] = useState<Record<string, any>>({});
@@ -7720,6 +7860,17 @@ try {
         {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { initAudioCtx(); setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
         {dictationDeckId && <DictationPlayer deck={decks.find(d => d.id === dictationDeckId)!} onClose={() => setDictationDeckId(null)} />}
         {shadowingDeckId && <ShadowingPlayer deck={decks.find(d => d.id === shadowingDeckId)!} onClose={() => setShadowingDeckId(null)} />}
+        {storyReaderDeckId && (
+          <StoryReaderModal
+            isOpen={Boolean(storyReaderDeckId)}
+            onClose={() => setStoryReaderDeckId(null)}
+            topic={decks.find(d => d.id === storyReaderDeckId)}
+            storyData={storyData}
+            onRegenerate={() => handleOpenStory(storyReaderDeckId, true)}
+            isGenerating={isGeneratingStory}
+            language={appLanguage}
+          />
+        )}
       </AnimatePresence>
 
 {/* RENAME MODAL */}
@@ -7925,8 +8076,8 @@ try {
           </div>
         ) : (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="w-full">
-          {(!activeBook?.training_mode || activeBook.training_mode === 'standard_cloze') && (
-          <div className="flex justify-center mb-8 pt-2">
+          <div className="flex flex-wrap items-center justify-center gap-3 mb-8 pt-2">
+            {(!activeBook?.training_mode || activeBook.training_mode === 'standard_cloze') && (
             <div className="h-9 p-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/5 dark:border-white/10 flex items-center shadow-inner">
               {(["Grammatik", "Wörter"] as const).map((tab) => {
                 const isActive = activeTab === tab;
@@ -7946,8 +8097,19 @@ try {
                 );
               })}
             </div>
+            )}
+
+            {filteredDecksList.length > 0 && (
+              <button
+                onClick={() => handleOpenStory(filteredDecksList[0].id)}
+                className="h-9 px-4 rounded-full bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/25 text-xs font-semibold flex items-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer backdrop-blur-md select-none"
+                title="Lesetext (Story Reader)"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
+                <span>Lesetext</span>
+              </button>
+            )}
           </div>
-          )}
 
           <div className="space-y-16">
             {(() => {
@@ -8041,6 +8203,7 @@ try {
                                   onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                   onDelete={handleDeleteClick} 
                                   onViewTheory={handleViewTheory} 
+                                  onOpenStory={handleOpenStory}
                                 />
                               </div>
                             ))}
@@ -8081,6 +8244,7 @@ try {
                                           onStartShadowing={(id: string) => setShadowingDeckId(id)} 
                                           onDelete={handleDeleteClick} 
                                           onViewTheory={handleViewTheory} 
+                                          onOpenStory={handleOpenStory}
                                         />
                                       </div>
                                     ))}

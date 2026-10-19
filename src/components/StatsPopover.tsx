@@ -76,24 +76,32 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
   useEffect(() => {
     if (!isOpen) return;
 
+    const prevOverflow = document.body.style.overflow;
+    const prevTouchAction = document.body.style.touchAction;
+    const prevOverscroll = document.body.style.overscrollBehavior;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+    document.body.style.overscrollBehavior = 'none';
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
 
-    const preventDefault = (e: Event) => {
-      const target = e.target as HTMLElement | null;
-      if (!target?.closest('.stats-modal-content')) {
-        e.preventDefault();
-      }
+    const blockScroll = (e: Event) => {
+      e.preventDefault();
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('wheel', preventDefault, { passive: false });
-    window.addEventListener('touchmove', preventDefault, { passive: false });
+    window.addEventListener('wheel', blockScroll, { passive: false });
+    window.addEventListener('touchmove', blockScroll, { passive: false });
 
     return () => {
-      window.removeEventListener('wheel', preventDefault);
-      window.removeEventListener('touchmove', preventDefault);
+      document.body.style.overflow = prevOverflow;
+      document.body.style.touchAction = prevTouchAction;
+      document.body.style.overscrollBehavior = prevOverscroll;
+      window.removeEventListener('wheel', blockScroll);
+      window.removeEventListener('touchmove', blockScroll);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, onClose]);
@@ -229,9 +237,9 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
             <button
               onClick={() => { onClose(); onReviewMistakes(); }}
               type="button"
-              className="h-8 px-3.5 rounded-xl bg-zinc-900 hover:bg-black text-white dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-900 active:scale-[0.98] text-xs font-medium transition-all duration-150 flex items-center gap-1.5 shadow-sm hover:shadow-md cursor-pointer select-none"
+              className="h-8 px-3.5 rounded-xl bg-zinc-100 hover:bg-zinc-200/90 text-zinc-900 border border-black/[0.08] dark:bg-white/10 dark:hover:bg-white/15 dark:text-zinc-100 dark:border-white/10 active:scale-[0.98] text-xs font-medium transition-all duration-150 flex items-center gap-1.5 shadow-sm hover:shadow-md cursor-pointer select-none"
             >
-              <RotateCcw className="w-3 h-3 text-sky-400 dark:text-sky-600"/>
+              <RotateCcw className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400"/>
               <span>{t.reviewButton}</span>
             </button>
           )}
