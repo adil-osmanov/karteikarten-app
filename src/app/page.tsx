@@ -7450,17 +7450,19 @@ try {
     );
   }
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, selectedLevel?: CEFRLevel) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const activeLevel = selectedLevel || targetLevelForUpload || 'B1';
+    setTargetLevelForUpload(activeLevel);
     setIsUploadingCSV(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
         const rawText = (event.target?.result as string) || '';
         const text = rawText.replace(/^\uFEFF/, '');
-      const lines = text.split('\n').filter(line => line.trim().length > 0);
+        const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
       
       const cards: Flashcard[] = [];
       
@@ -7513,7 +7515,7 @@ try {
         if (isPrepBookObj) {
           if (parts.length >= 4) {
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord: parts[0].trim(),
               sentence: `${parts[1].trim()} | ${parts[2].trim().toUpperCase()}`,
               translation: parts[3].trim(),
@@ -7526,7 +7528,7 @@ try {
             });
           } else if (parts.length >= 2) {
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord: parts[0].trim(),
               sentence: (parts[2] || parts[0]).trim(),
               translation: parts[1].trim(),
@@ -7547,7 +7549,7 @@ try {
             const translation = parts[4].trim();
             
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord: infinitiv,
               sentence: "VERB_DRILL",
               translation: translation,
@@ -7561,7 +7563,7 @@ try {
             });
           } else if (parts.length >= 2) {
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord: parts[0].trim(),
               sentence: "VERB_DRILL",
               translation: parts[1].trim(),
@@ -7641,7 +7643,7 @@ try {
 
           if (fullText) {
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord: fullText,
               sentence: chunksStr || konstruktion || fullText,
               translation: translation || '—',
@@ -7669,7 +7671,7 @@ try {
              
              let forms = parts.length >= 4 ? parts[3].trim() : undefined;
              cards.push({
-                id: crypto.randomUUID(),
+                id: ensureUuid(),
                 targetWord: parts[0].trim(),
                 sentence: rExample || '-',
                 translation: rTranslation || '—',
@@ -7691,7 +7693,7 @@ try {
             const options = [targetWord, parts[3].trim(), parts[4].trim(), parts[5].trim()].sort(() => Math.random() - 0.5);
             const extraInfo = parts.length >= 7 && parts[6]?.trim() ? parts[6].trim() : null;
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord,
               sentence,
               translation,
@@ -7711,7 +7713,7 @@ try {
             const translation = parts[2].trim();
             const options = [targetWord, parts[3].trim(), parts[4].trim()].sort(() => Math.random() - 0.5);
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord,
               sentence,
               translation,
@@ -7728,7 +7730,7 @@ try {
             const translation = parts[2].trim();
             const extraInfo = parts[3].trim();
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord,
               sentence,
               translation,
@@ -7749,7 +7751,7 @@ try {
               [sentence, translation] = [translation, sentence];
             }
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord,
               sentence: sentence || targetWord,
               translation: translation || '—',
@@ -7764,7 +7766,7 @@ try {
             const targetWord = parts[0].trim();
             const translation = parts[1].trim();
             cards.push({
-              id: crypto.randomUUID(),
+              id: ensureUuid(),
               targetWord,
               sentence: targetWord,
               translation: translation || '—',
@@ -7781,25 +7783,30 @@ try {
 
       if (cards.length > 0) {
         const defaultName = file.name.replace(/\.[^/.]+$/, '').trim();
-        const newDeckId = crypto.randomUUID();
+        const newDeckId = ensureUuid();
         const activeBook = books.find(b => b.id === activeBookId);
         const targetLang = (activeBook?.language as any) || useStore.getState().appLanguage || 'DE';
         const targetBookId = activeBookId || (targetLang === 'EN' ? 'default-en' : 'default-de');
         const category = (activeTab && activeTab.toLowerCase().includes('wört')) ? 'Wörter' : 'Grammatik';
+        const finalLevel = activeLevel || targetLevelForUpload || 'B1';
         
-        const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
-        langMap[newDeckId] = targetLang;
-        localStorage.setItem('deck_languages', JSON.stringify(langMap));
+        try {
+          const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
+          langMap[newDeckId] = targetLang;
+          localStorage.setItem('deck_languages', JSON.stringify(langMap));
+        } catch (_) {}
         
-        const bookMap = JSON.parse(localStorage.getItem('deck_books') || '{}');
-        bookMap[newDeckId] = targetBookId;
-        localStorage.setItem('deck_books', JSON.stringify(bookMap));
+        try {
+          const bookMap = JSON.parse(localStorage.getItem('deck_books') || '{}');
+          bookMap[newDeckId] = targetBookId;
+          localStorage.setItem('deck_books', JSON.stringify(bookMap));
+        } catch (_) {}
         
         const optimisticDeck: Deck = {
           id: newDeckId,
           name: defaultName,
           category: category,
-          level: targetLevelForUpload,
+          level: finalLevel,
           cards,
           card_count: cards.length,
           language: targetLang,
@@ -7814,7 +7821,7 @@ try {
             id: newDeckId,
             name: defaultName,
             category: category,
-            level: targetLevelForUpload,
+            level: finalLevel,
             cards,
             language: targetLang,
             bookId: targetBookId
@@ -7827,7 +7834,7 @@ try {
               book_id: targetBookId,
               title: defaultName,
               name: defaultName,
-              level: targetLevelForUpload,
+              level: finalLevel,
               category: category.toLowerCase().includes('wört') ? 'woerter' : 'grammatik',
               cards: cards,
               created_at: new Date().toISOString()
@@ -8128,7 +8135,15 @@ try {
         )}
       </AnimatePresence>
 
-      <input type="file" accept=".csv,.txt" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+      <input 
+        type="file" 
+        accept=".csv,.txt,text/csv,text/plain,application/vnd.ms-excel,text/comma-separated-values" 
+        className="sr-only"
+        style={{ position: 'fixed', top: '-10000px', left: '-10000px', opacity: 0, pointerEvents: 'none' }}
+        ref={fileInputRef} 
+        onChange={handleFileUpload}
+        onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+      />
 
       <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-6 pb-12 md:pt-8 md:pb-24">
         {!activeBookId ? (
@@ -8302,19 +8317,27 @@ try {
                         >
                           <Play className="w-3 h-3 fill-current" />
                         </button>
-                        <button 
-                          type="button"
-                          onClick={() => handlePlusClick(level)}
-                          disabled={isUploadingCSV}
-                          className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer disabled:opacity-50"
+                        <label 
+                          className={cn(
+                            "w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer relative",
+                            isUploadingCSV && "opacity-50 pointer-events-none"
+                          )}
                           title="CSV / TXT importieren"
                         >
+                          <input 
+                            type="file" 
+                            accept=".csv,.txt,text/csv,text/plain,application/vnd.ms-excel,text/comma-separated-values"
+                            className="sr-only"
+                            style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}
+                            onChange={(e) => handleFileUpload(e, level)}
+                            onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+                          />
                           {isUploadingCSV && targetLevelForUpload === level ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
                           ) : (
                             <Plus className="w-3.5 h-3.5" />
                           )}
-                        </button>
+                        </label>
                       </div>
 
                       {/* Справа: компактная пилюля повторения */}

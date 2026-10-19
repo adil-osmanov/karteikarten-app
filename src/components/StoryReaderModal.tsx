@@ -121,6 +121,22 @@ export function StoryReaderModal({
     }
   };
 
+  const focusWords = React.useMemo(() => {
+    const rawList: string[] = [];
+    if (Array.isArray(storyData?.glossary)) {
+      storyData.glossary.forEach((g: any) => {
+        const item = g.baseWord || g.word;
+        if (item && typeof item === 'string') rawList.push(item.trim());
+      });
+    }
+    if (rawList.length === 0 && Array.isArray(topic?.cards)) {
+      topic.cards.forEach((c: any) => {
+        if (c.targetWord && typeof c.targetWord === 'string') rawList.push(c.targetWord.trim());
+      });
+    }
+    return Array.from(new Set(rawList.filter(Boolean))).slice(0, 16);
+  }, [storyData, topic]);
+
   let sentenceCounter = 0;
 
   return (
@@ -163,7 +179,7 @@ export function StoryReaderModal({
               ) : (
                 <Volume2 className="w-3.5 h-3.5" />
               )}
-              <span>{isPlayingAudio ? 'Пауза' : 'Слушать'}</span>
+              <span>{isPlayingAudio ? 'Pause' : 'Vorlesen'}</span>
             </button>
 
             <button
@@ -186,7 +202,7 @@ export function StoryReaderModal({
         </div>
 
         {/* Тело книги (Apple Books Style) */}
-        <div className="flex-1 overflow-y-auto my-6 pr-3 pt-2 space-y-6 text-zinc-800 dark:text-zinc-200 text-[17px] leading-[1.8] font-normal tracking-normal select-text">
+        <div className="flex-1 overflow-y-auto my-4 pr-3 pt-2 pb-10 space-y-6 text-left select-text">
           {isGenerating ? (
             <div className="py-24 flex flex-col items-center justify-center text-zinc-500 space-y-3">
               <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
@@ -194,7 +210,7 @@ export function StoryReaderModal({
             </div>
           ) : (
             storyData?.paragraphs?.map((p: any, pIdx: number) => (
-              <p key={pIdx} className="text-justify">
+              <p key={pIdx} className="text-left text-zinc-800 dark:text-zinc-200 text-[16px] sm:text-[17px] leading-[1.8] font-normal tracking-normal">
                 {p.sentences?.map((s: any) => {
                   const currentIdx = sentenceCounter++;
                   const isSelected = activeSentenceIdx === currentIdx;
@@ -205,10 +221,10 @@ export function StoryReaderModal({
                         setActiveSentenceIdx(currentIdx);
                         setActiveTranslation(s.translation);
                       }}
-                      className={`cursor-pointer rounded-md transition-colors duration-150 mr-1.5 px-0.5 ${
+                      className={`transition-all duration-150 mr-1.5 rounded-lg px-1.5 py-0.5 cursor-pointer ${
                         isSelected
-                          ? 'bg-sky-500/20 text-zinc-900 dark:text-white underline decoration-sky-400/50 underline-offset-4'
-                          : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.06] text-zinc-800 dark:text-zinc-200 hover:text-zinc-900 dark:hover:text-white'
+                          ? 'bg-black/[0.08] dark:bg-white/[0.08] text-zinc-950 dark:text-white font-medium'
+                          : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.04]'
                       }`}
                     >
                       {s.text}
@@ -220,17 +236,33 @@ export function StoryReaderModal({
           )}
         </div>
 
-        {/* Нижняя панель перевода предложения */}
-        <div className="pt-4 border-t border-black/[0.08] dark:border-white/[0.08] min-h-[56px] flex items-center px-4 py-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-sm text-zinc-800 dark:text-zinc-300">
-          {activeTranslation ? (
-            <span className="italic leading-relaxed text-zinc-900 dark:text-zinc-100">
-              «{activeTranslation}»
-            </span>
-          ) : (
-            <span className="text-zinc-400 dark:text-zinc-500 text-xs font-medium">
-              Кликните на предложение в тексте, чтобы увидеть его русский перевод.
-            </span>
+        {/* Нижняя панель: Fokus-Wörter + перевод предложения */}
+        <div className="pt-3 border-t border-black/[0.08] dark:border-white/[0.08] space-y-2.5">
+          {focusWords.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">Fokus:</span>
+              {focusWords.map((w: string) => (
+                <span
+                  key={w}
+                  className="px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 text-[11px] text-zinc-700 dark:text-zinc-300 font-medium select-text"
+                >
+                  {w}
+                </span>
+              ))}
+            </div>
           )}
+
+          <div className="min-h-[52px] flex items-center px-4 py-3 rounded-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-black/5 dark:border-white/5 text-sm text-zinc-800 dark:text-zinc-300">
+            {activeTranslation ? (
+              <span className="italic leading-relaxed text-zinc-900 dark:text-zinc-100">
+                «{activeTranslation}»
+              </span>
+            ) : (
+              <span className="text-zinc-400 dark:text-zinc-500 text-xs font-medium">
+                Нажмите на предложение в тексте, чтобы увидеть его русский перевод.
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>
