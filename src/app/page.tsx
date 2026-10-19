@@ -1847,6 +1847,21 @@ function AutoFitGermanHeading({
   );
 }
 
+export function getMaskedSentence(sentence: string, targetWord: string): string {
+  if (!sentence || !targetWord) return sentence;
+  const cleanWord = targetWord.replace(/^(der|die|das)\s+/i, '').replace(/\|/g, '').trim();
+  if (!cleanWord) return sentence;
+
+  const escaped = cleanWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`\\b${escaped}[a-zäöüß]*\\b`, 'gi');
+  const masked = sentence.replace(regex, '[...]');
+  if (masked === sentence && sentence.toLowerCase().includes(cleanWord.toLowerCase())) {
+    const fallbackRegex = new RegExp(escaped, 'gi');
+    return sentence.replace(fallbackRegex, '[...]');
+  }
+  return masked;
+}
+
 function RapidFlashcardMode({
   card,
   progress,
@@ -1978,18 +1993,20 @@ function RapidFlashcardMode({
   }, [locked, flip, onAnswer]);
 
   const isTypingRound = progress >= 2 || (card?.masteryLevel || 0) >= 2;
-  const [typedValue, setTypedValue] = useState("");
-  const [hasInputError, setHasInputError] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [isError, setIsError] = useState(false);
   const [isTypingSuccess, setIsTypingSuccess] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset typing state on new card
   useEffect(() => {
-    setTypedValue("");
-    setHasInputError(false);
+    setInputValue("");
+    setIsError(false);
     setIsTypingSuccess(false);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
   }, [card?.id]);
 
   // Autofocus input in typing mode
@@ -2028,45 +2045,38 @@ function RapidFlashcardMode({
     };
   }, [card?.targetWord, card?.hint, card?.forms]);
 
-  const placeholderText = useMemo(() => {
-    if (parsedNoun.article) {
-      return `${parsedNoun.article} ...`;
-    }
-    if (parsedNoun.noun.length > 2) {
-      return `${parsedNoun.noun[0]}...`;
-    }
-    return "Tippen...";
-  }, [parsedNoun]);
+  const checkAnswerMatch = useCallback((val: string) => {
+    const v = val.trim().toLowerCase();
+    if (!v) return { isValid: true, isComplete: false };
 
-  const checkTypingValidation = useCallback((val: string) => {
-    const v = val.trim();
-    if (!v) return { isValid: true, isComplete: false, activeTarget: parsedNoun.noun };
-
-    const normV = v.toLowerCase();
-    const targetA = parsedNoun.noun.toLowerCase();
-    const targetB = parsedNoun.full.toLowerCase();
+    const targetA = parsedNoun.noun.trim().toLowerCase();
+    const targetB = parsedNoun.full.trim().toLowerCase();
 
     // Check transliterated versions (ä -> ae, ö -> oe, ü -> ue, ß -> ss)
-    const translitV = normV.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
-    const translitA = targetA.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
-    const translitB = targetB.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+    const translit = (s: string) => s
+      .replace(/ä/g, 'ae')
+      .replace(/ö/g, 'oe')
+      .replace(/ü/g, 'ue')
+      .replace(/ß/g, 'ss');
 
-    const matchesPrefixA = targetA.startsWith(normV) || translitA.startsWith(translitV);
-    const matchesPrefixB = targetB.startsWith(normV) || translitB.startsWith(translitV);
+    const translitV = translit(v);
+    const translitA = translit(targetA);
+    const translitB = translit(targetB);
 
-    const isCompleteA = normV === targetA || translitV === translitA;
-    const isCompleteB = normV === targetB || translitV === translitB;
-
-    const activeTarget = (matchesPrefixB && !matchesPrefixA) ? parsedNoun.full : parsedNoun.noun;
-    const isValid = matchesPrefixA || matchesPrefixB;
+    const isCompleteA = v === targetA || translitV === translitA;
+    const isCompleteB = v === targetB || translitV === translitB;
     const isComplete = isCompleteA || isCompleteB;
 
-    return { isValid, isComplete, activeTarget };
+    const matchesPrefixA = targetA.startsWith(v) || translitA.startsWith(translitV);
+    const matchesPrefixB = targetB.startsWith(v) || translitB.startsWith(translitV);
+    const isValid = matchesPrefixA || matchesPrefixB;
+
+    return { isValid, isComplete };
   }, [parsedNoun]);
 
   const handleTypingSuccess = useCallback(() => {
     setIsTypingSuccess(true);
-    setHasInputError(false);
+    setIsError(false);
     playFeedbackSound(true);
     speak();
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -2078,108 +2088,77 @@ function RapidFlashcardMode({
     }, 400);
   }, [speak, onAnswer]);
 
+  const triggerError = useCallback(() => {
+    setIsError(true);
+    playFeedbackSound(false);
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate([30, 40, 30]); } catch(e) {}
+    }
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+    errorTimeoutRef.current = setTimeout(() => {
+      setIsError(false);
+    }, 500);
+  }, []);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (locked || isTypingSuccess) return;
     const val = e.target.value;
-    setTypedValue(val);
+    setInputValue(val);
     playTockSound();
+    if (isError) setIsError(false);
 
-    const { isValid, isComplete } = checkTypingValidation(val);
-
-    if (!isValid && val.length > 0) {
-      setHasInputError(true);
-      playFeedbackSound(false);
-    } else {
-      setHasInputError(false);
-    }
-
+    const { isValid, isComplete } = checkAnswerMatch(val);
     if (isValid && isComplete) {
       handleTypingSuccess();
     }
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
     if (e.key === 'Enter') {
       e.preventDefault();
-      const { isComplete } = checkTypingValidation(typedValue);
+      const { isComplete } = checkAnswerMatch(inputValue);
       if (isComplete) {
         handleTypingSuccess();
       } else {
-        setHasInputError(true);
-        playFeedbackSound(false);
-        if (typeof navigator !== 'undefined' && navigator.vibrate) {
-          try { navigator.vibrate([30, 40, 30]); } catch(e) {}
-        }
+        triggerError();
       }
     }
   };
 
-  const handleAppendChar = (char: string) => {
+  const handleTriggerHint = () => {
     if (locked || isTypingSuccess) return;
-    playTockSound();
-    const nextVal = typedValue + char;
-    setTypedValue(nextVal);
-    const { isValid, isComplete } = checkTypingValidation(nextVal);
-    if (!isValid) {
-      setHasInputError(true);
-      playFeedbackSound(false);
+    const targetA = parsedNoun.noun;
+    const targetB = parsedNoun.full;
+
+    let nextVal = "";
+    if (inputValue.length === 0) {
+      const target = targetB || targetA;
+      nextVal = target.slice(0, 1);
+    } else if (targetB.toLowerCase().startsWith(inputValue.toLowerCase()) && inputValue.length < targetB.length) {
+      nextVal = targetB.slice(0, inputValue.length + 1);
+    } else if (targetA.toLowerCase().startsWith(inputValue.toLowerCase()) && inputValue.length < targetA.length) {
+      nextVal = targetA.slice(0, inputValue.length + 1);
     } else {
-      setHasInputError(false);
+      const target = (targetB.toLowerCase().startsWith(inputValue[0]?.toLowerCase())) ? targetB : targetA;
+      nextVal = target.slice(0, 1);
     }
+
+    setInputValue(nextVal);
+    playTockSound();
+    setIsError(false);
+
+    const { isValid, isComplete } = checkAnswerMatch(nextVal);
     if (isValid && isComplete) {
       handleTypingSuccess();
     }
     inputRef.current?.focus();
   };
 
-  const handleSurrender = () => {
-    if (locked || isTypingSuccess) return;
-    setHasInputError(true);
-    playFeedbackSound(false);
-    speak();
-    setTypedValue(parsedNoun.noun);
-    typingTimerRef.current = setTimeout(() => {
-      onAnswer(false, false);
-    }, 1200);
-  };
-
-  const renderTypingDisplay = () => {
-    if (typedValue.length === 0) {
-      return (
-        <span className="text-zinc-400 dark:text-zinc-500 font-normal tracking-wide text-lg sm:text-xl select-none">
-          {placeholderText}
-        </span>
-      );
-    }
-
-    const { activeTarget } = checkTypingValidation(typedValue);
-    return (
-      <span className="inline-flex items-center">
-        {Array.from(typedValue).map((char, i) => {
-          const expectedChar = activeTarget[i];
-          const isCharMatch = expectedChar && char.toLowerCase() === expectedChar.toLowerCase();
-          return (
-            <span
-              key={i}
-              className={cn(
-                "transition-colors duration-150 font-medium",
-                isCharMatch
-                  ? isTypingSuccess
-                    ? "text-emerald-500 dark:text-emerald-400 font-semibold"
-                    : "text-zinc-900 dark:text-white"
-                  : "text-rose-500 font-semibold underline decoration-rose-500"
-              )}
-            >
-              {char}
-            </span>
-          );
-        })}
-        {!isTypingSuccess && (
-          <span className="inline-block w-0.5 h-6 bg-sky-500 dark:bg-sky-400 ml-0.5 animate-pulse" />
-        )}
-      </span>
-    );
-  };
+  const maskedSentence = useMemo(() => {
+    if (!example) return '';
+    return getMaskedSentence(example, card?.targetWord || '');
+  }, [example, card?.targetWord]);
 
   useEffect(() => {
     if (isTypingRound) return;
@@ -2298,100 +2277,71 @@ function RapidFlashcardMode({
                   <Volume2 className="w-[18px] h-[18px]" />
                 </button>
               </div>
-              <div className="flex items-center gap-2 pr-1">
-                {[0, 1, 2, 3].map(i => (
-                  <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700")} />
-                ))}
+              <div className="flex items-center gap-2.5 pr-1">
+                <div className="flex items-center gap-1.5">
+                  {[0, 1, 2, 3].map(i => (
+                    <div
+                      key={i}
+                      className={cn(
+                        "w-2 h-2 rounded-full transition-colors duration-300",
+                        i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"
+                      )}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleTriggerHint(); }}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Tipp: Nächsten Buchstaben aufdecken"
+                >
+                  <HelpCircle className="w-[18px] h-[18px]" />
+                </button>
               </div>
             </div>
 
             {/* Central Content */}
             <div className="flex-1 flex flex-col items-center justify-center w-full my-4">
-              {/* Noun Article Badge */}
-              {parsedNoun.article && (
-                <div className="flex justify-center mb-3">
-                  <span className={cn(
-                    "text-xs sm:text-sm font-semibold uppercase tracking-wider px-3.5 py-1 rounded-full border shadow-sm transition-colors",
-                    parsedNoun.article === 'der' && "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30 shadow-sky-500/5",
-                    parsedNoun.article === 'die' && "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 shadow-rose-500/5",
-                    parsedNoun.article === 'das' && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 shadow-emerald-500/5"
-                  )}>
-                    {parsedNoun.article}
-                  </span>
-                </div>
-              )}
-
               {/* Translation Meaning */}
-              <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-zinc-900 dark:text-white text-center leading-snug px-2 mb-2">
+              <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-zinc-900 dark:text-white text-center leading-snug px-2 mb-3">
                 {translation}
               </div>
 
-              {/* Context / Hint if available */}
-              {(example || card.hint) && (
-                <div className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 font-normal text-center max-w-md mx-auto mb-5 italic line-clamp-2 px-3">
-                  {example ? `"${example}"` : (card.hint || '')}
+              {/* Context sentence with masked target word */}
+              {maskedSentence && (
+                <div className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 font-normal text-center max-w-md mx-auto mb-6 italic line-clamp-2 px-3">
+                  "{maskedSentence}"
                 </div>
               )}
 
-              {/* Interactive Typing Box with per-character visual feedback */}
-              <div className="relative w-full max-w-sm sm:max-w-md flex items-center justify-center my-1">
-                <div
-                  onClick={() => inputRef.current?.focus()}
-                  className={cn(
-                    "w-full flex items-center justify-center min-h-[58px] sm:min-h-[64px] px-5 py-3 rounded-2xl cursor-text transition-all duration-200",
-                    "bg-zinc-100/90 dark:bg-white/[0.05] border",
-                    hasInputError
-                      ? "border-rose-500/80 dark:border-rose-500/80 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
-                      : isTypingSuccess
-                      ? "border-emerald-500/80 dark:border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
-                      : "border-zinc-200 dark:border-white/10 hover:border-zinc-300 dark:hover:border-white/20 focus-within:border-sky-500 dark:focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-500/20"
-                  )}
-                >
-                  <div className="text-xl sm:text-2xl font-semibold tracking-wider text-center flex items-center justify-center overflow-x-auto whitespace-nowrap py-0.5">
-                    {renderTypingDisplay()}
-                  </div>
-                </div>
-
+              {/* Interactive Typing Input */}
+              <div className="relative w-full max-w-sm sm:max-w-md flex flex-col items-center my-2">
                 <input
                   ref={inputRef}
                   type="text"
-                  value={typedValue}
+                  value={inputValue}
                   onChange={handleInputChange}
                   onKeyDown={handleInputKeyDown}
                   disabled={locked || isTypingSuccess}
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  className="absolute inset-0 opacity-0 w-full h-full cursor-text text-base sm:text-lg"
-                  style={{ fontSize: '18px' }}
+                  placeholder="Auf Deutsch eingeben..."
+                  className={cn(
+                    "w-full text-center text-xl sm:text-2xl font-medium tracking-wide py-3.5 px-4 rounded-2xl outline-none transition-all duration-200",
+                    "bg-zinc-100/90 dark:bg-white/[0.05] text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-600 border",
+                    isTypingSuccess
+                      ? "border-emerald-500/80 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+                      : isError
+                      ? "border-rose-500/50 animate-shake"
+                      : "border-zinc-200 dark:border-white/10 hover:border-zinc-300 dark:hover:border-white/20 focus:border-sky-500/80 dark:focus:border-sky-400/80 focus:ring-2 focus:ring-sky-500/20"
+                  )}
                 />
               </div>
-
-              {/* Quick Umlaut Bar for Mobile Keyboards */}
-              <div className="flex gap-2.5 mt-3 justify-center items-center">
-                {['ä', 'ö', 'ü', 'ß'].map((char) => (
-                  <button
-                    key={char}
-                    type="button"
-                    onClick={() => handleAppendChar(char)}
-                    className="w-10 h-10 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 text-zinc-800 dark:text-white font-medium active:scale-90 transition text-base flex items-center justify-center select-none shadow-sm cursor-pointer"
-                  >
-                    {char}
-                  </button>
-                ))}
-              </div>
             </div>
 
-            {/* Bottom Row: Assistance */}
-            <div className="w-full flex justify-center pt-2">
-              <button
-                type="button"
-                onClick={handleSurrender}
-                className="text-xs text-zinc-400 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300 font-medium tracking-wide py-1.5 px-3.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
-              >
-                Hilfe anzeigen
-              </button>
-            </div>
+            {/* Bottom Spacer to keep vertical balance */}
+            <div className="w-full h-4" />
           </div>
         </div>
       </motion.div>
