@@ -2040,32 +2040,34 @@ function RapidFlashcardMode({
   }, [card?.id]);
 
   const [typedValue, setTypedValue] = useState("");
-  const [isError, setIsError] = useState(false);
+  const [isErrorMismatch, setIsErrorMismatch] = useState(false);
+  const [isShaking, setIsShaking] = useState(false);
   const [isTypingSuccess, setIsTypingSuccess] = useState(false);
-  const [showHint, setShowHint] = useState(false);
+  const [isSurrendered, setIsSurrendered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset typing state on new card
   useEffect(() => {
     setTypedValue("");
-    setIsError(false);
+    setIsErrorMismatch(false);
+    setIsShaking(false);
     setIsTypingSuccess(false);
-    setShowHint(false);
+    setIsSurrendered(false);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+    if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
   }, [card?.id]);
 
   // Autofocus input in typing mode
   useEffect(() => {
-    if (isTypingRound && !locked && !showHint) {
+    if (isTypingRound && !locked && !isSurrendered) {
       const timer = setTimeout(() => {
         inputRef.current?.focus();
       }, 80);
       return () => clearTimeout(timer);
     }
-  }, [isTypingRound, card?.id, locked, showHint]);
+  }, [isTypingRound, card?.id, locked, isSurrendered]);
 
   const parsedNoun = useMemo(() => {
     let raw = (card?.targetWord || '').replace(/\|/g, '').trim();
@@ -2093,23 +2095,10 @@ function RapidFlashcardMode({
     };
   }, [card?.targetWord, card?.hint, card?.forms]);
 
-  const activeTarget = useMemo(() => {
-    if (
-      parsedNoun.article &&
-      typedValue.length > 0 &&
-      parsedNoun.noun.toLowerCase().startsWith(typedValue[0].toLowerCase()) &&
-      !parsedNoun.full.toLowerCase().startsWith(typedValue[0].toLowerCase())
-    ) {
-      return parsedNoun.noun;
-    }
-    return parsedNoun.full || parsedNoun.noun;
-  }, [parsedNoun, typedValue]);
-
-  const targetLetters = useMemo(() => Array.from(activeTarget), [activeTarget]);
-
-  const handleTypingSuccess = useCallback(() => {
+  const handleSuccessAnswer = useCallback(() => {
     setIsTypingSuccess(true);
-    setIsError(false);
+    setIsErrorMismatch(false);
+    setIsShaking(false);
     playFeedbackSound(true);
     speak();
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -2121,55 +2110,75 @@ function RapidFlashcardMode({
     }, 400);
   }, [speak, onAnswer]);
 
-  const triggerError = useCallback(() => {
-    setIsError(true);
+  const triggerErrorShake = useCallback(() => {
+    setIsErrorMismatch(true);
+    setIsShaking(true);
     playFeedbackSound(false);
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       try { navigator.vibrate([30, 40, 30]); } catch(e) {}
     }
-    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
-    errorTimeoutRef.current = setTimeout(() => {
-      setIsError(false);
+    if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+    shakeTimerRef.current = setTimeout(() => {
+      setIsShaking(false);
     }, 500);
   }, []);
 
-  const handleCharValidate = useCallback((val: string, targetStr: string) => {
-    if (val.length === targetStr.length) {
-      const isAllMatch = val.split('').every((char, i) => char.toLowerCase() === targetStr[i]?.toLowerCase());
-      if (isAllMatch) {
-        handleTypingSuccess();
-      }
-    }
-  }, [handleTypingSuccess]);
+  const handleInputChange = (rawVal: string) => {
+    if (locked || isTypingSuccess || isSurrendered) return;
 
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const isAllMatch = typedValue.length === activeTarget.length &&
-        typedValue.split('').every((char, i) => char.toLowerCase() === activeTarget[i]?.toLowerCase());
-      if (isAllMatch) {
-        handleTypingSuccess();
-      } else {
-        triggerError();
-      }
+    // Automatic Russian -> German layout mapping and digraph replacements
+    const val = convertRuToDeLayout(rawVal, parsedNoun.full || card.targetWord);
+    setTypedValue(val);
+    playTockSound();
+    if (isShaking) setIsShaking(false);
+
+    if (!val) {
+      setIsErrorMismatch(false);
+      return;
+    }
+
+    const input = val.toLowerCase();
+    const targetA = parsedNoun.noun.toLowerCase().trim();
+    const targetB = parsedNoun.full.toLowerCase().trim();
+
+    const isPrefixMatch = targetA.startsWith(input) || targetB.startsWith(input);
+    setIsErrorMismatch(!isPrefixMatch);
+
+    // If word is completely and accurately typed
+    const trimmedInput = input.trim();
+    if (trimmedInput === targetA || trimmedInput === targetB) {
+      handleSuccessAnswer();
     }
   };
 
-  const handleTriggerHint = () => {
-    if (locked || isTypingSuccess || showHint) return;
-    setShowHint(true);
-    setTypedValue("");
-    playFeedbackSound(false);
+  const handleEnterSubmit = () => {
+    if (locked || isTypingSuccess || isSurrendered) return;
+    const trimmedInput = typedValue.toLowerCase().trim();
+    const targetA = parsedNoun.noun.toLowerCase().trim();
+    const targetB = parsedNoun.full.toLowerCase().trim();
+
+    if (trimmedInput && (trimmedInput === targetA || trimmedInput === targetB)) {
+      handleSuccessAnswer();
+    } else {
+      triggerErrorShake();
+    }
+  };
+
+  const handleGiveUp = () => {
+    if (locked || isTypingSuccess || isSurrendered) return;
+    setIsSurrendered(true);
+    setIsErrorMismatch(false);
+    setIsShaking(false);
+
+    // 1. Reveal correct word directly in the input field
+    const revealWord = parsedNoun.full || card.targetWord.replace(/\|/g, '').trim();
+    setTypedValue(revealWord);
+
+    // 2. Play audio pronunciation
     speak();
 
-    // Call penalty: card.masteryLevel - 1, re-queue card to end of session
+    // 3. Penalty -1 mastery round and re-queue card to end of session
     onHintPenalty?.();
-
-    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
-    errorTimeoutRef.current = setTimeout(() => {
-      setShowHint(false);
-    }, 1800);
   };
 
   const maskedSentence = useMemo(() => {
@@ -2311,10 +2320,10 @@ function RapidFlashcardMode({
                 </div>
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); handleTriggerHint(); }}
-                  disabled={locked || isTypingSuccess || showHint}
+                  onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
+                  disabled={locked || isTypingSuccess || isSurrendered}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
-                  title="Tipp: Richtiges Wort anzeigen (-1)"
+                  title="Aufgeben / Wort anzeigen (-1)"
                 >
                   <HelpCircle className="w-[18px] h-[18px]" />
                 </button>
@@ -2330,78 +2339,41 @@ function RapidFlashcardMode({
 
               {/* Context sentence with masked target word */}
               {maskedSentence && (
-                <div className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 font-normal text-center max-w-md mx-auto mb-4 italic line-clamp-2 px-3">
-                  "{maskedSentence}"
+                <div className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 font-normal text-center max-w-md mx-auto mb-6 italic line-clamp-2 px-3">
+                  &ldquo;{maskedSentence}&rdquo;
                 </div>
               )}
 
-              {/* Floating Scientific Hint (1.8s duration) */}
-              <AnimatePresence>
-                {showHint && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                    className="mb-4 px-5 py-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-500 dark:text-amber-300 font-semibold text-lg sm:text-xl tracking-wide shadow-lg backdrop-blur-md flex items-center gap-2 select-none"
-                  >
-                    <span>{activeTarget}</span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Interactive Input without blinking caret & per-character visual feedback */}
-              <div className="relative flex items-center justify-center my-4 max-w-full">
-                {/* Real hidden input for native mobile/desktop typing */}
+              {/* Monolithic Apple Spotlight input line */}
+              <div className="w-full max-w-md relative px-2">
                 <input
                   ref={inputRef}
                   type="text"
                   value={typedValue}
-                  onChange={(e) => {
-                    if (locked || isTypingSuccess || showHint) return;
-                    const converted = convertRuToDeLayout(e.target.value, activeTarget);
-                    if (converted.length > activeTarget.length) return;
-                    setTypedValue(converted);
-                    playTockSound();
-                    if (isError) setIsError(false);
-                    handleCharValidate(converted, activeTarget);
+                  onChange={(e) => handleInputChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleEnterSubmit();
+                    }
                   }}
-                  onKeyDown={handleInputKeyDown}
-                  disabled={locked || isTypingSuccess || showHint}
+                  readOnly={isSurrendered || locked || isTypingSuccess}
                   autoFocus
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  className="absolute inset-0 w-full h-full opacity-0 caret-transparent cursor-text z-10"
+                  placeholder={isSurrendered ? '' : 'Auf Deutsch eingeben...'}
+                  className={cn(
+                    "w-full text-center text-xl sm:text-2xl font-medium tracking-wide rounded-2xl py-3.5 px-6 outline-none transition-all duration-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 bg-zinc-100/90 dark:bg-white/[0.04] border",
+                    isSurrendered
+                      ? "text-amber-500 dark:text-amber-300 border-amber-500/50 bg-amber-500/10 shadow-[0_0_20px_rgba(245,158,11,0.15)] font-semibold"
+                      : isErrorMismatch
+                      ? "text-rose-500 dark:text-rose-400 border-rose-500/50 bg-rose-500/5"
+                      : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 focus:border-sky-500 dark:focus:border-sky-400/60 focus:bg-white dark:focus:bg-white/[0.06]",
+                    isShaking && "animate-shake"
+                  )}
                 />
-
-                {/* Visual letter cells with per-letter coloring */}
-                <div className={cn(
-                  "flex items-center gap-1.5 flex-wrap justify-center pointer-events-none select-none transition-transform",
-                  isError && "animate-shake"
-                )}>
-                  {targetLetters.map((targetChar, idx) => {
-                    if (targetChar === ' ') {
-                      return <span key={idx} className="w-3 sm:w-4" />;
-                    }
-                    const userChar = typedValue[idx];
-                    let color = 'text-zinc-400 dark:text-zinc-500 border-zinc-200 dark:border-zinc-700/80 bg-zinc-50 dark:bg-white/[0.02]';
-                    if (userChar !== undefined) {
-                      if (userChar.toLowerCase() === targetChar.toLowerCase()) {
-                        color = 'text-emerald-500 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_12px_rgba(16,185,129,0.15)]';
-                      } else {
-                        color = 'text-rose-500 dark:text-rose-400 border-rose-500/50 bg-rose-500/10 shadow-[0_0_12px_rgba(244,63,94,0.15)]';
-                      }
-                    }
-                    return (
-                      <span
-                        key={idx}
-                        className={`w-8 h-10 sm:w-9 sm:h-11 md:w-10 md:h-12 rounded-xl border flex items-center justify-center text-lg sm:text-xl font-semibold transition-all ${color}`}
-                      >
-                        {userChar || '•'}
-                      </span>
-                    );
-                  })}
-                </div>
               </div>
             </div>
 
