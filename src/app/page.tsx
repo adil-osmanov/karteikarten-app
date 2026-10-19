@@ -28,6 +28,32 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function getLocalTodayDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`; // Пример: "2026-10-19" строго локально
+}
+
+export const checkAndResetDailyProgress = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const todayStr = getLocalTodayDateString();
+    const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
+
+    if (storedDate !== todayStr) {
+      console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
+      localStorage.setItem('app_daily_counter_date', todayStr);
+      localStorage.setItem('last_active_date', todayStr);
+      localStorage.setItem('daily_learned_count', '0');
+      window.dispatchEvent(new Event('storage-update'));
+    }
+  } catch (err) {
+    console.error('Ошибка проверки дневного сброса:', err);
+  }
+};
+
 function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState(false);
   React.useEffect(() => {
@@ -917,27 +943,40 @@ const useStore = create<DeckState>()((set, get) => ({
   incrementDailyProgress: () => {
     if (typeof window !== 'undefined') {
       const { appLanguage } = get();
-      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayStr = getLocalTodayDateString();
+      const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
+
+      let curLearned = 0;
+      if (storedDate !== todayStr) {
+        console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
+        localStorage.setItem('app_daily_counter_date', todayStr);
+        localStorage.setItem('last_active_date', todayStr);
+        localStorage.setItem('daily_learned_count', '0');
+        curLearned = 0;
+      } else {
+        curLearned = parseInt(localStorage.getItem('daily_learned_count') || '0', 10) || 0;
+      }
+
       const key = `daily_activity_${appLanguage}`;
       let progress: Record<string, any> = {};
       try {
         const stored = localStorage.getItem(key);
         if (stored) progress = JSON.parse(stored);
       } catch (e) {}
-      
+
       const rawCount = progress[todayStr];
       const currentCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
-      
+
       progress[todayStr] = currentCount + 1;
-      
+
       safeSetStorage(key, JSON.stringify(progress));
       try {
-        const curLearned = parseInt(localStorage.getItem('daily_learned_count') || '0', 10) || 0;
         localStorage.setItem('daily_learned_count', String(curLearned + 1));
+        localStorage.setItem('app_daily_counter_date', todayStr);
         localStorage.setItem('last_active_date', todayStr);
       } catch (e) {}
       window.dispatchEvent(new Event('storage-update'));
-      
+
       supabase.from('user_stats').upsert({
         language: appLanguage,
         daily_activity: progress
@@ -2028,6 +2067,19 @@ function RapidFlashcardMode({
     });
   }, [locked]);
 
+  const [cardAnimation, setCardAnimation] = useState<'idle' | 'slide-out' | 'slide-in-prep' | 'slide-in'>('slide-in-prep');
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      setCardAnimation('slide-in');
+      const timer = setTimeout(() => {
+        setCardAnimation('idle');
+      }, 300);
+      return () => clearTimeout(timer);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [card?.id]);
+
   const answer = useCallback((correct: boolean) => {
     if (locked) return;
     if (!isFlippedRef.current) {
@@ -2041,7 +2093,17 @@ function RapidFlashcardMode({
     unlockRapidAudio();
     const s = getRapidSounds();
     if (correct) s?.success.play(); else s?.error.play();
-    onAnswer(correct, true);
+
+    // Physical card swipe transition (slide-out to the left)
+    setCardAnimation('slide-out');
+    setTimeout(() => {
+      onAnswer(correct, true);
+      setCardAnimation('slide-in-prep');
+      requestAnimationFrame(() => {
+        setCardAnimation('slide-in');
+        setTimeout(() => setCardAnimation('idle'), 300);
+      });
+    }, 280);
   }, [locked, flip, onAnswer]);
 
   // Lock typing round mode to card.id so progress incrementing on answer does NOT cause the leaving card to mutate
@@ -2117,12 +2179,26 @@ function RapidFlashcardMode({
       try { navigator.vibrate(40); } catch(e) {}
     }
 
+    // 1. Короткий импульс успеха (350ms)
     typingTimerRef.current = setTimeout(() => {
-      setIsSuccessFeedback(false);
-      setTypedValue('');
-      setIsErrorMismatch(false);
-      onAnswer(true, false);
-    }, 600);
+      // 2. Запуск физического перелистывания (улет влево)
+      setCardAnimation('slide-out');
+
+      setTimeout(() => {
+        // 3. Переключение на следующую карточку
+        setIsSuccessFeedback(false);
+        setTypedValue('');
+        setIsErrorMismatch(false);
+        onAnswer(true, false);
+
+        // Подготовка следующей карты справа
+        setCardAnimation('slide-in-prep');
+        requestAnimationFrame(() => {
+          setCardAnimation('slide-in');
+          setTimeout(() => setCardAnimation('idle'), 300);
+        });
+      }, 280);
+    }, 350);
   }, [speak, onAnswer]);
 
   const triggerErrorShake = useCallback(() => {
@@ -2194,6 +2270,11 @@ function RapidFlashcardMode({
 
     // 3. Penalty -1 mastery round and re-queue card to end of session
     onHintPenalty?.();
+
+    // 4. Physical slide-out right before card advances
+    setTimeout(() => {
+      setCardAnimation('slide-out');
+    }, 1500);
   };
 
   const maskedSentence = useMemo(() => {
@@ -2298,12 +2379,17 @@ function RapidFlashcardMode({
 
   if (isTypingRound) {
     return (
-      <motion.div
-        initial={{ opacity: 0, x: 40 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -40 }}
-        transition={{ duration: 0.25, ease: 'easeOut' }}
-        className="w-full flex flex-col items-center"
+      <div
+        className={cn(
+          "w-full flex flex-col items-center transition-all duration-300",
+          cardAnimation === 'slide-out'
+            ? "-translate-x-[110%] -rotate-6 opacity-0 pointer-events-none"
+            : cardAnimation === 'slide-in-prep'
+            ? "translate-x-[80%] rotate-6 opacity-0"
+            : cardAnimation === 'slide-in'
+            ? "translate-x-0 rotate-0 opacity-100 duration-300 ease-out"
+            : "translate-x-0 rotate-0 opacity-100"
+        )}
       >
         <div className="w-full relative">
           <div 
@@ -2399,17 +2485,22 @@ function RapidFlashcardMode({
             <div className="w-full h-4" />
           </div>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 40 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -40 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
-      className="w-full flex flex-col items-center"
+    <div
+      className={cn(
+        "w-full flex flex-col items-center transition-all duration-300",
+        cardAnimation === 'slide-out'
+          ? "-translate-x-[110%] -rotate-6 opacity-0 pointer-events-none"
+          : cardAnimation === 'slide-in-prep'
+          ? "translate-x-[80%] rotate-6 opacity-0"
+          : cardAnimation === 'slide-in'
+          ? "translate-x-0 rotate-0 opacity-100 duration-300 ease-out"
+          : "translate-x-0 rotate-0 opacity-100"
+      )}
     >
       <div className="w-full relative" style={{ perspective: '1200px' }}>
         <motion.div
@@ -2465,7 +2556,7 @@ function RapidFlashcardMode({
           <Check className="w-6 h-6" />
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -2669,18 +2760,16 @@ function RapidSession({
         </div>
       </div>
 
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
-        <AnimatePresence mode="wait">
-          <RapidFlashcardMode
-            key={`${current.card.id}-${turn}`}
-            card={liveCard}
-            progress={wordProgress[current.card.id] || 0}
-            locked={locked}
-            onAnswer={handleAnswer}
-            onHintPenalty={handleHintPenalty}
-            reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
-          />
-        </AnimatePresence>
+      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4 overflow-hidden">
+        <RapidFlashcardMode
+          key={`${current.card.id}-${turn}`}
+          card={liveCard}
+          progress={wordProgress[current.card.id] || 0}
+          locked={locked}
+          onAnswer={handleAnswer}
+          onHintPenalty={handleHintPenalty}
+          reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
+        />
       </div>
 
       <StatsPopover
@@ -2738,7 +2827,7 @@ function RapidStudyCard({
     : (isReview || card.isArchived || progress >= 2);
 
   return (
-    <div className="w-full flex justify-center px-4">
+    <div className="w-full flex justify-center px-4 overflow-hidden">
       <RapidFlashcardMode
         key={card.id}
         card={card}
@@ -4110,21 +4199,42 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
 
   const [dailyLearnedCount, setDailyLearnedCount] = useState<number>(0);
   const [daily, setDaily] = useState<Record<string, any>>({});
-  useEffect(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+
+  const checkAndResetDaily = useCallback(() => {
     try {
-      const lastActiveDate = localStorage.getItem('last_active_date');
-      if (lastActiveDate !== todayStr) {
+      const todayStr = getLocalTodayDateString();
+      const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
+
+      if (storedDate !== todayStr) {
+        console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
+        localStorage.setItem('app_daily_counter_date', todayStr);
         localStorage.setItem('last_active_date', todayStr);
         localStorage.setItem('daily_learned_count', '0');
         setDailyLearnedCount(0);
       } else {
-        const storedCount = localStorage.getItem('daily_learned_count');
-        if (storedCount) setDailyLearnedCount(parseInt(storedCount, 10) || 0);
+        const savedCount = parseInt(localStorage.getItem('daily_learned_count') || '0', 10) || 0;
+        setDailyLearnedCount(savedCount);
       }
-    } catch (e) {}
+    } catch (err) {
+      console.error('Ошибка проверки дневного сброса:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkAndResetDaily();
+
+    // Сброс при возвращении на вкладку (если вкладка висела открытой ночью)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndResetDaily();
+      }
+    };
+
+    window.addEventListener('focus', checkAndResetDaily);
+    document.addEventListener('visibilitychange', handleVisibility);
 
     const loadProgress = () => {
+      checkAndResetDaily();
       try {
         const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
         if (stored) setDaily(JSON.parse(stored));
@@ -4133,10 +4243,15 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
     };
     loadProgress();
     window.addEventListener('storage-update', loadProgress);
-    return () => window.removeEventListener('storage-update', loadProgress);
-  }, [appLanguage]);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+    return () => {
+      window.removeEventListener('focus', checkAndResetDaily);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('storage-update', loadProgress);
+    };
+  }, [appLanguage, checkAndResetDaily]);
+
+  const todayStr = getLocalTodayDateString();
   const rawCount = daily[todayStr];
   const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
   const displayTodayCount = Math.max(todayCount, stats?.cardsDone || 0, dailyLearnedCount);
@@ -7421,6 +7536,25 @@ export default function App() {
     }
     return () => { document.body.style.overflow = 'unset'; };
   }, [renameModal, deleteModal, bookModal, deleteBookModal]);
+
+  useEffect(() => {
+    checkAndResetDailyProgress();
+
+    // Сброс при возвращении на вкладку (если вкладка висела открытой ночью)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndResetDailyProgress();
+      }
+    };
+
+    window.addEventListener('focus', checkAndResetDailyProgress);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.removeEventListener('focus', checkAndResetDailyProgress);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
 
 
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);

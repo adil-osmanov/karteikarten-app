@@ -21,9 +21,17 @@ export const normalizeLanguage = (lang?: string | null): SupportedLanguage => {
   return clean || 'DE';
 };
 
+export function getLocalTodayDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export const getTodayKey = (): string => {
   try {
-    return new Date().toISOString().slice(0, 10);
+    return getLocalTodayDateString();
   } catch {
     return '2026-10-19';
   }
