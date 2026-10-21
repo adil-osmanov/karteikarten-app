@@ -6,6 +6,7 @@ export interface StatsPopoverProps {
   isOpen: boolean;
   onClose: () => void;
   stats: any;
+  langStats?: any;
   language?: 'DE' | 'EN' | 'RU' | string;
   onReviewMistakes: () => void;
 }
@@ -72,7 +73,7 @@ const STATS_I18N: Record<string, {
   }
 };
 
-export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReviewMistakes }: StatsPopoverProps) {
+export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE', onReviewMistakes }: StatsPopoverProps) {
   useEffect(() => {
     if (!isOpen) return;
 
@@ -112,7 +113,26 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
   const currentLang = STATS_I18N[normalized] ? normalized : 'DE';
   const t = STATS_I18N[currentLang];
 
-  const totalSeconds = typeof stats?.activeSeconds === 'number' ? stats.activeSeconds : 0;
+  const currentLangStats = langStats || (() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const raw = localStorage.getItem(`daily_stats_${currentLang.toLowerCase()}_${today}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const totalDone = typeof currentLangStats?.learnedToday === 'number'
+    ? currentLangStats.learnedToday
+    : (typeof stats?.cardsDone === 'number' ? stats.cardsDone : getTodayCompletedCardsCount(currentLang));
+
+  const totalSeconds = typeof currentLangStats?.focusSeconds === 'number' && currentLangStats.focusSeconds > 0
+    ? currentLangStats.focusSeconds
+    : (typeof stats?.activeSeconds === 'number' ? stats.activeSeconds : 0);
+
   const minutes = Math.floor(totalSeconds / 60);
   const hours = Math.floor(minutes / 60);
   
@@ -125,20 +145,22 @@ export function StatsPopover({ isOpen, onClose, stats, language = 'DE', onReview
     timeDisplay = t.timeLessThanMin;
   }
 
-  const realCardsCount = getTodayCompletedCardsCount(currentLang);
-  const totalDone = Math.max(typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0, realCardsCount);
   const target = 200;
   const progressPercent = Math.min(Math.round((totalDone / target) * 100), 100);
 
-  const mistakesToday = typeof stats?.mistakesCountToday === 'number'
-    ? stats.mistakesCountToday
-    : (Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0);
+  const mistakesToday = typeof currentLangStats?.mistakesCount === 'number'
+    ? currentLangStats.mistakesCount
+    : (typeof stats?.mistakesCountToday === 'number'
+        ? stats.mistakesCountToday
+        : (Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0));
 
-  const totalAttempts = totalDone + mistakesToday;
-  const correctAttempts = Math.max(0, totalDone);
-  const accuracy = totalAttempts > 0 
-    ? Math.min(100, Math.max(0, Math.round((correctAttempts / totalAttempts) * 100))) 
-    : 100;
+  const totalAttempts = (currentLangStats?.totalCount && currentLangStats.totalCount > 0)
+    ? currentLangStats.totalCount
+    : (totalDone + mistakesToday);
+
+  const accuracy = (currentLangStats?.totalCount && currentLangStats.totalCount > 0)
+    ? Math.round((currentLangStats.correctCount / currentLangStats.totalCount) * 100)
+    : (totalAttempts > 0 ? Math.round((totalDone / totalAttempts) * 100) : 100);
 
   const accuracyColor = totalAttempts === 0
     ? 'text-zinc-900 dark:text-zinc-100'

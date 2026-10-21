@@ -382,6 +382,17 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
       }
     }
 
+    const scopedKey = `daily_stats_${normLang.toLowerCase()}_${todayStr}`;
+    const scopedRaw = localStorage.getItem(scopedKey);
+    if (scopedRaw) {
+      try {
+        const parsed = JSON.parse(scopedRaw);
+        if (typeof parsed?.learnedToday === 'number' && parsed.learnedToday > maxFound) {
+          maxFound = parsed.learnedToday;
+        }
+      } catch {}
+    }
+
     const appKeys = [
       getStorageKey(normLang),
       `app_daily_stats_${normLang.toLowerCase()}`

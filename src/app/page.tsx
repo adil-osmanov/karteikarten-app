@@ -30,40 +30,213 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Получение локальной даты пользователя (YYYY-MM-DD)
+export function getLocalTodayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function getLocalTodayDateString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`; // Пример: "2026-10-19" строго локально
+  return getLocalTodayStr();
+}
+
+export interface LanguageDailyProgress {
+  learnedToday: number;
+  focusSeconds: number;
+  correctCount: number;
+  totalCount: number;
+  mistakes: string[]; // id карточек с ошибками
+  mistakesCount?: number;
+  focusMinutes?: number;
+  accuracy?: number;
+}
+
+// Загрузка статистики для конкретного языка
+export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
+  const defaultStats: LanguageDailyProgress = {
+    learnedToday: 0,
+    focusSeconds: 0,
+    correctCount: 0,
+    totalCount: 0,
+    mistakes: [],
+    mistakesCount: 0,
+    focusMinutes: 0,
+    accuracy: 100
+  };
+
+  if (typeof window === 'undefined') return defaultStats;
+
+  const today = getLocalTodayStr();
+  const cleanLang = (lang || 'de').toLowerCase();
+  const raw = localStorage.getItem(`daily_stats_${cleanLang}_${today}`);
+  if (!raw) {
+    return defaultStats;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    const learnedToday = typeof parsed.learnedToday === 'number' ? parsed.learnedToday : 0;
+    const focusSeconds = typeof parsed.focusSeconds === 'number' ? parsed.focusSeconds : 0;
+    const correctCount = typeof parsed.correctCount === 'number' ? parsed.correctCount : 0;
+    const totalCount = typeof parsed.totalCount === 'number' ? parsed.totalCount : 0;
+    const mistakes = Array.isArray(parsed.mistakes) ? parsed.mistakes : [];
+    const mistakesCount = typeof parsed.mistakesCount === 'number' ? parsed.mistakesCount : mistakes.length;
+
+    return {
+      learnedToday,
+      focusSeconds,
+      correctCount,
+      totalCount,
+      mistakes,
+      mistakesCount,
+      focusMinutes: Math.floor(focusSeconds / 60),
+      accuracy: totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 100
+    };
+  } catch {
+    return defaultStats;
+  }
+}
+
+// Сохранение статистики для конкретного языка
+export function updateLanguageDailyStats(lang: string, deltaLearned: number = 0, isCorrect?: boolean, cardId?: string): LanguageDailyProgress {
+  const defaultStats: LanguageDailyProgress = {
+    learnedToday: 0,
+    focusSeconds: 0,
+    correctCount: 0,
+    totalCount: 0,
+    mistakes: [],
+    mistakesCount: 0,
+    focusMinutes: 0,
+    accuracy: 100
+  };
+
+  if (typeof window === 'undefined') return defaultStats;
+
+  const today = getLocalTodayStr();
+  const cleanLang = (lang || 'de').toLowerCase();
+  const key = `daily_stats_${cleanLang}_${today}`;
+  let current: LanguageDailyProgress = { ...defaultStats };
+
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) current = { ...current, ...JSON.parse(raw) };
+  } catch {}
+
+  current.learnedToday = Math.max(0, current.learnedToday + deltaLearned);
+  if (isCorrect !== undefined) {
+    current.totalCount += 1;
+    if (isCorrect) {
+      current.correctCount += 1;
+    } else {
+      current.mistakesCount = (current.mistakesCount || 0) + 1;
+      if (cardId && !current.mistakes.includes(cardId)) {
+        current.mistakes.push(cardId);
+      }
+    }
+  }
+
+  current.focusMinutes = Math.floor(current.focusSeconds / 60);
+  current.accuracy = current.totalCount > 0 ? Math.round((current.correctCount / current.totalCount) * 100) : 100;
+
+  localStorage.setItem(key, JSON.stringify(current));
+
+  // Sync to Supabase per-language
+  supabase.from('user_stats').upsert({
+    language: `DAILY_STATS_${cleanLang.toUpperCase()}`,
+    daily_activity: { date: today, ...current }
+  }, { onConflict: 'language' }).then(() => {});
+
+  window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang } }));
+  window.dispatchEvent(new Event('storage-update'));
+
+  return current;
+}
+
+// Исправление утечки данных: обнуление EN и RU за сегодня, сохранение 13 за немецким DE
+export function fixAndIsolateDailyStats() {
+  if (typeof window === 'undefined') return;
+  try {
+    const today = getLocalTodayStr();
+    const fixedFlag = `daily_stats_isolated_v2_${today}`;
+    if (localStorage.getItem(fixedFlag)) return;
+
+    // 1. Обнуляем английский и русский языки за сегодняшний день
+    const enKey = `daily_stats_en_${today}`;
+    const ruKey = `daily_stats_ru_${today}`;
+    const emptyStats = { learnedToday: 0, focusSeconds: 0, correctCount: 0, totalCount: 0, mistakesCount: 0, mistakes: [] };
+    localStorage.setItem(enKey, JSON.stringify(emptyStats));
+    localStorage.setItem(ruKey, JSON.stringify(emptyStats));
+
+    // Сброс старых ключей активности
+    try {
+      const actEn = JSON.parse(localStorage.getItem('daily_activity_EN') || '{}');
+      if (actEn[today]) { actEn[today] = 0; localStorage.setItem('daily_activity_EN', JSON.stringify(actEn)); }
+      const actRu = JSON.parse(localStorage.getItem('daily_activity_RU') || '{}');
+      if (actRu[today]) { actRu[today] = 0; localStorage.setItem('daily_activity_RU', JSON.stringify(actRu)); }
+    } catch {}
+
+    // 2. Счетчик 13 оставляем строго за немецким языком (de)
+    const deKey = `daily_stats_de_${today}`;
+    const rawDe = localStorage.getItem(deKey);
+    let deCount = 13;
+    if (rawDe) {
+      try {
+        const parsed = JSON.parse(rawDe);
+        deCount = Math.max(13, parsed.learnedToday || 0);
+      } catch {}
+    } else {
+      const legacy = parseInt(localStorage.getItem('daily_learned_count') || '13', 10) || 13;
+      deCount = Math.max(13, legacy);
+    }
+    const deStats = {
+      learnedToday: deCount,
+      focusSeconds: 0,
+      correctCount: deCount,
+      totalCount: deCount,
+      mistakesCount: 0,
+      mistakes: []
+    };
+    localStorage.setItem(deKey, JSON.stringify(deStats));
+
+    // Удаляем глобальный неизолированный ключ
+    localStorage.removeItem('daily_learned_count');
+    localStorage.setItem(fixedFlag, 'true');
+
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: 'de' } }));
+    window.dispatchEvent(new Event('storage-update'));
+  } catch (e) {
+    console.error('Error fixing daily stats leak:', e);
+  }
 }
 
 export const checkAndResetDailyProgress = () => {
   if (typeof window === 'undefined') return;
   try {
-    const todayStr = getLocalTodayDateString();
+    const todayStr = getLocalTodayStr();
     const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
 
     if (storedDate !== todayStr) {
       console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
       localStorage.setItem('app_daily_counter_date', todayStr);
       localStorage.setItem('last_active_date', todayStr);
-      localStorage.setItem('daily_learned_count', '0');
+      localStorage.removeItem('daily_learned_count');
 
-      ['DE', 'EN', 'RU'].forEach(lang => {
+      ['de', 'en', 'ru'].forEach(lang => {
+        const key = `daily_stats_${lang}_${todayStr}`;
+        const emptyStats = { learnedToday: 0, focusSeconds: 0, correctCount: 0, totalCount: 0, mistakesCount: 0, mistakes: [] };
+        localStorage.setItem(key, JSON.stringify(emptyStats));
+
         try {
-          const actKey = `daily_activity_${lang}`;
+          const actKey = `daily_activity_${lang.toUpperCase()}`;
           const stored = localStorage.getItem(actKey);
           let progress: Record<string, any> = {};
           if (stored) progress = JSON.parse(stored);
-          if (progress[todayStr] === undefined) {
-            progress[todayStr] = 0;
-            localStorage.setItem(actKey, JSON.stringify(progress));
-          }
+          progress[todayStr] = 0;
+          localStorage.setItem(actKey, JSON.stringify(progress));
         } catch (e) {}
       });
 
       resetDayStatsToZero();
+      window.dispatchEvent(new CustomEvent('stats-update'));
       window.dispatchEvent(new Event('storage-update'));
     }
   } catch (err) {
@@ -960,19 +1133,15 @@ const useStore = create<DeckState>()((set, get) => ({
   incrementDailyProgress: () => {
     if (typeof window !== 'undefined') {
       const { appLanguage } = get();
-      const todayStr = getLocalTodayDateString();
+      const cleanLang = (appLanguage || 'de').toLowerCase();
+      const todayStr = getLocalTodayStr();
       const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
 
-      let curLearned = 0;
       if (storedDate !== todayStr) {
-        console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
-        localStorage.setItem('app_daily_counter_date', todayStr);
-        localStorage.setItem('last_active_date', todayStr);
-        localStorage.setItem('daily_learned_count', '0');
-        curLearned = 0;
-      } else {
-        curLearned = parseInt(localStorage.getItem('daily_learned_count') || '0', 10) || 0;
+        checkAndResetDailyProgress();
       }
+
+      updateLanguageDailyStats(cleanLang, 1, true);
 
       const key = `daily_activity_${appLanguage}`;
       let progress: Record<string, any> = {};
@@ -987,12 +1156,9 @@ const useStore = create<DeckState>()((set, get) => ({
       progress[todayStr] = currentCount + 1;
 
       safeSetStorage(key, JSON.stringify(progress));
-      try {
-        localStorage.setItem('daily_learned_count', String(curLearned + 1));
-        localStorage.setItem('app_daily_counter_date', todayStr);
-        localStorage.setItem('last_active_date', todayStr);
-      } catch (e) {}
-      window.dispatchEvent(new Event('storage-update'));
+      localStorage.setItem('app_daily_counter_date', todayStr);
+      localStorage.setItem('last_active_date', todayStr);
+      localStorage.removeItem('daily_learned_count');
 
       supabase.from('user_stats').upsert({
         language: appLanguage,
@@ -2835,6 +3001,7 @@ function RapidSession({
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         stats={stats}
+        langStats={getLanguageDailyStats(studyLanguage)}
         language={studyLanguage}
         onReviewMistakes={handleReviewMistakes}
       />
@@ -3322,6 +3489,7 @@ function StudyInterface({
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         stats={stats}
+        langStats={getLanguageDailyStats(studyLanguage)}
         language={studyLanguage}
         onReviewMistakes={handleReviewMistakes}
       />
@@ -4279,66 +4447,43 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
     };
   }, [isLangOpen]);
 
-  const [dailyLearnedCount, setDailyLearnedCount] = useState<number>(0);
-  const [daily, setDaily] = useState<Record<string, any>>({});
+  const [langStats, setLangStats] = useState<LanguageDailyProgress>(() => getLanguageDailyStats(effectiveLang));
 
-  const checkAndResetDaily = useCallback(() => {
-    try {
-      const todayStr = getLocalTodayDateString();
-      const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
-
-      if (storedDate !== todayStr) {
-        console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
-        localStorage.setItem('app_daily_counter_date', todayStr);
-        localStorage.setItem('last_active_date', todayStr);
-        localStorage.setItem('daily_learned_count', '0');
-        setDailyLearnedCount(0);
-      } else {
-        const savedCount = parseInt(localStorage.getItem('daily_learned_count') || '0', 10) || 0;
-        setDailyLearnedCount(savedCount);
-      }
-    } catch (err) {
-      console.error('Ошибка проверки дневного сброса:', err);
-    }
+  useEffect(() => {
+    fixAndIsolateDailyStats();
+    checkAndResetDailyProgress();
   }, []);
 
   useEffect(() => {
-    checkAndResetDaily();
+    setLangStats(getLanguageDailyStats(effectiveLang));
+  }, [effectiveLang]);
 
-    // Сброс при возвращении на вкладку (если вкладка висела открытой ночью)
+  useEffect(() => {
+    const handleUpdate = () => {
+      checkAndResetDailyProgress();
+      setLangStats(getLanguageDailyStats(effectiveLang));
+    };
+
+    window.addEventListener('stats-update', handleUpdate);
+    window.addEventListener('storage-update', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    window.addEventListener('focus', handleUpdate);
+
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        checkAndResetDaily();
+        handleUpdate();
       }
     };
-
-    window.addEventListener('focus', checkAndResetDaily);
     document.addEventListener('visibilitychange', handleVisibility);
 
-    const loadProgress = () => {
-      checkAndResetDaily();
-      try {
-        const stored = localStorage.getItem(`daily_activity_${appLanguage}`);
-        if (stored) setDaily(JSON.parse(stored));
-        else setDaily({});
-      } catch (e) {}
-    };
-    loadProgress();
-    window.addEventListener('storage-update', loadProgress);
-
     return () => {
-      window.removeEventListener('focus', checkAndResetDaily);
+      window.removeEventListener('stats-update', handleUpdate);
+      window.removeEventListener('storage-update', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+      window.removeEventListener('focus', handleUpdate);
       document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('storage-update', loadProgress);
     };
-  }, [appLanguage, checkAndResetDaily]);
-
-  const todayStr = getLocalTodayDateString();
-  const rawCount = daily[todayStr];
-  const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
-  const realCardsCount = getTodayCompletedCardsCount(effectiveLang);
-  const statsCardsDone = stats?.date === todayStr && typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0;
-  const displayTodayCount = Math.max(statsCardsDone, realCardsCount, todayCount, dailyLearnedCount);
+  }, [effectiveLang]);
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
   const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
@@ -4445,7 +4590,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
                 <path d="m3 17 9 5 9-5" />
               </svg>
               <span suppressHydrationWarning className="text-xs font-semibold tabular-nums tracking-tight font-sans">
-                {displayTodayCount} <span className="text-zinc-400 dark:text-zinc-500 font-normal">/ 200</span>
+                {langStats.learnedToday} <span className="text-zinc-400 dark:text-zinc-500 font-normal">/ 200</span>
               </span>
             </button>
 
@@ -4468,6 +4613,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         stats={stats}
+        langStats={langStats}
         language={effectiveLang}
         onReviewMistakes={() => {
           setIsStatsOpen(false);
