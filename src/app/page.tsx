@@ -1978,8 +1978,8 @@ function RapidFlashcardMode({
   card: Flashcard;
   progress: number;
   locked: boolean;
-  onAnswer: (correct: boolean, wasFlipped: boolean) => void;
-  onHintPenalty?: () => void;
+  onAnswer: (correct: boolean, wasFlipped?: boolean, isSurrender?: boolean) => void;
+  onHintPenalty?: (penalizedScore?: number) => void;
   deckTitle?: string;
   reverse?: boolean;
 }) {
@@ -2100,42 +2100,44 @@ function RapidFlashcardMode({
     onAnswer(correct, true);
   }, [locked, flip, onAnswer]);
 
+  const [localMastery, setLocalMastery] = useState(() => (card?.isArchived ? 4 : progress));
+  const [isAnswered, setIsAnswered] = useState(false);
+  const [isSurrendered, setIsSurrendered] = useState(false);
+  const [cardAnimation, setCardAnimation] = useState<'idle' | 'slide-out'>('idle');
+
   // Lock typing round mode to card.id so progress incrementing on answer does NOT cause the leaving card to mutate
   const [isTypingRound, setIsTypingRound] = useState(() => progress >= 2 || (card?.masteryLevel || 0) >= 2);
-
-  useEffect(() => {
-    setIsTypingRound(progress >= 2 || (card?.masteryLevel || 0) >= 2);
-  }, [card?.id]);
 
   const [typedValue, setTypedValue] = useState("");
   const [isErrorMismatch, setIsErrorMismatch] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
   const [isSuccessFeedback, setIsSuccessFeedback] = useState(false);
-  const [isSurrendered, setIsSurrendered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset typing state on new card
   useEffect(() => {
-    setTypedValue("");
+    setIsTypingRound(progress >= 2 || (card?.masteryLevel || 0) >= 2);
+    setLocalMastery(card?.isArchived ? 4 : progress);
+    setIsAnswered(false);
+    setIsSurrendered(false);
+    setIsSuccessFeedback(false);
     setIsErrorMismatch(false);
     setIsShaking(false);
-    setIsSuccessFeedback(false);
-    setIsSurrendered(false);
-    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    setTypedValue("");
+    setCardAnimation('idle');
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-  }, [card?.id]);
+  }, [card?.id, progress, card?.isArchived, card?.masteryLevel]);
 
   // Autofocus input in typing mode only on non-mobile (on mobile virtual keyboard handles typing)
   useEffect(() => {
-    if (isTypingRound && !locked && !isSurrendered && !isMobile) {
+    if (isTypingRound && !locked && !isAnswered && !isMobile) {
       const timer = setTimeout(() => {
         inputRef.current?.focus();
       }, 80);
       return () => clearTimeout(timer);
     }
-  }, [isTypingRound, card?.id, locked, isSurrendered, isMobile]);
+  }, [isTypingRound, card?.id, locked, isAnswered, isMobile]);
 
   const parsedNoun = useMemo(() => {
     let raw = (card?.targetWord || '').replace(/\|/g, '').trim();
@@ -2164,7 +2166,9 @@ function RapidFlashcardMode({
   }, [card?.targetWord, card?.hint, card?.forms]);
 
   const handleSuccessAnswer = useCallback(() => {
+    if (isAnswered) return;
     setIsSuccessFeedback(true);
+    setIsAnswered(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
     playFeedbackSound(true);
@@ -2172,14 +2176,8 @@ function RapidFlashcardMode({
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       try { navigator.vibrate(40); } catch(e) {}
     }
-
-    typingTimerRef.current = setTimeout(() => {
-      setIsSuccessFeedback(false);
-      setTypedValue('');
-      setIsErrorMismatch(false);
-      onAnswer(true, false);
-    }, 1800);
-  }, [speak, onAnswer]);
+    // No automatic timer! User reads the word and explicitly presses Weiter or Enter
+  }, [isAnswered, speak]);
 
   const triggerErrorShake = useCallback(() => {
     setIsErrorMismatch(true);
@@ -2195,7 +2193,7 @@ function RapidFlashcardMode({
   }, []);
 
   const handleInputChange = (rawVal: string) => {
-    if (locked || isSuccessFeedback || isSurrendered) return;
+    if (locked || isAnswered) return;
 
     // Automatic Russian -> German layout mapping and digraph replacements
     const val = convertRuToDeLayout(rawVal, parsedNoun.full || card.targetWord);
@@ -2223,7 +2221,7 @@ function RapidFlashcardMode({
   };
 
   const handleEnterSubmit = () => {
-    if (locked || isSuccessFeedback || isSurrendered) return;
+    if (locked || isAnswered) return;
     const trimmedInput = typedValue.toLowerCase().trim();
     const targetA = parsedNoun.noun.toLowerCase().trim();
     const targetB = parsedNoun.full.toLowerCase().trim();
@@ -2236,27 +2234,49 @@ function RapidFlashcardMode({
   };
 
   const handleGiveUp = () => {
-    if (locked || isSuccessFeedback || isSurrendered) return;
+    if (locked || isAnswered) return;
+
+    // 1. Принудительный штраф -1 раунд (мгновенно для точек шапки)
+    const updatedMastery = Math.max(0, localMastery - 1);
+    setLocalMastery(updatedMastery);
+
     setIsSurrendered(true);
+    setIsAnswered(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
 
-    // 1. Reveal correct word directly in the input field
+    // 2. Отображаем правильное слово в инпуте спокойным белым цветом
     const revealWord = parsedNoun.full || card.targetWord.replace(/\|/g, '').trim();
     setTypedValue(revealWord);
 
-    // 2. Play audio pronunciation
+    // 3. Воспроизводим аудио слова
     speak();
 
-    // 3. Penalty -1 mastery round and re-queue card to end of session
-    onHintPenalty?.();
+    // 4. Применяем штраф в родителе (обновляет SRS/колоду и добавляет в конец очереди)
+    onHintPenalty?.(updatedMastery);
   };
 
-  const maskedSentence = useMemo(() => {
-    const s = example || card?.sentence || '';
-    if (!s) return '';
-    return getSmartMaskedSentence(s, card?.targetWord || '');
-  }, [example, card?.sentence, card?.targetWord]);
+  const handleProceedNext = () => {
+    if (!isAnswered) return;
+
+    // Запуск физического перелистывания карточки (Card Slide)
+    setCardAnimation('slide-out');
+
+    setTimeout(() => {
+      setIsAnswered(false);
+      setIsSurrendered(false);
+      setIsSuccessFeedback(false);
+      setTypedValue('');
+      setIsErrorMismatch(false);
+
+      if (isSurrendered) {
+        onAnswer(false, false, true);
+      } else {
+        onAnswer(true, false, false);
+      }
+      setCardAnimation('idle');
+    }, 260);
+  };
 
   useEffect(() => {
     if (isTypingRound) return;
@@ -2306,7 +2326,13 @@ function RapidFlashcardMode({
       </div>
       <div className="flex items-center gap-2 pr-1">
         {[0, 1, 2, 3].map(i => (
-          <div key={i} className={cn("w-2 h-2 rounded-full transition-colors duration-300", i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700")} />
+          <div
+            key={i}
+            className={cn(
+              "w-2 h-2 rounded-full transition-all duration-200",
+              i < localMastery ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]" : "bg-zinc-300 dark:bg-zinc-700"
+            )}
+          />
         ))}
       </div>
     </div>
@@ -2357,10 +2383,11 @@ function RapidFlashcardMode({
       <div className="w-full flex flex-col items-center">
         <div className="w-full relative">
           <div 
-            onClick={() => { if (!isMobile) inputRef.current?.focus(); }}
+            onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
             className={cn(
-              "relative w-full min-h-[420px] md:min-h-[480px] p-6 sm:p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col justify-between items-center cursor-text transition-all",
-              isMobile && !isSuccessFeedback && "pb-64 sm:pb-72"
+              "relative w-full min-h-[420px] md:min-h-[480px] p-6 sm:p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col justify-between items-center cursor-text transition-all duration-300",
+              cardAnimation === 'slide-out' && "translate-x-[-120%] -rotate-6 opacity-0 ease-out pointer-events-none",
+              isMobile && !isAnswered && "pb-64 sm:pb-72"
             )}
           >
             {/* Top Header */}
@@ -2376,13 +2403,16 @@ function RapidFlashcardMode({
                 </button>
               </div>
               <div className="flex items-center gap-2.5 pr-1">
+                {/* 4 точки прогресса раундов (мгновенно отражают masteryLevel) */}
                 <div className="flex items-center gap-1.5">
                   {[0, 1, 2, 3].map(i => (
                     <div
                       key={i}
                       className={cn(
-                        "w-2 h-2 rounded-full transition-colors duration-300",
-                        i < progress ? "bg-blue-500" : "bg-zinc-300 dark:bg-zinc-700"
+                        "w-2 h-2 rounded-full transition-all duration-200",
+                        i < localMastery
+                          ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]"
+                          : "bg-zinc-300 dark:bg-zinc-800"
                       )}
                     />
                   ))}
@@ -2390,7 +2420,7 @@ function RapidFlashcardMode({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
-                  disabled={locked || isSuccessFeedback || isSurrendered}
+                  disabled={locked || isAnswered}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
                   title="Aufgeben / Wort anzeigen (-1)"
                 >
@@ -2399,34 +2429,31 @@ function RapidFlashcardMode({
               </div>
             </div>
 
-            {/* Central Content */}
-            <div className="flex-1 flex flex-col items-center justify-center w-full my-4">
+            {/* Central Content: ТОЛЬКО перевод и поле ввода (БЕЗ ПРИМЕРА ПРЕДЛОЖЕНИЯ) */}
+            <div className="flex-1 flex flex-col items-center justify-center w-full my-auto text-center">
               {/* Translation Meaning */}
-              <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-zinc-900 dark:text-white text-center leading-snug px-2 mb-3">
-                {translation}
-              </div>
-
-              {/* Context sentence with masked target word */}
-              {maskedSentence && (
-                <p className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 italic mb-6 max-w-lg mx-auto font-normal leading-relaxed text-center select-none line-clamp-2 px-3">
-                  &ldquo;{maskedSentence}&rdquo;
-                </p>
-              )}
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white text-center leading-snug px-2 mb-6">
+                {translation || card.hint}
+              </h2>
 
               {/* Monolithic Apple Spotlight input line without blinking caret */}
-              <div className="w-full max-w-md relative px-2">
+              <div className="w-full max-w-md relative px-2 mb-2">
                 <input
                   ref={inputRef}
                   type="text"
                   inputMode={isMobile ? "none" : "text"}
-                  readOnly={isMobile || isSurrendered || locked || isSuccessFeedback}
+                  readOnly={isMobile || isAnswered || locked}
                   value={typedValue}
                   onChange={(e) => handleInputChange(e.target.value)}
                   onKeyDown={(e) => {
                     e.stopPropagation();
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      handleEnterSubmit();
+                      if (isAnswered) {
+                        handleProceedNext();
+                      } else {
+                        handleEnterSubmit();
+                      }
                     }
                   }}
                   autoFocus={!isMobile}
@@ -2435,8 +2462,8 @@ function RapidFlashcardMode({
                   spellCheck={false}
                   placeholder=""
                   className={cn(
-                    "w-full text-center text-xl sm:text-2xl font-medium tracking-wide rounded-2xl py-3.5 px-6 outline-none transition-all duration-200 caret-transparent placeholder:text-zinc-400 dark:placeholder:text-zinc-600 border",
-                    isSuccessFeedback
+                    "w-full text-center text-xl sm:text-2xl font-medium tracking-wide rounded-2xl py-3.5 px-6 outline-none transition-all duration-200 caret-transparent border",
+                    isAnswered && !isSurrendered
                       ? "text-emerald-500 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] font-semibold"
                       : isSurrendered
                       ? "text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05] font-medium"
@@ -2447,22 +2474,35 @@ function RapidFlashcardMode({
                   )}
                 />
               </div>
+
+              {/* Bottom block: Weiter button appears immediately upon answer or surrender */}
+              <div className="w-full max-w-md mt-6 min-h-[56px] flex items-center justify-center">
+                {isAnswered && (
+                  <button
+                    type="button"
+                    onClick={handleProceedNext}
+                    className="w-full py-4 rounded-2xl bg-sky-500 hover:bg-sky-400 active:scale-[0.99] text-white font-semibold text-base transition-all shadow-lg shadow-sky-500/25 animate-in fade-in zoom-in-95 duration-150 cursor-pointer"
+                  >
+                    Weiter
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Bottom Spacer to keep vertical balance */}
-            <div className="w-full h-4" />
+            <div className="w-full h-2" />
           </div>
         </div>
 
-        {isMobile && !isSuccessFeedback && (
+        {isMobile && !isAnswered && (
           <VirtualKeyboard
             docked
             onKeyPress={(char) => {
-              if (locked || isSuccessFeedback || isSurrendered) return;
+              if (locked || isAnswered) return;
               handleInputChange(typedValue + char);
             }}
             onBackspace={() => {
-              if (locked || isSuccessFeedback || isSurrendered) return;
+              if (locked || isAnswered) return;
               handleInputChange(typedValue.slice(0, -1));
             }}
             targetWord={parsedNoun.noun || card.targetWord}
@@ -2624,11 +2664,24 @@ function RapidSession({
     });
   }, [queue]);
 
-  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean) => {
+  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = true, isSurrender: boolean = false) => {
     if (locked || !queue || queue.length === 0) return;
     const current = queue[0];
     const id = current.card.id;
     const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
+
+    if (isSurrender) {
+      // Penalty and mistake recording were already completed immediately in handleHintPenalty.
+      // Move card to the end of the queue for review and advance.
+      setLocked(true);
+      const advanceDelay = wasFlipped ? 380 : 60;
+      timerRef.current = setTimeout(() => {
+        setQueue(q => (q ? [...q.filter(item => item.card.id !== id), current] : q));
+        setTurn(t => t + 1);
+        setLocked(false);
+      }, advanceDelay);
+      return;
+    }
 
     recordCardResult(correct, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
 
@@ -2660,31 +2713,29 @@ function RapidSession({
       setTurn(t => t + 1);
       setLocked(false);
     }, advanceDelay);
-  }, [locked, queue, wordProgress, answerCard, setCardProgress]);
+  }, [locked, queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
 
-  const handleHintPenalty = useCallback(() => {
-    if (locked || !queue || queue.length === 0) return;
+  const handleHintPenalty = useCallback((forcedScore?: number) => {
+    if (!queue || queue.length === 0) return;
     const current = queue[0];
     const id = current.card.id;
     const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
     const currentProgress = wordProgress[id] ?? liveCard.masteryLevel ?? 0;
-    const penalizedProgress = Math.max(0, currentProgress - 1);
+    const penalizedProgress = typeof forcedScore === 'number' ? forcedScore : Math.max(0, currentProgress - 1);
 
-    // 1) Update progress and persist penalty immediately
-    setCardProgress(current.deckId, id, penalizedProgress);
+    // 1) Update progress and persist penalty immediately (store + Supabase)
+    if (liveCard.isArchived) {
+      answerCard(current.deckId, id, false, true);
+    } else {
+      setCardProgress(current.deckId, id, penalizedProgress);
+    }
     setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
-    setLocked(true);
 
     // 2) Record mistake in daily stats pool for focused repetition
     recordCardResult(false, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
 
-    // 3) After 1.8s (hint overlay display time), push card to END of current session queue
-    timerRef.current = setTimeout(() => {
-      setQueue(q => (q ? [...q.filter(item => item.card.id !== id), current] : q));
-      setTurn(t => t + 1);
-      setLocked(false);
-    }, 1800);
-  }, [locked, queue, wordProgress, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
+    // NO automatic timer! The user reads the word and explicitly taps «Weiter» to advance.
+  }, [queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
 
   if (queue === null) return null;
 
@@ -2794,16 +2845,22 @@ function RapidStudyCard({
 
   const progress = card.isArchived ? 4 : Math.max(0, Math.min(3, card.masteryLevel || 0));
 
-  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = true) => {
+  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = true, isSurrendered: boolean = false) => {
     if (locked) return;
     setLocked(true);
-    onAnswer(correct, false);
+    if (!isSurrendered) {
+      onAnswer(correct, false);
+    }
     const delay = wasFlipped ? 380 : 60;
     timerRef.current = setTimeout(() => {
       onNext();
       setLocked(false);
     }, delay);
   }, [locked, onAnswer, onNext]);
+
+  const handleHintPenalty = useCallback(() => {
+    onAnswer(false, true);
+  }, [onAnswer]);
 
   // When repeating cards (in a review session or if already archived),
   // prompt MUST be in Russian (reverse = true) so the user actively recalls the German translation.
@@ -2827,7 +2884,7 @@ function RapidStudyCard({
             progress={progress}
             locked={locked}
             onAnswer={handleAnswer}
-            onHintPenalty={() => handleAnswer(false)}
+            onHintPenalty={handleHintPenalty}
             deckTitle={deckTitle}
             reverse={isReverse}
           />
@@ -3487,6 +3544,11 @@ function StudyCard({
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
+  const [localMastery, setLocalMastery] = useState(() => (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+
+  useEffect(() => {
+    setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
+  }, [card.id, card.masteryLevel, card.isArchived]);
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const playbackSpeed = useStore(state => state.playbackSpeed);
@@ -3594,6 +3656,7 @@ function StudyCard({
   };
 
   const handleHilfe = () => {
+    setLocalMastery(prev => Math.max(0, prev - 1));
     setHasErrored(true);
     hasErroredRef.current = true;
     onAnswer(false, true); // isHilfe = true
@@ -3835,7 +3898,7 @@ function StudyCard({
                   key={step} 
                   className={cn(
                     "w-2.5 h-2.5 rounded-full transition-colors",
-                    (card.isArchived || card.masteryLevel > step) ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
+                    step < localMastery ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
                   )}
                 />
               ))}
@@ -6489,6 +6552,11 @@ function PrepStudyCard({
   const [isHilfe, setIsHilfe] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
+  const [localMastery, setLocalMastery] = useState(() => (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+
+  useEffect(() => {
+    setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
+  }, [card.id, card.masteryLevel, card.isArchived]);
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
   const originalVerb = card.targetWord;
@@ -6531,6 +6599,7 @@ function PrepStudyCard({
   }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio]);
 
   const onHilfe = useCallback(() => {
+    setLocalMastery(prev => Math.max(0, prev - 1));
     hasErroredRef.current = true;
     setHasErrored(true);
     setIsHilfe(true);
@@ -6612,19 +6681,17 @@ function PrepStudyCard({
             <HelpCircle className="w-5 h-5" />
           </button>
           <div className="flex gap-1.5">
-            {[0, 1, 2, 3].map((step) => {
-              const visualMastery = card.masteryLevel;
-              return (
+            {[0, 1, 2, 3].map((step) => (
               <div 
                 key={step} 
                 className={cn(
                   "w-2.5 h-2.5 rounded-full transition-all duration-300",
-                  (card.isArchived || visualMastery > step) 
+                  step < localMastery
                     ? "bg-blue-600 dark:bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
                     : "bg-gray-200 dark:bg-white/10"
                 )}
               />
-            )})}
+            ))}
           </div>
         </div>
       </div>
@@ -6749,6 +6816,11 @@ function VerbStudyCard({
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
   const [isHilfe, setIsHilfe] = useState(false);
+  const [localMastery, setLocalMastery] = useState(() => (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+
+  useEffect(() => {
+    setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
+  }, [card.id, card.masteryLevel, card.isArchived]);
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
   const virtualBackspaceRef = useRef<(() => void) | undefined>(undefined);
@@ -6797,6 +6869,7 @@ function VerbStudyCard({
   }, []);
 
   const handleHilfe = useCallback(() => {
+    setLocalMastery(prev => Math.max(0, prev - 1));
     hasErroredRef.current = true;
     setHasErrored(true);
     setIsHilfe(true);
@@ -6853,20 +6926,17 @@ function VerbStudyCard({
             <HelpCircle className="w-5 h-5" />
           </button>
           <div className="flex gap-1.5">
-            {[0, 1, 2, 3].map((step) => {
-              const visualMastery = card.masteryLevel;
-                 
-              return (
+            {[0, 1, 2, 3].map((step) => (
               <div 
                 key={step} 
                 className={cn(
                   "w-2.5 h-2.5 rounded-full transition-all duration-300",
-                  (card.isArchived || visualMastery > step) 
+                  step < localMastery 
                     ? "bg-blue-600 dark:bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
                     : "bg-gray-200 dark:bg-white/10"
                 )}
               />
-            )})}
+            ))}
           </div>
         </div>
       </div>
@@ -7159,6 +7229,11 @@ export function RedemittelStudyCard({
   const [placedChunks, setPlacedChunks] = useState<RedemittelChunk[]>([]);
   const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'surrender'>('idle');
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [localMastery, setLocalMastery] = useState(() => (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+
+  useEffect(() => {
+    setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
+  }, [card.id, card.masteryLevel, card.isArchived]);
 
   const handlePlayAudio = useCallback(() => {
     if (!data.fullText) return;
@@ -7217,6 +7292,7 @@ export function RedemittelStudyCard({
 
   const handleSurrender = useCallback(() => {
     if (status === 'success' || status === 'surrender') return;
+    setLocalMastery(prev => Math.max(0, prev - 1));
     const correctOrder = [...data.shuffledChunks].sort((a, b) => a.originalIndex - b.originalIndex);
     setPlacedChunks(correctOrder);
     setStatus('surrender');
@@ -7346,7 +7422,7 @@ export function RedemittelStudyCard({
                   key={step}
                   className={cn(
                     "w-2.5 h-2.5 rounded-full transition-colors",
-                    (card.isArchived || (card.masteryLevel || 0) > step)
+                    step < localMastery
                       ? "bg-blue-600 dark:bg-blue-500"
                       : "bg-gray-200 dark:bg-zinc-700"
                   )}
