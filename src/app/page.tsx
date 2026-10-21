@@ -19,6 +19,8 @@ import { persist } from "zustand/middleware";
 import { supabase } from "@/lib/supabase";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
+import { MobileKeyboard } from "@/components/MobileKeyboard";
+import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -2173,9 +2175,7 @@ function RapidFlashcardMode({
     setIsShaking(false);
     playFeedbackSound(true);
     speak();
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      try { navigator.vibrate(40); } catch(e) {}
-    }
+    triggerHaptic('success');
     // No automatic timer! User reads the word and explicitly presses Weiter or Enter
   }, [isAnswered, speak]);
 
@@ -2183,9 +2183,7 @@ function RapidFlashcardMode({
     setIsErrorMismatch(true);
     setIsShaking(true);
     playFeedbackSound(false);
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      try { navigator.vibrate([30, 40, 30]); } catch(e) {}
-    }
+    triggerHaptic('error');
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
     shakeTimerRef.current = setTimeout(() => {
       setIsShaking(false);
@@ -2212,6 +2210,9 @@ function RapidFlashcardMode({
 
     const isPrefixMatch = targetA.startsWith(input) || targetB.startsWith(input);
     setIsErrorMismatch(!isPrefixMatch);
+    if (!isPrefixMatch) {
+      triggerHaptic('error');
+    }
 
     // If word is completely and accurately typed
     const trimmedInput = input.trim();
@@ -2495,8 +2496,7 @@ function RapidFlashcardMode({
         </div>
 
         {isMobile && !isAnswered && (
-          <VirtualKeyboard
-            docked
+          <MobileKeyboard
             onKeyPress={(char) => {
               if (locked || isAnswered) return;
               handleInputChange(typedValue + char);
@@ -2505,8 +2505,10 @@ function RapidFlashcardMode({
               if (locked || isAnswered) return;
               handleInputChange(typedValue.slice(0, -1));
             }}
-            targetWord={parsedNoun.noun || card.targetWord}
-            currentInput={typedValue}
+            onSpace={() => {
+              if (locked || isAnswered) return;
+              handleInputChange(typedValue + ' ');
+            }}
           />
         )}
       </div>
@@ -3673,11 +3675,13 @@ function StudyCard({
     const lastCharIndex = value.length - 1;
     if (value.length > 0 && !lastCharValid) {
       playFeedbackSound(false);
+      triggerHaptic('error');
       // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
     }
 
     if (isValid && isComplete) {
       playFeedbackSound(true);
+      triggerHaptic('success');
       onAnswer(true, false);
       handleReveal();
     }
@@ -4036,13 +4040,10 @@ function StudyCard({
       </motion.div>
 
       {phase === "Question" && !isMultipleChoice && isMobile && (
-        <VirtualKeyboard 
-          docked
+        <MobileKeyboard 
           onKeyPress={handleVirtualKeyPress}
           onBackspace={handleVirtualBackspace}
-          expectedChar={expectedChar}
-          targetWord={primaryTarget || card.targetWord}
-          currentInput={inputText}
+          onSpace={() => handleVirtualKeyPress(' ')}
         />
       )}
     </>
@@ -6786,9 +6787,11 @@ function PrepStudyCard({
         </AnimatePresence>
       </div>
       {(!isSuccess && !isHilfe) && isTouchDevice && activeSlot < 2 && (
-         <div className="mt-6 -mx-6 md:-mx-12 -mb-6 md:-mb-10 w-[calc(100%+48px)]">
-           <VirtualKeyboard onKeyPress={handleVirtualKey} onBackspace={handleVirtualBackspace} />
-         </div>
+         <MobileKeyboard 
+           onKeyPress={handleVirtualKey} 
+           onBackspace={handleVirtualBackspace} 
+           onSpace={() => handleVirtualKey(' ')}
+         />
       )}
     </motion.div>
     </>
@@ -6989,12 +6992,11 @@ function VerbStudyCard({
       </div>
       
       {(!isSuccess && !isHilfe) && isMobile && (
-         <div className="mt-6 -mx-6 md:-mx-12 -mb-6 md:-mb-10 w-[calc(100%+48px)]">
-           <VirtualKeyboard 
-             onKeyPress={(char) => virtualKeyRef.current?.(char)} 
-             onBackspace={() => virtualBackspaceRef.current?.()} 
-           />
-         </div>
+        <MobileKeyboard 
+          onKeyPress={(char) => virtualKeyRef.current?.(char)} 
+          onBackspace={() => virtualBackspaceRef.current?.()} 
+          onSpace={() => virtualKeyRef.current?.(' ')}
+        />
       )}
     </motion.div>
   );

@@ -241,24 +241,26 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
     if (typeof cloudRaw.activeSeconds === 'number' && cloudRaw.activeSeconds > maxActiveSeconds) {
       maxActiveSeconds = cloudRaw.activeSeconds;
     }
-    if (typeof cloudRaw.cardsDone === 'number') {
-      // Guard against old un-reset cloud counters:
-      if (todayActual > 0 && cloudRaw.cardsDone > todayActual * 4 && cloudRaw.cardsDone > 30) {
-        maxCardsDone = Math.max(maxCardsDone, todayActual);
-      } else {
-        maxCardsDone = Math.max(maxCardsDone, cloudRaw.cardsDone, todayActual);
-      }
-    } else {
-      maxCardsDone = Math.max(maxCardsDone, todayActual);
-    }
+    const cloudDone = typeof cloudRaw.cardsDone === 'number' ? cloudRaw.cardsDone : 0;
+    maxCardsDone = Math.max(maxCardsDone, cloudDone, todayActual);
+
     if (typeof cloudRaw.correctCount === 'number') {
       maxCorrectCount = Math.min(maxCardsDone, Math.max(maxCorrectCount, cloudRaw.correctCount));
+    } else {
+      maxCorrectCount = Math.max(maxCorrectCount, maxCardsDone);
     }
     const cloudMistakes = typeof cloudRaw.mistakesCountToday === 'number' ? cloudRaw.mistakesCountToday : cloudPool.length;
     maxMistakesToday = Math.max(maxMistakesToday, cloudMistakes, mergedPool.length);
   } else {
     maxMistakesToday = Math.max(maxMistakesToday, mergedPool.length);
   }
+
+  try {
+    const actKey = `daily_activity_${normLang}`;
+    const existingAct = JSON.parse(localStorage.getItem(actKey) || '{}');
+    existingAct[todayKey] = Math.max(existingAct[todayKey] || 0, maxCardsDone);
+    localStorage.setItem(actKey, JSON.stringify(existingAct));
+  } catch {}
 
   const updated: DailyStats = {
     date: todayKey,
@@ -662,15 +664,50 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     return () => { isCancelled = true; };
   }, [lang]);
 
-  // Supabase Cloud recovery: fetch canonical database stats on mount
+  // Supabase Cloud recovery: fetch canonical database stats on mount, tab focus/visibility, and live Realtime
   useEffect(() => {
     let isCancelled = false;
-    fetchStatsFromSupabase(lang).then(cloudStats => {
-      if (isCancelled || !cloudStats) return;
-      const updated = reconcileStatsFromCloud(lang, cloudStats);
-      setLocalStats(updated);
-    });
-    return () => { isCancelled = true; };
+    const syncFromCloud = () => {
+      fetchStatsFromSupabase(lang).then(cloudStats => {
+        if (isCancelled || !cloudStats) return;
+        const updated = reconcileStatsFromCloud(lang, cloudStats);
+        setLocalStats(updated);
+      });
+    };
+
+    syncFromCloud();
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        syncFromCloud();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    // Supabase Realtime channel for instant cross-browser and cross-device sync
+    const channel = supabase
+      .channel(`realtime-daystats-${lang}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'user_stats',
+        filter: `language=eq.DAY_STATS_${normalizeLanguage(lang)}`
+      }, (payload: any) => {
+        if (payload?.new?.daily_activity && !isCancelled) {
+          const updated = reconcileStatsFromCloud(lang, payload.new.daily_activity);
+          setLocalStats(updated);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      isCancelled = true;
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+      supabase.removeChannel(channel);
+    };
   }, [lang]);
 
   // Manage study activity timer & listener subscriptions

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { ArrowBigUp, Delete } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { triggerHaptic } from "@/lib/haptics";
 
 export interface VirtualKeyboardProps {
   onKeyPress: (key: string) => void;
@@ -49,16 +50,6 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
     }
   }, []);
 
-  const triggerHaptic = useCallback(() => {
-    try {
-      if (typeof navigator !== "undefined" && navigator.vibrate) {
-        navigator.vibrate(10);
-      }
-    } catch {
-      // Haptics not supported or blocked by browser permissions
-    }
-  }, []);
-
   const triggerHighlight = useCallback((key: string) => {
     if (activeTimerRef.current) {
       clearTimeout(activeTimerRef.current);
@@ -79,21 +70,25 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
 
   const executeKeyAction = useCallback((key: string) => {
     if (key === "SHIFT") {
+      triggerHaptic("light");
       setIsShifted(prev => !prev);
       return;
     }
 
     if (key === "BACKSPACE") {
+      triggerHaptic("light");
       onBackspace();
       return;
     }
 
     if (key === "SPACE") {
+      triggerHaptic("medium");
       onKeyPress(" ");
       return;
     }
 
     // Normal character
+    triggerHaptic("light");
     const char = isShifted ? key.toUpperCase() : key.toLowerCase();
     onKeyPress(char);
 
