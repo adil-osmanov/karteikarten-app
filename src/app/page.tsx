@@ -2272,16 +2272,12 @@ function RapidFlashcardMode({
     const s = getRapidSounds();
     if (correct) s?.success.play(); else s?.error.play();
 
-    setCardAnimation('slide-out');
-    setTimeout(() => {
-      onAnswer(correct, true);
-    }, 200);
+    onAnswer(correct, true);
   }, [locked, flip, onAnswer]);
 
   const [localMastery, setLocalMastery] = useState(() => (card?.isArchived ? 4 : progress));
   const [isAnswered, setIsAnswered] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
-  const [cardAnimation, setCardAnimation] = useState<'idle' | 'slide-out' | 'slide-in-prep' | 'slide-in'>('idle');
 
   // Lock typing round mode to card.id so progress incrementing on answer does NOT cause the leaving card to mutate
   const [isTypingRound, setIsTypingRound] = useState(() => progress >= 2 || (card?.masteryLevel || 0) >= 2);
@@ -2293,7 +2289,7 @@ function RapidFlashcardMode({
   const inputRef = useRef<HTMLInputElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset typing state on new card with smooth Apple fluid spring slide-in
+  // Reset typing state on new card
   useEffect(() => {
     setIsTypingRound(progress >= 2 || (card?.masteryLevel || 0) >= 2);
     setLocalMastery(card?.isArchived ? 4 : progress);
@@ -2304,19 +2300,6 @@ function RapidFlashcardMode({
     setIsShaking(false);
     setTypedValue("");
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-
-    setCardAnimation('slide-in-prep');
-    const r1 = requestAnimationFrame(() => {
-      const r2 = requestAnimationFrame(() => {
-        setCardAnimation('slide-in');
-        const timer = setTimeout(() => {
-          setCardAnimation('idle');
-        }, 300);
-        return () => clearTimeout(timer);
-      });
-      return () => cancelAnimationFrame(r2);
-    });
-    return () => cancelAnimationFrame(r1);
   }, [card?.id, progress, card?.isArchived, card?.masteryLevel]);
 
   // Autofocus input in typing mode only on non-mobile (on mobile virtual keyboard handles typing)
@@ -2449,22 +2432,17 @@ function RapidFlashcardMode({
   const handleProceedNext = () => {
     if (!isAnswered) return;
 
-    // Запуск физического перелистывания карточки (Card Slide Out)
-    setCardAnimation('slide-out');
+    setIsAnswered(false);
+    setIsSurrendered(false);
+    setIsSuccessFeedback(false);
+    setTypedValue('');
+    setIsErrorMismatch(false);
 
-    setTimeout(() => {
-      setIsAnswered(false);
-      setIsSurrendered(false);
-      setIsSuccessFeedback(false);
-      setTypedValue('');
-      setIsErrorMismatch(false);
-
-      if (isSurrendered) {
-        onAnswer(false, false, true);
-      } else {
-        onAnswer(true, false, false);
-      }
-    }, 200);
+    if (isSurrendered) {
+      onAnswer(false, false, true);
+    } else {
+      onAnswer(true, false, false);
+    }
   };
 
   useEffect(() => {
@@ -2498,7 +2476,7 @@ function RapidFlashcardMode({
     return () => window.removeEventListener('keydown', handleKey);
   }, [isTypingRound, flip, answer, speak]);
 
-  const faceBase = "absolute inset-0 flex flex-col justify-between items-center p-7 sm:p-9 pb-8 sm:pb-9 rounded-[32px] border bg-white dark:bg-zinc-900/95 border-black/[0.08] dark:border-white/10 text-zinc-900 dark:text-white shadow-2xl transform-gpu will-change-transform [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
+  const faceBase = "absolute inset-0 flex flex-col justify-between items-center p-8 sm:p-10 pb-9 sm:pb-11 rounded-[32px] border bg-white dark:bg-zinc-900/90 border-black/[0.08] dark:border-white/10 text-zinc-900 dark:text-white shadow-2xl backdrop-blur-2xl transform-gpu will-change-transform [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
   // Header lives INSIDE each face so it rotates together with the card
@@ -2572,14 +2550,9 @@ function RapidFlashcardMode({
       <div className="w-full max-w-[720px] mx-auto flex flex-col items-center">
         <div className="w-full relative">
           <div 
+            key={card.id}
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
-            className={cn(
-              "w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-transform duration-300 relative cursor-text",
-              cardAnimation === 'slide-out' && "-translate-x-[110%] -rotate-3 opacity-0 ease-in duration-200 pointer-events-none",
-              cardAnimation === 'slide-in-prep' && "translate-x-[70%] rotate-3 opacity-0 duration-0 pointer-events-none",
-              cardAnimation === 'slide-in' && "translate-x-0 rotate-0 opacity-100 ease-[cubic-bezier(0.16,1,0.3,1)] duration-300",
-              cardAnimation === 'idle' && "translate-x-0 rotate-0 opacity-100"
-            )}
+            className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none cursor-text"
           >
             {/* Шапка: Звук, статус-точки, помощь */}
             <div className="h-12 shrink-0 flex items-center justify-between w-full">
@@ -2665,18 +2638,19 @@ function RapidFlashcardMode({
               </div>
             </div>
 
-            {/* Низ: Кнопка Weiter строго фиксированной высоты с zero layout shift */}
-            <div className="w-full flex items-center justify-center shrink-0 mt-6 sm:mt-8 pt-2">
-              <button
-                type="button"
-                onClick={handleProceedNext}
-                className={cn(
-                  "w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none",
-                  isAnswered ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"
-                )}
-              >
-                Weiter
-              </button>
+            {/* Нижняя зона: Кнопка Weiter с безопасным отступом от границы */}
+            <div className="w-full flex flex-col items-center justify-center mt-8 sm:mt-10 shrink-0">
+              {isAnswered ? (
+                <button
+                  type="button"
+                  onClick={handleProceedNext}
+                  className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+                >
+                  Weiter
+                </button>
+              ) : (
+                <div className="h-13 sm:h-14 invisible pointer-events-none" />
+              )}
             </div>
           </div>
         </div>
@@ -2703,15 +2677,9 @@ function RapidFlashcardMode({
 
   return (
     <div className="w-full max-w-[720px] mx-auto flex flex-col items-center">
-      <div className={cn(
-        "w-full relative [perspective:1000px] transition-transform duration-300",
-        cardAnimation === 'slide-out' && "-translate-x-[110%] -rotate-3 opacity-0 ease-in duration-200 pointer-events-none",
-        cardAnimation === 'slide-in-prep' && "translate-x-[70%] rotate-3 opacity-0 duration-0 pointer-events-none",
-        cardAnimation === 'slide-in' && "translate-x-0 rotate-0 opacity-100 ease-[cubic-bezier(0.16,1,0.3,1)] duration-300",
-        cardAnimation === 'idle' && "translate-x-0 rotate-0 opacity-100"
-      )}>
+      <div key={card.id} className="w-full relative [perspective:1000px] animate-card-appear">
         <motion.div
-          className="relative w-full h-[460px] cursor-pointer select-none transform-gpu will-change-transform"
+          className="relative w-full min-h-[440px] cursor-pointer select-none transform-gpu will-change-transform"
           style={{ transformStyle: 'preserve-3d' }}
           animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
@@ -2981,10 +2949,10 @@ function RapidSession({
       </div>
 
       <div className={cn(
-        "w-full max-w-[720px] mx-auto flex-1 flex flex-col items-center justify-center px-4 pt-2 overflow-hidden relative",
+        "w-full max-w-[720px] mx-auto flex-1 flex flex-col items-center justify-center px-4 py-6 relative",
         (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[290px] md:pb-12" : "pb-12"
       )}>
-        <div className="w-full flex flex-col items-center transform-gpu will-change-transform [backface-visibility:hidden]">
+        <div className="w-full flex flex-col items-center">
           <RapidFlashcardMode
             key={`${current.card.id}-${turn}`}
             card={liveCard}
@@ -3060,27 +3028,17 @@ function RapidStudyCard({
     : (isReview || card.isArchived || progress >= 2);
 
   return (
-    <div className="w-full flex justify-center px-4 overflow-hidden relative">
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.div
-          key={card.id}
-          initial={{ opacity: 0, x: 50 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -140, rotate: -4 }}
-          transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-          className="w-full flex flex-col items-center"
-        >
-          <RapidFlashcardMode
-            card={card}
-            progress={progress}
-            locked={locked}
-            onAnswer={handleAnswer}
-            onHintPenalty={handleHintPenalty}
-            deckTitle={deckTitle}
-            reverse={isReverse}
-          />
-        </motion.div>
-      </AnimatePresence>
+    <div className="w-full flex justify-center px-4 relative">
+      <RapidFlashcardMode
+        key={card.id}
+        card={card}
+        progress={progress}
+        locked={locked}
+        onAnswer={handleAnswer}
+        onHintPenalty={handleHintPenalty}
+        deckTitle={deckTitle}
+        reverse={isReverse}
+      />
     </div>
   );
 }
@@ -3376,7 +3334,7 @@ function StudyInterface({
       </div>
 
       <div className={cn(
-        "w-full max-w-[720px] mx-auto flex-1 flex flex-col items-center justify-center px-4 pt-2",
+        "w-full max-w-[720px] mx-auto flex-1 flex flex-col items-center justify-center px-4 py-6 select-none",
         isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[290px] md:pb-12" : "pb-12"
       )}>
         <AnimatePresence mode="wait">
@@ -4021,13 +3979,9 @@ function StudyCard({
 
   return (
     <>
-      <motion.div 
+      <div 
         key={card.id}
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.98 }}
-        transition={{ duration: 0.2 }}
-        className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
+        className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -4213,21 +4167,23 @@ function StudyCard({
           )}
 
           {!isMultipleChoice && (
-            <div className="w-full flex items-center justify-center shrink-0 mt-6 sm:mt-8 pt-2">
-              <button
-                ref={nextButtonRef}
-                onClick={onNext}
-                className={cn(
-                  "w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none",
-                  phase === "Answer" ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"
-                )}
-              >
-                Weiter
-              </button>
+            <div className="w-full flex flex-col items-center justify-center mt-8 sm:mt-10 shrink-0">
+              {phase === "Answer" ? (
+                <button
+                  ref={nextButtonRef}
+                  type="button"
+                  onClick={onNext}
+                  className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+                >
+                  Weiter
+                </button>
+              ) : (
+                <div className="h-13 sm:h-14 invisible pointer-events-none" />
+              )}
             </div>
           )}
         </div>
-      </motion.div>
+      </div>
 
       {phase === "Question" && !isMultipleChoice && isMobile && (
         <MobileKeyboard 
@@ -6810,12 +6766,9 @@ function PrepStudyCard({
 
   return (
     <>
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.2 }}
-      className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
+    <div 
+      key={card.id}
+      className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
@@ -6937,16 +6890,18 @@ function PrepStudyCard({
         </div>
       </div>
 
-      <div className="w-full flex items-center justify-center shrink-0 mt-6 sm:mt-8 pt-2">
-        <button
-          onClick={onNext}
-          className={cn(
-            "w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none",
-            (isSuccess || isHilfe) ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"
-          )}
-        >
-          Weiter
-        </button>
+      <div className="w-full flex flex-col items-center justify-center mt-8 sm:mt-10 shrink-0">
+        {(isSuccess || isHilfe) ? (
+          <button
+            type="button"
+            onClick={onNext}
+            className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+          >
+            Weiter
+          </button>
+        ) : (
+          <div className="h-13 sm:h-14 invisible pointer-events-none" />
+        )}
       </div>
       {(!isSuccess && !isHilfe) && isTouchDevice && activeSlot < 2 && (
          <MobileKeyboard 
@@ -6955,7 +6910,7 @@ function PrepStudyCard({
            onSpace={() => handleVirtualKey(' ')}
          />
       )}
-    </motion.div>
+    </div>
     </>
   );
 }
@@ -7051,12 +7006,9 @@ function VerbStudyCard({
   ));
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.2 }}
-      className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
+    <div 
+      key={card.id}
+      className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
@@ -7135,16 +7087,18 @@ function VerbStudyCard({
         </div>
       </div>
 
-      <div className="w-full flex items-center justify-center shrink-0 mt-6 sm:mt-8 pt-2">
-        <button
-          onClick={onNext}
-          className={cn(
-            "w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none",
-            (isSuccess || isHilfe) ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"
-          )}
-        >
-          Weiter
-        </button>
+      <div className="w-full flex flex-col items-center justify-center mt-8 sm:mt-10 shrink-0">
+        {(isSuccess || isHilfe) ? (
+          <button
+            type="button"
+            onClick={onNext}
+            className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+          >
+            Weiter
+          </button>
+        ) : (
+          <div className="h-13 sm:h-14 invisible pointer-events-none" />
+        )}
       </div>
       
       {(!isSuccess && !isHilfe) && isMobile && (
@@ -7154,7 +7108,7 @@ function VerbStudyCard({
           onSpace={() => virtualKeyRef.current?.(' ')}
         />
       )}
-    </motion.div>
+    </div>
   );
 }
 
@@ -7523,14 +7477,10 @@ export function RedemittelStudyCard({
   }, [availableChunks, placedChunks, status, onNext, handleSelectChunk, handleRemoveChunk, handleReset, handlePlayAudio, handleSurrender]);
 
   return (
-    <div className="w-full flex justify-center px-4">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.98 }}
-        transition={{ duration: 0.2 }}
+      <div
+        key={card.id}
         className={cn(
-          "w-full max-w-[720px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative",
+          "w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none",
           status === 'success'
             ? "border-emerald-500/40 dark:border-emerald-500/40"
             : status === 'surrender'
@@ -7648,12 +7598,12 @@ export function RedemittelStudyCard({
         </div>
 
         {/* 4. ПЛИТКИ ВЫБОРА (НИЗ КАРТОЧКИ) ИЛИ КНОПКА WEITER */}
-        <div className="mt-8 pt-5 border-t border-black/[0.05] dark:border-white/[0.06] min-h-[58px] flex items-center justify-center w-full">
+        <div className="mt-8 sm:mt-10 min-h-[58px] flex items-center justify-center w-full shrink-0">
           <AnimatePresence mode="wait">
             {status === 'success' || status === 'surrender' ? (
               <motion.div
                 key="weiter-btn"
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.15 }}
@@ -7662,7 +7612,7 @@ export function RedemittelStudyCard({
                 <button
                   onClick={onNext}
                   autoFocus
-                  className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+                  className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
                 >
                   Weiter
                 </button>
@@ -7709,8 +7659,7 @@ export function RedemittelStudyCard({
             )}
           </AnimatePresence>
         </div>
-      </motion.div>
-    </div>
+      </div>
   );
 }
 
