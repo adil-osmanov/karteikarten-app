@@ -4,8 +4,7 @@ import { triggerHaptic } from '@/lib/haptics';
 export interface MobileKeyboardProps {
   onKeyPress: (char: string) => void;
   onBackspace: () => void;
-  onSpace?: () => void;
-  docked?: boolean;
+  onSpace: () => void;
 }
 
 export function MobileKeyboard({ onKeyPress, onBackspace, onSpace }: MobileKeyboardProps) {
@@ -15,77 +14,62 @@ export function MobileKeyboard({ onKeyPress, onBackspace, onSpace }: MobileKeybo
   const row2 = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'ö', 'ä'];
   const row3 = ['y', 'x', 'c', 'v', 'b', 'n', 'm', 'ß'];
 
-  const handleCharPress = (char: string) => {
+  const handleChar = (ch: string) => {
     triggerHaptic('light');
-    onKeyPress(isShift ? char.toUpperCase() : char);
+    onKeyPress(isShift ? ch.toUpperCase() : ch);
     if (isShift) setIsShift(false);
   };
 
-  const handleBackspacePress = () => {
-    triggerHaptic('light');
-    onBackspace();
-  };
-
-  const handleSpacePress = () => {
-    triggerHaptic('medium');
-    if (onSpace) {
-      onSpace();
-    } else {
-      onKeyPress(' ');
-    }
-  };
-
-  const handleShiftToggle = () => {
-    triggerHaptic('light');
-    setIsShift(prev => !prev);
-  };
-
   return (
-    <div className="fixed bottom-0 left-0 right-0 w-full bg-zinc-950/95 border-t border-white/10 px-1 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] z-40 backdrop-blur-2xl shadow-2xl flex flex-col items-center gap-1.5 select-none touch-manipulation">
-      {/* Ряд 1 */}
-      <div className="flex w-full justify-center gap-1">
+    <div 
+      className="fixed bottom-0 left-0 right-0 w-full bg-[#1c1c1e] border-t border-white/[0.08] px-[3px] pt-2 pb-[max(8px,env(safe-area-inset-bottom))] z-40 select-none touch-manipulation flex flex-col items-center gap-[6px] shadow-[0_-10px_30px_rgba(0,0,0,0.5)]"
+      style={{ touchAction: 'none' }}
+    >
+      {/* Ряд 1: q w e r t z u i o p ü */}
+      <div className="flex w-full justify-center gap-[5px]">
         {row1.map((ch) => (
           <button
             key={ch}
             type="button"
             onPointerDown={(e) => {
               e.preventDefault();
-              handleCharPress(ch);
+              handleChar(ch);
             }}
-            className="flex-1 h-11 rounded-lg bg-zinc-800/80 active:bg-zinc-600 text-white font-medium text-base sm:text-lg flex items-center justify-center transition-transform active:scale-95 shadow-sm cursor-pointer"
+            className="flex-1 h-[44px] rounded-[6px] bg-[#3a3a3c] active:bg-[#636366] text-white text-[20px] font-normal flex items-center justify-center shadow-[0_1px_0_rgba(0,0,0,0.35)] transition-colors cursor-pointer"
           >
             {isShift ? ch.toUpperCase() : ch}
           </button>
         ))}
       </div>
 
-      {/* Ряд 2 */}
-      <div className="flex w-full justify-center gap-1 px-2">
+      {/* Ряд 2: a s d f g h j k l ö ä */}
+      <div className="flex w-full justify-center gap-[5px] px-[6px]">
         {row2.map((ch) => (
           <button
             key={ch}
             type="button"
             onPointerDown={(e) => {
               e.preventDefault();
-              handleCharPress(ch);
+              handleChar(ch);
             }}
-            className="flex-1 h-11 rounded-lg bg-zinc-800/80 active:bg-zinc-600 text-white font-medium text-base sm:text-lg flex items-center justify-center transition-transform active:scale-95 shadow-sm cursor-pointer"
+            className="flex-1 h-[44px] rounded-[6px] bg-[#3a3a3c] active:bg-[#636366] text-white text-[20px] font-normal flex items-center justify-center shadow-[0_1px_0_rgba(0,0,0,0.35)] transition-colors cursor-pointer"
           >
             {isShift ? ch.toUpperCase() : ch}
           </button>
         ))}
       </div>
 
-      {/* Ряд 3 */}
-      <div className="flex w-full justify-center gap-1">
+      {/* Ряд 3: [ ⇧ ] y x c v b n m ß [ ⌫ ] */}
+      <div className="flex w-full justify-center gap-[5px]">
         <button
           type="button"
           onPointerDown={(e) => {
             e.preventDefault();
-            handleShiftToggle();
+            triggerHaptic('light');
+            setIsShift(!isShift);
           }}
-          className={`w-11 h-11 rounded-lg flex items-center justify-center text-sm font-semibold transition-transform active:scale-95 cursor-pointer ${
-            isShift ? 'bg-white text-zinc-900' : 'bg-zinc-800/80 text-zinc-300 active:bg-zinc-700'
+          className={`w-[44px] h-[44px] rounded-[6px] flex items-center justify-center text-[18px] font-medium transition-colors shadow-[0_1px_0_rgba(0,0,0,0.35)] cursor-pointer ${
+            isShift ? 'bg-white text-black' : 'bg-[#2c2c2e] active:bg-[#48484a] text-white'
           }`}
         >
           ⇧
@@ -97,9 +81,9 @@ export function MobileKeyboard({ onKeyPress, onBackspace, onSpace }: MobileKeybo
             type="button"
             onPointerDown={(e) => {
               e.preventDefault();
-              handleCharPress(ch);
+              handleChar(ch);
             }}
-            className="flex-1 h-11 rounded-lg bg-zinc-800/80 active:bg-zinc-600 text-white font-medium text-base sm:text-lg flex items-center justify-center transition-transform active:scale-95 shadow-sm cursor-pointer"
+            className="flex-1 h-[44px] rounded-[6px] bg-[#3a3a3c] active:bg-[#636366] text-white text-[20px] font-normal flex items-center justify-center shadow-[0_1px_0_rgba(0,0,0,0.35)] transition-colors cursor-pointer"
           >
             {isShift ? ch.toUpperCase() : ch}
           </button>
@@ -109,23 +93,25 @@ export function MobileKeyboard({ onKeyPress, onBackspace, onSpace }: MobileKeybo
           type="button"
           onPointerDown={(e) => {
             e.preventDefault();
-            handleBackspacePress();
+            triggerHaptic('light');
+            onBackspace();
           }}
-          className="w-11 h-11 rounded-lg bg-zinc-800/80 active:bg-zinc-600 text-zinc-300 flex items-center justify-center transition-transform active:scale-95 cursor-pointer"
+          className="w-[44px] h-[44px] rounded-[6px] bg-[#2c2c2e] active:bg-[#48484a] text-white flex items-center justify-center text-[19px] transition-colors shadow-[0_1px_0_rgba(0,0,0,0.35)] cursor-pointer"
         >
           ⌫
         </button>
       </div>
 
       {/* Ряд 4: Пробел */}
-      <div className="flex w-full justify-center px-4 mt-0.5">
+      <div className="flex w-full justify-center px-4 mt-[2px]">
         <button
           type="button"
           onPointerDown={(e) => {
             e.preventDefault();
-            handleSpacePress();
+            triggerHaptic('medium');
+            onSpace();
           }}
-          className="w-3/5 h-11 rounded-lg bg-zinc-800/80 active:bg-zinc-600 text-zinc-400 font-medium text-xs tracking-wider uppercase flex items-center justify-center transition-transform active:scale-95 shadow-sm cursor-pointer"
+          className="w-[62%] h-[44px] rounded-[6px] bg-[#3a3a3c] active:bg-[#636366] text-zinc-300 text-[13px] tracking-wider uppercase font-medium flex items-center justify-center shadow-[0_1px_0_rgba(0,0,0,0.35)] transition-colors cursor-pointer"
         >
           Leerzeichen
         </button>

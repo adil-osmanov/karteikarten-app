@@ -2382,17 +2382,16 @@ function RapidFlashcardMode({
   if (isTypingRound) {
     return (
       <div className="w-full flex flex-col items-center">
-        <div className="w-full relative">
+        <div className="w-full max-w-md relative">
           <div 
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
             className={cn(
-              "relative w-full min-h-[420px] md:min-h-[480px] p-6 sm:p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col justify-between items-center cursor-text transition-all duration-300",
-              cardAnimation === 'slide-out' && "translate-x-[-120%] -rotate-6 opacity-0 ease-out pointer-events-none",
-              isMobile && !isAnswered && "pb-64 sm:pb-72"
+              "relative w-full p-6 sm:p-8 rounded-[30px] border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col items-center cursor-text transition-all duration-300",
+              cardAnimation === 'slide-out' && "translate-x-[-120%] -rotate-6 opacity-0 ease-out pointer-events-none"
             )}
           >
             {/* Top Header */}
-            <div className="w-full flex justify-between items-center z-20">
+            <div className="w-full flex justify-between items-center z-20 mb-4">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -2431,9 +2430,9 @@ function RapidFlashcardMode({
             </div>
 
             {/* Central Content: ТОЛЬКО перевод и поле ввода (БЕЗ ПРИМЕРА ПРЕДЛОЖЕНИЯ) */}
-            <div className="flex-1 flex flex-col items-center justify-center w-full my-auto text-center">
+            <div className="flex flex-col items-center justify-center w-full my-auto text-center">
               {/* Translation Meaning */}
-              <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white text-center leading-snug px-2 mb-6">
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white text-center leading-snug px-2 mb-6">
                 {translation || card.hint}
               </h2>
 
@@ -2489,9 +2488,6 @@ function RapidFlashcardMode({
                 )}
               </div>
             </div>
-
-            {/* Bottom Spacer to keep vertical balance */}
-            <div className="w-full h-2" />
           </div>
         </div>
 
@@ -2602,6 +2598,7 @@ function RapidSession({
   const [isMistakesReviewMode, setIsMistakesReviewMode] = useState(false);
   const isReviewingMistakesSession = Boolean(reviewCards && reviewCards.length > 0) || isMistakesReviewMode;
 
+  const isMobile = useIsMobile();
   const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [wordProgress, setWordProgress] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
@@ -2787,7 +2784,10 @@ function RapidSession({
         </div>
       </div>
 
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4 overflow-hidden relative">
+      <div className={cn(
+        "w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col items-center justify-center px-4 pt-2 overflow-hidden relative",
+        (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[290px] md:pb-12" : "pb-12"
+      )}>
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.div
             key={`${current.card.id}-${turn}`}
@@ -3028,6 +3028,8 @@ function StudyInterface({
     );
   }, [currentDeck]);
 
+  const isMobile = useIsMobile();
+
   const currentCardTrainingMode = useMemo(() => {
     if (!currentCardSnapshot) return 'standard_cloze';
     return getCardTrainingMode(currentCardSnapshot, currentDeckId, decks, books, trainingMode);
@@ -3184,7 +3186,10 @@ function StudyInterface({
         </div>
       </div>
 
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col justify-center pb-12 px-4">
+      <div className={cn(
+        "w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col items-center justify-center px-4 pt-2",
+        isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[290px] md:pb-12" : "pb-12"
+      )}>
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
             <PrepStudyCard
@@ -3828,8 +3833,7 @@ function StudyCard({
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.2 }}
         className={cn(
-          "relative bg-white dark:bg-[#1C1C1E] rounded-3xl p-4 sm:p-6 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[420px] transition-colors duration-200",
-          isMobile && !isMultipleChoice && phase === "Question" && "pb-64 sm:pb-72"
+          "relative bg-white dark:bg-[#1C1C1E] rounded-[30px] p-6 sm:p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between w-full max-w-md md:max-w-xl transition-colors duration-200"
         )}
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
@@ -6647,7 +6651,7 @@ function PrepStudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-3xl p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[420px] transition-colors duration-200"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[30px] p-6 sm:p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between w-full max-w-md md:max-w-xl transition-colors duration-200"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
@@ -6894,7 +6898,7 @@ function VerbStudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-12 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between min-h-[400px] transition-colors duration-200"
+      className="relative bg-white dark:bg-[#1C1C1E] rounded-[30px] p-6 sm:p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between w-full max-w-md md:max-w-xl transition-colors duration-200"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
