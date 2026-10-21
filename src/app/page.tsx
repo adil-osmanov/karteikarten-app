@@ -1968,6 +1968,13 @@ export function convertRuToDeLayout(text: string, target?: string): string {
   return res;
 }
 
+export const getDynamicInputFontSize = (textLength: number) => {
+  if (textLength > 24) return 'text-base sm:text-lg tracking-normal';
+  if (textLength > 17) return 'text-lg sm:text-xl tracking-tight';
+  if (textLength > 12) return 'text-xl sm:text-2xl tracking-wide';
+  return 'text-2xl sm:text-3xl tracking-wide';
+};
+
 function RapidFlashcardMode({
   card,
   progress,
@@ -2142,22 +2149,22 @@ function RapidFlashcardMode({
   }, [isTypingRound, card?.id, locked, isAnswered, isMobile]);
 
   const parsedNoun = useMemo(() => {
-    let raw = (card?.targetWord || '').replace(/\|/g, '').trim();
+    let raw = (card?.targetWord || '').replace(/\|/g, ' ').replace(/\s{2,}/g, ' ').trim();
     const directMatch = raw.match(/^(der|die|das)\s+(.+)$/i);
     if (directMatch) {
       return {
         article: directMatch[1].toLowerCase(),
         noun: directMatch[2].trim(),
-        full: raw
+        full: `${directMatch[1].toLowerCase()} ${directMatch[2].trim()}`
       };
     }
-    const hintText = (card?.hint || card?.forms || '').trim();
-    const hintMatch = hintText.match(/^(der|die|das)\b/i);
+    const hintText = (card?.hint || card?.forms || card?.translation || '').trim();
+    const hintMatch = hintText.match(/\b(der|die|das)\b/i);
     if (hintMatch && /^[A-ZÄÖÜ]/.test(raw)) {
       return {
         article: hintMatch[1].toLowerCase(),
         noun: raw,
-        full: `${hintMatch[1]} ${raw}`
+        full: `${hintMatch[1].toLowerCase()} ${raw}`
       };
     }
     return {
@@ -2165,7 +2172,7 @@ function RapidFlashcardMode({
       noun: raw,
       full: raw
     };
-  }, [card?.targetWord, card?.hint, card?.forms]);
+  }, [card?.targetWord, card?.hint, card?.forms, card?.translation]);
 
   const handleSuccessAnswer = useCallback(() => {
     if (isAnswered) return;
@@ -2204,18 +2211,19 @@ function RapidFlashcardMode({
       return;
     }
 
-    const input = val.toLowerCase();
+    // Collapse multiple internal spaces while preserving trailing spaces
+    const cleanInput = val.toLowerCase().replace(/\s{2,}/g, ' ');
     const targetA = parsedNoun.noun.toLowerCase().trim();
     const targetB = parsedNoun.full.toLowerCase().trim();
 
-    const isPrefixMatch = targetA.startsWith(input) || targetB.startsWith(input);
+    const isPrefixMatch = targetA.startsWith(cleanInput) || targetB.startsWith(cleanInput);
     setIsErrorMismatch(!isPrefixMatch);
     if (!isPrefixMatch) {
       triggerHaptic('error');
     }
 
     // If word is completely and accurately typed
-    const trimmedInput = input.trim();
+    const trimmedInput = cleanInput.trim();
     if (trimmedInput === targetA || trimmedInput === targetB) {
       handleSuccessAnswer();
     }
@@ -2223,7 +2231,7 @@ function RapidFlashcardMode({
 
   const handleEnterSubmit = () => {
     if (locked || isAnswered) return;
-    const trimmedInput = typedValue.toLowerCase().trim();
+    const trimmedInput = typedValue.toLowerCase().replace(/\s{2,}/g, ' ').trim();
     const targetA = parsedNoun.noun.toLowerCase().trim();
     const targetB = parsedNoun.full.toLowerCase().trim();
 
@@ -2310,7 +2318,7 @@ function RapidFlashcardMode({
     return () => window.removeEventListener('keydown', handleKey);
   }, [isTypingRound, flip, answer, speak]);
 
-  const faceBase = "absolute inset-0 flex flex-col justify-center items-center p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
+  const faceBase = "absolute inset-0 flex flex-col justify-between items-center p-7 sm:p-10 rounded-[32px] border bg-white dark:bg-zinc-900/90 border-black/[0.08] dark:border-white/10 text-zinc-900 dark:text-white shadow-2xl backdrop-blur-2xl [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
   // Header lives INSIDE each face so it rotates together with the card
@@ -2381,63 +2389,64 @@ function RapidFlashcardMode({
 
   if (isTypingRound) {
     return (
-      <div className="w-full flex flex-col items-center">
-        <div className="w-full max-w-md relative">
+      <div className="w-full max-w-[720px] mx-auto flex flex-col items-center">
+        <div className="w-full relative">
           <div 
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
             className={cn(
-              "relative w-full p-6 sm:p-8 rounded-[30px] border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col items-center cursor-text transition-all duration-300",
+              "w-full max-w-[720px] min-h-[420px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-7 sm:p-10 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto transition-all duration-300 relative select-none cursor-text",
               cardAnimation === 'slide-out' && "translate-x-[-120%] -rotate-6 opacity-0 ease-out pointer-events-none"
             )}
           >
-            {/* Top Header */}
-            <div className="w-full flex justify-between items-center z-20 mb-4">
+            {/* Шапка: Звук, статус-точки, помощь */}
+            <div className="flex items-center justify-between w-full shrink-0">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); speak(); }}
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  className="w-9 h-9 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/10 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white transition active:scale-95 cursor-pointer"
                   title="Aussprache anhören (R)"
                 >
-                  <Volume2 className="w-[18px] h-[18px]" />
+                  <Volume2 className="w-4 h-4" />
                 </button>
               </div>
-              <div className="flex items-center gap-2.5 pr-1">
-                {/* 4 точки прогресса раундов (мгновенно отражают masteryLevel) */}
+
+              <div className="flex items-center gap-3">
+                {/* Точки раундов */}
                 <div className="flex items-center gap-1.5">
-                  {[0, 1, 2, 3].map(i => (
-                    <div
-                      key={i}
+                  {[1, 2, 3, 4].map((step) => (
+                    <span
+                      key={step}
                       className={cn(
                         "w-2 h-2 rounded-full transition-all duration-200",
-                        i < localMastery
+                        step <= localMastery
                           ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]"
                           : "bg-zinc-300 dark:bg-zinc-800"
                       )}
                     />
                   ))}
                 </div>
+
+                {/* Кнопка сдачи "?" */}
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
-                  disabled={locked || isAnswered}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
-                  title="Aufgeben / Wort anzeigen (-1)"
+                  disabled={isAnswered || locked}
+                  className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/10 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white transition active:scale-95 disabled:opacity-40 cursor-pointer"
+                  title="Сдаться (-1 раунд)"
                 >
-                  <HelpCircle className="w-[18px] h-[18px]" />
+                  <HelpCircle className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
 
-            {/* Central Content: ТОЛЬКО перевод и поле ввода (БЕЗ ПРИМЕРА ПРЕДЛОЖЕНИЯ) */}
-            <div className="flex flex-col items-center justify-center w-full my-auto text-center">
-              {/* Translation Meaning */}
-              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white text-center leading-snug px-2 mb-6">
+            {/* Центр: Значение и Адаптивный инпут под длинные слова */}
+            <div className="flex flex-col items-center justify-center my-auto w-full text-center px-2 py-4">
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white mb-8 max-w-xl">
                 {translation || card.hint}
               </h2>
 
-              {/* Monolithic Apple Spotlight input line without blinking caret */}
-              <div className="w-full max-w-md relative px-2 mb-2">
+              <div className="w-full max-w-[540px] mx-auto relative">
                 <input
                   ref={inputRef}
                   type="text"
@@ -2448,21 +2457,18 @@ function RapidFlashcardMode({
                   onKeyDown={(e) => {
                     e.stopPropagation();
                     if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (isAnswered) {
-                        handleProceedNext();
-                      } else {
-                        handleEnterSubmit();
-                      }
+                      if (isAnswered) handleProceedNext();
+                      else handleEnterSubmit();
                     }
                   }}
                   autoFocus={!isMobile}
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  placeholder=""
+                  placeholder={isAnswered ? '' : 'Auf Deutsch eingeben...'}
                   className={cn(
-                    "w-full text-center text-xl sm:text-2xl font-medium tracking-wide rounded-2xl py-3.5 px-6 outline-none transition-all duration-200 caret-transparent border",
+                    "w-full text-center font-medium py-3.5 px-4 sm:px-6 rounded-2xl outline-none transition-all duration-200 caret-transparent border",
+                    getDynamicInputFontSize((typedValue || parsedNoun.full || card.targetWord || '').length),
                     isAnswered && !isSurrendered
                       ? "text-emerald-500 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] font-semibold"
                       : isSurrendered
@@ -2474,19 +2480,19 @@ function RapidFlashcardMode({
                   )}
                 />
               </div>
+            </div>
 
-              {/* Bottom block: Weiter button appears immediately upon answer or surrender */}
-              <div className="w-full max-w-md mt-6 min-h-[56px] flex items-center justify-center">
-                {isAnswered && (
-                  <button
-                    type="button"
-                    onClick={handleProceedNext}
-                    className="w-full py-4 rounded-2xl bg-sky-500 hover:bg-sky-400 active:scale-[0.99] text-white font-semibold text-base transition-all shadow-lg shadow-sky-500/25 animate-in fade-in zoom-in-95 duration-150 cursor-pointer"
-                  >
-                    Weiter
-                  </button>
-                )}
-              </div>
+            {/* Низ: Кнопка Weiter строго фиксированной высоты */}
+            <div className="w-full max-w-[540px] mx-auto shrink-0 min-h-[56px] flex items-center justify-center">
+              {isAnswered && (
+                <button
+                  type="button"
+                  onClick={handleProceedNext}
+                  className="w-full py-3.5 sm:py-4 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-semibold text-base transition-all shadow-lg shadow-sky-500/25 active:scale-[0.99] animate-in fade-in zoom-in-95 duration-150 cursor-pointer"
+                >
+                  Weiter
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -2512,10 +2518,10 @@ function RapidFlashcardMode({
   }
 
   return (
-    <div className="w-full flex flex-col items-center">
+    <div className="w-full max-w-[720px] mx-auto flex flex-col items-center">
       <div className="w-full relative" style={{ perspective: '1200px' }}>
         <motion.div
-          className="relative w-full min-h-[420px] md:min-h-[480px] cursor-pointer select-none"
+          className="relative w-full min-h-[420px] cursor-pointer select-none"
           style={{ transformStyle: 'preserve-3d' }}
           animate={{ rotateY: isFlipped ? 180 : 0 }}
           transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
@@ -2762,7 +2768,7 @@ function RapidSession({
 
   return (
     <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 mb-4">
+      <div className="w-full max-w-[720px] mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -2785,7 +2791,7 @@ function RapidSession({
       </div>
 
       <div className={cn(
-        "w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col items-center justify-center px-4 pt-2 overflow-hidden relative",
+        "w-full max-w-[720px] mx-auto flex-1 flex flex-col items-center justify-center px-4 pt-2 overflow-hidden relative",
         (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[290px] md:pb-12" : "pb-12"
       )}>
         <AnimatePresence mode="popLayout" initial={false}>
@@ -3157,7 +3163,7 @@ function StudyInterface({
   return (
       <>
 <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-2xl md:max-w-3xl mx-auto px-4 mb-4">
+      <div className="w-full max-w-[720px] mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -3187,7 +3193,7 @@ function StudyInterface({
       </div>
 
       <div className={cn(
-        "w-full max-w-2xl md:max-w-3xl mx-auto flex-1 flex flex-col items-center justify-center px-4 pt-2",
+        "w-full max-w-[720px] mx-auto flex-1 flex flex-col items-center justify-center px-4 pt-2",
         isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[290px] md:pb-12" : "pb-12"
       )}>
         <AnimatePresence mode="wait">
@@ -3575,9 +3581,14 @@ function StudyCard({
   }, [shouldCapitalize, clozeWord]);
 
   const secondaryTarget = useMemo(() => {
-    if (!isCustomCloze) return "";
-    return shouldCapitalize ? card.targetWord.charAt(0).toUpperCase() + card.targetWord.slice(1) : card.targetWord;
-  }, [isCustomCloze, shouldCapitalize, card.targetWord]);
+    // If targetWord has article and clozeWord does not (or vice versa), allow both!
+    const cleanTw = (card.targetWord || '').replace(/\|/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    const cleanCloze = (clozeWord || '').trim();
+    if (cleanTw.toLowerCase() !== cleanCloze.toLowerCase()) {
+      return shouldCapitalize ? cleanTw.charAt(0).toUpperCase() + cleanTw.slice(1) : cleanTw;
+    }
+    return "";
+  }, [shouldCapitalize, card.targetWord, clozeWord]);
 
   const checkInputValidation = useCallback((value: string) => {
     const v = value.toLowerCase();
@@ -3786,7 +3797,7 @@ function StudyCard({
       const isMatch = char.toLowerCase() === activeTarget[i]?.toLowerCase();
       return (
         <span key={i} className={cn("font-medium", isMatch ? "text-gray-900 dark:text-[#F5F5F7]" : "text-red-500")}>
-          {char}
+          {char === ' ' ? '\u00A0' : char}
         </span>
       );
     });
@@ -3832,9 +3843,7 @@ function StudyCard({
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.2 }}
-        className={cn(
-          "relative bg-white dark:bg-[#1C1C1E] rounded-[30px] p-6 sm:p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between w-full max-w-md md:max-w-xl transition-colors duration-200"
-        )}
+        className="w-full max-w-[720px] min-h-[420px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-7 sm:p-10 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto transition-all duration-300 relative select-none"
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -4028,13 +4037,13 @@ function StudyCard({
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center w-full mt-4"
+              className="w-full max-w-[540px] mx-auto shrink-0 min-h-[56px] flex items-center justify-center mt-4"
             >
               <button
                 ref={nextButtonRef}
                 onClick={onNext}
                 autoFocus
-                className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-sm transition-transform duration-150 ease-out active:scale-[0.98] cursor-pointer"
+                className="w-full py-3.5 sm:py-4 rounded-2xl bg-sky-500 hover:bg-sky-400 text-white font-semibold text-base transition-all shadow-lg shadow-sky-500/25 active:scale-[0.99] animate-in fade-in zoom-in-95 duration-150 cursor-pointer"
               >
                 Weiter
               </button>
@@ -6651,7 +6660,7 @@ function PrepStudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[30px] p-6 sm:p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between w-full max-w-md md:max-w-xl transition-colors duration-200"
+      className="w-full max-w-[720px] min-h-[420px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-7 sm:p-10 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto transition-all duration-300 relative select-none"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
@@ -6898,7 +6907,7 @@ function VerbStudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-[30px] p-6 sm:p-8 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col items-center justify-between w-full max-w-md md:max-w-xl transition-colors duration-200"
+      className="w-full max-w-[720px] min-h-[420px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-7 sm:p-10 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto transition-all duration-300 relative select-none"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
@@ -7378,14 +7387,14 @@ export function RedemittelStudyCard({
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.2 }}
         className={cn(
-          "relative bg-white dark:bg-[#1C1C1E] rounded-[24px] p-6 md:p-8 transition-colors duration-200 shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] border flex flex-col justify-between min-h-[380px] w-full max-w-2xl",
+          "w-full max-w-[720px] min-h-[420px] rounded-[32px] bg-white dark:bg-zinc-900/90 border p-7 sm:p-10 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto transition-all duration-300 relative select-none",
           status === 'success'
-            ? "border-emerald-500/30 dark:border-emerald-500/30"
+            ? "border-emerald-500/40 dark:border-emerald-500/40"
             : status === 'surrender'
             ? "border-zinc-300 dark:border-zinc-600/70"
             : status === 'error'
             ? "border-rose-500/40 dark:border-rose-500/40"
-            : "border-black/[0.08] dark:border-white/[0.08]"
+            : "border-black/[0.08] dark:border-white/10"
         )}
       >
         {/* 1. Верхняя панель карточки */}
