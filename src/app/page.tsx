@@ -2498,7 +2498,7 @@ function RapidFlashcardMode({
     return () => window.removeEventListener('keydown', handleKey);
   }, [isTypingRound, flip, answer, speak]);
 
-  const faceBase = "absolute inset-0 flex flex-col justify-between items-center p-7 sm:p-9 rounded-[32px] border bg-white dark:bg-zinc-900/95 border-black/[0.08] dark:border-white/10 text-zinc-900 dark:text-white shadow-2xl transform-gpu will-change-transform [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
+  const faceBase = "absolute inset-0 flex flex-col justify-between items-center p-7 sm:p-9 pb-8 sm:pb-9 rounded-[32px] border bg-white dark:bg-zinc-900/95 border-black/[0.08] dark:border-white/10 text-zinc-900 dark:text-white shadow-2xl transform-gpu will-change-transform [backface-visibility:hidden] [-webkit-backface-visibility:hidden]";
   const faceStyle = { backfaceVisibility: 'hidden' as const, WebkitBackfaceVisibility: 'hidden' as const };
 
   // Header lives INSIDE each face so it rotates together with the card
@@ -2574,7 +2574,7 @@ function RapidFlashcardMode({
           <div 
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
             className={cn(
-              "w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-transform duration-300 relative cursor-text",
+              "w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-transform duration-300 relative cursor-text",
               cardAnimation === 'slide-out' && "-translate-x-[110%] -rotate-3 opacity-0 ease-in duration-200 pointer-events-none",
               cardAnimation === 'slide-in-prep' && "translate-x-[70%] rotate-3 opacity-0 duration-0 pointer-events-none",
               cardAnimation === 'slide-in' && "translate-x-0 rotate-0 opacity-100 ease-[cubic-bezier(0.16,1,0.3,1)] duration-300",
@@ -2648,7 +2648,7 @@ function RapidFlashcardMode({
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  placeholder={isAnswered ? '' : 'Auf Deutsch eingeben...'}
+                  placeholder=""
                   className={cn(
                     "w-full text-center font-medium py-3.5 px-4 sm:px-6 rounded-2xl outline-none transition-colors duration-150 caret-transparent border",
                     getDynamicInputFontSize((typedValue || parsedNoun.full || card.targetWord || '').length),
@@ -2665,13 +2665,13 @@ function RapidFlashcardMode({
               </div>
             </div>
 
-            {/* Низ: Кнопка Weiter строго фиксированной высоты h-16 с zero layout shift */}
-            <div className="w-full max-w-[520px] h-16 mx-auto shrink-0 flex items-center justify-center">
+            {/* Низ: Кнопка Weiter строго фиксированной высоты с zero layout shift */}
+            <div className="w-full flex items-center justify-center shrink-0 mt-6 sm:mt-8 pt-2">
               <button
                 type="button"
                 onClick={handleProceedNext}
                 className={cn(
-                  "w-full py-3.5 sm:py-4 rounded-2xl bg-sky-500 hover:bg-sky-400 active:scale-[0.99] text-white font-semibold text-base shadow-lg shadow-sky-500/20 cursor-pointer transition-all duration-200",
+                  "w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none",
                   isAnswered ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"
                 )}
               >
@@ -4027,7 +4027,7 @@ function StudyCard({
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.98 }}
         transition={{ duration: 0.2 }}
-        className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
+        className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -4213,12 +4213,12 @@ function StudyCard({
           )}
 
           {!isMultipleChoice && (
-            <div className="w-full max-w-[520px] h-16 mx-auto shrink-0 flex items-center justify-center mt-2">
+            <div className="w-full flex items-center justify-center shrink-0 mt-6 sm:mt-8 pt-2">
               <button
                 ref={nextButtonRef}
                 onClick={onNext}
                 className={cn(
-                  "w-full py-3.5 sm:py-4 rounded-2xl bg-sky-500 hover:bg-sky-400 active:scale-[0.99] text-white font-semibold text-base shadow-lg shadow-sky-500/20 cursor-pointer transition-all duration-200",
+                  "w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none",
                   phase === "Answer" ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"
                 )}
               >
@@ -6815,7 +6815,7 @@ function PrepStudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.2 }}
-      className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
+      className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
@@ -6937,11 +6937,11 @@ function PrepStudyCard({
         </div>
       </div>
 
-      <div className="w-full max-w-[520px] h-16 mx-auto shrink-0 flex items-center justify-center">
+      <div className="w-full flex items-center justify-center shrink-0 mt-6 sm:mt-8 pt-2">
         <button
           onClick={onNext}
           className={cn(
-            "w-full py-3.5 sm:py-4 rounded-2xl bg-sky-500 hover:bg-sky-400 active:scale-[0.99] text-white font-semibold text-base shadow-lg shadow-sky-500/20 cursor-pointer transition-all duration-200",
+            "w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none",
             (isSuccess || isHilfe) ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"
           )}
         >
@@ -7056,7 +7056,7 @@ function VerbStudyCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.2 }}
-      className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
+      className="w-full max-w-[720px] h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative"
     >
       <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
         <button 
@@ -7135,11 +7135,11 @@ function VerbStudyCard({
         </div>
       </div>
 
-      <div className="w-full max-w-[520px] h-16 mx-auto shrink-0 flex items-center justify-center">
+      <div className="w-full flex items-center justify-center shrink-0 mt-6 sm:mt-8 pt-2">
         <button
           onClick={onNext}
           className={cn(
-            "w-full py-3.5 sm:py-4 rounded-2xl bg-sky-500 hover:bg-sky-400 active:scale-[0.99] text-white font-semibold text-base shadow-lg shadow-sky-500/20 cursor-pointer transition-all duration-200",
+            "w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none",
             (isSuccess || isHilfe) ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-2 pointer-events-none"
           )}
         >
@@ -7530,7 +7530,7 @@ export function RedemittelStudyCard({
         exit={{ opacity: 0, scale: 0.98 }}
         transition={{ duration: 0.2 }}
         className={cn(
-          "w-full max-w-[720px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border p-7 sm:p-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative",
+          "w-full max-w-[720px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border p-7 sm:p-9 pb-8 sm:pb-9 shadow-2xl flex flex-col justify-between mx-auto transform-gpu will-change-transform [backface-visibility:hidden] [perspective:1000px] [-webkit-font-smoothing:antialiased] select-none transition-colors duration-150 relative",
           status === 'success'
             ? "border-emerald-500/40 dark:border-emerald-500/40"
             : status === 'surrender'
@@ -7662,7 +7662,7 @@ export function RedemittelStudyCard({
                 <button
                   onClick={onNext}
                   autoFocus
-                  className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-sm transition-transform duration-150 ease-out active:scale-[0.98] select-none cursor-pointer"
+                  className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] active:scale-[0.985] text-white font-semibold text-[15px] sm:text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
                 >
                   Weiter
                 </button>
