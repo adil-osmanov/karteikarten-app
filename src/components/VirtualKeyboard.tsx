@@ -10,6 +10,7 @@ export interface VirtualKeyboardProps {
   targetWord?: string;
   currentInput?: string;
   className?: string;
+  docked?: boolean;
 }
 
 export const VirtualKeyboard = React.memo(function VirtualKeyboard({
@@ -18,7 +19,8 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
   expectedChar: explicitExpectedChar,
   targetWord,
   currentInput,
-  className
+  className,
+  docked = false
 }: VirtualKeyboardProps) {
   const [isShifted, setIsShifted] = useState(false);
   const [activePressedKey, setActivePressedKey] = useState<string | null>(null);
@@ -103,8 +105,7 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
 
   /**
    * Apple Dynamic Hit-Target Expansion (Weighted Distance Hit-Testing)
-   * Instead of per-button click listeners, a container pointerdown handler measures touch (X,Y)
-   * and calculates Euclidean distance to all key centers:
+   * Measures touch (X,Y) and calculates Euclidean distance to all key centers:
    *   Distance = sqrt((touchX - centerX)^2 + (touchY - centerY)^2)
    * If key.toLowerCase() === expectedChar.toLowerCase(), EffectiveDistance = Distance * 0.45.
    * Otherwise EffectiveDistance = Distance * 1.0.
@@ -198,28 +199,30 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
           strokeWidth={isShifted ? 2.5 : 2}
         />
       );
-      flexValue = 1.3;
+      flexValue = 1.35;
     } else if (key === "BACKSPACE") {
       content = <Delete className="w-5 h-5" strokeWidth={2.2} />;
-      flexValue = 1.3;
+      flexValue = 1.35;
     } else if (key === "SPACE") {
       content = (
-        <span className="text-[12px] font-medium tracking-wider text-zinc-400 select-none uppercase">
+        <span className="text-[12px] sm:text-[13px] font-medium tracking-wider text-zinc-300 dark:text-zinc-400 select-none uppercase">
           Leerzeichen
         </span>
       );
-      flexValue = 6;
+      flexValue = 7;
     }
 
-    const baseClasses =
-      "relative flex items-center justify-center rounded-lg shadow-sm h-10 sm:h-12 text-sm sm:text-base font-medium select-none touch-none transition-all duration-75";
+    const baseClasses = cn(
+      "relative flex items-center justify-center rounded-[8px] sm:rounded-lg shadow-sm font-medium select-none touch-none transition-all duration-75 cursor-pointer",
+      docked ? "h-11 sm:h-12 text-base sm:text-lg" : "h-10 sm:h-12 text-sm sm:text-base"
+    );
 
     const keyColors = isFunctional
-      ? "bg-zinc-700/80 active:bg-zinc-600 text-zinc-200"
-      : "bg-zinc-800/90 active:bg-zinc-650 text-white";
+      ? "bg-zinc-700/85 active:bg-zinc-600 text-zinc-100"
+      : "bg-zinc-800/95 active:bg-zinc-650 text-white";
 
     const pressedClasses = isPressed
-      ? "bg-zinc-650 scale-[0.96] ring-1 ring-white/20"
+      ? "bg-zinc-600 scale-[0.96] ring-1 ring-white/20"
       : "";
 
     return (
@@ -243,17 +246,19 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
       ref={containerRef}
       onPointerDown={handlePointerDown}
       className={cn(
-        "w-full max-w-full mx-auto p-1.5 sm:p-2.5",
-        "bg-zinc-900/95 dark:bg-[#161618] border border-zinc-800/80 dark:border-white/[0.08] rounded-2xl flex flex-col gap-1.5 sm:gap-2",
-        "select-none touch-none shadow-lg",
+        docked
+          ? "fixed bottom-0 left-0 right-0 w-full bg-zinc-950/95 border-t border-white/10 px-1.5 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] z-40 backdrop-blur-2xl shadow-2xl flex flex-col items-center select-none touch-manipulation"
+          : "w-full max-w-full mx-auto p-1.5 sm:p-2.5 bg-zinc-900/95 dark:bg-[#161618] border border-zinc-800/80 dark:border-white/[0.08] rounded-2xl flex flex-col gap-1.5 sm:gap-2 select-none touch-none shadow-lg",
         className
       )}
     >
-      {rows.map((row, idx) => (
-        <div key={idx} className="flex justify-center gap-1 sm:gap-1.5 w-full">
-          {row.map(key => renderKey(key))}
-        </div>
-      ))}
+      <div className={cn("w-full flex flex-col gap-1 sm:gap-1.5", docked && "max-w-xl mx-auto")}>
+        {rows.map((row, idx) => (
+          <div key={idx} className="flex justify-center gap-1 sm:gap-1.5 w-full">
+            {row.map(key => renderKey(key))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 });

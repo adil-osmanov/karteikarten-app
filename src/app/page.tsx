@@ -20,7 +20,7 @@ import { supabase } from "@/lib/supabase";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
-import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 
@@ -1983,6 +1983,7 @@ function RapidFlashcardMode({
   deckTitle?: string;
   reverse?: boolean;
 }) {
+  const isMobile = useIsMobile();
   const [isFlipped, setIsFlipped] = useState(false);
   const isFlippedRef = useRef(false);
   isFlippedRef.current = isFlipped;
@@ -2126,15 +2127,15 @@ function RapidFlashcardMode({
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
   }, [card?.id]);
 
-  // Autofocus input in typing mode
+  // Autofocus input in typing mode only on non-mobile (on mobile virtual keyboard handles typing)
   useEffect(() => {
-    if (isTypingRound && !locked && !isSurrendered) {
+    if (isTypingRound && !locked && !isSurrendered && !isMobile) {
       const timer = setTimeout(() => {
         inputRef.current?.focus();
       }, 80);
       return () => clearTimeout(timer);
     }
-  }, [isTypingRound, card?.id, locked, isSurrendered]);
+  }, [isTypingRound, card?.id, locked, isSurrendered, isMobile]);
 
   const parsedNoun = useMemo(() => {
     let raw = (card?.targetWord || '').replace(/\|/g, '').trim();
@@ -2356,8 +2357,11 @@ function RapidFlashcardMode({
       <div className="w-full flex flex-col items-center">
         <div className="w-full relative">
           <div 
-            onClick={() => inputRef.current?.focus()}
-            className="relative w-full min-h-[420px] md:min-h-[480px] p-6 sm:p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col justify-between items-center cursor-text"
+            onClick={() => { if (!isMobile) inputRef.current?.focus(); }}
+            className={cn(
+              "relative w-full min-h-[420px] md:min-h-[480px] p-6 sm:p-8 md:p-10 rounded-3xl border bg-white border-zinc-200/60 text-black shadow-sm dark:bg-[#1c1c1e] dark:border-zinc-800/80 dark:text-white dark:shadow-none flex flex-col justify-between items-center cursor-text transition-all",
+              isMobile && !isSuccessFeedback && "pb-64 sm:pb-72"
+            )}
           >
             {/* Top Header */}
             <div className="w-full flex justify-between items-center z-20">
@@ -2414,6 +2418,8 @@ function RapidFlashcardMode({
                 <input
                   ref={inputRef}
                   type="text"
+                  inputMode={isMobile ? "none" : "text"}
+                  readOnly={isMobile || isSurrendered || locked || isSuccessFeedback}
                   value={typedValue}
                   onChange={(e) => handleInputChange(e.target.value)}
                   onKeyDown={(e) => {
@@ -2423,8 +2429,7 @@ function RapidFlashcardMode({
                       handleEnterSubmit();
                     }
                   }}
-                  readOnly={isSurrendered || locked || isSuccessFeedback}
-                  autoFocus
+                  autoFocus={!isMobile}
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
@@ -2448,6 +2453,22 @@ function RapidFlashcardMode({
             <div className="w-full h-4" />
           </div>
         </div>
+
+        {isMobile && !isSuccessFeedback && (
+          <VirtualKeyboard
+            docked
+            onKeyPress={(char) => {
+              if (locked || isSuccessFeedback || isSurrendered) return;
+              handleInputChange(typedValue + char);
+            }}
+            onBackspace={() => {
+              if (locked || isSuccessFeedback || isSurrendered) return;
+              handleInputChange(typedValue.slice(0, -1));
+            }}
+            targetWord={parsedNoun.noun || card.targetWord}
+            currentInput={typedValue}
+          />
+        )}
       </div>
     );
   }
@@ -3732,237 +3753,238 @@ function StudyCard({
     : null;
 
   return (
-    <motion.div 
-      key={card.id + phase}
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.2 }}
-      className="relative bg-white dark:bg-[#1C1C1E] rounded-3xl p-4 sm:p-6 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[420px] transition-colors duration-200"
-      onClick={() => {
-        if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
-          inputRef.current.focus();
-        }
-      }}
-    >
-      <div className="w-full flex items-center justify-between mb-8">
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => {
-              const speechSentence = phase === "Answer" ? fullSentence : (parts[0] + "Lücke" + parts[1]);
-              playAudio(speechSentence);
-            }}
-            disabled={isPlayingAudio}
-            className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
-          >
-            <Volume2 className="w-5 h-5" />
-            <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded-[4px] px-1 shadow-sm pointer-events-none">
-              R
-            </span>
-          </button>
-          
-          <button
-            onClick={() => setPlaybackSpeed(playbackSpeed === 1 ? 0.75 : 1)}
-            className="flex items-center justify-center h-[28px] px-3 rounded-full bg-gray-50/80 dark:bg-[#2C2C2E]/60 backdrop-blur-md border border-black/[0.03] dark:border-white/[0.05] text-gray-500 dark:text-[#8E8E93] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] hover:text-gray-700 dark:hover:text-[#EBEBF5] transition-all active:scale-[0.96] shadow-sm select-none"
-            title="Playback Speed"
-          >
-            <AnimatePresence mode="wait">
-              <motion.span
-                key={playbackSpeed}
-                initial={{ opacity: 0, y: 4, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -4, scale: 0.9 }}
-                transition={{ duration: 0.15, ease: "easeOut" }}
-                className="text-[11px] font-semibold tabular-nums tracking-wide leading-none"
-              >
-                {playbackSpeed}x
-              </motion.span>
+    <>
+      <motion.div 
+        key={card.id + phase}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.2 }}
+        className={cn(
+          "relative bg-white dark:bg-[#1C1C1E] rounded-3xl p-4 sm:p-6 md:p-10 border border-black/[0.08] dark:border-white/[0.08] shadow-sm dark:shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[420px] transition-colors duration-200",
+          isMobile && !isMultipleChoice && phase === "Question" && "pb-64 sm:pb-72"
+        )}
+        onClick={() => {
+          if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
+            inputRef.current.focus();
+          }
+        }}
+      >
+        <div className="w-full flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => {
+                const speechSentence = phase === "Answer" ? fullSentence : (parts[0] + "Lücke" + parts[1]);
+                playAudio(speechSentence);
+              }}
+              disabled={isPlayingAudio}
+              className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+            >
+              <Volume2 className="w-5 h-5" />
+              <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded-[4px] px-1 shadow-sm pointer-events-none">
+                R
+              </span>
+            </button>
+            
+            <button
+              onClick={() => setPlaybackSpeed(playbackSpeed === 1 ? 0.75 : 1)}
+              className="flex items-center justify-center h-[28px] px-3 rounded-full bg-gray-50/80 dark:bg-[#2C2C2E]/60 backdrop-blur-md border border-black/[0.03] dark:border-white/[0.05] text-gray-500 dark:text-[#8E8E93] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] hover:text-gray-700 dark:hover:text-[#EBEBF5] transition-all active:scale-[0.96] shadow-sm select-none"
+              title="Playback Speed"
+            >
+              <AnimatePresence mode="wait">
+                <motion.span
+                  key={playbackSpeed}
+                  initial={{ opacity: 0, y: 4, scale: 0.9 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -4, scale: 0.9 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  className="text-[11px] font-semibold tabular-nums tracking-wide leading-none"
+                >
+                  {playbackSpeed}x
+                </motion.span>
+              </AnimatePresence>
+            </button>
+          </div>
+          <div className="flex items-center gap-4">
+            <AnimatePresence>
+              {(hasErrored || phase === "Answer") && deckTitle && (
+                <motion.span 
+                  initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
+                  animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
+                >
+                  {deckTitle}
+                </motion.span>
+              )}
             </AnimatePresence>
-          </button>
-        </div>
-        <div className="flex items-center gap-4">
-          <AnimatePresence>
-            {(hasErrored || phase === "Answer") && deckTitle && (
-              <motion.span 
-                initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
-                animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
-                exit={{ opacity: 0 }}
-                className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
-              >
-                {deckTitle}
-              </motion.span>
-            )}
-          </AnimatePresence>
-          <button 
-            onClick={handleHilfe}
-            disabled={phase !== "Question"}
-            className={cn(
-              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
-              phase !== "Question" && "opacity-0 pointer-events-none"
-            )}
-            title="Hilfe (H)"
-          >
-            <HelpCircle className="w-5 h-5" />
-          </button>
-          <div className="flex gap-1.5">
-            {[0, 1, 2, 3].map((step) => (
-              <div 
-                key={step} 
-                className={cn(
-                  "w-2.5 h-2.5 rounded-full transition-colors",
-                  (card.isArchived || card.masteryLevel > step) ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
-                )}
-              />
-            ))}
+            <button 
+              onClick={handleHilfe}
+              disabled={phase !== "Question"}
+              className={cn(
+                "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
+                phase !== "Question" && "opacity-0 pointer-events-none"
+              )}
+              title="Hilfe (H)"
+            >
+              <HelpCircle className="w-5 h-5" />
+            </button>
+            <div className="flex gap-1.5">
+              {[0, 1, 2, 3].map((step) => (
+                <div 
+                  key={step} 
+                  className={cn(
+                    "w-2.5 h-2.5 rounded-full transition-colors",
+                    (card.isArchived || card.masteryLevel > step) ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
+                  )}
+                />
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="flex flex-col items-center text-center w-full">
-        <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 dark:text-[#F5F5F7] w-full max-w-2xl mb-4">
-          {parts[0]}
-          
-          {phase === "Answer" ? (
-            <span className={cn(
-              "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white transition-colors",
-              parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
-            )}>
-              {parsedTargetWord ? (
-                <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {parsedTargetWord.rest}</>
-              ) : (
-                displayAnswerWord
-              )}
-            </span>
-          ) : (
-            <>
-              {isMultipleChoice ? (
-                <span className="inline-block align-baseline mx-1.5 min-w-[100px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent select-none">
-                  {displayAnswerWord}
-                </span>
-              ) : (
-                <span className="inline-block relative align-baseline border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5">
-                  <span className="inline-block w-full text-center">
-                    {renderInputChars()}
+        <div className="flex flex-col items-center text-center w-full">
+          <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 dark:text-[#F5F5F7] w-full max-w-2xl mb-4">
+            {parts[0]}
+            
+            {phase === "Answer" ? (
+              <span className={cn(
+                "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white transition-colors",
+                parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
+              )}>
+                {parsedTargetWord ? (
+                  <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {parsedTargetWord.rest}</>
+                ) : (
+                  displayAnswerWord
+                )}
+              </span>
+            ) : (
+              <>
+                {isMultipleChoice ? (
+                  <span className="inline-block align-baseline mx-1.5 min-w-[100px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent select-none">
+                    {displayAnswerWord}
                   </span>
-                  {!isMobile && (
+                ) : (
+                  <span className="inline-block relative align-baseline border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5">
+                    <span className="inline-block w-full text-center">
+                      {renderInputChars()}
+                    </span>
                     <input
                       ref={inputRef}
-                      autoFocus={false}
+                      autoFocus={!isMobile}
                       type="text"
+                      inputMode={isMobile ? "none" : "text"}
+                      readOnly={isMobile}
                       value={inputText}
                       onChange={handleInputChange}
                       onKeyDown={handleKeyDown}
-                      className="absolute inset-0 opacity-0 cursor-text w-full h-full"
+                      className="absolute inset-0 opacity-0 cursor-default w-full h-full"
                       autoComplete="off"
                       autoCorrect="off"
                       spellCheck={false}
                     />
-                  )}
-                </span>
-              )}
-            </>
-          )}
-          
-          {parts[1]}
-        </div>
-
-        <div className="mt-4 mb-6 w-full text-center">
-          <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
-            {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
-          </p>
-
-          {isAnswered && parsedExtra.type !== 'none' && (
-            <div className="mt-5 flex flex-col items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200">
-              <div className={cn(
-                "px-5 py-2.5 rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-md mx-auto w-fit max-w-[95%] overflow-hidden relative transition-all",
-                parsedExtra.type === 'noun'
-                  ? "bg-zinc-800/90 dark:bg-[#2C2C2E]/90 border border-white/15 dark:border-white/10 text-white"
-                  : "bg-[#505969]/90 dark:bg-[#2C2C2E]/90 border border-white/10 dark:border-white/[0.08] text-slate-100"
-              )}>
-                {parsedExtra.type === 'noun' ? (
-                  <span className="text-sm font-medium leading-relaxed">
-                    <span className={parsedExtra.articleClasses}>{parsedExtra.article}</span>{' '}
-                    <span className="text-zinc-100">{parsedExtra.word}</span>
                   </span>
-                ) : (
-                  <span className="text-sm font-medium leading-relaxed text-white dark:text-[#EBEBF5]">
-                    {parsedExtra.main}
+                )}
+              </>
+            )}
+            
+            {parts[1]}
+          </div>
+
+          <div className="mt-4 mb-6 w-full text-center">
+            <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
+              {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
+            </p>
+
+            {isAnswered && parsedExtra.type !== 'none' && (
+              <div className="mt-5 flex flex-col items-center gap-1.5 animate-in fade-in zoom-in-95 duration-200">
+                <div className={cn(
+                  "px-5 py-2.5 rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-md mx-auto w-fit max-w-[95%] overflow-hidden relative transition-all",
+                  parsedExtra.type === 'noun'
+                    ? "bg-zinc-800/90 dark:bg-[#2C2C2E]/90 border border-white/15 dark:border-white/10 text-white"
+                    : "bg-[#505969]/90 dark:bg-[#2C2C2E]/90 border border-white/10 dark:border-white/[0.08] text-slate-100"
+                )}>
+                  {parsedExtra.type === 'noun' ? (
+                    <span className="text-sm font-medium leading-relaxed">
+                      <span className={parsedExtra.articleClasses}>{parsedExtra.article}</span>{' '}
+                      <span className="text-zinc-100">{parsedExtra.word}</span>
+                    </span>
+                  ) : (
+                    <span className="text-sm font-medium leading-relaxed text-white dark:text-[#EBEBF5]">
+                      {parsedExtra.main}
+                    </span>
+                  )}
+                </div>
+                {parsedExtra.sub && (
+                  <span className="text-xs sm:text-[13px] text-zinc-500 dark:text-[#8E8E93] font-medium tracking-wide">
+                    {parsedExtra.sub}
                   </span>
                 )}
               </div>
-              {parsedExtra.sub && (
-                <span className="text-xs sm:text-[13px] text-zinc-500 dark:text-[#8E8E93] font-medium tracking-wide">
-                  {parsedExtra.sub}
-                </span>
-              )}
-            </div>
-          )}
+            )}
+          </div>
+
+
         </div>
 
-
-      </div>
-
-      <div className="mt-2 w-full">
-        {phase === "Question" && !isMultipleChoice && (
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="md:hidden mt-4 w-full"
-          >
-            <VirtualKeyboard 
-              onKeyPress={handleVirtualKeyPress}
-              onBackspace={handleVirtualBackspace}
-              expectedChar={expectedChar}
-            />
-          </motion.div>
-        )}
-
-        {phase === "Question" && isMultipleChoice && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mt-8"
-          >
-            {card.options.map((opt, idx) => {
-              const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
-              return (
-                <button
-                  key={`${opt}-${idx}`}
-                  onClick={() => handleOptionClick(opt)}
-                  className="w-full py-3.5 px-4 rounded-xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-zinc-50 hover:bg-zinc-100/80 border border-zinc-200/70 hover:border-zinc-300 text-zinc-900 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/80 dark:border-white/10 dark:hover:border-white/20 dark:text-zinc-100 shadow-sm"
-                >
-                  <span className="truncate pr-2">{displayOpt}</span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 text-zinc-400 dark:text-zinc-400 font-mono shrink-0 pointer-events-none">
-                    {idx + 1}
-                  </span>
-                </button>
-              );
-            })}
-          </motion.div>
-        )}
-
-        {phase === "Answer" && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center w-full mt-4"
-          >
-            <button
-              ref={nextButtonRef}
-              onClick={onNext}
-              autoFocus
-              className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-sm transition-transform duration-150 ease-out active:scale-[0.98] cursor-pointer"
+        <div className="mt-2 w-full">
+          {phase === "Question" && isMultipleChoice && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mt-8"
             >
-              Weiter
-            </button>
-          </motion.div>
-        )}
-      </div>
-    </motion.div>
+              {card.options.map((opt, idx) => {
+                const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
+                return (
+                  <button
+                    key={`${opt}-${idx}`}
+                    onClick={() => handleOptionClick(opt)}
+                    className="w-full py-3.5 px-4 rounded-xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-zinc-50 hover:bg-zinc-100/80 border border-zinc-200/70 hover:border-zinc-300 text-zinc-900 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/80 dark:border-white/10 dark:hover:border-white/20 dark:text-zinc-100 shadow-sm"
+                  >
+                    <span className="truncate pr-2">{displayOpt}</span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 text-zinc-400 dark:text-zinc-400 font-mono shrink-0 pointer-events-none">
+                      {idx + 1}
+                    </span>
+                  </button>
+                );
+              })}
+            </motion.div>
+          )}
+
+          {phase === "Answer" && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex flex-col items-center w-full mt-4"
+            >
+              <button
+                ref={nextButtonRef}
+                onClick={onNext}
+                autoFocus
+                className="w-full py-4 rounded-[16px] text-lg font-semibold bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-400 shadow-sm transition-transform duration-150 ease-out active:scale-[0.98] cursor-pointer"
+              >
+                Weiter
+              </button>
+            </motion.div>
+          )}
+        </div>
+      </motion.div>
+
+      {phase === "Question" && !isMultipleChoice && isMobile && (
+        <VirtualKeyboard 
+          docked
+          onKeyPress={handleVirtualKeyPress}
+          onBackspace={handleVirtualBackspace}
+          expectedChar={expectedChar}
+          targetWord={primaryTarget || card.targetWord}
+          currentInput={inputText}
+        />
+      )}
+    </>
   );
 }
-
 
 // --- MAIN APP COMPONENT ---
 
@@ -4228,7 +4250,9 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
   const todayStr = getLocalTodayDateString();
   const rawCount = daily[todayStr];
   const todayCount = typeof rawCount === 'number' ? rawCount : (rawCount?.total || (typeof rawCount === 'string' ? parseInt(rawCount) || 0 : 0));
-  const displayTodayCount = Math.max(todayCount, dailyLearnedCount);
+  const realCardsCount = getTodayCompletedCardsCount(effectiveLang);
+  const statsCardsDone = stats?.date === todayStr && typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0;
+  const displayTodayCount = Math.max(statsCardsDone, realCardsCount, todayCount, dailyLearnedCount);
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
   const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
