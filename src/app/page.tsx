@@ -103,6 +103,165 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
   }
 }
 
+// --- SUPABASE MULTI-DEVICE CLOUD SYNC FOR DAILY COUNTER ---
+
+export async function fetchDailyStatsFromCloud(lang: string): Promise<number | null> {
+  const cleanLang = (lang || 'de').toLowerCase();
+  const todayStr = getLocalDateKey();
+  let cloudCount: number | null = null;
+
+  // 1. Попытка запроса в таблицу user_daily_stats (если создана в Supabase)
+  try {
+    let userId: string | null = null;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) userId = user.id;
+    } catch {}
+
+    let query = supabase
+      .from('user_daily_stats')
+      .select('cards_count')
+      .eq('language', cleanLang)
+      .eq('date', todayStr);
+
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
+
+    const { data, error } = await query.maybeSingle();
+
+    if (!error && data && typeof data.cards_count === 'number') {
+      cloudCount = data.cards_count;
+    }
+  } catch (e) {}
+
+  // 2. Гарантированная синхронизация из user_stats (основная таблица Supabase)
+  try {
+    const { data, error } = await supabase
+      .from('user_stats')
+      .select('language, daily_activity')
+      .in('language', [`DAILY_STATS_${cleanLang.toUpperCase()}`, cleanLang.toUpperCase()]);
+
+    if (!error && data && Array.isArray(data)) {
+      const dailyRow = data.find(r => r.language === `DAILY_STATS_${cleanLang.toUpperCase()}`);
+      const histRow = data.find(r => r.language === cleanLang.toUpperCase());
+
+      let countFromDaily = 0;
+      if (dailyRow?.daily_activity) {
+        const act = dailyRow.daily_activity;
+        if (act.date === todayStr) {
+          countFromDaily = typeof act.cards_count === 'number' 
+            ? act.cards_count 
+            : (typeof act.learnedToday === 'number' ? act.learnedToday : 0);
+        }
+      }
+
+      let countFromHist = 0;
+      if (histRow?.daily_activity) {
+        const raw = histRow.daily_activity[todayStr];
+        countFromHist = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw) || 0 : 0));
+      }
+
+      const bestCloud = Math.max(countFromDaily, countFromHist);
+      if (cloudCount === null || bestCloud > cloudCount) {
+        cloudCount = bestCloud;
+      }
+    }
+  } catch (e) {
+    console.error('Ошибка загрузки дневной статистики из Supabase:', e);
+  }
+
+  return cloudCount;
+}
+
+export async function syncDailyStatsToCloud(lang: string, count: number, currentStats?: Partial<LanguageDailyProgress>): Promise<void> {
+  const cleanLang = (lang || 'de').toLowerCase();
+  const todayStr = getLocalDateKey();
+  const nowIso = new Date().toISOString();
+
+  // 1. Попытка upsert в user_daily_stats
+  try {
+    let userId = '00000000-0000-0000-0000-000000000000';
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) userId = user.id;
+    } catch {}
+
+    await supabase.from('user_daily_stats').upsert(
+      {
+        user_id: userId,
+        language: cleanLang,
+        date: todayStr,
+        cards_count: count,
+        updated_at: nowIso
+      },
+      { onConflict: 'user_id,language,date' }
+    );
+  } catch (e) {}
+
+  // 2. Надежный upsert в user_stats (для multi-device Mac/iPhone синхронизации)
+  try {
+    const fullDaily = {
+      date: todayStr,
+      learnedToday: count,
+      cards_count: count,
+      updated_at: nowIso,
+      ...(currentStats || {})
+    };
+
+    await supabase.from('user_stats').upsert({
+      language: `DAILY_STATS_${cleanLang.toUpperCase()}`,
+      daily_activity: fullDaily
+    }, { onConflict: 'language' });
+
+    // Обновляем календарную сетку
+    const histKey = `daily_activity_${cleanLang.toUpperCase()}`;
+    let progress: Record<string, any> = {};
+    try {
+      const stored = localStorage.getItem(histKey);
+      if (stored) progress = JSON.parse(stored);
+    } catch {}
+    progress[todayStr] = Math.max(progress[todayStr] || 0, count);
+    localStorage.setItem(histKey, JSON.stringify(progress));
+
+    await supabase.from('user_stats').upsert({
+      language: cleanLang.toUpperCase(),
+      daily_activity: progress
+    }, { onConflict: 'language' });
+  } catch (e) {
+    console.error('Ошибка синхронизации дневной статистики в Supabase user_stats:', e);
+  }
+}
+
+export async function syncDailyStatsFromCloud(lang: string): Promise<number> {
+  if (typeof window === 'undefined') return 0;
+  const cleanLang = (lang || 'de').toLowerCase();
+  const todayStr = getLocalDateKey();
+  const key = `daily_stats_${cleanLang}_${todayStr}`;
+
+  let current = getLanguageDailyStats(cleanLang);
+  const cloudCount = await fetchDailyStatsFromCloud(cleanLang);
+
+  if (cloudCount !== null) {
+    const maxCount = Math.max(cloudCount, current.learnedToday);
+    if (maxCount !== current.learnedToday) {
+      current.learnedToday = maxCount;
+      current.totalCount = Math.max(current.totalCount, maxCount);
+      current.correctCount = Math.max(current.correctCount, maxCount);
+      localStorage.setItem(key, JSON.stringify(current));
+
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang } }));
+      window.dispatchEvent(new Event('storage-update'));
+    } else if (current.learnedToday > cloudCount) {
+      // Локально на устройстве больше, чем в облаке — отправляем наверх в Supabase
+      syncDailyStatsToCloud(cleanLang, current.learnedToday, current);
+    }
+    return maxCount;
+  }
+
+  return current.learnedToday;
+}
+
 // Сохранение статистики для конкретного языка
 export function updateLanguageDailyStats(lang: string, deltaLearned: number = 0, isCorrect?: boolean, cardId?: string): LanguageDailyProgress {
   const defaultStats: LanguageDailyProgress = {
@@ -146,11 +305,8 @@ export function updateLanguageDailyStats(lang: string, deltaLearned: number = 0,
 
   localStorage.setItem(key, JSON.stringify(current));
 
-  // Sync to Supabase per-language
-  supabase.from('user_stats').upsert({
-    language: `DAILY_STATS_${cleanLang.toUpperCase()}`,
-    daily_activity: { date: today, ...current }
-  }, { onConflict: 'language' }).then(() => {});
+  // Sync to Supabase multi-device (iPhone, Mac, etc.)
+  syncDailyStatsToCloud(cleanLang, current.learnedToday, current);
 
   window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang } }));
   window.dispatchEvent(new Event('storage-update'));
@@ -666,6 +822,8 @@ export interface Flashcard {
   baseWordInfo?: string | null;
   forms?: string | null;
   hint?: string | null;
+  grammarHint?: string | null;
+  explanation?: string | null;
 }
 
 export interface CardSRSUpdate {
@@ -3194,17 +3352,23 @@ function StudyInterface({
 
   useEffect(() => {
     setLangStats(getLanguageDailyStats(studyLanguage));
+    syncDailyStatsFromCloud(studyLanguage);
   }, [studyLanguage]);
 
   useEffect(() => {
     const handleStatsUpdate = () => {
       setLangStats(getLanguageDailyStats(studyLanguage));
     };
+    const handleFocus = () => {
+      syncDailyStatsFromCloud(studyLanguage);
+    };
     window.addEventListener('stats-update', handleStatsUpdate);
     window.addEventListener('storage-update', handleStatsUpdate);
+    window.addEventListener('focus', handleFocus);
     return () => {
       window.removeEventListener('stats-update', handleStatsUpdate);
       window.removeEventListener('storage-update', handleStatsUpdate);
+      window.removeEventListener('focus', handleFocus);
     };
   }, [studyLanguage]);
 
@@ -3730,6 +3894,55 @@ function renderFormattedHint(hint: string) {
   return <span className="text-sm font-medium text-zinc-100 leading-relaxed">{parsed.main}</span>;
 }
 
+export function renderFormattedGrammarRule(rawText?: string | null) {
+  if (!rawText) return null;
+  const text = rawText.replace(/➔|->/g, '→').trim();
+  if (!text) return null;
+
+  const segments = text.split('→');
+
+  return (
+    <span className="inline-flex items-center flex-wrap justify-center gap-1.5 leading-normal">
+      {segments.map((seg, segIdx) => {
+        const trimmedSeg = seg.trim();
+        const words = trimmedSeg.split(/\s+/);
+
+        return (
+          <React.Fragment key={segIdx}>
+            {segIdx > 0 && (
+              <span className="text-zinc-400 dark:text-zinc-500 font-bold mx-1 select-none">→</span>
+            )}
+            <span className="inline-flex items-center gap-1 flex-wrap">
+              {words.map((w, wIdx) => {
+                const cleanWord = w.replace(/[.,!?:;()]/g, '');
+                const lower = cleanWord.toLowerCase();
+                let colorClass = "text-zinc-800 dark:text-zinc-200 font-medium";
+
+                if (['der', 'den', 'dem', 'des', 'einen', 'einem', 'einer', 'eines'].includes(lower)) {
+                  colorClass = "text-sky-600 dark:text-sky-400 font-semibold";
+                } else if (['die', 'eine'].includes(lower)) {
+                  colorClass = "text-rose-600 dark:text-rose-400 font-semibold";
+                } else if (['das', 'ein'].includes(lower)) {
+                  colorClass = "text-emerald-600 dark:text-emerald-400 font-semibold";
+                } else if (lower.includes('akk') || lower.includes('dat') || lower.includes('gen') || lower.includes('nom') || lower.startsWith('+')) {
+                  colorClass = "text-amber-600 dark:text-amber-400 font-semibold";
+                }
+
+                return (
+                  <span key={wIdx} className={colorClass}>
+                    {w}
+                  </span>
+                );
+              })}
+            </span>
+          </React.Fragment>
+        );
+      })}
+    </span>
+  );
+}
+
+
 // --- STUDY CARD ---
 
 function StudyCard({ 
@@ -4184,26 +4397,16 @@ function StudyCard({
               {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
             </p>
 
-            {isAnswered && parsedExtra.type !== 'none' && (
+            {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
               <div className="mt-5 flex flex-col items-center gap-1.5 transition-opacity duration-200">
-                <div className={cn(
-                  "px-5 py-2.5 rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-md mx-auto w-fit max-w-[95%] overflow-hidden relative transition-all",
-                  parsedExtra.type === 'noun'
-                    ? "bg-zinc-800/90 dark:bg-[#2C2C2E]/90 border border-white/15 dark:border-white/10 text-white"
-                    : "bg-[#505969]/90 dark:bg-[#2C2C2E]/90 border border-white/10 dark:border-white/[0.08] text-slate-100"
-                )}>
-                  {parsedExtra.type === 'noun' ? (
-                    <span className="text-sm font-medium leading-relaxed">
-                      <span className={parsedExtra.articleClasses}>{parsedExtra.article}</span>{' '}
-                      <span className="text-zinc-100">{parsedExtra.word}</span>
-                    </span>
-                  ) : (
-                    <span className="text-sm font-medium leading-relaxed text-white dark:text-[#EBEBF5]">
-                      {parsedExtra.main}
-                    </span>
+                <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm mb-2 max-w-[95%]">
+                  {renderFormattedGrammarRule(
+                    card.grammarHint || 
+                    card.explanation || 
+                    (parsedExtra.type === 'noun' ? `${parsedExtra.article} ${parsedExtra.word}` : (parsedExtra.type === 'other' ? parsedExtra.main : ''))
                   )}
                 </div>
-                {parsedExtra.sub && (
+                {parsedExtra.type !== 'none' && parsedExtra.sub && (
                   <span className="text-xs sm:text-[13px] text-zinc-500 dark:text-[#8E8E93] font-medium tracking-wide">
                     {parsedExtra.sub}
                   </span>
@@ -4478,16 +4681,19 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
   useEffect(() => {
     fixAndIsolateDailyStats();
     checkAndResetDailyProgress();
+    syncDailyStatsFromCloud(effectiveLang);
   }, []);
 
   useEffect(() => {
     setLangStats(getLanguageDailyStats(effectiveLang));
+    syncDailyStatsFromCloud(effectiveLang);
   }, [effectiveLang]);
 
   useEffect(() => {
     const handleUpdate = () => {
       checkAndResetDailyProgress();
       setLangStats(getLanguageDailyStats(effectiveLang));
+      syncDailyStatsFromCloud(effectiveLang);
     };
 
     window.addEventListener('stats-update', handleUpdate);
