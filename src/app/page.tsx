@@ -30,14 +30,21 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Получение локальной даты пользователя (YYYY-MM-DD)
+// Получение локальной даты устройства (YYYY-MM-DD)
+export const getLocalDateKey = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export function getLocalTodayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return getLocalDateKey();
 }
 
 export function getLocalTodayDateString(): string {
-  return getLocalTodayStr();
+  return getLocalDateKey();
 }
 
 export interface LanguageDailyProgress {
@@ -151,74 +158,40 @@ export function updateLanguageDailyStats(lang: string, deltaLearned: number = 0,
   return current;
 }
 
-// Исправление утечки данных: обнуление EN и RU за сегодня, сохранение 13 за немецким DE
-export function fixAndIsolateDailyStats() {
+// Очистка мусорных глобальных ключей и устаревших фиксов
+export function cleanLegacyDailyCounters() {
   if (typeof window === 'undefined') return;
   try {
-    const today = getLocalTodayStr();
-    const fixedFlag = `daily_stats_isolated_v2_${today}`;
-    if (localStorage.getItem(fixedFlag)) return;
-
-    // 1. Обнуляем английский и русский языки за сегодняшний день
-    const enKey = `daily_stats_en_${today}`;
-    const ruKey = `daily_stats_ru_${today}`;
-    const emptyStats = { learnedToday: 0, focusSeconds: 0, correctCount: 0, totalCount: 0, mistakesCount: 0, mistakes: [] };
-    localStorage.setItem(enKey, JSON.stringify(emptyStats));
-    localStorage.setItem(ruKey, JSON.stringify(emptyStats));
-
-    // Сброс старых ключей активности
-    try {
-      const actEn = JSON.parse(localStorage.getItem('daily_activity_EN') || '{}');
-      if (actEn[today]) { actEn[today] = 0; localStorage.setItem('daily_activity_EN', JSON.stringify(actEn)); }
-      const actRu = JSON.parse(localStorage.getItem('daily_activity_RU') || '{}');
-      if (actRu[today]) { actRu[today] = 0; localStorage.setItem('daily_activity_RU', JSON.stringify(actRu)); }
-    } catch {}
-
-    // 2. Счетчик 13 оставляем строго за немецким языком (de)
-    const deKey = `daily_stats_de_${today}`;
-    const rawDe = localStorage.getItem(deKey);
-    let deCount = 13;
-    if (rawDe) {
-      try {
-        const parsed = JSON.parse(rawDe);
-        deCount = Math.max(13, parsed.learnedToday || 0);
-      } catch {}
-    } else {
-      const legacy = parseInt(localStorage.getItem('daily_learned_count') || '13', 10) || 13;
-      deCount = Math.max(13, legacy);
-    }
-    const deStats = {
-      learnedToday: deCount,
-      focusSeconds: 0,
-      correctCount: deCount,
-      totalCount: deCount,
-      mistakesCount: 0,
-      mistakes: []
-    };
-    localStorage.setItem(deKey, JSON.stringify(deStats));
-
-    // Удаляем глобальный неизолированный ключ
     localStorage.removeItem('daily_learned_count');
-    localStorage.setItem(fixedFlag, 'true');
+    localStorage.removeItem('app_daily_count');
+    localStorage.removeItem('today_count');
 
-    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: 'de' } }));
-    window.dispatchEvent(new Event('storage-update'));
+    // Удаляем все старые временные ключи с фиксами daily_stats_isolated_v2* и daily_stats_isolated_*
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('daily_stats_isolated_') || k.startsWith('daily_stats_isolated_v2'))) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
   } catch (e) {
-    console.error('Error fixing daily stats leak:', e);
+    console.error('Error cleaning legacy daily counters:', e);
   }
 }
+export const fixAndIsolateDailyStats = cleanLegacyDailyCounters;
 
 export const checkAndResetDailyProgress = () => {
   if (typeof window === 'undefined') return;
   try {
-    const todayStr = getLocalTodayStr();
+    cleanLegacyDailyCounters();
+    const todayStr = getLocalDateKey();
     const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
 
     if (storedDate !== todayStr) {
       console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
       localStorage.setItem('app_daily_counter_date', todayStr);
       localStorage.setItem('last_active_date', todayStr);
-      localStorage.removeItem('daily_learned_count');
 
       ['de', 'en', 'ru'].forEach(lang => {
         const key = `daily_stats_${lang}_${todayStr}`;
@@ -2134,11 +2107,19 @@ export function convertRuToDeLayout(text: string, target?: string): string {
   return res;
 }
 
+export function getAdaptiveFontSize(text: string): string {
+  const len = (text || '').length;
+  if (len > 25) return 'text-sm sm:text-base leading-tight tracking-tight';
+  if (len > 18) return 'text-base sm:text-lg leading-snug tracking-tight';
+  if (len > 12) return 'text-lg sm:text-xl leading-normal tracking-normal';
+  return 'text-xl sm:text-2xl leading-normal tracking-wide';
+}
+
 export const getDynamicInputFontSize = (textLength: number) => {
-  if (textLength > 24) return 'text-base sm:text-lg tracking-normal';
-  if (textLength > 17) return 'text-lg sm:text-xl tracking-tight';
-  if (textLength > 12) return 'text-xl sm:text-2xl tracking-wide';
-  return 'text-2xl sm:text-3xl tracking-wide';
+  if (textLength > 25) return 'text-sm sm:text-base leading-tight tracking-tight';
+  if (textLength > 18) return 'text-base sm:text-lg leading-snug tracking-tight';
+  if (textLength > 12) return 'text-lg sm:text-xl leading-normal tracking-normal';
+  return 'text-xl sm:text-2xl leading-normal tracking-wide';
 };
 
 function RapidFlashcardMode({
@@ -2602,39 +2583,48 @@ function RapidFlashcardMode({
                 {translation || card.hint}
               </h2>
 
-              <div className="w-full max-w-[540px] mx-auto relative">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  inputMode={isMobile ? "none" : "text"}
-                  readOnly={isMobile || isAnswered || locked}
-                  value={typedValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter') {
-                      if (isAnswered) handleProceedNext();
-                      else handleEnterSubmit();
-                    }
-                  }}
-                  autoFocus={!isMobile}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder=""
-                  className={cn(
-                    "w-full text-center font-medium py-3.5 px-4 sm:px-6 rounded-2xl outline-none transition-colors duration-150 caret-transparent border",
-                    getDynamicInputFontSize((typedValue || parsedNoun.full || card.targetWord || '').length),
-                    isAnswered && !isSurrendered
-                      ? "text-emerald-500 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)] font-semibold"
-                      : isSurrendered
-                      ? "text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05] font-medium"
-                      : isErrorMismatch
-                      ? "text-rose-500 dark:text-rose-400 border-rose-500/50 bg-rose-500/5"
-                      : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-100/90 dark:bg-white/[0.04] focus:border-sky-500 dark:focus:border-sky-400/60 focus:bg-white dark:focus:bg-white/[0.06]",
-                    isShaking && "animate-shake"
-                  )}
-                />
+              <div className="w-full max-w-[340px] sm:max-w-md mx-auto px-3 relative">
+                {isAnswered ? (
+                  <div
+                    className={cn(
+                      "w-full min-h-[52px] flex items-center justify-center text-center font-semibold py-3 px-4 rounded-2xl border break-words",
+                      getAdaptiveFontSize(typedValue || parsedNoun.full || card.targetWord || ''),
+                      !isSurrendered
+                        ? "text-emerald-500 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)]"
+                        : "text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]"
+                    )}
+                  >
+                    {typedValue || parsedNoun.full || card.targetWord}
+                  </div>
+                ) : (
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    inputMode={isMobile ? "none" : "text"}
+                    readOnly={isMobile || locked}
+                    value={typedValue}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') {
+                        handleEnterSubmit();
+                      }
+                    }}
+                    autoFocus={!isMobile}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder=""
+                    className={cn(
+                      "w-full text-center font-medium py-3.5 px-4 sm:px-6 rounded-2xl outline-none transition-colors duration-150 caret-transparent border break-words",
+                      getAdaptiveFontSize(typedValue || parsedNoun.full || card.targetWord || ''),
+                      isErrorMismatch
+                        ? "text-rose-500 dark:text-rose-400 border-rose-500/50 bg-rose-500/5"
+                        : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-100/90 dark:bg-white/[0.04] focus:border-sky-500 dark:focus:border-sky-400/60 focus:bg-white dark:focus:bg-white/[0.06]",
+                      isShaking && "animate-shake"
+                    )}
+                  />
+                )}
               </div>
             </div>
 
