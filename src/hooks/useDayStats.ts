@@ -811,17 +811,18 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
 
     const today = getTodayKey();
     const currentActivityCards = getTodayCompletedCardsCount(targetLang);
-    const newCardsDone = Math.max((current.cardsDone || 0) + 1, currentActivityCards + (isCorrect ? 0 : 1));
+    const newCardsDone = isCorrect
+      ? Math.max((current.cardsDone || 0) + 1, currentActivityCards)
+      : Math.max(current.cardsDone || 0, currentActivityCards);
 
     const prevMistakesToday = typeof current.mistakesCountToday === 'number'
       ? current.mistakesCountToday
       : (current.mistakesPool?.length || 0);
     const newMistakesToday = isCorrect ? prevMistakesToday : Math.max(prevMistakesToday + 1, updatedPool.length);
 
-    let newCorrectCount = (current.correctCount || 0) + (isCorrect ? 1 : 0);
-    if (newCorrectCount + newMistakesToday > newCardsDone) {
-      newCorrectCount = Math.max(0, newCardsDone - newMistakesToday);
-    }
+    const newCorrectCount = isCorrect
+      ? Math.max((current.correctCount || 0) + 1, newCardsDone)
+      : Math.max(current.correctCount || 0, newCardsDone);
 
     const nextStats: DailyStats = {
       ...current,

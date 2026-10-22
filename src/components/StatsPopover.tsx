@@ -125,13 +125,16 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     }
   })();
 
-  const totalDone = typeof currentLangStats?.learnedToday === 'number'
-    ? currentLangStats.learnedToday
-    : (typeof stats?.cardsDone === 'number' ? stats.cardsDone : getTodayCompletedCardsCount(currentLang));
+  const totalDone = Math.max(
+    typeof currentLangStats?.learnedToday === 'number' ? currentLangStats.learnedToday : 0,
+    typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0,
+    getTodayCompletedCardsCount(currentLang)
+  );
 
-  const totalSeconds = typeof currentLangStats?.focusSeconds === 'number' && currentLangStats.focusSeconds > 0
-    ? currentLangStats.focusSeconds
-    : (typeof stats?.activeSeconds === 'number' ? stats.activeSeconds : 0);
+  const totalSeconds = Math.max(
+    typeof currentLangStats?.focusSeconds === 'number' ? currentLangStats.focusSeconds : 0,
+    typeof stats?.activeSeconds === 'number' ? stats.activeSeconds : 0
+  );
 
   const minutes = Math.floor(totalSeconds / 60);
   const hours = Math.floor(minutes / 60);

@@ -58,6 +58,28 @@ export interface LanguageDailyProgress {
   accuracy?: number;
 }
 
+// In-memory кэш для полной защиты от переполнения localStorage (Safari QuotaExceededError)
+const memoryDailyStats: Record<string, { date: string; data: LanguageDailyProgress }> = {};
+const cloudSyncedToday: Record<string, string> = {};
+
+function persistDailyStatsLocal(cleanLang: string, today: string, stats: LanguageDailyProgress) {
+  memoryDailyStats[cleanLang] = { date: today, data: { ...stats } };
+  if (typeof window === 'undefined') return;
+  try {
+    safeSetStorage(`daily_stats_${cleanLang}_${today}`, JSON.stringify(stats));
+    const histKey = `daily_activity_${cleanLang.toUpperCase()}`;
+    let progress: Record<string, any> = {};
+    try {
+      const stored = localStorage.getItem(histKey);
+      if (stored) progress = JSON.parse(stored);
+    } catch {}
+    progress[today] = Math.max(typeof progress[today] === 'number' ? progress[today] : 0, stats.learnedToday);
+    safeSetStorage(histKey, JSON.stringify(progress));
+    safeSetStorage('app_daily_counter_date', today);
+    safeSetStorage('last_active_date', today);
+  } catch {}
+}
+
 // Загрузка статистики для конкретного языка
 export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
   const defaultStats: LanguageDailyProgress = {
@@ -75,198 +97,144 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
 
   const today = getDeviceLocalDate();
   const cleanLang = (lang || 'de').toLowerCase();
-  const raw = localStorage.getItem(`daily_stats_${cleanLang}_${today}`);
-  if (!raw) {
-    return defaultStats;
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    const learnedToday = typeof parsed.learnedToday === 'number' ? parsed.learnedToday : 0;
-    const focusSeconds = typeof parsed.focusSeconds === 'number' ? parsed.focusSeconds : 0;
-    const correctCount = typeof parsed.correctCount === 'number' ? parsed.correctCount : 0;
-    const totalCount = typeof parsed.totalCount === 'number' ? parsed.totalCount : 0;
-    const mistakes = Array.isArray(parsed.mistakes) ? parsed.mistakes : [];
-    const mistakesCount = typeof parsed.mistakesCount === 'number' ? parsed.mistakesCount : mistakes.length;
+  const upperLang = cleanLang.toUpperCase();
 
-    return {
-      learnedToday,
-      focusSeconds,
-      correctCount,
-      totalCount,
-      mistakes,
-      mistakesCount,
-      focusMinutes: Math.floor(focusSeconds / 60),
-      accuracy: totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 100
-    };
-  } catch {
-    return defaultStats;
-  }
+  const mem = memoryDailyStats[cleanLang]?.date === today ? memoryDailyStats[cleanLang].data : null;
+  const fallbackCompleted = getTodayCompletedCardsCount(upperLang);
+
+  let parsed: any = null;
+  try {
+    const raw = localStorage.getItem(`daily_stats_${cleanLang}_${today}`);
+    if (raw) parsed = JSON.parse(raw);
+  } catch {}
+
+  const learnedToday = Math.max(
+    typeof mem?.learnedToday === 'number' ? mem.learnedToday : 0,
+    typeof parsed?.learnedToday === 'number' ? parsed.learnedToday : 0,
+    fallbackCompleted
+  );
+  const focusSeconds = Math.max(
+    typeof mem?.focusSeconds === 'number' ? mem.focusSeconds : 0,
+    typeof parsed?.focusSeconds === 'number' ? parsed.focusSeconds : 0
+  );
+  const mistakes = Array.isArray(mem?.mistakes) && mem.mistakes.length > 0
+    ? mem.mistakes
+    : (Array.isArray(parsed?.mistakes) ? parsed.mistakes : []);
+  const mistakesCount = Math.max(
+    typeof mem?.mistakesCount === 'number' ? mem.mistakesCount : 0,
+    typeof parsed?.mistakesCount === 'number' ? parsed.mistakesCount : mistakes.length
+  );
+  const correctCount = Math.max(
+    typeof mem?.correctCount === 'number' ? mem.correctCount : 0,
+    typeof parsed?.correctCount === 'number' ? parsed.correctCount : 0,
+    learnedToday
+  );
+  const totalCount = Math.max(
+    typeof mem?.totalCount === 'number' ? mem.totalCount : 0,
+    typeof parsed?.totalCount === 'number' ? parsed.totalCount : 0,
+    correctCount + mistakesCount
+  );
+
+  const result: LanguageDailyProgress = {
+    learnedToday,
+    focusSeconds,
+    correctCount,
+    totalCount,
+    mistakes,
+    mistakesCount,
+    focusMinutes: Math.floor(focusSeconds / 60),
+    accuracy: totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 100
+  };
+
+  memoryDailyStats[cleanLang] = { date: today, data: result };
+  return result;
 }
 
 // --- SUPABASE MULTI-DEVICE CLOUD SYNC FOR DAILY COUNTER ---
 
-// Загрузка статистики из Supabase (Single Source of Truth)
-export async function syncCloudDailyStats(userId?: string, lang: string = 'de'): Promise<number> {
+// Загрузка статистики из Supabase (Single Source of Truth в таблице user_stats)
+export async function syncCloudDailyStats(_userId?: string, lang: string = 'de'): Promise<number> {
   const cleanLang = (lang || 'de').toLowerCase();
+  const upperLang = cleanLang.toUpperCase();
   const today = getDeviceLocalDate();
   let countFromDb: number | null = null;
+  let dayRowActivity: any = null;
+  let dailyRowActivity: any = null;
 
-  // 1. Попытка запроса в таблицу user_daily_stats
-  try {
-    let query = supabase
-      .from('user_daily_stats')
-      .select('cards_count')
-      .eq('language', cleanLang)
-      .eq('date', today);
-
-    if (userId) {
-      query = query.eq('user_id', userId);
-    }
-
-    const { data, error } = await query.maybeSingle();
-    if (!error && data && typeof data.cards_count === 'number') {
-      countFromDb = data.cards_count;
-    }
-  } catch (e) {}
-
-  // 2. Гарантированный источник истины: user_stats (где надежно хранятся DAILY_STATS_DE / DE / DAY_STATS_DE)
   try {
     const { data, error } = await supabase
       .from('user_stats')
       .select('language, daily_activity')
-      .in('language', [`DAILY_STATS_${cleanLang.toUpperCase()}`, cleanLang.toUpperCase(), `DAY_STATS_${cleanLang.toUpperCase()}`]);
+      .in('language', [`DAILY_STATS_${upperLang}`, upperLang, `DAY_STATS_${upperLang}`]);
 
     if (!error && data && Array.isArray(data)) {
-      const dailyRow = data.find(r => r.language === `DAILY_STATS_${cleanLang.toUpperCase()}`);
-      const histRow = data.find(r => r.language === cleanLang.toUpperCase());
-      const dayRow = data.find(r => r.language === `DAY_STATS_${cleanLang.toUpperCase()}`);
+      const dailyRow = data.find(r => r.language === `DAILY_STATS_${upperLang}`);
+      const histRow = data.find(r => r.language === upperLang);
+      const dayRow = data.find(r => r.language === `DAY_STATS_${upperLang}`);
 
       let countFromDaily = 0;
       if (dailyRow?.daily_activity && dailyRow.daily_activity.date === today) {
-        const act = dailyRow.daily_activity;
-        countFromDaily = typeof act.cards_count === 'number' 
-          ? act.cards_count 
-          : (typeof act.learnedToday === 'number' ? act.learnedToday : 0);
+        dailyRowActivity = dailyRow.daily_activity;
+        countFromDaily = typeof dailyRowActivity.cards_count === 'number'
+          ? dailyRowActivity.cards_count
+          : (typeof dailyRowActivity.learnedToday === 'number' ? dailyRowActivity.learnedToday : 0);
       }
 
       let countFromHist = 0;
       if (histRow?.daily_activity) {
         const raw = histRow.daily_activity[today];
-        countFromHist = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw) || 0 : 0));
+        countFromHist = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
       }
 
       let countFromDay = 0;
       if (dayRow?.daily_activity && dayRow.daily_activity.date === today) {
-        countFromDay = typeof dayRow.daily_activity.cardsDone === 'number' ? dayRow.daily_activity.cardsDone : 0;
+        dayRowActivity = dayRow.daily_activity;
+        const done = typeof dayRowActivity.cardsDone === 'number' ? dayRowActivity.cardsDone : 0;
+        const corr = typeof dayRowActivity.correctCount === 'number' ? dayRowActivity.correctCount : 0;
+        countFromDay = Math.max(done, corr);
       }
 
-      const bestCloud = Math.max(countFromDaily, countFromHist, countFromDay);
-      if (countFromDb === null || bestCloud > countFromDb) {
-        countFromDb = bestCloud;
-      }
+      countFromDb = Math.max(countFromDaily, countFromHist, countFromDay);
+      cloudSyncedToday[cleanLang] = today;
     }
   } catch (e) {
     console.error('Ошибка загрузки дневной статистики из Supabase:', e);
   }
 
-  const finalCount = countFromDb !== null ? countFromDb : 0;
-
-  // Синхронизируем локальный стейт и хранилище для текущего браузера (Safari/Chrome)
-  if (typeof window !== 'undefined' && finalCount > 0) {
-    const key = `daily_stats_${cleanLang}_${today}`;
-    let current = getLanguageDailyStats(cleanLang);
-    if (finalCount > current.learnedToday) {
-      current.learnedToday = finalCount;
-      current.totalCount = Math.max(current.totalCount, finalCount);
-      current.correctCount = Math.max(current.correctCount, finalCount);
-      localStorage.setItem(key, JSON.stringify(current));
-
-      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: finalCount } }));
-      window.dispatchEvent(new Event('storage-update'));
-    }
-  }
-
-  return finalCount;
-}
-
-// Инкремент в Supabase (+1)
-export async function incrementCloudDailyCounter(lang: string = 'de'): Promise<number> {
-  const cleanLang = (lang || 'de').toLowerCase();
-  const today = getDeviceLocalDate();
-  const nowIso = new Date().toISOString();
-
-  // 1. Оптимистичное обновление в UI и локальном хранилище
-  const key = `daily_stats_${cleanLang}_${today}`;
-  let current = getLanguageDailyStats(cleanLang);
-  current.learnedToday += 1;
-  current.totalCount += 1;
-  current.correctCount += 1;
+  const current = getLanguageDailyStats(cleanLang);
+  const finalCount = countFromDb !== null ? Math.max(countFromDb, current.learnedToday) : current.learnedToday;
 
   if (typeof window !== 'undefined') {
-    localStorage.setItem(key, JSON.stringify(current));
-    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: current.learnedToday } }));
+    const updated: LanguageDailyProgress = {
+      ...current,
+      learnedToday: finalCount,
+      correctCount: Math.max(current.correctCount, finalCount),
+      totalCount: Math.max(current.totalCount, finalCount + (current.mistakesCount || 0)),
+      focusSeconds: Math.max(
+        current.focusSeconds || 0,
+        typeof dailyRowActivity?.focusSeconds === 'number' ? dailyRowActivity.focusSeconds : 0,
+        typeof dayRowActivity?.activeSeconds === 'number' ? dayRowActivity.activeSeconds : 0
+      )
+    };
+    updated.focusMinutes = Math.floor(updated.focusSeconds / 60);
+    updated.accuracy = updated.totalCount > 0 ? Math.round((updated.correctCount / updated.totalCount) * 100) : 100;
+
+    persistDailyStatsLocal(cleanLang, today, updated);
+
+    if (dayRowActivity || finalCount > 0) {
+      reconcileStatsFromCloud(upperLang, {
+        ...(dayRowActivity || {}),
+        date: today,
+        cardsDone: finalCount,
+        correctCount: finalCount
+      });
+    }
+
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: finalCount } }));
     window.dispatchEvent(new Event('storage-update'));
   }
 
-  const newCount = current.learnedToday;
-
-  // 2. Идентификатор пользователя
-  let userId = '00000000-0000-0000-0000-000000000000';
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user?.id) userId = user.id;
-  } catch {}
-
-  // 3. Сохранение в user_daily_stats
-  try {
-    await supabase.from('user_daily_stats').upsert(
-      {
-        user_id: userId,
-        language: cleanLang,
-        date: today,
-        cards_count: newCount,
-        updated_at: nowIso
-      },
-      { onConflict: 'user_id,language,date' }
-    );
-  } catch (e) {}
-
-  // 4. Гарантированное сохранение в user_stats (DAILY_STATS_DE и DE calendar)
-  try {
-    const fullDaily = {
-      ...current,
-      date: today,
-      learnedToday: newCount,
-      cards_count: newCount,
-      updated_at: nowIso
-    };
-
-    await supabase.from('user_stats').upsert({
-      language: `DAILY_STATS_${cleanLang.toUpperCase()}`,
-      daily_activity: fullDaily
-    }, { onConflict: 'language' });
-
-    // Обновляем календарную сетку
-    const histKey = `daily_activity_${cleanLang.toUpperCase()}`;
-    let progress: Record<string, any> = {};
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem(histKey);
-        if (stored) progress = JSON.parse(stored);
-      } catch {}
-      progress[today] = Math.max(progress[today] || 0, newCount);
-      localStorage.setItem(histKey, JSON.stringify(progress));
-    }
-
-    await supabase.from('user_stats').upsert({
-      language: cleanLang.toUpperCase(),
-      daily_activity: progress
-    }, { onConflict: 'language' });
-  } catch (e) {
-    console.error('Ошибка записи в Supabase user_stats:', e);
-  }
-
-  return newCount;
+  return finalCount;
 }
 
 export async function fetchDailyStatsFromCloud(lang: string): Promise<number | null> {
@@ -275,60 +243,82 @@ export async function fetchDailyStatsFromCloud(lang: string): Promise<number | n
 
 export async function syncDailyStatsToCloud(lang: string, count: number, currentStats?: Partial<LanguageDailyProgress>): Promise<void> {
   const cleanLang = (lang || 'de').toLowerCase();
+  const upperLang = cleanLang.toUpperCase();
   const today = getDeviceLocalDate();
   const nowIso = new Date().toISOString();
 
-  try {
-    let userId = '00000000-0000-0000-0000-000000000000';
+  let effectiveCount = count;
+
+  // Если браузер (например Safari) ещё не успел подтянуть облачный счетчик в этой сессии,
+  // сначала сверяемся с облаком, чтобы никогда не затереть больший счетчик нулем!
+  if (cloudSyncedToday[cleanLang] !== today) {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.id) {
-        userId = session.user.id;
-      } else {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user?.id) userId = user.id;
+      const { data } = await supabase
+        .from('user_stats')
+        .select('language, daily_activity')
+        .in('language', [`DAILY_STATS_${upperLang}`, upperLang, `DAY_STATS_${upperLang}`]);
+
+      if (data && Array.isArray(data)) {
+        const dailyRow = data.find(r => r.language === `DAILY_STATS_${upperLang}`);
+        const histRow = data.find(r => r.language === upperLang);
+        const dayRow = data.find(r => r.language === `DAY_STATS_${upperLang}`);
+
+        const c1 = (dailyRow?.daily_activity?.date === today)
+          ? (dailyRow.daily_activity.cards_count ?? dailyRow.daily_activity.learnedToday ?? 0)
+          : 0;
+        const rawHist = histRow?.daily_activity?.[today];
+        const c2 = typeof rawHist === 'number' ? rawHist : 0;
+        const c3 = (dayRow?.daily_activity?.date === today)
+          ? (dayRow.daily_activity.cardsDone ?? dayRow.daily_activity.correctCount ?? 0)
+          : 0;
+
+        const cloudMax = Math.max(c1, c2, c3);
+        if (cloudMax >= effectiveCount) {
+          effectiveCount = cloudMax + 1;
+          const localCur = getLanguageDailyStats(cleanLang);
+          localCur.learnedToday = effectiveCount;
+          localCur.correctCount = Math.max(localCur.correctCount, effectiveCount);
+          localCur.totalCount = Math.max(localCur.totalCount, effectiveCount + (localCur.mistakesCount || 0));
+          persistDailyStatsLocal(cleanLang, today, localCur);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: effectiveCount } }));
+            window.dispatchEvent(new Event('storage-update'));
+          }
+        }
+        cloudSyncedToday[cleanLang] = today;
       }
     } catch {}
-
-    await supabase.from('user_daily_stats').upsert(
-      {
-        user_id: userId,
-        language: cleanLang,
-        date: today,
-        cards_count: count,
-        updated_at: nowIso
-      },
-      { onConflict: 'user_id,language,date' }
-    );
-  } catch (e) {}
+  }
 
   try {
     const fullDaily = {
       ...(currentStats || {}),
       date: today,
-      learnedToday: count,
-      cards_count: count,
+      learnedToday: effectiveCount,
+      cards_count: effectiveCount,
       updated_at: nowIso
     };
 
     await supabase.from('user_stats').upsert({
-      language: `DAILY_STATS_${cleanLang.toUpperCase()}`,
+      language: `DAILY_STATS_${upperLang}`,
       daily_activity: fullDaily
     }, { onConflict: 'language' });
 
-    const histKey = `daily_activity_${cleanLang.toUpperCase()}`;
+    const histKey = `daily_activity_${upperLang}`;
     let progress: Record<string, any> = {};
     if (typeof window !== 'undefined') {
       try {
         const stored = localStorage.getItem(histKey);
         if (stored) progress = JSON.parse(stored);
       } catch {}
-      progress[today] = Math.max(progress[today] || 0, count);
-      localStorage.setItem(histKey, JSON.stringify(progress));
+      progress[today] = Math.max(typeof progress[today] === 'number' ? progress[today] : 0, effectiveCount);
+      safeSetStorage(histKey, JSON.stringify(progress));
+    } else {
+      progress[today] = effectiveCount;
     }
 
     await supabase.from('user_stats').upsert({
-      language: cleanLang.toUpperCase(),
+      language: upperLang,
       daily_activity: progress
     }, { onConflict: 'language' });
   } catch (e) {
@@ -342,54 +332,46 @@ export async function syncDailyStatsFromCloud(lang: string): Promise<number> {
 
 // Сохранение статистики для конкретного языка
 export function updateLanguageDailyStats(lang: string, deltaLearned: number = 0, isCorrect?: boolean, cardId?: string): LanguageDailyProgress {
-  const defaultStats: LanguageDailyProgress = {
-    learnedToday: 0,
-    focusSeconds: 0,
-    correctCount: 0,
-    totalCount: 0,
-    mistakes: [],
-    mistakesCount: 0,
-    focusMinutes: 0,
-    accuracy: 100
-  };
-
-  if (typeof window === 'undefined') return defaultStats;
-
   const today = getLocalTodayStr();
   const cleanLang = (lang || 'de').toLowerCase();
-  const key = `daily_stats_${cleanLang}_${today}`;
-  let current: LanguageDailyProgress = { ...defaultStats };
-
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) current = { ...current, ...JSON.parse(raw) };
-  } catch {}
+  const current = { ...getLanguageDailyStats(cleanLang) };
 
   current.learnedToday = Math.max(0, current.learnedToday + deltaLearned);
   if (isCorrect !== undefined) {
     current.totalCount += 1;
     if (isCorrect) {
-      current.correctCount += 1;
+      current.correctCount = Math.max(current.correctCount + 1, current.learnedToday);
     } else {
       current.mistakesCount = (current.mistakesCount || 0) + 1;
       if (cardId && !current.mistakes.includes(cardId)) {
-        current.mistakes.push(cardId);
+        current.mistakes = [...current.mistakes, cardId];
       }
     }
+  } else if (deltaLearned > 0) {
+    current.correctCount = Math.max(current.correctCount + deltaLearned, current.learnedToday);
+    current.totalCount = Math.max(current.totalCount + deltaLearned, current.correctCount + (current.mistakesCount || 0));
   }
 
   current.focusMinutes = Math.floor(current.focusSeconds / 60);
   current.accuracy = current.totalCount > 0 ? Math.round((current.correctCount / current.totalCount) * 100) : 100;
 
-  localStorage.setItem(key, JSON.stringify(current));
+  persistDailyStatsLocal(cleanLang, today, current);
 
-  // Sync to Supabase multi-device (iPhone, Mac, etc.)
+  // Sync to Supabase multi-device (iPhone, Mac, Chrome, Safari)
   syncDailyStatsToCloud(cleanLang, current.learnedToday, current);
 
-  window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang } }));
-  window.dispatchEvent(new Event('storage-update'));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: current.learnedToday } }));
+    window.dispatchEvent(new Event('storage-update'));
+  }
 
   return current;
+}
+
+// Инкремент в Supabase (+1)
+export async function incrementCloudDailyCounter(lang: string = 'de', cardId?: string): Promise<number> {
+  const updated = updateLanguageDailyStats(lang, 1, true, cardId);
+  return updated.learnedToday;
 }
 
 // Очистка мусорных глобальных ключей и устаревших фиксов
@@ -400,7 +382,6 @@ export function cleanLegacyDailyCounters() {
     localStorage.removeItem('app_daily_count');
     localStorage.removeItem('today_count');
 
-    // Удаляем все старые временные ключи с фиксами daily_stats_isolated_v2* и daily_stats_isolated_*
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -422,15 +403,31 @@ export const checkAndResetDailyProgress = () => {
     const todayStr = getLocalDateKey();
     const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
 
+    if (!storedDate) {
+      safeSetStorage('app_daily_counter_date', todayStr);
+      safeSetStorage('last_active_date', todayStr);
+      return;
+    }
+
     if (storedDate !== todayStr) {
       console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
-      localStorage.setItem('app_daily_counter_date', todayStr);
-      localStorage.setItem('last_active_date', todayStr);
+      safeSetStorage('app_daily_counter_date', todayStr);
+      safeSetStorage('last_active_date', todayStr);
 
       ['de', 'en', 'ru'].forEach(lang => {
         const key = `daily_stats_${lang}_${todayStr}`;
-        const emptyStats = { learnedToday: 0, focusSeconds: 0, correctCount: 0, totalCount: 0, mistakesCount: 0, mistakes: [] };
-        localStorage.setItem(key, JSON.stringify(emptyStats));
+        const emptyStats: LanguageDailyProgress = {
+          learnedToday: 0,
+          focusSeconds: 0,
+          correctCount: 0,
+          totalCount: 0,
+          mistakesCount: 0,
+          mistakes: [],
+          focusMinutes: 0,
+          accuracy: 100
+        };
+        memoryDailyStats[lang] = { date: todayStr, data: emptyStats };
+        safeSetStorage(key, JSON.stringify(emptyStats));
 
         try {
           const actKey = `daily_activity_${lang.toUpperCase()}`;
@@ -438,7 +435,7 @@ export const checkAndResetDailyProgress = () => {
           let progress: Record<string, any> = {};
           if (stored) progress = JSON.parse(stored);
           progress[todayStr] = 0;
-          localStorage.setItem(actKey, JSON.stringify(progress));
+          safeSetStorage(actKey, JSON.stringify(progress));
         } catch (e) {}
       });
 
@@ -1689,7 +1686,6 @@ const useStore = create<DeckState>()((set, get) => ({
   setCardProgress: async (deckId, cardId, score, targetLang?: string) => {
     const previousDecks = get().decks;
     let updatedCard: Flashcard | null = null;
-    if (score >= 4) get().incrementDailyProgress(targetLang);
 
     set((state) => {
       const di = state.decks.findIndex((d) => d.id === deckId);
@@ -2546,12 +2542,14 @@ function RapidFlashcardMode({
     });
   }, [speechText]);
 
-  // 1. Автоматическая озвучка лицевой стороны при появлении карточки
+  // 1. Автоматическая озвучка ТОЛЬКО у лицевой стороны на 1-2 раунде (на обратной и до ответа на 3-4 раунде — нет)
   useEffect(() => {
-    if (currentCard?.targetWord && !isFlipped && !isAnswered) {
+    const mastery = currentCard?.isArchived ? 4 : (currentCard?.masteryLevel ?? progress ?? 0);
+    const round1or2 = currentCard?.isArchived ? false : mastery < 2;
+    if (round1or2 && currentCard?.targetWord) {
       playSafeAudio(() => playCardAudio(currentCard.targetWord));
     }
-  }, [currentCard?.id, isFlipped, isAnswered, playCardAudio]);
+  }, [currentCard?.id]);
 
   // Автофокус инпута в режиме ввода на ПК
   useEffect(() => {
@@ -2572,7 +2570,6 @@ function RapidFlashcardMode({
       playSafeAudio(() => playSuccessSound());
       const nextMastery = Math.min(4, (localMastery || 0) + 1);
       setLocalMastery(nextMastery);
-      incrementCloudDailyCounter('de');
     } else {
       playSafeAudio(() => playErrorSound());
       const nextMastery = Math.max(0, (localMastery || 0) - 1);
@@ -2597,14 +2594,8 @@ function RapidFlashcardMode({
   }, [locked, isTransitioning, localMastery, onAnswer, onHintPenalty]);
 
   const toggleFlip = useCallback(() => {
-    setIsFlipped(prev => {
-      const next = !prev;
-      if (next) {
-        playSafeAudio(() => playCardAudio(currentCard?.targetWord));
-      }
-      return next;
-    });
-  }, [currentCard?.targetWord, playCardAudio]);
+    setIsFlipped(prev => !prev);
+  }, []);
 
   const triggerErrorShake = useCallback(() => {
     setIsErrorMismatch(true);
@@ -2628,7 +2619,6 @@ function RapidFlashcardMode({
 
     playSafeAudio(() => playSuccessSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
-    incrementCloudDailyCounter('de');
     triggerHaptic('success');
   }, [isAnswered, localMastery, playCardAudio, currentCard?.targetWord]);
 
@@ -2736,9 +2726,8 @@ function RapidFlashcardMode({
         } else if (e.key === 'ArrowLeft') {
           e.preventDefault();
           if (!isFlipped) {
-            // Шаг 1: На лицевой стороне стрелка раскрывает ответ
+            // Шаг 1: На лицевой стороне стрелка раскрывает ответ (без озвучки на обратной стороне)
             setIsFlipped(true);
-            playSafeAudio(() => playCardAudio(currentCard?.targetWord));
           } else {
             // Шаг 2: На обратной стороне стрелка влево оценивает "Не знаю"
             handleRateCard(false);
@@ -2746,9 +2735,8 @@ function RapidFlashcardMode({
         } else if (e.key === 'ArrowRight') {
           e.preventDefault();
           if (!isFlipped) {
-            // Шаг 1: На лицевой стороне стрелка раскрывает ответ
+            // Шаг 1: На лицевой стороне стрелка раскрывает ответ (без озвучки на обратной стороне)
             setIsFlipped(true);
-            playSafeAudio(() => playCardAudio(currentCard?.targetWord));
           } else {
             // Шаг 2: На обратной стороне стрелка вправо оценивает "Знаю"
             handleRateCard(true);
@@ -2761,8 +2749,9 @@ function RapidFlashcardMode({
         }
       }
 
-      // Озвучка по клавише R (если фокус не в текстовом инпуте)
+      // Озвучка по клавише R (только на лицевой стороне в раундах 1-2, или в раундах 3-4 если фокус не в инпуте)
       if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
+        if (isRound1or2 && isFlipped) return;
         if (!isRound1or2 && document.activeElement === inputRef.current) return;
         playSafeAudio(() => playCardAudio(currentCard?.targetWord));
       }
@@ -2773,7 +2762,7 @@ function RapidFlashcardMode({
   }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, toggleFlip, playCardAudio]);
 
   return (
-    <div className={`w-full flex-1 flex flex-col items-center justify-center px-4 py-4 my-auto select-none transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
+    <div className={`w-full flex flex-col items-center select-none transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
       {isRound1or2 ? (
         /* =======================================================
            РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
@@ -2832,21 +2821,11 @@ function RapidFlashcardMode({
               <div className="h-6" />
             </div>
 
-            {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР) */}
+            {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР, БЕЗ ОЗВУЧКИ) */}
             <div className="absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden rotate-y-180 bg-white dark:bg-zinc-900/98 rounded-[32px]">
-              {/* Шапка */}
+              {/* Шапка (без кнопки озвучки на обратной стороне) */}
               <div className="flex items-center justify-between w-full">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    playSafeAudio(() => playCardAudio(currentCard?.targetWord));
-                  }}
-                  className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition cursor-pointer"
-                  title="Aussprache anhören (R)"
-                >
-                  <Volume2 className="w-4 h-4"/>
-                </button>
+                <div className="w-9 h-9" />
                 <div className="flex items-center gap-1.5">
                   {[1, 2, 3, 4].map(step => (
                     <span
@@ -2952,7 +2931,7 @@ function RapidFlashcardMode({
             </div>
           </div>
 
-          {/* Центр: ТОЛЬКО русский перевод и инпут (БЕЗ ПРИМЕРА И БЕЗ ПЛЕЙСХОЛДЕРА) */}
+          {/* Центр: ТОЛЬКО русский перевод и инпут (БЕЗ ПРИМЕРА, БЕЗ ПЛЕЙСХОЛДЕРА И БЕЗ МИГАЮЩЕЙ КАРЕТКИ) */}
           <div 
             className="my-auto w-full flex flex-col items-center text-center select-text"
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
@@ -2971,8 +2950,12 @@ function RapidFlashcardMode({
                 inputMode={isMobile ? "none" : undefined}
                 tabIndex={isMobile ? -1 : 0}
                 autoFocus={!isMobile}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="" /* ПЛЕЙСХОЛДЕР СТРОГО ПУСТОЙ */
-                className={`w-full text-center font-medium py-3.5 px-6 rounded-2xl outline-none transition-colors border ${
+                style={{ caretColor: 'transparent' }}
+                className={`w-full text-center font-medium py-3.5 px-6 rounded-2xl outline-none transition-colors border caret-transparent ${
                   isMobile ? 'pointer-events-none select-none ' : ''
                 }${
                   isAnswered
@@ -3045,9 +3028,55 @@ function RapidSession({
   }, [deckId, appLanguage]);
 
   const { stats, recordCardResult } = useDayStats({ isStudying: true, language: studyLanguage });
+  const [langStats, setLangStats] = useState<LanguageDailyProgress>(() => getLanguageDailyStats(studyLanguage));
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isMistakesReviewMode, setIsMistakesReviewMode] = useState(false);
   const isReviewingMistakesSession = Boolean(reviewCards && reviewCards.length > 0) || isMistakesReviewMode;
+
+  useEffect(() => {
+    setLangStats(getLanguageDailyStats(studyLanguage));
+    syncCloudDailyStats(undefined, studyLanguage).then(count => {
+      if (typeof count === 'number' && count > 0) {
+        setLangStats(prev => ({
+          ...prev,
+          learnedToday: Math.max(prev.learnedToday, count),
+          totalCount: Math.max(prev.totalCount, count),
+          correctCount: Math.max(prev.correctCount, count)
+        }));
+      }
+    });
+  }, [studyLanguage]);
+
+  useEffect(() => {
+    const handleStatsUpdate = () => {
+      setLangStats(getLanguageDailyStats(studyLanguage));
+    };
+    const handleSync = () => {
+      syncCloudDailyStats(undefined, studyLanguage).then(count => {
+        if (typeof count === 'number' && count > 0) {
+          setLangStats(prev => ({
+            ...prev,
+            learnedToday: Math.max(prev.learnedToday, count),
+            totalCount: Math.max(prev.totalCount, count),
+            correctCount: Math.max(prev.correctCount, count)
+          }));
+        }
+      });
+    };
+    window.addEventListener('stats-update', handleStatsUpdate);
+    window.addEventListener('storage-update', handleStatsUpdate);
+    window.addEventListener('focus', handleSync);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') handleSync();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('stats-update', handleStatsUpdate);
+      window.removeEventListener('storage-update', handleStatsUpdate);
+      window.removeEventListener('focus', handleSync);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [studyLanguage]);
 
   const isMobile = useIsMobile();
   const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
@@ -3133,6 +3162,24 @@ function RapidSession({
       return;
     }
 
+    if (correct) {
+      updateLanguageDailyStats(studyLanguage, 1, true, id);
+      setLangStats(prev => ({
+        ...prev,
+        learnedToday: (prev?.learnedToday || 0) + 1,
+        totalCount: (prev?.totalCount || 0) + 1,
+        correctCount: (prev?.correctCount || 0) + 1
+      }));
+    } else {
+      updateLanguageDailyStats(studyLanguage, 0, false, id);
+      setLangStats(prev => ({
+        ...prev,
+        totalCount: (prev?.totalCount || 0) + 1,
+        mistakesCount: (prev?.mistakesCount || 0) + 1,
+        mistakes: prev?.mistakes?.includes(id) ? prev.mistakes : [...(prev?.mistakes || []), id]
+      }));
+    }
+
     recordCardResult(correct, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
 
     const currentScore = wordProgress[id] ?? liveCard.masteryLevel ?? 0;
@@ -3142,10 +3189,10 @@ function RapidSession({
     // 1) Persist immediately (store + Supabase)
     if (liveCard.isArchived) {
       // Spaced-repetition review of an already learned word
-      if (learned) answerCard(current.deckId, id, true, false);
-      else if (!correct) answerCard(current.deckId, id, false, false);
+      if (learned) answerCard(current.deckId, id, true, false, true, studyLanguage);
+      else if (!correct) answerCard(current.deckId, id, false, false, true, studyLanguage);
     } else {
-      setCardProgress(current.deckId, id, newScore);
+      setCardProgress(current.deckId, id, newScore, studyLanguage);
     }
 
     // 2) Update dots immediately
@@ -3176,13 +3223,20 @@ function RapidSession({
 
     // 1) Update progress and persist penalty immediately (store + Supabase)
     if (liveCard.isArchived) {
-      answerCard(current.deckId, id, false, true);
+      answerCard(current.deckId, id, false, true, true, studyLanguage);
     } else {
-      setCardProgress(current.deckId, id, penalizedProgress);
+      setCardProgress(current.deckId, id, penalizedProgress, studyLanguage);
     }
     setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
 
     // 2) Record mistake in daily stats pool for focused repetition
+    updateLanguageDailyStats(studyLanguage, 0, false, id);
+    setLangStats(prev => ({
+      ...prev,
+      totalCount: (prev?.totalCount || 0) + 1,
+      mistakesCount: (prev?.mistakesCount || 0) + 1,
+      mistakes: prev?.mistakes?.includes(id) ? prev.mistakes : [...(prev?.mistakes || []), id]
+    }));
     recordCardResult(false, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
 
     // NO automatic timer! The user reads the word and explicitly taps «Weiter» to advance.
@@ -3213,9 +3267,9 @@ function RapidSession({
   const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === current.card.id) || current.card;
 
   return (
-    <div className="flex flex-col min-h-screen w-full items-center justify-center pt-8 pb-8 relative z-50">
-      <div className="w-full max-w-[760px] mx-auto px-4 mb-4">
-        <div className="flex items-center justify-between mb-3">
+    <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
+      <div className="w-full max-w-[760px] mx-auto px-4 mb-2.5">
+        <div className="flex items-center justify-between mb-2">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -3237,27 +3291,25 @@ function RapidSession({
       </div>
 
       <div className={cn(
-        "flex-1 w-full flex flex-col items-center justify-center my-auto px-4 py-4 min-h-[calc(100vh-140px)] relative",
+        "w-full max-w-[760px] mx-auto px-4 flex flex-col items-center select-none relative",
         (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[290px] md:pb-6" : ""
       )}>
-        <div className="w-full flex flex-col items-center justify-center my-auto">
-          <RapidFlashcardMode
-            key={`${current.card.id}-${turn}`}
-            card={liveCard}
-            progress={wordProgress[current.card.id] || 0}
-            locked={locked}
-            onAnswer={handleAnswer}
-            onHintPenalty={handleHintPenalty}
-            reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
-          />
-        </div>
+        <RapidFlashcardMode
+          key={`${current.card.id}-${turn}`}
+          card={liveCard}
+          progress={wordProgress[current.card.id] || 0}
+          locked={locked}
+          onAnswer={handleAnswer}
+          onHintPenalty={handleHintPenalty}
+          reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
+        />
       </div>
 
       <StatsPopover
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         stats={stats}
-        langStats={getLanguageDailyStats(studyLanguage)}
+        langStats={langStats}
         language={studyLanguage}
         onReviewMistakes={handleReviewMistakes}
       />
@@ -3316,7 +3368,7 @@ function RapidStudyCard({
     : (isReview || card.isArchived || progress >= 2);
 
   return (
-    <div className="w-full flex justify-center px-4 relative">
+    <div className="w-full flex justify-center relative">
       <RapidFlashcardMode
         key={card.id}
         card={card}
@@ -3693,10 +3745,9 @@ function StudyInterface({
   }
 
   return (
-      <>
-<div className="flex flex-col min-h-screen w-full items-center justify-center pt-8 pb-8 relative z-50">
-      <div className="w-full max-w-[760px] mx-auto px-4 mb-4">
-        <div className="flex items-center justify-between mb-3">
+    <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
+      <div className="w-full max-w-[760px] mx-auto px-4 mb-2.5">
+        <div className="flex items-center justify-between mb-2">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -3725,7 +3776,7 @@ function StudyInterface({
       </div>
 
       <div className={cn(
-        "flex-1 w-full flex flex-col items-center justify-center my-auto px-4 py-4 min-h-[calc(100vh-140px)] select-none",
+        "w-full max-w-[760px] mx-auto px-4 flex flex-col items-center select-none relative",
         isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[290px] md:pb-6" : ""
       )}>
         <AnimatePresence mode="wait">
@@ -3798,7 +3849,6 @@ function StudyInterface({
         onReviewMistakes={handleReviewMistakes}
       />
     </div>
-    </>
   );
 }
 
@@ -4847,51 +4897,14 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
 
   const fetchCloudTodayStats = useCallback(async (lang: string) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user?.id) return;
-
-      const todayStr = getDeviceLocalDate(); // YYYY-MM-DD
-      const cleanLang = (lang || 'de').toLowerCase();
-      const { data } = await supabase
-        .from('user_daily_stats')
-        .select('cards_count')
-        .eq('user_id', session.user.id)
-        .eq('language', cleanLang)
-        .eq('date', todayStr)
-        .maybeSingle();
-
-      let cloudCount = (data && typeof data.cards_count === 'number') ? data.cards_count : null;
-
-      // Fallback к user_stats если в user_daily_stats еще нет записи
-      if (cloudCount === null) {
-        try {
-          const { data: statsData } = await supabase
-            .from('user_stats')
-            .select('language, daily_activity')
-            .eq('language', `DAILY_STATS_${cleanLang.toUpperCase()}`)
-            .maybeSingle();
-          if (statsData?.daily_activity && statsData.daily_activity.date === todayStr) {
-            cloudCount = statsData.daily_activity.cards_count ?? statsData.daily_activity.learnedToday ?? null;
-          }
-        } catch {}
-      }
-
-      if (typeof cloudCount === 'number') {
-        const finalCount = cloudCount;
-        setLangStats(prev => ({
-          ...prev,
-          learnedToday: finalCount,
-          totalCount: Math.max(prev?.totalCount || 0, finalCount),
-          correctCount: Math.max(prev?.correctCount || 0, finalCount)
-        }));
-        const key = `daily_stats_${cleanLang}_${todayStr}`;
-        let current = getLanguageDailyStats(cleanLang);
-        current.learnedToday = finalCount;
-        current.totalCount = Math.max(current.totalCount, finalCount);
-        current.correctCount = Math.max(current.correctCount, finalCount);
-        localStorage.setItem(key, JSON.stringify(current));
-        window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: finalCount } }));
-      }
+      const finalCount = await syncCloudDailyStats(undefined, lang);
+      const updated = getLanguageDailyStats(lang);
+      setLangStats({
+        ...updated,
+        learnedToday: Math.max(updated.learnedToday, finalCount),
+        totalCount: Math.max(updated.totalCount, finalCount),
+        correctCount: Math.max(updated.correctCount, finalCount)
+      });
     } catch (err) {
       console.error('Failed to sync daily stats:', err);
     }
@@ -4902,15 +4915,22 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
     checkAndResetDailyProgress();
     setLangStats(getLanguageDailyStats(effectiveLang));
 
-    // 1. Немедленная загрузка для текущего языка
+    // 1. Немедленная загрузка из Supabase user_stats для текущего языка
     fetchCloudTodayStats(effectiveLang);
 
-    // 2. Слушатель auth state (Safari асинхронно восстанавливает сессию)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user?.id) {
+    // 2. Realtime-подписка на изменения счетчика с других браузеров и устройств
+    const upperLang = normalizeLanguage(effectiveLang);
+    const channel = supabase
+      .channel(`realtime-header-stats-${upperLang}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'user_stats',
+        filter: `language=eq.DAILY_STATS_${upperLang}`
+      }, () => {
         fetchCloudTodayStats(effectiveLang);
-      }
-    });
+      })
+      .subscribe();
 
     // 3. Синхронизация при фокусе окна и смене видимости (возврат в Safari с другого устройства)
     const handleSync = () => {
@@ -4923,6 +4943,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
     };
 
     window.addEventListener('focus', handleSync);
+    window.addEventListener('pageshow', handleSync);
     window.addEventListener('stats-update', handleStorageUpdate);
     window.addEventListener('storage-update', handleStorageUpdate);
     window.addEventListener('storage', handleStorageUpdate);
@@ -4935,8 +4956,9 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(channel);
       window.removeEventListener('focus', handleSync);
+      window.removeEventListener('pageshow', handleSync);
       window.removeEventListener('stats-update', handleStorageUpdate);
       window.removeEventListener('storage-update', handleStorageUpdate);
       window.removeEventListener('storage', handleStorageUpdate);
@@ -5049,7 +5071,7 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
                 <path d="m3 17 9 5 9-5" />
               </svg>
               <span suppressHydrationWarning className="text-xs font-semibold tabular-nums tracking-tight font-sans">
-                {langStats.learnedToday} <span className="text-zinc-400 dark:text-zinc-500 font-normal">/ 200</span>
+                {Math.max(langStats.learnedToday || 0, stats?.cardsDone || 0)} <span className="text-zinc-400 dark:text-zinc-500 font-normal">/ 200</span>
               </span>
             </button>
 
