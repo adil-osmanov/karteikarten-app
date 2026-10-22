@@ -2561,7 +2561,7 @@ function RapidFlashcardMode({
     }
   }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile]);
 
-  // 5. Устранение бага обратной крутки карточки с Apple Fluid Motion
+  // 5. Устранение бага обратной крутки карточки: карточка просто угасает и сразу сменяется без кульбита
   const handleRateCard = useCallback((remembered: boolean) => {
     if (locked || isTransitioning) return;
     setIsTransitioning(true);
@@ -2579,18 +2579,14 @@ function RapidFlashcardMode({
       } catch {}
     }
 
-    // Мягкое угасание (fade-out)
-    setCardAnimClass('opacity-0 scale-[0.985]');
+    // Мягкое угасание (fade-out) текущей обратной стороны без обратного переворота
+    setCardAnimClass('opacity-0 scale-[0.97] transition-all duration-140 ease-out');
 
-    // По таймауту 160ms сбрасываем флип без обратного кульбита
     setTimeout(() => {
-      setIsFlipped(false);
-      onAnswer(remembered, true);
-      requestAnimationFrame(() => {
-        setCardAnimClass('opacity-100 scale-100');
-        setIsTransitioning(false);
-      });
-    }, 160);
+      // НЕ вызываем setIsFlipped(false), чтобы карточка не крутилась обратно на глазах!
+      // Сразу передаем ответ родителю (wasFlipped: false, чтобы переключение произошло сразу)
+      onAnswer(remembered, false);
+    }, 140);
   }, [locked, isTransitioning, localMastery, onAnswer, onHintPenalty]);
 
   const toggleFlip = useCallback(() => {
@@ -2644,10 +2640,9 @@ function RapidFlashcardMode({
   const handleProceedNext = useCallback(() => {
     if (!isAnswered || isTransitioning) return;
     setIsTransitioning(true);
-    setCardAnimClass('opacity-0 scale-[0.985]');
+    setCardAnimClass('opacity-0 scale-[0.97] transition-all duration-140 ease-out');
 
     setTimeout(() => {
-      setIsFlipped(false);
       setIsAnswered(false);
       setIsSurrendered(false);
       setTypedValue('');
@@ -2658,12 +2653,7 @@ function RapidFlashcardMode({
       } else {
         onAnswer(true, false, false);
       }
-
-      requestAnimationFrame(() => {
-        setCardAnimClass('opacity-100 scale-100');
-        setIsTransitioning(false);
-      });
-    }, 160);
+    }, 140);
   }, [isAnswered, isTransitioning, isSurrendered, onAnswer]);
 
   const handleInputChange = (rawVal: string) => {
@@ -2940,7 +2930,7 @@ function RapidFlashcardMode({
               {currentCard?.translation || currentCard?.hint}
             </h2>
 
-            <div className="w-full max-w-md">
+            <div className="w-full max-w-lg">
               <input
                 ref={inputRef}
                 type="text"
@@ -2955,7 +2945,13 @@ function RapidFlashcardMode({
                 spellCheck={false}
                 placeholder="" /* ПЛЕЙСХОЛДЕР СТРОГО ПУСТОЙ */
                 style={{ caretColor: 'transparent' }}
-                className={`w-full text-center font-medium py-3.5 px-6 rounded-2xl outline-none transition-colors border caret-transparent ${
+                className={`w-full text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border caret-transparent ${
+                  typedValue.length > 22
+                    ? 'text-lg sm:text-xl'
+                    : typedValue.length > 14
+                    ? 'text-xl sm:text-2xl'
+                    : 'text-2xl sm:text-[28px]'
+                } ${
                   isMobile ? 'pointer-events-none select-none ' : ''
                 }${
                   isAnswered
@@ -3199,8 +3195,8 @@ function RapidSession({
     setWordProgress(prev => ({ ...prev, [id]: Math.min(4, newScore) }));
     setLocked(true);
 
-    // 3) After a short beat so the filled dot is visible: learned -> remove, otherwise -> end of queue
-    const advanceDelay = wasFlipped ? 380 : 60;
+    // 3) Моментальный переход к следующей карточке (карточка уже плавно угасла в компоненте)
+    const advanceDelay = wasFlipped ? 120 : 20;
     timerRef.current = setTimeout(() => {
       if (learned) {
         setMastered(m => m + 1);
@@ -3292,7 +3288,7 @@ function RapidSession({
 
       <div className={cn(
         "w-full max-w-[760px] mx-auto px-4 flex flex-col items-center select-none relative",
-        (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[290px] md:pb-6" : ""
+        (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[320px] md:pb-6" : ""
       )}>
         <RapidFlashcardMode
           key={`${current.card.id}-${turn}`}
@@ -3344,13 +3340,13 @@ function RapidStudyCard({
 
   const progress = card.isArchived ? 4 : Math.max(0, Math.min(3, card.masteryLevel || 0));
 
-  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = true, isSurrendered: boolean = false) => {
+  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = false, isSurrendered: boolean = false) => {
     if (locked) return;
     setLocked(true);
     if (!isSurrendered) {
       onAnswer(correct, false);
     }
-    const delay = wasFlipped ? 380 : 60;
+    const delay = wasFlipped ? 120 : 20;
     timerRef.current = setTimeout(() => {
       onNext();
       setLocked(false);
@@ -3777,7 +3773,7 @@ function StudyInterface({
 
       <div className={cn(
         "w-full max-w-[760px] mx-auto px-4 flex flex-col items-center select-none relative",
-        isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[290px] md:pb-6" : ""
+        isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[320px] md:pb-6" : ""
       )}>
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
