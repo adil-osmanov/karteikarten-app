@@ -885,10 +885,10 @@ interface DeckState {
   updateDeck: (deckId: string, updates: Partial<Deck>, replaceCards?: Flashcard[]) => Promise<void>;
   deleteDeck: (deckId: string) => void;
   renameDeck: (deckId: string, newName: string) => void;
-  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
-  setCardProgress: (deckId: string, cardId: string, score: number) => void;
+  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string) => void;
+  setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => void;
   dailyProgress: Record<string, number>;
-  incrementDailyProgress: () => void;
+  incrementDailyProgress: (targetLang?: string) => void;
   appLanguage: 'DE' | 'EN' | 'RU';
   setAppLanguage: (lang: 'DE' | 'EN' | 'RU') => void;
   books: BookMeta[];
@@ -1108,10 +1108,10 @@ const useStore = create<DeckState>()((set, get) => ({
       set({ books: previousBooks });
     }
   },
-  incrementDailyProgress: () => {
+  incrementDailyProgress: (targetLang?: string) => {
     if (typeof window !== 'undefined') {
       const { appLanguage } = get();
-      const cleanLang = (appLanguage || 'de').toLowerCase();
+      const cleanLang = (targetLang || appLanguage || 'de').toLowerCase();
       const todayStr = getLocalTodayStr();
       const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
 
@@ -1121,7 +1121,7 @@ const useStore = create<DeckState>()((set, get) => ({
 
       updateLanguageDailyStats(cleanLang, 1, true);
 
-      const key = `daily_activity_${appLanguage}`;
+      const key = `daily_activity_${cleanLang.toUpperCase()}`;
       let progress: Record<string, any> = {};
       try {
         const stored = localStorage.getItem(key);
@@ -1139,9 +1139,12 @@ const useStore = create<DeckState>()((set, get) => ({
       localStorage.removeItem('daily_learned_count');
 
       supabase.from('user_stats').upsert({
-        language: appLanguage,
+        language: cleanLang.toUpperCase(),
         daily_activity: progress
       }, { onConflict: 'language' }).then(() => {});
+
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang } }));
+      window.dispatchEvent(new Event('storage-update'));
     }
   },
   
@@ -1360,10 +1363,21 @@ const useStore = create<DeckState>()((set, get) => ({
     }
   },
 
-  answerCard: async (deckId, cardId, isCorrect, isHilfe) => {
-    // Update daily progress
-    if (isCorrect) {
-      get().incrementDailyProgress();
+  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string) => {
+    const deck = get().decks.find((d) => d.id === deckId);
+    let lang = targetLanguage;
+    if (!lang && deck) {
+      if (deck.language) lang = deck.language;
+      else if (deck.bookId) {
+        const book = get().books.find(b => b.id === deck.bookId);
+        if (book?.language) lang = book.language;
+      }
+    }
+    const cleanLang = normalizeLanguage(lang || get().appLanguage || 'DE');
+
+    // Update daily progress only if not already handled by the caller
+    if (isCorrect && !isHilfe && !skipDailyIncrement) {
+      get().incrementDailyProgress(cleanLang);
     }
     const previousDecks = get().decks;
     let updatedCard: Flashcard | null = null;
@@ -1419,10 +1433,10 @@ const useStore = create<DeckState>()((set, get) => ({
   },
 
   // Rapid flashcards: persist the 0-4 round score of a word. 4 => archived (learned).
-  setCardProgress: async (deckId, cardId, score) => {
+  setCardProgress: async (deckId, cardId, score, targetLang?: string) => {
     const previousDecks = get().decks;
     let updatedCard: Flashcard | null = null;
-    if (score >= 4) get().incrementDailyProgress();
+    if (score >= 4) get().incrementDailyProgress(targetLang);
 
     set((state) => {
       const di = state.decks.findIndex((d) => d.id === deckId);
@@ -2326,6 +2340,8 @@ function RapidFlashcardMode({
 
   const handleSuccessAnswer = useCallback(() => {
     if (isAnswered) return;
+    const nextMastery = Math.min(4, (localMastery || 0) + 1);
+    setLocalMastery(nextMastery);
     setIsSuccessFeedback(true);
     setIsAnswered(true);
     setIsErrorMismatch(false);
@@ -2334,7 +2350,7 @@ function RapidFlashcardMode({
     speak();
     triggerHaptic('success');
     // No automatic timer! User reads the word and explicitly presses Weiter or Enter
-  }, [isAnswered, speak]);
+  }, [isAnswered, localMastery, speak]);
 
   const triggerErrorShake = useCallback(() => {
     setIsErrorMismatch(true);
@@ -3174,6 +3190,24 @@ function StudyInterface({
 
   const { stats, recordCardResult } = useDayStats({ isStudying: true, language: studyLanguage });
 
+  const [langStats, setLangStats] = useState<LanguageDailyProgress>(() => getLanguageDailyStats(studyLanguage));
+
+  useEffect(() => {
+    setLangStats(getLanguageDailyStats(studyLanguage));
+  }, [studyLanguage]);
+
+  useEffect(() => {
+    const handleStatsUpdate = () => {
+      setLangStats(getLanguageDailyStats(studyLanguage));
+    };
+    window.addEventListener('stats-update', handleStatsUpdate);
+    window.addEventListener('storage-update', handleStatsUpdate);
+    return () => {
+      window.removeEventListener('stats-update', handleStatsUpdate);
+      window.removeEventListener('storage-update', handleStatsUpdate);
+    };
+  }, [studyLanguage]);
+
   const isGrammarDeck = useMemo(() => {
     return Boolean(
       currentDeck?.category?.toLowerCase().includes('gramm') ||
@@ -3187,6 +3221,62 @@ function StudyInterface({
     if (!currentCardSnapshot) return 'standard_cloze';
     return getCardTrainingMode(currentCardSnapshot, currentDeckId, decks, books, trainingMode);
   }, [currentCardSnapshot, currentDeckId, decks, books, trainingMode]);
+
+  const handleSessionAnswer = useCallback((correct: boolean, isHilfe: boolean) => {
+    if (!currentCardSnapshot || !currentDeckId) return;
+    const isActualCorrect = correct && !isHilfe;
+
+    // 1. Сразу вычисляй новый уровень раунда
+    const currentMastery = liveCard?.masteryLevel ?? currentCardSnapshot?.masteryLevel ?? 0;
+    const nextMastery = isActualCorrect
+      ? Math.min(4, currentMastery + 1)
+      : Math.max(0, currentMastery - 1);
+
+    // 2. МГНОВЕННО обновляй стейт текущей карточки в массиве сессии
+    setActiveCards(prev => prev.map((item, idx) => {
+      if (idx === currentIndex || item.card.id === currentCardSnapshot.id) {
+        return {
+          ...item,
+          card: {
+            ...item.card,
+            masteryLevel: nextMastery
+          }
+        };
+      }
+      return item;
+    }));
+
+    // 3. МГНОВЕННЫЙ ИНКРЕМЕНТ ДНЕВНОГО СЧЕТЧИКА (+1) ПРИ ПРАВИЛЬНОМ ОТВЕТЕ
+    if (isActualCorrect) {
+      setMasteredInSession(prev => prev + 1);
+      updateLanguageDailyStats(studyLanguage, 1, true, currentCardSnapshot.id);
+      setLangStats(prev => ({
+        ...prev,
+        learnedToday: (prev?.learnedToday || 0) + 1,
+        totalCount: (prev?.totalCount || 0) + 1,
+        correctCount: (prev?.correctCount || 0) + 1
+      }));
+    } else {
+      updateLanguageDailyStats(studyLanguage, 0, false, currentCardSnapshot.id);
+      setLangStats(prev => ({
+        ...prev,
+        totalCount: (prev?.totalCount || 0) + 1,
+        mistakesCount: (prev?.mistakesCount || 0) + 1,
+        mistakes: prev?.mistakes?.includes(currentCardSnapshot.id) ? prev.mistakes : [...(prev?.mistakes || []), currentCardSnapshot.id]
+      }));
+      if (!isDrillMode) {
+        setActiveCards(prev => [...prev, { deckId: currentDeckId, card: { ...currentCardSnapshot, masteryLevel: nextMastery } }]);
+      }
+    }
+
+    // 4. Запись в статистику сессии и базу Supabase через answerCard
+    recordCardResult(isActualCorrect, { deckId: currentDeckId, card: { ...liveCard, masteryLevel: nextMastery }, ...liveCard, masteryLevel: nextMastery }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
+    answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage);
+
+    // 5. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: studyLanguage.toLowerCase() } }));
+    window.dispatchEvent(new Event('storage-update'));
+  }, [currentCardSnapshot, currentDeckId, liveCard, currentIndex, studyLanguage, isDrillMode, isReviewingMistakesSession, recordCardResult, answerCard]);
   
   const handleNext = useCallback(() => {
     if (currentIndex < activeCards.length - 1) {
@@ -3350,16 +3440,7 @@ function StudyInterface({
               card={liveCard}
               deckTitle={currentDeck?.name}
               onAnswer={(id, correct, isHilfe) => {
-                const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
-                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (isActualCorrect) {
-                  setMasteredInSession(prev => prev + 1);
-                } else {
-                  if (!isDrillMode) {
-                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
-                  }
-                }
+                handleSessionAnswer(correct, isHilfe);
               }}
               onNext={handleNext}
             />
@@ -3369,16 +3450,7 @@ function StudyInterface({
               card={liveCard}
               deckTitle={currentDeck?.name}
               onAnswer={(correct, isHilfe) => {
-                const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
-                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (isActualCorrect) {
-                  setMasteredInSession(prev => prev + 1);
-                } else {
-                  if (!isDrillMode) {
-                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
-                  }
-                }
+                handleSessionAnswer(correct, isHilfe);
               }}
               onNext={handleNext}
             />
@@ -3390,16 +3462,7 @@ function StudyInterface({
               cardIndex={currentIndex + 1}
               totalCards={activeCards.length}
               onAnswer={(correct, isHilfe) => {
-                const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
-                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (isActualCorrect) {
-                  setMasteredInSession(prev => prev + 1);
-                } else {
-                  if (!isDrillMode) {
-                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
-                  }
-                }
+                handleSessionAnswer(correct, isHilfe);
               }}
               onNext={handleNext}
             />
@@ -3411,16 +3474,7 @@ function StudyInterface({
               isReview={Boolean(reviewCards || isInitialArchivedDeck || liveCard.isArchived)}
               reverse={Boolean(reviewCards) ? true : undefined}
               onAnswer={(correct, isHilfe) => {
-                const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
-                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (isActualCorrect) {
-                  setMasteredInSession(prev => prev + 1);
-                } else {
-                  if (!isDrillMode) {
-                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: liveCard }]);
-                  }
-                }
+                handleSessionAnswer(correct, isHilfe);
               }}
               onNext={handleNext}
             />
@@ -3432,16 +3486,7 @@ function StudyInterface({
               isGrammar={isGrammarDeck}
               forceInputMode={!!reviewCards && !isDrillMode}
               onAnswer={(correct, isHilfe) => {
-                const isActualCorrect = correct && !isHilfe;
-                recordCardResult(isActualCorrect, { deckId: currentDeckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
-                answerCard(currentDeckId, currentCardSnapshot.id, correct, isHilfe);
-                if (isActualCorrect) {
-                  setMasteredInSession(prev => prev + 1);
-                } else {
-                  if (!isDrillMode) {
-                    setActiveCards(prev => [...prev, { deckId: currentDeckId, card: currentCardSnapshot }]);
-                  }
-                }
+                handleSessionAnswer(correct, isHilfe);
               }}
               onNext={handleNext}
             />
@@ -3453,7 +3498,7 @@ function StudyInterface({
         isOpen={isStatsOpen}
         onClose={() => setIsStatsOpen(false)}
         stats={stats}
-        langStats={getLanguageDailyStats(studyLanguage)}
+        langStats={langStats}
         language={studyLanguage}
         onReviewMistakes={handleReviewMistakes}
       />
@@ -3812,6 +3857,13 @@ function StudyCard({
     if (phase !== "Question") return;
     const optLower = option.trim().toLowerCase();
     const correct = optLower === card.targetWord.trim().toLowerCase() || optLower === clozeWord.trim().toLowerCase();
+    
+    // 1. Мгновенно вычисляем и зажигаем синюю точку в шапке
+    const nextMastery = correct 
+      ? Math.min(4, (localMastery || 0) + 1) 
+      : Math.max(0, (localMastery || 0) - 1);
+    setLocalMastery(nextMastery);
+
     if (!correct) {
       setHasErrored(true);
       hasErroredRef.current = true;
@@ -3822,7 +3874,8 @@ function StudyCard({
   };
 
   const handleHilfe = () => {
-    setLocalMastery(prev => Math.max(0, prev - 1));
+    const nextMastery = Math.max(0, (localMastery || 0) - 1);
+    setLocalMastery(nextMastery);
     setHasErrored(true);
     hasErroredRef.current = true;
     onAnswer(false, true); // isHilfe = true
@@ -3844,6 +3897,10 @@ function StudyCard({
     }
 
     if (isValid && isComplete) {
+      // 1. Мгновенно вычисляем и зажигаем синюю точку в шапке
+      const nextMastery = Math.min(4, (localMastery || 0) + 1);
+      setLocalMastery(nextMastery);
+
       playFeedbackSound(true);
       triggerHaptic('success');
       onAnswer(true, false);
@@ -6723,10 +6780,13 @@ function PrepStudyCard({
   const handleKasusSelect = useCallback((selected: string) => {
     if (activeSlot !== 2 || isSuccess || isHilfe) return;
     if (selected === kasusRaw) {
+       const isCorrect = !isHilfe && !hasErroredRef.current;
+       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
+       setLocalMastery(nextMastery);
        setIsSuccess(true);
        playFeedbackSound(true);
        playAudio();
-       onAnswer(card.id, !isHilfe && !hasErroredRef.current, isHilfe);
+       onAnswer(card.id, isCorrect, isHilfe);
     } else {
        hasErroredRef.current = true;
        setHasErrored(true);
@@ -6734,7 +6794,7 @@ function PrepStudyCard({
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
     }
-  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio]);
+  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio, localMastery]);
 
   const onHilfe = useCallback(() => {
     setLocalMastery(prev => Math.max(0, prev - 1));
@@ -6991,11 +7051,14 @@ function VerbStudyCard({
     if (idx < 2) {
       setActiveInput(idx + 1);
     } else {
+      const isCorrect = !hasErroredRef.current && !isHilfe;
+      const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
+      setLocalMastery(nextMastery);
       setIsSuccess(true);
       playAudio();
-      onAnswer(!hasErroredRef.current && !isHilfe, false);
+      onAnswer(isCorrect, false);
     }
-  }, [isHilfe, playAudio, onAnswer]);
+  }, [isHilfe, playAudio, onAnswer, localMastery]);
 
   const handleSlotError = useCallback(() => {
     // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
@@ -7378,6 +7441,8 @@ export function RedemittelStudyCard({
     // Automatic check when all chunks are placed
     if (nextPlaced.length === data.chunks.length) {
       const isCorrect = nextPlaced.every((c, i) => c.originalIndex === i);
+      const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
+      setLocalMastery(nextMastery);
       if (isCorrect) {
         setStatus('success');
         playFeedbackSound(true);
@@ -7396,7 +7461,7 @@ export function RedemittelStudyCard({
         setStatus('idle');
       }
     }
-  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer]);
+  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery]);
 
   const handleRemoveChunk = useCallback((chunk: RedemittelChunk) => {
     if (status === 'success' || status === 'surrender') return;
