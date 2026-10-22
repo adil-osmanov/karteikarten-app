@@ -2422,10 +2422,12 @@ function RapidFlashcardMode({
   const [typedValue, setTypedValue] = useState("");
   const [isErrorMismatch, setIsErrorMismatch] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [cardAnimClass, setCardAnimClass] = useState('opacity-100 scale-100');
   const inputRef = useRef<HTMLInputElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Сброс стейта при смене карточки (гарантия защиты от крашей и перевернутого состояния)
+  // 7. Сброс стейта строго по currentCard?.id (устранение мигания инпута при переходе на раунд 3)
   useEffect(() => {
     const mastery = currentCard?.isArchived ? 4 : (currentCard?.masteryLevel ?? progress ?? 0);
     setLocalMastery(mastery);
@@ -2436,18 +2438,10 @@ function RapidFlashcardMode({
     setTypedValue("");
     setIsErrorMismatch(false);
     setIsShaking(false);
+    setCardAnimClass('opacity-100 scale-100');
+    setIsTransitioning(false);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-  }, [currentCard?.id, currentCard?.masteryLevel, currentCard?.isArchived, progress]);
-
-  // Автофокус инпута в режиме ввода на ПК
-  useEffect(() => {
-    if (!isRound1or2 && !locked && !isAnswered && !isMobile) {
-      const timer = setTimeout(() => {
-        inputRef.current?.focus();
-      }, 80);
-      return () => clearTimeout(timer);
-    }
-  }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile]);
+  }, [currentCard?.id]);
 
   // Извлечение артикля, основного слова и множественного числа
   const { article, wordOnly, plural } = useMemo(() => {
@@ -2507,10 +2501,10 @@ function RapidFlashcardMode({
   const getArticleColor = (art: string | null) => {
     if (!art) return '';
     const lower = art.toLowerCase();
-    if (lower === 'der') return 'text-sky-400 font-semibold mr-2';
-    if (lower === 'die') return 'text-rose-400 font-semibold mr-2';
-    if (lower === 'das') return 'text-emerald-400 font-semibold mr-2';
-    return 'text-rose-400 font-semibold mr-2';
+    if (lower === 'der') return 'text-sky-500 dark:text-sky-400 font-semibold mr-2';
+    if (lower === 'die') return 'text-rose-500 dark:text-rose-400 font-semibold mr-2';
+    if (lower === 'das') return 'text-emerald-500 dark:text-emerald-400 font-semibold mr-2';
+    return 'text-rose-500 dark:text-rose-400 font-semibold mr-2';
   };
 
   const parsedNoun = useMemo(() => {
@@ -2552,15 +2546,33 @@ function RapidFlashcardMode({
     });
   }, [speechText]);
 
+  // 1. Автоматическая озвучка лицевой стороны при появлении карточки
+  useEffect(() => {
+    if (currentCard?.targetWord && !isFlipped && !isAnswered) {
+      playSafeAudio(() => playCardAudio(currentCard.targetWord));
+    }
+  }, [currentCard?.id, isFlipped, isAnswered, playCardAudio]);
+
+  // Автофокус инпута в режиме ввода на ПК
+  useEffect(() => {
+    if (!isRound1or2 && !locked && !isAnswered && !isMobile) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 80);
+      return () => clearTimeout(timer);
+    }
+  }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile]);
+
+  // 5. Устранение бага обратной крутки карточки с Apple Fluid Motion
   const handleRateCard = useCallback((remembered: boolean) => {
-    if (locked) return;
-    setIsFlipped(false);
+    if (locked || isTransitioning) return;
+    setIsTransitioning(true);
+
     if (remembered) {
       playSafeAudio(() => playSuccessSound());
       const nextMastery = Math.min(4, (localMastery || 0) + 1);
       setLocalMastery(nextMastery);
       incrementCloudDailyCounter('de');
-      onAnswer(true, true);
     } else {
       playSafeAudio(() => playErrorSound());
       const nextMastery = Math.max(0, (localMastery || 0) - 1);
@@ -2568,9 +2580,21 @@ function RapidFlashcardMode({
       try {
         onHintPenalty?.(nextMastery);
       } catch {}
-      onAnswer(false, true);
     }
-  }, [locked, localMastery, onAnswer, onHintPenalty]);
+
+    // Мягкое угасание (fade-out)
+    setCardAnimClass('opacity-0 scale-[0.985]');
+
+    // По таймауту 160ms сбрасываем флип без обратного кульбита
+    setTimeout(() => {
+      setIsFlipped(false);
+      onAnswer(remembered, true);
+      requestAnimationFrame(() => {
+        setCardAnimClass('opacity-100 scale-100');
+        setIsTransitioning(false);
+      });
+    }, 160);
+  }, [locked, isTransitioning, localMastery, onAnswer, onHintPenalty]);
 
   const toggleFlip = useCallback(() => {
     setIsFlipped(prev => {
@@ -2628,19 +2652,29 @@ function RapidFlashcardMode({
   }, [locked, isAnswered, localMastery, parsedNoun, currentCard?.targetWord, playCardAudio, onHintPenalty]);
 
   const handleProceedNext = useCallback(() => {
-    if (!isAnswered) return;
-    setIsFlipped(false);
-    setIsAnswered(false);
-    setIsSurrendered(false);
-    setTypedValue('');
-    setIsErrorMismatch(false);
+    if (!isAnswered || isTransitioning) return;
+    setIsTransitioning(true);
+    setCardAnimClass('opacity-0 scale-[0.985]');
 
-    if (isSurrendered) {
-      onAnswer(false, false, true);
-    } else {
-      onAnswer(true, false, false);
-    }
-  }, [isAnswered, isSurrendered, onAnswer]);
+    setTimeout(() => {
+      setIsFlipped(false);
+      setIsAnswered(false);
+      setIsSurrendered(false);
+      setTypedValue('');
+      setIsErrorMismatch(false);
+
+      if (isSurrendered) {
+        onAnswer(false, false, true);
+      } else {
+        onAnswer(true, false, false);
+      }
+
+      requestAnimationFrame(() => {
+        setCardAnimClass('opacity-100 scale-100');
+        setIsTransitioning(false);
+      });
+    }, 160);
+  }, [isAnswered, isTransitioning, isSurrendered, onAnswer]);
 
   const handleInputChange = (rawVal: string) => {
     if (locked || isAnswered) return;
@@ -2684,7 +2718,7 @@ function RapidFlashcardMode({
     }
   }, [locked, isAnswered, typedValue, parsedNoun, handleSuccessAnswer, triggerErrorShake]);
 
-  // Хоткеи: Space для бесконечного флипа туда-обратно, стрелки для оценки, Enter/Space для Weiter
+  // 3. Двухшаговое управление стрелками, Space для бесконечного флипа туда-обратно, Enter/Space для Weiter
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isAnswered) {
@@ -2698,13 +2732,27 @@ function RapidFlashcardMode({
       if (isRound1or2) {
         if (e.code === 'Space' || e.key === ' ') {
           e.preventDefault();
-          setIsFlipped(prev => !prev);
+          toggleFlip();
         } else if (e.key === 'ArrowLeft') {
           e.preventDefault();
-          handleRateCard(false); // ✕
+          if (!isFlipped) {
+            // Шаг 1: На лицевой стороне стрелка раскрывает ответ
+            setIsFlipped(true);
+            playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+          } else {
+            // Шаг 2: На обратной стороне стрелка влево оценивает "Не знаю"
+            handleRateCard(false);
+          }
         } else if (e.key === 'ArrowRight') {
           e.preventDefault();
-          handleRateCard(true); // ✓
+          if (!isFlipped) {
+            // Шаг 1: На лицевой стороне стрелка раскрывает ответ
+            setIsFlipped(true);
+            playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+          } else {
+            // Шаг 2: На обратной стороне стрелка вправо оценивает "Знаю"
+            handleRateCard(true);
+          }
         }
       } else {
         if (e.key === 'Enter') {
@@ -2722,24 +2770,24 @@ function RapidFlashcardMode({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, playCardAudio]);
+  }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, toggleFlip, playCardAudio]);
 
   return (
-    <div className="w-full flex-1 flex flex-col items-center justify-center px-4 py-6 select-none">
+    <div className={`w-full flex-1 flex flex-col items-center justify-center px-4 py-4 my-auto select-none transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
       {isRound1or2 ? (
         /* =======================================================
-           РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE
+           РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
            ======================================================= */
-        <div className="w-full max-w-[680px] flex flex-col items-center gap-8 perspective-1000">
+        <div className="w-full max-w-[760px] flex flex-col items-center gap-6 perspective-1000">
           {/* 3D Оболочка */}
           <div
             onClick={toggleFlip}
-            className={`w-full min-h-[420px] rounded-[32px] bg-zinc-900/95 border border-white/10 p-8 sm:p-10 shadow-2xl relative cursor-pointer transform-style-3d transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] ${
-              isFlipped ? 'rotate-y-180' : ''
-            }`}
+            className={`w-full min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 relative cursor-pointer transform-style-3d ${
+              isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
+            } ${isFlipped ? 'rotate-y-180' : ''}`}
           >
             {/* ФРОНТАЛЬНАЯ СТОРОНА (СЛОВО НА НЕМЕЦКОМ) */}
-            <div className="absolute inset-0 p-8 sm:p-10 flex flex-col justify-between backface-hidden">
+            <div className="absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden bg-white dark:bg-zinc-900/95 rounded-[32px]">
               {/* Шапка */}
               <div className="flex items-center justify-between w-full">
                 <button
@@ -2748,7 +2796,7 @@ function RapidFlashcardMode({
                     e.stopPropagation();
                     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
                   }}
-                  className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer"
+                  className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition active:scale-95 cursor-pointer"
                   title="Aussprache anhören (R)"
                 >
                   <Volume2 className="w-4 h-4"/>
@@ -2757,10 +2805,10 @@ function RapidFlashcardMode({
                   {[1, 2, 3, 4].map(step => (
                     <span
                       key={step}
-                      className={`w-2.5 h-2.5 rounded-full ${
+                      className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
                         step <= (localMastery || 0)
-                          ? 'bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.4)]'
-                          : 'bg-zinc-800 border border-white/5'
+                          ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                          : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
                       }`}
                     />
                   ))}
@@ -2768,13 +2816,13 @@ function RapidFlashcardMode({
               </div>
 
               {/* Центр: Слово + Множественное число */}
-              <div className="my-auto text-center space-y-3">
-                <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-white">
+              <div className="my-auto text-center space-y-2 select-text">
+                <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
                   {article && <span className={getArticleColor(article)}>{article}</span>}
                   {wordOnly || currentCard?.targetWord}
                 </h2>
                 {plural && (
-                  <p className="text-sm font-medium text-zinc-400 tracking-wide">
+                  <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal mt-1">
                     {plural}
                   </p>
                 )}
@@ -2785,7 +2833,7 @@ function RapidFlashcardMode({
             </div>
 
             {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР) */}
-            <div className="absolute inset-0 p-8 sm:p-10 flex flex-col justify-between backface-hidden rotate-y-180 bg-zinc-900/98 rounded-[32px]">
+            <div className="absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden rotate-y-180 bg-white dark:bg-zinc-900/98 rounded-[32px]">
               {/* Шапка */}
               <div className="flex items-center justify-between w-full">
                 <button
@@ -2794,7 +2842,7 @@ function RapidFlashcardMode({
                     e.stopPropagation();
                     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
                   }}
-                  className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition cursor-pointer"
+                  className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition cursor-pointer"
                   title="Aussprache anhören (R)"
                 >
                   <Volume2 className="w-4 h-4"/>
@@ -2803,34 +2851,37 @@ function RapidFlashcardMode({
                   {[1, 2, 3, 4].map(step => (
                     <span
                       key={step}
-                      className={`w-2.5 h-2.5 rounded-full ${
+                      className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
                         step <= (localMastery || 0)
-                          ? 'bg-sky-500'
-                          : 'bg-zinc-800'
+                          ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                          : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
                       }`}
                     />
                   ))}
                 </div>
               </div>
 
-              {/* Центр: Слово, перевод, пример */}
-              <div className="my-auto text-center space-y-4">
+              {/* Центр: Слово, перевод, чистый пример без серой плашки */}
+              <div className="my-auto text-center space-y-6 select-text w-full max-w-xl mx-auto">
                 <div className="space-y-1">
-                  <h2 className="text-2xl sm:text-3xl font-bold text-white">
+                  <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
                     {article && <span className={getArticleColor(article)}>{article}</span>}
                     {wordOnly || currentCard?.targetWord}
                   </h2>
                   {plural && (
-                    <p className="text-xs text-zinc-500">{plural}</p>
+                    <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal mt-1">
+                      {plural}
+                    </p>
                   )}
                 </div>
 
-                <p className="text-lg sm:text-xl font-medium text-zinc-200">
+                <p className="text-xl sm:text-2xl font-medium text-zinc-800 dark:text-zinc-100">
                   {currentCard?.translation || currentCard?.hint}
                 </p>
 
+                {/* 6. Чистая цитата примера (без серой плашки, строго как на скриншоте 3) */}
                 {currentCard?.sentence && currentCard?.sentence !== '-' && (
-                  <div className="mt-4 p-3.5 rounded-2xl bg-white/[0.03] border-l-2 border-zinc-600 text-left text-sm text-zinc-400 italic max-w-lg mx-auto leading-relaxed">
+                  <div className="mt-8 border-l border-zinc-600/70 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-500 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
                     {currentCard.sentence}
                   </div>
                 )}
@@ -2840,21 +2891,21 @@ function RapidFlashcardMode({
             </div>
           </div>
 
-          {/* ПАРЯЩИЕ КНОПКИ УПРАВЛЕНИЯ [ ✕ ] И [ ✓ ] */}
-          <div className="flex items-center justify-center gap-6">
+          {/* 2. ПАРЯЩИЕ КНОПКИ УПРАВЛЕНИЯ [ ✕ ] И [ ✓ ] - ТОЛЬКО ДЛЯ ТАЧ-УСТРОЙСТВ */}
+          <div className="hidden [@media(pointer:coarse)]:flex items-center justify-center gap-6 mt-6">
             <button
               type="button"
-              onClick={() => handleRateCard(false)}
-              className="w-14 h-14 rounded-full bg-zinc-900 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10 transition-all active:scale-90 shadow-xl cursor-pointer"
-              title="Не помню (ArrowLeft)"
+              onClick={(e) => { e.stopPropagation(); handleRateCard(false); }}
+              className="w-14 h-14 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-rose-500 hover:border-rose-500/40 hover:bg-rose-500/10 transition-all active:scale-90 shadow-lg shadow-zinc-950/5 dark:shadow-xl cursor-pointer"
+              title="Не знаю (ArrowLeft)"
             >
               <X className="w-6 h-6 stroke-[2.5]"/>
             </button>
             <button
               type="button"
-              onClick={() => handleRateCard(true)}
-              className="w-14 h-14 rounded-full bg-zinc-900 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-emerald-400 hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-all active:scale-90 shadow-xl cursor-pointer"
-              title="Помню (ArrowRight)"
+              onClick={(e) => { e.stopPropagation(); handleRateCard(true); }}
+              className="w-14 h-14 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-all active:scale-90 shadow-lg shadow-zinc-950/5 dark:shadow-xl cursor-pointer"
+              title="Знаю (ArrowRight)"
             >
               <Check className="w-6 h-6 stroke-[2.5]"/>
             </button>
@@ -2864,13 +2915,13 @@ function RapidFlashcardMode({
         /* =======================================================
            РАУНДЫ 3-4: ЧИСТЫЙ АКТИВНЫЙ ВВОД (ACTIVE RECALL)
            ======================================================= */
-        <div className="w-full max-w-[680px] min-h-[420px] rounded-[32px] bg-zinc-900/95 border border-white/10 p-8 sm:p-10 shadow-2xl flex flex-col justify-between">
+        <div className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 flex flex-col justify-between mx-auto relative">
           {/* Шапка */}
           <div className="flex items-center justify-between w-full shrink-0">
             <button
               type="button"
               onClick={() => playSafeAudio(() => playCardAudio(currentCard?.targetWord))}
-              className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition cursor-pointer"
+              className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition cursor-pointer"
               title="Aussprache anhören (R)"
             >
               <Volume2 className="w-4 h-4"/>
@@ -2880,10 +2931,10 @@ function RapidFlashcardMode({
                 {[1, 2, 3, 4].map(step => (
                   <span
                     key={step}
-                    className={`w-2.5 h-2.5 rounded-full ${
+                    className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
                       step <= (localMastery || 0)
-                        ? 'bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.4)]'
-                        : 'bg-zinc-800 border border-white/5'
+                        ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                        : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
                     }`}
                   />
                 ))}
@@ -2893,7 +2944,7 @@ function RapidFlashcardMode({
                 type="button"
                 onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
                 disabled={isAnswered || locked}
-                className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
+                className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
                 title="Сдаться (-1 раунд)"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
@@ -2903,10 +2954,10 @@ function RapidFlashcardMode({
 
           {/* Центр: ТОЛЬКО русский перевод и инпут (БЕЗ ПРИМЕРА И БЕЗ ПЛЕЙСХОЛДЕРА) */}
           <div 
-            className="my-auto w-full flex flex-col items-center text-center"
+            className="my-auto w-full flex flex-col items-center text-center select-text"
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
-            <h2 className="text-2xl sm:text-3xl font-bold text-white mb-8 max-w-lg">
+            <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white mb-8 max-w-lg">
               {currentCard?.translation || currentCard?.hint}
             </h2>
 
@@ -2926,11 +2977,11 @@ function RapidFlashcardMode({
                 }${
                   isAnswered
                     ? (!isSurrendered
-                        ? 'text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                        : 'text-white border-white/20 bg-white/[0.05]')
+                        ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
+                        : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
                     : isErrorMismatch
-                      ? 'text-rose-500 border-rose-500/50 bg-rose-500/10'
-                      : 'text-white border-white/10 bg-white/[0.04] focus:border-sky-400/60'
+                      ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
+                      : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus:border-sky-500/60 dark:focus:border-sky-400/60'
                 }${isShaking ? ' animate-shake' : ''}`}
               />
             </div>
@@ -3162,8 +3213,8 @@ function RapidSession({
   const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === current.card.id) || current.card;
 
   return (
-    <div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-[720px] mx-auto px-4 mb-4">
+    <div className="flex flex-col min-h-screen w-full items-center justify-center pt-8 pb-8 relative z-50">
+      <div className="w-full max-w-[760px] mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -3186,10 +3237,10 @@ function RapidSession({
       </div>
 
       <div className={cn(
-        "w-full max-w-[720px] mx-auto flex-1 flex flex-col items-center justify-center px-4 py-6 relative",
-        (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[290px] md:pb-12" : "pb-12"
+        "flex-1 w-full flex flex-col items-center justify-center my-auto px-4 py-4 min-h-[calc(100vh-140px)] relative",
+        (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[290px] md:pb-6" : ""
       )}>
-        <div className="w-full flex flex-col items-center">
+        <div className="w-full flex flex-col items-center justify-center my-auto">
           <RapidFlashcardMode
             key={`${current.card.id}-${turn}`}
             card={liveCard}
@@ -3643,8 +3694,8 @@ function StudyInterface({
 
   return (
       <>
-<div className="flex flex-col h-full items-center justify-center pt-8 relative z-50">
-      <div className="w-full max-w-[720px] mx-auto px-4 mb-4">
+<div className="flex flex-col min-h-screen w-full items-center justify-center pt-8 pb-8 relative z-50">
+      <div className="w-full max-w-[760px] mx-auto px-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
@@ -3674,8 +3725,8 @@ function StudyInterface({
       </div>
 
       <div className={cn(
-        "w-full max-w-[720px] mx-auto flex-1 flex flex-col items-center justify-center px-4 py-6 select-none",
-        isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[290px] md:pb-12" : "pb-12"
+        "flex-1 w-full flex flex-col items-center justify-center my-auto px-4 py-4 min-h-[calc(100vh-140px)] select-none",
+        isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[290px] md:pb-6" : ""
       )}>
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
@@ -4371,7 +4422,7 @@ function StudyCard({
     <>
       <div 
         key={card.id}
-        className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
+        className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -7227,7 +7278,7 @@ function PrepStudyCard({
     <>
     <div 
       key={card.id}
-      className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
+      className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -7477,7 +7528,7 @@ function VerbStudyCard({
   return (
     <div 
       key={card.id}
-      className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
+      className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -7958,14 +8009,14 @@ export function RedemittelStudyCard({
       <div
         key={card.id}
         className={cn(
-          "w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none",
+          "w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none",
           status === 'success'
             ? "border-emerald-500/40 dark:border-emerald-500/40"
             : status === 'surrender'
             ? "border-zinc-300 dark:border-zinc-600/70"
             : status === 'error'
             ? "border-rose-500/40 dark:border-rose-500/40"
-            : "border-black/[0.08] dark:border-white/10"
+            : "border-zinc-200/80 dark:border-white/10"
         )}
       >
         {/* 1. Верхняя панель карточки */}
