@@ -281,8 +281,13 @@ export async function syncDailyStatsToCloud(lang: string, count: number, current
   try {
     let userId = '00000000-0000-0000-0000-000000000000';
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user?.id) userId = user.id;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        userId = session.user.id;
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) userId = user.id;
+      }
     } catch {}
 
     await supabase.from('user_daily_stats').upsert(
@@ -2444,46 +2449,69 @@ function RapidFlashcardMode({
     }
   }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile]);
 
-  const formatForms = (f: string | undefined | null) => {
-    if (!f || f === '-') return null;
-    return f.replace(/,\s*/g, ' · ');
-  };
+  // Извлечение артикля, основного слова и множественного числа
+  const { article, wordOnly, plural } = useMemo(() => {
+    let raw = (currentCard?.targetWord || '').replace(/\|/g, '').trim();
+    let art: string | null = (currentCard as any)?.article || null;
+    let noun = (currentCard as any)?.wordOnly || raw;
+    let pl: string | null = (currentCard as any)?.plural || null;
 
-  const { displayGerman, displayForms } = useMemo(() => {
-    let rawWord = (currentCard?.targetWord || '').replace(/\|/g, '').trim();
-    let forms = currentCard?.forms || null;
-
-    // 1. Если слово уже содержит артикль (например "die Abiturprüfung")
-    const directMatch = rawWord.match(/^(der|die|das)\s+(.+)$/i);
-    if (directMatch) {
-      return { displayGerman: rawWord, displayForms: formatForms(forms) };
-    }
-
-    // 2. Извлекаем артикль и форму мн. числа из hint / forms
-    const hintText = (currentCard?.hint || currentCard?.forms || '').trim();
-    const hintMatch = hintText.match(/^(der|die|das)\b\s*([a-zA-ZäöüÄÖÜß\s-]+?)(?:,\s*([-a-zA-ZäöüÄÖÜß]+))?(?:\s*—|\s*-\s*|\s*\(|$)/i);
-
-    if (hintMatch) {
-      const art = hintMatch[1];
-      const nounInHint = hintMatch[2].trim();
-      const pluralInHint = hintMatch[3]?.trim();
-
-      if (/^[A-ZÄÖÜ]/.test(rawWord) || (nounInHint && nounInHint.toLowerCase() === rawWord.toLowerCase())) {
-        const fullNoun = `${art} ${rawWord}`;
-        if (!forms && pluralInHint) {
-          forms = pluralInHint.startsWith('-') ? pluralInHint : `-${pluralInHint}`;
+    if (!art) {
+      const directMatch = raw.match(/^(der|die|das)\s+(.+)$/i);
+      if (directMatch) {
+        art = directMatch[1];
+        noun = directMatch[2].trim();
+      } else {
+        const hintText = (currentCard?.hint || currentCard?.forms || '').trim();
+        const hintMatch = hintText.match(/^(der|die|das)\b\s*([a-zA-ZäöüÄÖÜß\s-]+?)(?:,\s*([-a-zA-ZäöüÄÖÜß]+))?(?:\s*—|\s*-\s*|\s*\(|$)/i);
+        if (hintMatch && (/^[A-ZÄÖÜ]/.test(raw) || hintMatch[2].trim().toLowerCase() === raw.toLowerCase())) {
+          art = hintMatch[1];
+        } else {
+          const simpleArt = hintText.match(/^(der|die|das)\b/i);
+          if (simpleArt && /^[A-ZÄÖÜ]/.test(raw)) {
+            art = simpleArt[1];
+          }
         }
-        return { displayGerman: fullNoun, displayForms: formatForms(forms) };
       }
     }
 
-    const simpleArt = hintText.match(/^(der|die|das)\b/i);
-    if (simpleArt && /^[A-ZÄÖÜ]/.test(rawWord)) {
-      return { displayGerman: `${simpleArt[1]} ${rawWord}`, displayForms: formatForms(forms) };
+    if (!pl) {
+      const forms = (currentCard?.forms || '').trim();
+      const hint = (currentCard?.hint || '').trim();
+      if (forms && forms !== '-') {
+        if (/^(der|die|das)\s+/i.test(forms)) {
+          pl = forms;
+        } else if (forms.startsWith('-') || forms.startsWith('·')) {
+          pl = art ? `die ${noun}${forms.replace(/^[-·]\s*/, '')}` : forms;
+        } else {
+          pl = forms;
+        }
+      } else {
+        const plMatch = hint.match(/^(?:der|die|das)\s+[a-zA-ZäöüÄÖÜß\s-]+?,\s*([-a-zA-ZäöüÄÖÜß\s]+?)(?:\s*—|\s*-\s*|\s*\(|$)/i);
+        if (plMatch) {
+          const rawPl = plMatch[1].trim();
+          if (rawPl.startsWith('-')) {
+            pl = `die ${noun}${rawPl.slice(1)}`;
+          } else if (/^(der|die|das)\s+/i.test(rawPl)) {
+            pl = rawPl;
+          } else {
+            pl = `die ${rawPl}`;
+          }
+        }
+      }
     }
 
-    return { displayGerman: rawWord, displayForms: formatForms(forms) };
-  }, [currentCard?.targetWord, currentCard?.hint, currentCard?.forms]);
+    return { article: art, wordOnly: noun, plural: pl };
+  }, [currentCard?.targetWord, currentCard?.forms, currentCard?.hint, (currentCard as any)?.article, (currentCard as any)?.wordOnly, (currentCard as any)?.plural]);
+
+  const getArticleColor = (art: string | null) => {
+    if (!art) return '';
+    const lower = art.toLowerCase();
+    if (lower === 'der') return 'text-sky-400 font-semibold mr-2';
+    if (lower === 'die') return 'text-rose-400 font-semibold mr-2';
+    if (lower === 'das') return 'text-emerald-400 font-semibold mr-2';
+    return 'text-rose-400 font-semibold mr-2';
+  };
 
   const parsedNoun = useMemo(() => {
     let raw = (currentCard?.targetWord || '').replace(/\|/g, ' ').replace(/\s{2,}/g, ' ').trim();
@@ -2512,14 +2540,9 @@ function RapidFlashcardMode({
   }, [currentCard?.targetWord, currentCard?.hint, currentCard?.forms, currentCard?.translation]);
 
   const speechText = useMemo(() => {
-    const raw = displayGerman || currentCard?.targetWord || '';
+    const raw = currentCard?.targetWord || '';
     return raw.replace(/\|/g, '').trim();
-  }, [displayGerman, currentCard?.targetWord]);
-
-  const speak = useCallback(() => {
-    if (!speechText) return;
-    playGermanSpeech(speechText, { forceAudioEl: getSharedSpeechAudio() });
-  }, [speechText]);
+  }, [currentCard?.targetWord]);
 
   const playCardAudio = useCallback((word?: string) => {
     const textToSpeak = (word || speechText || '').replace(/\|/g, '').trim();
@@ -2549,6 +2572,16 @@ function RapidFlashcardMode({
     }
   }, [locked, localMastery, onAnswer, onHintPenalty]);
 
+  const toggleFlip = useCallback(() => {
+    setIsFlipped(prev => {
+      const next = !prev;
+      if (next) {
+        playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+      }
+      return next;
+    });
+  }, [currentCard?.targetWord, playCardAudio]);
+
   const triggerErrorShake = useCallback(() => {
     setIsErrorMismatch(true);
     setIsShaking(true);
@@ -2570,10 +2603,10 @@ function RapidFlashcardMode({
     setLocalMastery(nextMastery);
 
     playSafeAudio(() => playSuccessSound());
-    playSafeAudio(() => speak());
+    playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     incrementCloudDailyCounter('de');
     triggerHaptic('success');
-  }, [isAnswered, localMastery, speak]);
+  }, [isAnswered, localMastery, playCardAudio, currentCard?.targetWord]);
 
   const handleGiveUp = useCallback(() => {
     if (locked || isAnswered) return;
@@ -2588,11 +2621,11 @@ function RapidFlashcardMode({
     const revealWord = parsedNoun.full || (currentCard?.targetWord || '').replace(/\|/g, '').trim();
     setTypedValue(revealWord);
 
-    playSafeAudio(() => speak());
+    playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     try {
       onHintPenalty?.(updatedMastery);
     } catch {}
-  }, [locked, isAnswered, localMastery, parsedNoun, currentCard?.targetWord, speak, onHintPenalty]);
+  }, [locked, isAnswered, localMastery, parsedNoun, currentCard?.targetWord, playCardAudio, onHintPenalty]);
 
   const handleProceedNext = useCallback(() => {
     if (!isAnswered) return;
@@ -2651,10 +2684,9 @@ function RapidFlashcardMode({
     }
   }, [locked, isAnswered, typedValue, parsedNoun, handleSuccessAnswer, triggerErrorShake]);
 
-  // Глобальные хоткеи: Enter / Space для Weiter, Стрелки и Space для флип-карт
+  // Хоткеи: Space для бесконечного флипа туда-обратно, стрелки для оценки, Enter/Space для Weiter
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Хоткеи для кнопки Weiter
       if (isAnswered) {
         if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
@@ -2663,25 +2695,18 @@ function RapidFlashcardMode({
         return;
       }
 
-      // Хоткеи для Раундов 1-2 (Флип-карты)
       if (isRound1or2) {
-        if (!isFlipped) {
-          if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
-            e.preventDefault();
-            setIsFlipped(true);
-            playSafeAudio(() => playCardAudio(currentCard?.targetWord));
-          }
-        } else {
-          if (e.key === 'ArrowLeft') {
-            e.preventDefault();
-            handleRateCard(false); // Не помню
-          } else if (e.key === 'ArrowRight' || e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
-            e.preventDefault();
-            handleRateCard(true); // Помню
-          }
+        if (e.code === 'Space' || e.key === ' ') {
+          e.preventDefault();
+          setIsFlipped(prev => !prev);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          handleRateCard(false); // ✕
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          handleRateCard(true); // ✓
         }
       } else {
-        // Хоткеи для режима ввода: Enter отправляет ответ
         if (e.key === 'Enter') {
           e.preventDefault();
           handleEnterSubmit();
@@ -2691,222 +2716,240 @@ function RapidFlashcardMode({
       // Озвучка по клавише R (если фокус не в текстовом инпуте)
       if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
         if (!isRound1or2 && document.activeElement === inputRef.current) return;
-        playSafeAudio(() => speak());
+        playSafeAudio(() => playCardAudio(currentCard?.targetWord));
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAnswered, isFlipped, isRound1or2, currentCard?.targetWord, handleProceedNext, playCardAudio, handleRateCard, handleEnterSubmit, speak]);
-
-  const formatGermanWord = (w: string) => {
-    const trimmed = (w || '').trim();
-    const match = trimmed.match(/^(der|die|das)\s+(.+)$/i);
-    if (match) {
-      const article = match[1];
-      const rest = match[2];
-      const restParts = rest.split(' ');
-      const firstWord = restParts[0];
-      const remaining = restParts.slice(1).join(' ');
-
-      let articleColor = '';
-      const lowerArticle = article.toLowerCase();
-      if (lowerArticle === 'der') articleColor = 'text-sky-500 dark:text-sky-400 font-semibold';
-      else if (lowerArticle === 'die') articleColor = 'text-rose-500 dark:text-rose-400 font-semibold';
-      else if (lowerArticle === 'das') articleColor = 'text-emerald-500 dark:text-emerald-400 font-semibold';
-
-      return (
-        <span className="inline-flex items-baseline justify-center whitespace-nowrap">
-          <span className={articleColor}>{article}{'\u00A0'}</span>
-          <span className="whitespace-nowrap">{firstWord}</span>
-          {remaining && <span className="whitespace-nowrap">&nbsp;{remaining}</span>}
-        </span>
-      );
-    }
-    return <span className="whitespace-nowrap">{trimmed}</span>;
-  };
+  }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, playCardAudio]);
 
   return (
-    <div className="w-full max-w-[720px] mx-auto flex flex-col items-center">
-      <div className="w-full relative">
-        <div className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative select-none">
-          {/* Шапка: звук, dots, помощь */}
-          <div className="flex items-center justify-between w-full shrink-0 mb-6">
+    <div className="w-full flex-1 flex flex-col items-center justify-center px-4 py-6 select-none">
+      {isRound1or2 ? (
+        /* =======================================================
+           РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE
+           ======================================================= */
+        <div className="w-full max-w-[680px] flex flex-col items-center gap-8 perspective-1000">
+          {/* 3D Оболочка */}
+          <div
+            onClick={toggleFlip}
+            className={`w-full min-h-[420px] rounded-[32px] bg-zinc-900/95 border border-white/10 p-8 sm:p-10 shadow-2xl relative cursor-pointer transform-style-3d transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] ${
+              isFlipped ? 'rotate-y-180' : ''
+            }`}
+          >
+            {/* ФРОНТАЛЬНАЯ СТОРОНА (СЛОВО НА НЕМЕЦКОМ) */}
+            <div className="absolute inset-0 p-8 sm:p-10 flex flex-col justify-between backface-hidden">
+              {/* Шапка */}
+              <div className="flex items-center justify-between w-full">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+                  }}
+                  className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer"
+                  title="Aussprache anhören (R)"
+                >
+                  <Volume2 className="w-4 h-4"/>
+                </button>
+                <div className="flex items-center gap-1.5">
+                  {[1, 2, 3, 4].map(step => (
+                    <span
+                      key={step}
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        step <= (localMastery || 0)
+                          ? 'bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.4)]'
+                          : 'bg-zinc-800 border border-white/5'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Центр: Слово + Множественное число */}
+              <div className="my-auto text-center space-y-3">
+                <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-white">
+                  {article && <span className={getArticleColor(article)}>{article}</span>}
+                  {wordOnly || currentCard?.targetWord}
+                </h2>
+                {plural && (
+                  <p className="text-sm font-medium text-zinc-400 tracking-wide">
+                    {plural}
+                  </p>
+                )}
+              </div>
+
+              {/* Низ: Пусто для чистоты */}
+              <div className="h-6" />
+            </div>
+
+            {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР) */}
+            <div className="absolute inset-0 p-8 sm:p-10 flex flex-col justify-between backface-hidden rotate-y-180 bg-zinc-900/98 rounded-[32px]">
+              {/* Шапка */}
+              <div className="flex items-center justify-between w-full">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+                  }}
+                  className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition cursor-pointer"
+                  title="Aussprache anhören (R)"
+                >
+                  <Volume2 className="w-4 h-4"/>
+                </button>
+                <div className="flex items-center gap-1.5">
+                  {[1, 2, 3, 4].map(step => (
+                    <span
+                      key={step}
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        step <= (localMastery || 0)
+                          ? 'bg-sky-500'
+                          : 'bg-zinc-800'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Центр: Слово, перевод, пример */}
+              <div className="my-auto text-center space-y-4">
+                <div className="space-y-1">
+                  <h2 className="text-2xl sm:text-3xl font-bold text-white">
+                    {article && <span className={getArticleColor(article)}>{article}</span>}
+                    {wordOnly || currentCard?.targetWord}
+                  </h2>
+                  {plural && (
+                    <p className="text-xs text-zinc-500">{plural}</p>
+                  )}
+                </div>
+
+                <p className="text-lg sm:text-xl font-medium text-zinc-200">
+                  {currentCard?.translation || currentCard?.hint}
+                </p>
+
+                {currentCard?.sentence && currentCard?.sentence !== '-' && (
+                  <div className="mt-4 p-3.5 rounded-2xl bg-white/[0.03] border-l-2 border-zinc-600 text-left text-sm text-zinc-400 italic max-w-lg mx-auto leading-relaxed">
+                    {currentCard.sentence}
+                  </div>
+                )}
+              </div>
+
+              <div className="h-6" />
+            </div>
+          </div>
+
+          {/* ПАРЯЩИЕ КНОПКИ УПРАВЛЕНИЯ [ ✕ ] И [ ✓ ] */}
+          <div className="flex items-center justify-center gap-6">
             <button
               type="button"
-              onClick={() => playCardAudio(currentCard?.targetWord)}
-              className="w-9 h-9 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/10 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white transition active:scale-95 cursor-pointer"
+              onClick={() => handleRateCard(false)}
+              className="w-14 h-14 rounded-full bg-zinc-900 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10 transition-all active:scale-90 shadow-xl cursor-pointer"
+              title="Не помню (ArrowLeft)"
+            >
+              <X className="w-6 h-6 stroke-[2.5]"/>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleRateCard(true)}
+              className="w-14 h-14 rounded-full bg-zinc-900 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-emerald-400 hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-all active:scale-90 shadow-xl cursor-pointer"
+              title="Помню (ArrowRight)"
+            >
+              <Check className="w-6 h-6 stroke-[2.5]"/>
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* =======================================================
+           РАУНДЫ 3-4: ЧИСТЫЙ АКТИВНЫЙ ВВОД (ACTIVE RECALL)
+           ======================================================= */
+        <div className="w-full max-w-[680px] min-h-[420px] rounded-[32px] bg-zinc-900/95 border border-white/10 p-8 sm:p-10 shadow-2xl flex flex-col justify-between">
+          {/* Шапка */}
+          <div className="flex items-center justify-between w-full shrink-0">
+            <button
+              type="button"
+              onClick={() => playSafeAudio(() => playCardAudio(currentCard?.targetWord))}
+              className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition cursor-pointer"
               title="Aussprache anhören (R)"
             >
-              <Volume2 className="w-4 h-4" />
+              <Volume2 className="w-4 h-4"/>
             </button>
-
-            {deckTitle && (
-              <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-400 uppercase tracking-wider select-none">
-                {deckTitle}
-              </div>
-            )}
-
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 select-none">
-                {[1, 2, 3, 4].map((step) => (
+              <div className="flex items-center gap-1.5">
+                {[1, 2, 3, 4].map(step => (
                   <span
                     key={step}
-                    className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                    className={`w-2.5 h-2.5 rounded-full ${
                       step <= (localMastery || 0)
                         ? 'bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.4)]'
-                        : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
+                        : 'bg-zinc-800 border border-white/5'
                     }`}
                   />
                 ))}
               </div>
 
-              {!isRound1or2 && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
-                  disabled={isAnswered || locked}
-                  className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/10 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
-                  title="Сдаться (-1 раунд)"
-                >
-                  <HelpCircle className="w-3.5 h-3.5" />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
+                disabled={isAnswered || locked}
+                className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
+                title="Сдаться (-1 раунд)"
+              >
+                <HelpCircle className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
-          {/* КОНТЕНТНАЯ ЗОНА */}
-          <div className="flex-1 flex flex-col items-center justify-center my-auto w-full text-center py-4">
-            {isRound1or2 ? (
-              /* РЕЖИМ РАУНДОВ 1-2: ФЛИП-КАРТА */
-              <div 
-                onClick={() => {
-                  if (!isFlipped && !locked) {
-                    setIsFlipped(true);
-                    playSafeAudio(() => playCardAudio(currentCard?.targetWord));
-                  }
-                }}
-                className="cursor-pointer w-full flex flex-col items-center justify-center"
-              >
-                {!isFlipped ? (
-                  /* Лицевая сторона: ТОЛЬКО немецкое слово */
-                  <div className="space-y-6">
-                    <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                      {formatGermanWord(displayGerman || currentCard?.targetWord || '')}
-                    </h2>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
-                      Нажмите или Пробел, чтобы перевернуть
-                    </p>
-                  </div>
-                ) : (
-                  /* Обратная сторона: Перевод + Пример */
-                  <div className="space-y-4 animate-in fade-in duration-200">
-                    <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white">
-                      {formatGermanWord(displayGerman || currentCard?.targetWord || '')}
-                    </h2>
-                    {displayForms && (
-                      <div className="text-sm text-zinc-500 dark:text-zinc-400 -mt-2">
-                        {displayForms}
-                      </div>
-                    )}
-                    <p className="text-lg sm:text-xl text-zinc-700 dark:text-zinc-300 font-medium">
-                      {currentCard?.translation || currentCard?.hint}
-                    </p>
-                    {currentCard?.sentence && currentCard?.sentence !== '-' && (
-                      <div className="mt-4 p-4 rounded-2xl bg-black/[0.03] dark:bg-white/[0.03] border-l-2 border-sky-400 text-left text-sm text-zinc-600 dark:text-zinc-400 max-w-lg mx-auto">
-                        {currentCard.sentence}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* РЕЖИМ РАУНДОВ 3-4: ВВОД СЛОВА С РУССКОГО */
-              <div 
-                className="w-full flex flex-col items-center justify-center"
-                onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
-              >
-                <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white mb-6">
-                  {currentCard?.translation || currentCard?.hint}
-                </h2>
-                <div className="w-full max-w-[480px]">
-                  {isAnswered ? (
-                    <div
-                      className={cn(
-                        "w-full min-h-[52px] flex items-center justify-center text-center font-semibold py-3 px-4 rounded-2xl border break-words",
-                        getAdaptiveFontSize(typedValue || parsedNoun.full || currentCard?.targetWord || ''),
-                        !isSurrendered
-                          ? "text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)]"
-                          : "text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]"
-                      )}
-                    >
-                      {typedValue || parsedNoun.full || currentCard?.targetWord}
-                    </div>
-                  ) : (
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={typedValue}
-                      onChange={(e) => !isMobile && handleInputChange(e.target.value)}
-                      readOnly={isMobile || locked}
-                      inputMode={isMobile ? "none" : undefined}
-                      tabIndex={isMobile ? -1 : 0}
-                      autoFocus={false}
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      placeholder={isAnswered ? '' : 'Auf Deutsch eingeben...'}
-                      className={cn(
-                        "w-full text-center font-medium py-3.5 px-6 rounded-2xl outline-none border transition-colors",
-                        isMobile && "pointer-events-none select-none",
-                        getAdaptiveFontSize(typedValue || parsedNoun.full || currentCard?.targetWord || ''),
-                        isErrorMismatch
-                          ? "text-rose-500 border-rose-500/50 bg-rose-500/10"
-                          : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-100/90 dark:bg-white/[0.04] focus:border-sky-500 dark:focus:border-sky-400",
-                        isShaking && "animate-shake"
-                      )}
-                    />
-                  )}
-                </div>
-              </div>
-            )}
+          {/* Центр: ТОЛЬКО русский перевод и инпут (БЕЗ ПРИМЕРА И БЕЗ ПЛЕЙСХОЛДЕРА) */}
+          <div 
+            className="my-auto w-full flex flex-col items-center text-center"
+            onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
+          >
+            <h2 className="text-2xl sm:text-3xl font-bold text-white mb-8 max-w-lg">
+              {currentCard?.translation || currentCard?.hint}
+            </h2>
+
+            <div className="w-full max-w-md">
+              <input
+                ref={inputRef}
+                type="text"
+                value={typedValue}
+                onChange={(e) => !isMobile && handleInputChange(e.target.value)}
+                readOnly={isMobile || isAnswered}
+                inputMode={isMobile ? "none" : undefined}
+                tabIndex={isMobile ? -1 : 0}
+                autoFocus={!isMobile}
+                placeholder="" /* ПЛЕЙСХОЛДЕР СТРОГО ПУСТОЙ */
+                className={`w-full text-center font-medium py-3.5 px-6 rounded-2xl outline-none transition-colors border ${
+                  isMobile ? 'pointer-events-none select-none ' : ''
+                }${
+                  isAnswered
+                    ? (!isSurrendered
+                        ? 'text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
+                        : 'text-white border-white/20 bg-white/[0.05]')
+                    : isErrorMismatch
+                      ? 'text-rose-500 border-rose-500/50 bg-rose-500/10'
+                      : 'text-white border-white/10 bg-white/[0.04] focus:border-sky-400/60'
+                }${isShaking ? ' animate-shake' : ''}`}
+              />
+            </div>
           </div>
 
-          {/* НИЖНЯЯ ПАНЕЛЬ ДЕЙСТВИЙ */}
-          <div className="w-full flex items-center justify-center mt-6 shrink-0 min-h-[56px]">
-            {isRound1or2 && isFlipped ? (
-              /* Кнопки оценки для раундов 1-2 */
-              <div className="flex items-center gap-4 w-full max-w-md">
-                <button
-                  type="button"
-                  onClick={() => handleRateCard(false)}
-                  className="flex-1 py-3.5 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-600 dark:text-rose-300 font-semibold text-sm transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  ← Не помню
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRateCard(true)}
-                  className="flex-1 py-3.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-600 dark:text-emerald-300 font-semibold text-sm transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  Помню →
-                </button>
-              </div>
-            ) : isAnswered ? (
-              /* Кнопка Weiter для раундов 3-4 и после сдачи */
+          {/* Низ: Кнопка Weiter с хоткеями */}
+          <div className="w-full flex justify-center mt-6 min-h-[56px]">
+            {isAnswered && (
               <button
                 type="button"
                 onClick={handleProceedNext}
-                className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all flex items-center justify-center cursor-pointer select-none"
+                className="w-full max-w-sm h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:scale-[0.985] text-white font-semibold text-base shadow-[0_4px_24px_rgba(0,113,227,0.3)] transition-all flex items-center justify-center cursor-pointer select-none"
               >
-                Weiter (Space / Enter)
+                Weiter
               </button>
-            ) : (
-              <div className="h-13 sm:h-14" />
             )}
           </div>
         </div>
-      </div>
+      )}
 
       {isMobile && !isRound1or2 && !isAnswered && (
         <MobileKeyboard
@@ -4751,71 +4794,104 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
 
   const [langStats, setLangStats] = useState<LanguageDailyProgress>(() => getLanguageDailyStats(effectiveLang));
 
-  useEffect(() => {
-    fixAndIsolateDailyStats();
-    checkAndResetDailyProgress();
-    syncCloudDailyStats(undefined, effectiveLang).then(count => {
-      if (typeof count === 'number' && count > 0) {
+  const fetchCloudTodayStats = useCallback(async (lang: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) return;
+
+      const todayStr = getDeviceLocalDate(); // YYYY-MM-DD
+      const cleanLang = (lang || 'de').toLowerCase();
+      const { data } = await supabase
+        .from('user_daily_stats')
+        .select('cards_count')
+        .eq('user_id', session.user.id)
+        .eq('language', cleanLang)
+        .eq('date', todayStr)
+        .maybeSingle();
+
+      let cloudCount = (data && typeof data.cards_count === 'number') ? data.cards_count : null;
+
+      // Fallback к user_stats если в user_daily_stats еще нет записи
+      if (cloudCount === null) {
+        try {
+          const { data: statsData } = await supabase
+            .from('user_stats')
+            .select('language, daily_activity')
+            .eq('language', `DAILY_STATS_${cleanLang.toUpperCase()}`)
+            .maybeSingle();
+          if (statsData?.daily_activity && statsData.daily_activity.date === todayStr) {
+            cloudCount = statsData.daily_activity.cards_count ?? statsData.daily_activity.learnedToday ?? null;
+          }
+        } catch {}
+      }
+
+      if (typeof cloudCount === 'number') {
+        const finalCount = cloudCount;
         setLangStats(prev => ({
           ...prev,
-          learnedToday: Math.max(prev.learnedToday, count),
-          totalCount: Math.max(prev.totalCount, count),
-          correctCount: Math.max(prev.correctCount, count)
+          learnedToday: finalCount,
+          totalCount: Math.max(prev?.totalCount || 0, finalCount),
+          correctCount: Math.max(prev?.correctCount || 0, finalCount)
         }));
+        const key = `daily_stats_${cleanLang}_${todayStr}`;
+        let current = getLanguageDailyStats(cleanLang);
+        current.learnedToday = finalCount;
+        current.totalCount = Math.max(current.totalCount, finalCount);
+        current.correctCount = Math.max(current.correctCount, finalCount);
+        localStorage.setItem(key, JSON.stringify(current));
+        window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: finalCount } }));
       }
-    });
+    } catch (err) {
+      console.error('Failed to sync daily stats:', err);
+    }
   }, []);
 
   useEffect(() => {
+    fixAndIsolateDailyStats();
+    checkAndResetDailyProgress();
     setLangStats(getLanguageDailyStats(effectiveLang));
-    syncCloudDailyStats(undefined, effectiveLang).then(count => {
-      if (typeof count === 'number' && count > 0) {
-        setLangStats(prev => ({
-          ...prev,
-          learnedToday: Math.max(prev.learnedToday, count),
-          totalCount: Math.max(prev.totalCount, count),
-          correctCount: Math.max(prev.correctCount, count)
-        }));
+
+    // 1. Немедленная загрузка для текущего языка
+    fetchCloudTodayStats(effectiveLang);
+
+    // 2. Слушатель auth state (Safari асинхронно восстанавливает сессию)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user?.id) {
+        fetchCloudTodayStats(effectiveLang);
       }
     });
-  }, [effectiveLang]);
 
-  useEffect(() => {
-    const handleUpdate = () => {
+    // 3. Синхронизация при фокусе окна и смене видимости (возврат в Safari с другого устройства)
+    const handleSync = () => {
       checkAndResetDailyProgress();
-      setLangStats(getLanguageDailyStats(effectiveLang));
-      syncCloudDailyStats(undefined, effectiveLang).then(count => {
-        if (typeof count === 'number' && count > 0) {
-          setLangStats(prev => ({
-            ...prev,
-            learnedToday: Math.max(prev.learnedToday, count),
-            totalCount: Math.max(prev.totalCount, count),
-            correctCount: Math.max(prev.correctCount, count)
-          }));
-        }
-      });
+      fetchCloudTodayStats(effectiveLang);
     };
 
-    window.addEventListener('stats-update', handleUpdate);
-    window.addEventListener('storage-update', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
-    window.addEventListener('focus', handleUpdate);
+    const handleStorageUpdate = () => {
+      setLangStats(getLanguageDailyStats(effectiveLang));
+    };
+
+    window.addEventListener('focus', handleSync);
+    window.addEventListener('stats-update', handleStorageUpdate);
+    window.addEventListener('storage-update', handleStorageUpdate);
+    window.addEventListener('storage', handleStorageUpdate);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        handleUpdate();
+        handleSync();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
-      window.removeEventListener('stats-update', handleUpdate);
-      window.removeEventListener('storage-update', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
-      window.removeEventListener('focus', handleUpdate);
+      subscription.unsubscribe();
+      window.removeEventListener('focus', handleSync);
+      window.removeEventListener('stats-update', handleStorageUpdate);
+      window.removeEventListener('storage-update', handleStorageUpdate);
+      window.removeEventListener('storage', handleStorageUpdate);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [effectiveLang]);
+  }, [effectiveLang, fetchCloudTodayStats]);
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
   const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
