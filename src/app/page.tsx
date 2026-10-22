@@ -30,21 +30,21 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Получение локальной даты устройства (YYYY-MM-DD)
-export const getLocalDateKey = (): string => {
+// Получение локальной даты пользователя YYYY-MM-DD
+export function getDeviceLocalDate(): string {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-};
-
-export function getLocalTodayStr(): string {
-  return getLocalDateKey();
 }
 
+export const getLocalDateKey = (): string => getDeviceLocalDate();
+export function getLocalTodayStr(): string {
+  return getDeviceLocalDate();
+}
 export function getLocalTodayDateString(): string {
-  return getLocalDateKey();
+  return getDeviceLocalDate();
 }
 
 export interface LanguageDailyProgress {
@@ -73,7 +73,7 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
 
   if (typeof window === 'undefined') return defaultStats;
 
-  const today = getLocalTodayStr();
+  const today = getDeviceLocalDate();
   const cleanLang = (lang || 'de').toLowerCase();
   const raw = localStorage.getItem(`daily_stats_${cleanLang}_${today}`);
   if (!raw) {
@@ -105,81 +105,179 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
 
 // --- SUPABASE MULTI-DEVICE CLOUD SYNC FOR DAILY COUNTER ---
 
-export async function fetchDailyStatsFromCloud(lang: string): Promise<number | null> {
+// Загрузка статистики из Supabase (Single Source of Truth)
+export async function syncCloudDailyStats(userId?: string, lang: string = 'de'): Promise<number> {
   const cleanLang = (lang || 'de').toLowerCase();
-  const todayStr = getLocalDateKey();
-  let cloudCount: number | null = null;
+  const today = getDeviceLocalDate();
+  let countFromDb: number | null = null;
 
-  // 1. Попытка запроса в таблицу user_daily_stats (если создана в Supabase)
+  // 1. Попытка запроса в таблицу user_daily_stats
   try {
-    let userId: string | null = null;
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user?.id) userId = user.id;
-    } catch {}
-
     let query = supabase
       .from('user_daily_stats')
       .select('cards_count')
       .eq('language', cleanLang)
-      .eq('date', todayStr);
+      .eq('date', today);
 
     if (userId) {
       query = query.eq('user_id', userId);
     }
 
     const { data, error } = await query.maybeSingle();
-
     if (!error && data && typeof data.cards_count === 'number') {
-      cloudCount = data.cards_count;
+      countFromDb = data.cards_count;
     }
   } catch (e) {}
 
-  // 2. Гарантированная синхронизация из user_stats (основная таблица Supabase)
+  // 2. Гарантированный источник истины: user_stats (где надежно хранятся DAILY_STATS_DE / DE / DAY_STATS_DE)
   try {
     const { data, error } = await supabase
       .from('user_stats')
       .select('language, daily_activity')
-      .in('language', [`DAILY_STATS_${cleanLang.toUpperCase()}`, cleanLang.toUpperCase()]);
+      .in('language', [`DAILY_STATS_${cleanLang.toUpperCase()}`, cleanLang.toUpperCase(), `DAY_STATS_${cleanLang.toUpperCase()}`]);
 
     if (!error && data && Array.isArray(data)) {
       const dailyRow = data.find(r => r.language === `DAILY_STATS_${cleanLang.toUpperCase()}`);
       const histRow = data.find(r => r.language === cleanLang.toUpperCase());
+      const dayRow = data.find(r => r.language === `DAY_STATS_${cleanLang.toUpperCase()}`);
 
       let countFromDaily = 0;
-      if (dailyRow?.daily_activity) {
+      if (dailyRow?.daily_activity && dailyRow.daily_activity.date === today) {
         const act = dailyRow.daily_activity;
-        if (act.date === todayStr) {
-          countFromDaily = typeof act.cards_count === 'number' 
-            ? act.cards_count 
-            : (typeof act.learnedToday === 'number' ? act.learnedToday : 0);
-        }
+        countFromDaily = typeof act.cards_count === 'number' 
+          ? act.cards_count 
+          : (typeof act.learnedToday === 'number' ? act.learnedToday : 0);
       }
 
       let countFromHist = 0;
       if (histRow?.daily_activity) {
-        const raw = histRow.daily_activity[todayStr];
+        const raw = histRow.daily_activity[today];
         countFromHist = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw) || 0 : 0));
       }
 
-      const bestCloud = Math.max(countFromDaily, countFromHist);
-      if (cloudCount === null || bestCloud > cloudCount) {
-        cloudCount = bestCloud;
+      let countFromDay = 0;
+      if (dayRow?.daily_activity && dayRow.daily_activity.date === today) {
+        countFromDay = typeof dayRow.daily_activity.cardsDone === 'number' ? dayRow.daily_activity.cardsDone : 0;
+      }
+
+      const bestCloud = Math.max(countFromDaily, countFromHist, countFromDay);
+      if (countFromDb === null || bestCloud > countFromDb) {
+        countFromDb = bestCloud;
       }
     }
   } catch (e) {
     console.error('Ошибка загрузки дневной статистики из Supabase:', e);
   }
 
-  return cloudCount;
+  const finalCount = countFromDb !== null ? countFromDb : 0;
+
+  // Синхронизируем локальный стейт и хранилище для текущего браузера (Safari/Chrome)
+  if (typeof window !== 'undefined' && finalCount > 0) {
+    const key = `daily_stats_${cleanLang}_${today}`;
+    let current = getLanguageDailyStats(cleanLang);
+    if (finalCount > current.learnedToday) {
+      current.learnedToday = finalCount;
+      current.totalCount = Math.max(current.totalCount, finalCount);
+      current.correctCount = Math.max(current.correctCount, finalCount);
+      localStorage.setItem(key, JSON.stringify(current));
+
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: finalCount } }));
+      window.dispatchEvent(new Event('storage-update'));
+    }
+  }
+
+  return finalCount;
+}
+
+// Инкремент в Supabase (+1)
+export async function incrementCloudDailyCounter(lang: string = 'de'): Promise<number> {
+  const cleanLang = (lang || 'de').toLowerCase();
+  const today = getDeviceLocalDate();
+  const nowIso = new Date().toISOString();
+
+  // 1. Оптимистичное обновление в UI и локальном хранилище
+  const key = `daily_stats_${cleanLang}_${today}`;
+  let current = getLanguageDailyStats(cleanLang);
+  current.learnedToday += 1;
+  current.totalCount += 1;
+  current.correctCount += 1;
+
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(key, JSON.stringify(current));
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: current.learnedToday } }));
+    window.dispatchEvent(new Event('storage-update'));
+  }
+
+  const newCount = current.learnedToday;
+
+  // 2. Идентификатор пользователя
+  let userId = '00000000-0000-0000-0000-000000000000';
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.id) userId = user.id;
+  } catch {}
+
+  // 3. Сохранение в user_daily_stats
+  try {
+    await supabase.from('user_daily_stats').upsert(
+      {
+        user_id: userId,
+        language: cleanLang,
+        date: today,
+        cards_count: newCount,
+        updated_at: nowIso
+      },
+      { onConflict: 'user_id,language,date' }
+    );
+  } catch (e) {}
+
+  // 4. Гарантированное сохранение в user_stats (DAILY_STATS_DE и DE calendar)
+  try {
+    const fullDaily = {
+      ...current,
+      date: today,
+      learnedToday: newCount,
+      cards_count: newCount,
+      updated_at: nowIso
+    };
+
+    await supabase.from('user_stats').upsert({
+      language: `DAILY_STATS_${cleanLang.toUpperCase()}`,
+      daily_activity: fullDaily
+    }, { onConflict: 'language' });
+
+    // Обновляем календарную сетку
+    const histKey = `daily_activity_${cleanLang.toUpperCase()}`;
+    let progress: Record<string, any> = {};
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(histKey);
+        if (stored) progress = JSON.parse(stored);
+      } catch {}
+      progress[today] = Math.max(progress[today] || 0, newCount);
+      localStorage.setItem(histKey, JSON.stringify(progress));
+    }
+
+    await supabase.from('user_stats').upsert({
+      language: cleanLang.toUpperCase(),
+      daily_activity: progress
+    }, { onConflict: 'language' });
+  } catch (e) {
+    console.error('Ошибка записи в Supabase user_stats:', e);
+  }
+
+  return newCount;
+}
+
+export async function fetchDailyStatsFromCloud(lang: string): Promise<number | null> {
+  return syncCloudDailyStats(undefined, lang);
 }
 
 export async function syncDailyStatsToCloud(lang: string, count: number, currentStats?: Partial<LanguageDailyProgress>): Promise<void> {
   const cleanLang = (lang || 'de').toLowerCase();
-  const todayStr = getLocalDateKey();
+  const today = getDeviceLocalDate();
   const nowIso = new Date().toISOString();
 
-  // 1. Попытка upsert в user_daily_stats
   try {
     let userId = '00000000-0000-0000-0000-000000000000';
     try {
@@ -191,7 +289,7 @@ export async function syncDailyStatsToCloud(lang: string, count: number, current
       {
         user_id: userId,
         language: cleanLang,
-        date: todayStr,
+        date: today,
         cards_count: count,
         updated_at: nowIso
       },
@@ -199,14 +297,13 @@ export async function syncDailyStatsToCloud(lang: string, count: number, current
     );
   } catch (e) {}
 
-  // 2. Надежный upsert в user_stats (для multi-device Mac/iPhone синхронизации)
   try {
     const fullDaily = {
-      date: todayStr,
+      ...(currentStats || {}),
+      date: today,
       learnedToday: count,
       cards_count: count,
-      updated_at: nowIso,
-      ...(currentStats || {})
+      updated_at: nowIso
     };
 
     await supabase.from('user_stats').upsert({
@@ -214,15 +311,16 @@ export async function syncDailyStatsToCloud(lang: string, count: number, current
       daily_activity: fullDaily
     }, { onConflict: 'language' });
 
-    // Обновляем календарную сетку
     const histKey = `daily_activity_${cleanLang.toUpperCase()}`;
     let progress: Record<string, any> = {};
-    try {
-      const stored = localStorage.getItem(histKey);
-      if (stored) progress = JSON.parse(stored);
-    } catch {}
-    progress[todayStr] = Math.max(progress[todayStr] || 0, count);
-    localStorage.setItem(histKey, JSON.stringify(progress));
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(histKey);
+        if (stored) progress = JSON.parse(stored);
+      } catch {}
+      progress[today] = Math.max(progress[today] || 0, count);
+      localStorage.setItem(histKey, JSON.stringify(progress));
+    }
 
     await supabase.from('user_stats').upsert({
       language: cleanLang.toUpperCase(),
@@ -234,32 +332,7 @@ export async function syncDailyStatsToCloud(lang: string, count: number, current
 }
 
 export async function syncDailyStatsFromCloud(lang: string): Promise<number> {
-  if (typeof window === 'undefined') return 0;
-  const cleanLang = (lang || 'de').toLowerCase();
-  const todayStr = getLocalDateKey();
-  const key = `daily_stats_${cleanLang}_${todayStr}`;
-
-  let current = getLanguageDailyStats(cleanLang);
-  const cloudCount = await fetchDailyStatsFromCloud(cleanLang);
-
-  if (cloudCount !== null) {
-    const maxCount = Math.max(cloudCount, current.learnedToday);
-    if (maxCount !== current.learnedToday) {
-      current.learnedToday = maxCount;
-      current.totalCount = Math.max(current.totalCount, maxCount);
-      current.correctCount = Math.max(current.correctCount, maxCount);
-      localStorage.setItem(key, JSON.stringify(current));
-
-      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang } }));
-      window.dispatchEvent(new Event('storage-update'));
-    } else if (current.learnedToday > cloudCount) {
-      // Локально на устройстве больше, чем в облаке — отправляем наверх в Supabase
-      syncDailyStatsToCloud(cleanLang, current.learnedToday, current);
-    }
-    return maxCount;
-  }
-
-  return current.learnedToday;
+  return syncCloudDailyStats(undefined, lang);
 }
 
 // Сохранение статистики для конкретного языка
@@ -755,6 +828,23 @@ export const playFeedbackSound = (isCorrect: boolean) => {
   }
   playFallback(isCorrect ? 'success' : 'fail', vol);
 };
+
+export function playSafeAudio(audioSrcOrFn: () => Promise<void> | void) {
+  try {
+    const res = audioSrcOrFn();
+    if (res && typeof (res as any).catch === 'function') {
+      (res as any).catch((err: any) => {
+        console.warn('[Safari WebKit Audio] Воспроизведение перехвачено или заблокировано:', err);
+      });
+    }
+  } catch (err) {
+    console.warn('[Safari WebKit Audio] Ошибка вызова звука:', err);
+  }
+}
+
+export const playSuccessSound = () => playFeedbackSound(true);
+export const playErrorSound = () => playFeedbackSound(false);
+
 
 export const initAudioCtx = async () => {
   if (typeof window === 'undefined') return;
@@ -2498,22 +2588,24 @@ function RapidFlashcardMode({
 
   const handleSuccessAnswer = useCallback(() => {
     if (isAnswered) return;
-    const nextMastery = Math.min(4, (localMastery || 0) + 1);
-    setLocalMastery(nextMastery);
-    setIsSuccessFeedback(true);
+    // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
     setIsAnswered(true);
+    setIsSuccessFeedback(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
-    playFeedbackSound(true);
-    speak();
+
+    const nextMastery = Math.min(4, (localMastery || 0) + 1);
+    setLocalMastery(nextMastery);
+
+    playSafeAudio(() => playSuccessSound());
+    playSafeAudio(() => speak());
     triggerHaptic('success');
-    // No automatic timer! User reads the word and explicitly presses Weiter or Enter
   }, [isAnswered, localMastery, speak]);
 
   const triggerErrorShake = useCallback(() => {
     setIsErrorMismatch(true);
     setIsShaking(true);
-    playFeedbackSound(false);
+    playSafeAudio(() => playErrorSound());
     triggerHaptic('error');
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
     shakeTimerRef.current = setTimeout(() => {
@@ -2527,7 +2619,7 @@ function RapidFlashcardMode({
     // Automatic Russian -> German layout mapping and digraph replacements
     const val = convertRuToDeLayout(rawVal, parsedNoun.full || card.targetWord);
     setTypedValue(val);
-    playTockSound();
+    playSafeAudio(() => playTockSound());
     if (isShaking) setIsShaking(false);
 
     if (!val) {
@@ -2569,24 +2661,27 @@ function RapidFlashcardMode({
   const handleGiveUp = () => {
     if (locked || isAnswered) return;
 
-    // 1. Принудительный штраф -1 раунд (мгновенно для точек шапки)
-    const updatedMastery = Math.max(0, localMastery - 1);
-    setLocalMastery(updatedMastery);
-
-    setIsSurrendered(true);
+    // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
     setIsAnswered(true);
+    setIsSurrendered(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
 
-    // 2. Отображаем правильное слово в инпуте спокойным белым цветом
+    // 2. Принудительный штраф -1 раунд (мгновенно для точек шапки)
+    const updatedMastery = Math.max(0, localMastery - 1);
+    setLocalMastery(updatedMastery);
+
+    // 3. Отображаем правильное слово в инпуте спокойным цветом
     const revealWord = parsedNoun.full || card.targetWord.replace(/\|/g, '').trim();
     setTypedValue(revealWord);
 
-    // 3. Воспроизводим аудио слова
-    speak();
+    // 4. Безопасно воспроизводим аудио слова
+    playSafeAudio(() => speak());
 
-    // 4. Применяем штраф в родителе (обновляет SRS/колоду и добавляет в конец очереди)
-    onHintPenalty?.(updatedMastery);
+    // 5. Применяем штраф в родителе
+    try {
+      onHintPenalty?.(updatedMastery);
+    } catch (e) {}
   };
 
   const handleProceedNext = () => {
@@ -2651,16 +2746,20 @@ function RapidFlashcardMode({
           <Volume2 className="w-[18px] h-[18px]" />
         </button>
       </div>
-      <div className="flex items-center gap-2 pr-1">
-        {[0, 1, 2, 3].map(i => (
-          <div
-            key={i}
-            className={cn(
-              "w-2 h-2 rounded-full transition-all duration-200",
-              i < localMastery ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]" : "bg-zinc-300 dark:bg-zinc-700"
-            )}
-          />
-        ))}
+      <div className="flex items-center gap-1.5 pr-1 select-none">
+        {[1, 2, 3, 4].map((step) => {
+          const isCompleted = step <= (localMastery || 0);
+          return (
+            <span
+              key={step}
+              className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                isCompleted
+                  ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                  : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
+              }`}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -2737,18 +2836,20 @@ function RapidFlashcardMode({
 
               {/* Правая часть: точки прогресса и помощь */}
               <div className="flex items-center gap-3 shrink-0">
-                <div className="flex items-center gap-1.5">
-                  {[1, 2, 3, 4].map((step) => (
-                    <span
-                      key={step}
-                      className={cn(
-                        "w-2 h-2 rounded-full transition-all duration-200",
-                        step <= localMastery
-                          ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]"
-                          : "bg-zinc-800"
-                      )}
-                    />
-                  ))}
+                <div className="flex items-center gap-1.5 select-none">
+                  {[1, 2, 3, 4].map((step) => {
+                    const isCompleted = step <= (localMastery || 0);
+                    return (
+                      <span
+                        key={step}
+                        className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                          isCompleted
+                            ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                            : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
+                        }`}
+                      />
+                    );
+                  })}
                 </div>
 
                 {/* Кнопка сдачи "?" */}
@@ -3352,23 +3453,46 @@ function StudyInterface({
 
   useEffect(() => {
     setLangStats(getLanguageDailyStats(studyLanguage));
-    syncDailyStatsFromCloud(studyLanguage);
+    syncCloudDailyStats(undefined, studyLanguage).then(count => {
+      if (typeof count === 'number' && count > 0) {
+        setLangStats(prev => ({
+          ...prev,
+          learnedToday: Math.max(prev.learnedToday, count),
+          totalCount: Math.max(prev.totalCount, count),
+          correctCount: Math.max(prev.correctCount, count)
+        }));
+      }
+    });
   }, [studyLanguage]);
 
   useEffect(() => {
     const handleStatsUpdate = () => {
       setLangStats(getLanguageDailyStats(studyLanguage));
     };
-    const handleFocus = () => {
-      syncDailyStatsFromCloud(studyLanguage);
+    const handleSync = () => {
+      syncCloudDailyStats(undefined, studyLanguage).then(count => {
+        if (typeof count === 'number' && count > 0) {
+          setLangStats(prev => ({
+            ...prev,
+            learnedToday: Math.max(prev.learnedToday, count),
+            totalCount: Math.max(prev.totalCount, count),
+            correctCount: Math.max(prev.correctCount, count)
+          }));
+        }
+      });
     };
     window.addEventListener('stats-update', handleStatsUpdate);
     window.addEventListener('storage-update', handleStatsUpdate);
-    window.addEventListener('focus', handleFocus);
+    window.addEventListener('focus', handleSync);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') handleSync();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       window.removeEventListener('stats-update', handleStatsUpdate);
       window.removeEventListener('storage-update', handleStatsUpdate);
-      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('focus', handleSync);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [studyLanguage]);
 
@@ -4038,7 +4162,7 @@ function StudyCard({
     const handleNativeGlobalKeyDown = (e: KeyboardEvent) => {
       const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
       if (isSpecialKey) return;
-      playTockSound();
+      playSafeAudio(() => playTockSound());
     };
     
     window.addEventListener('keydown', handleNativeGlobalKeyDown);
@@ -4063,7 +4187,7 @@ function StudyCard({
 
   const handleReveal = useCallback(() => {
     setPhase("Answer");
-    playAudio(fullSentence);
+    playSafeAudio(() => playAudio(fullSentence));
   }, [fullSentence, playAudio]);
 
   const handleOptionClick = (option: string) => {
@@ -4071,7 +4195,10 @@ function StudyCard({
     const optLower = option.trim().toLowerCase();
     const correct = optLower === card.targetWord.trim().toLowerCase() || optLower === clozeWord.trim().toLowerCase();
     
-    // 1. Мгновенно вычисляем и зажигаем синюю точку в шапке
+    // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
+    setPhase("Answer");
+
+    // 2. Мгновенно вычисляем и зажигаем синюю точку в шапке
     const nextMastery = correct 
       ? Math.min(4, (localMastery || 0) + 1) 
       : Math.max(0, (localMastery || 0) - 1);
@@ -4081,18 +4208,40 @@ function StudyCard({
       setHasErrored(true);
       hasErroredRef.current = true;
     }
-    playFeedbackSound(correct);
-    onAnswer(correct, false);
-    handleReveal();
+
+    // 3. Безопасная озвучка (не крашит поток в Safari)
+    if (correct) {
+      playSafeAudio(() => playSuccessSound());
+      playSafeAudio(() => playAudio(fullSentence));
+    } else {
+      playSafeAudio(() => playErrorSound());
+      playSafeAudio(() => playAudio(fullSentence));
+    }
+
+    // 4. Оповещаем родителя
+    try {
+      onAnswer(correct, false);
+    } catch (e) {
+      console.warn('onAnswer error caught:', e);
+    }
   };
 
+  const handleSelectOption = handleOptionClick;
+
   const handleHilfe = () => {
+    // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
+    setPhase("Answer");
     const nextMastery = Math.max(0, (localMastery || 0) - 1);
     setLocalMastery(nextMastery);
     setHasErrored(true);
     hasErroredRef.current = true;
-    onAnswer(false, true); // isHilfe = true
-    handleReveal();
+    playSafeAudio(() => playErrorSound());
+    playSafeAudio(() => playAudio(fullSentence));
+    try {
+      onAnswer(false, true); // isHilfe = true
+    } catch (e) {
+      console.warn('onAnswer error caught:', e);
+    }
   };
 
   const processNewValue = (value: string) => {
@@ -4104,20 +4253,28 @@ function StudyCard({
 
     const lastCharIndex = value.length - 1;
     if (value.length > 0 && !lastCharValid) {
-      playFeedbackSound(false);
+      playSafeAudio(() => playErrorSound());
       triggerHaptic('error');
       // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
     }
 
     if (isValid && isComplete) {
-      // 1. Мгновенно вычисляем и зажигаем синюю точку в шапке
+      // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
+      setPhase("Answer");
+
+      // 2. Мгновенно вычисляем и зажигаем синюю точку в шапке
       const nextMastery = Math.min(4, (localMastery || 0) + 1);
       setLocalMastery(nextMastery);
 
-      playFeedbackSound(true);
+      playSafeAudio(() => playSuccessSound());
+      playSafeAudio(() => playAudio(fullSentence));
       triggerHaptic('success');
-      onAnswer(true, false);
-      handleReveal();
+
+      try {
+        onAnswer(true, false);
+      } catch (e) {
+        console.warn('onAnswer error caught:', e);
+      }
     }
   };
 
@@ -4126,12 +4283,12 @@ function StudyCard({
   };
 
   const handleVirtualKeyPress = (char: string) => {
-    playTockSound();
+    playSafeAudio(() => playTockSound());
     processNewValue(inputText + char);
   };
 
   const handleVirtualBackspace = () => {
-    playTockSound();
+    playSafeAudio(() => playTockSound());
     processNewValue(inputText.slice(0, -1));
   };
 
@@ -4304,18 +4461,20 @@ function StudyCard({
 
           {/* Правая часть: точки прогресса и помощь */}
           <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center gap-1.5">
-              {[0, 1, 2, 3].map((step) => (
-                <span 
-                  key={step} 
-                  className={cn(
-                    "w-2 h-2 rounded-full transition-colors duration-200",
-                    step < localMastery
-                      ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]"
-                      : "bg-zinc-800"
-                  )}
-                />
-              ))}
+            <div className="flex items-center gap-1.5 select-none">
+              {[1, 2, 3, 4].map((step) => {
+                const isCompleted = step <= (localMastery || 0);
+                return (
+                  <span 
+                    key={step} 
+                    className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                      isCompleted
+                        ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                        : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
+                    }`}
+                  />
+                );
+              })}
             </div>
             <button 
               type="button"
@@ -4399,7 +4558,7 @@ function StudyCard({
 
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
               <div className="mt-5 flex flex-col items-center gap-1.5 transition-opacity duration-200">
-                <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm mb-2 max-w-[95%]">
+                <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm mt-3 mb-2 max-w-[95%]">
                   {renderFormattedGrammarRule(
                     card.grammarHint || 
                     card.explanation || 
@@ -4681,19 +4840,46 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
   useEffect(() => {
     fixAndIsolateDailyStats();
     checkAndResetDailyProgress();
-    syncDailyStatsFromCloud(effectiveLang);
+    syncCloudDailyStats(undefined, effectiveLang).then(count => {
+      if (typeof count === 'number' && count > 0) {
+        setLangStats(prev => ({
+          ...prev,
+          learnedToday: Math.max(prev.learnedToday, count),
+          totalCount: Math.max(prev.totalCount, count),
+          correctCount: Math.max(prev.correctCount, count)
+        }));
+      }
+    });
   }, []);
 
   useEffect(() => {
     setLangStats(getLanguageDailyStats(effectiveLang));
-    syncDailyStatsFromCloud(effectiveLang);
+    syncCloudDailyStats(undefined, effectiveLang).then(count => {
+      if (typeof count === 'number' && count > 0) {
+        setLangStats(prev => ({
+          ...prev,
+          learnedToday: Math.max(prev.learnedToday, count),
+          totalCount: Math.max(prev.totalCount, count),
+          correctCount: Math.max(prev.correctCount, count)
+        }));
+      }
+    });
   }, [effectiveLang]);
 
   useEffect(() => {
     const handleUpdate = () => {
       checkAndResetDailyProgress();
       setLangStats(getLanguageDailyStats(effectiveLang));
-      syncDailyStatsFromCloud(effectiveLang);
+      syncCloudDailyStats(undefined, effectiveLang).then(count => {
+        if (typeof count === 'number' && count > 0) {
+          setLangStats(prev => ({
+            ...prev,
+            learnedToday: Math.max(prev.learnedToday, count),
+            totalCount: Math.max(prev.totalCount, count),
+            correctCount: Math.max(prev.correctCount, count)
+          }));
+        }
+      });
     };
 
     window.addEventListener('stats-update', handleUpdate);
@@ -6990,13 +7176,15 @@ function PrepStudyCard({
        const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
        setLocalMastery(nextMastery);
        setIsSuccess(true);
-       playFeedbackSound(true);
-       playAudio();
-       onAnswer(card.id, isCorrect, isHilfe);
+       playSafeAudio(() => playSuccessSound());
+       playSafeAudio(() => playAudio());
+       try {
+         onAnswer(card.id, isCorrect, isHilfe);
+       } catch (e) {}
     } else {
        hasErroredRef.current = true;
        setHasErrored(true);
-       playFeedbackSound(false);
+       playSafeAudio(() => playErrorSound());
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
     }
@@ -7008,8 +7196,10 @@ function PrepStudyCard({
     setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
-    playAudio();
-    onAnswer(card.id, false, true);
+    playSafeAudio(() => playAudio());
+    try {
+      onAnswer(card.id, false, true);
+    } catch (e) {}
   }, [card.id, onAnswer, playAudio]);
 
   useEffect(() => {
@@ -7068,18 +7258,20 @@ function PrepStudyCard({
         )}
 
         <div className="flex items-center gap-3 shrink-0">
-          <div className="flex gap-1.5">
-            {[0, 1, 2, 3].map((step) => (
-              <div 
-                key={step} 
-                className={cn(
-                  "w-2 h-2 rounded-full transition-all duration-300",
-                  step < localMastery
-                    ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]" 
-                    : "bg-zinc-800"
-                )}
-              />
-            ))}
+          <div className="flex items-center gap-1.5 select-none">
+            {[1, 2, 3, 4].map((step) => {
+              const isCompleted = step <= (localMastery || 0);
+              return (
+                <span 
+                  key={step} 
+                  className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                    isCompleted
+                      ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                      : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
+                  }`}
+                />
+              );
+            })}
           </div>
           <button 
             type="button"
@@ -7261,8 +7453,11 @@ function VerbStudyCard({
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
       setIsSuccess(true);
-      playAudio();
-      onAnswer(isCorrect, false);
+      playSafeAudio(() => playSuccessSound());
+      playSafeAudio(() => playAudio());
+      try {
+        onAnswer(isCorrect, false);
+      } catch (e) {}
     }
   }, [isHilfe, playAudio, onAnswer, localMastery]);
 
@@ -7276,8 +7471,10 @@ function VerbStudyCard({
     setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
-    playAudio();
-    onAnswer(false, true);
+    playSafeAudio(() => playAudio());
+    try {
+      onAnswer(false, true);
+    } catch (e) {}
   }, [playAudio, onAnswer]);
 
   const displayInfinitiv = (verbInfo.infinitiv || "").split('|').map((part: string, i: number, arr: string[]) => (
@@ -7311,18 +7508,20 @@ function VerbStudyCard({
         )}
 
         <div className="flex items-center gap-3 shrink-0">
-          <div className="flex gap-1.5">
-            {[0, 1, 2, 3].map((step) => (
-              <div 
-                key={step} 
-                className={cn(
-                  "w-2 h-2 rounded-full transition-all duration-300",
-                  step < localMastery 
-                    ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]" 
-                    : "bg-zinc-800"
-                )}
-              />
-            ))}
+          <div className="flex items-center gap-1.5 select-none">
+            {[1, 2, 3, 4].map((step) => {
+              const isCompleted = step <= (localMastery || 0);
+              return (
+                <span 
+                  key={step} 
+                  className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                    isCompleted
+                      ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                      : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
+                  }`}
+                />
+              );
+            })}
           </div>
           <button 
             type="button"
@@ -7651,16 +7850,20 @@ export function RedemittelStudyCard({
       setLocalMastery(nextMastery);
       if (isCorrect) {
         setStatus('success');
-        playFeedbackSound(true);
+        playSafeAudio(() => playSuccessSound());
         setIsAudioPlaying(true);
-        playGermanSpeech(data.fullText, {
+        playSafeAudio(() => playGermanSpeech(data.fullText, {
           onEnd: () => setIsAudioPlaying(false),
-        });
-        onAnswer(true, false);
+        }));
+        try {
+          onAnswer(true, false);
+        } catch (e) {}
       } else {
         setStatus('error');
-        playFeedbackSound(false);
-        onAnswer(false, false);
+        playSafeAudio(() => playErrorSound());
+        try {
+          onAnswer(false, false);
+        } catch (e) {}
       }
     } else {
       if (status === 'error') {
@@ -7691,12 +7894,14 @@ export function RedemittelStudyCard({
     const correctOrder = [...data.shuffledChunks].sort((a, b) => a.originalIndex - b.originalIndex);
     setPlacedChunks(correctOrder);
     setStatus('surrender');
-    playFeedbackSound(false);
+    playSafeAudio(() => playErrorSound());
     setIsAudioPlaying(true);
-    playGermanSpeech(data.fullText, {
+    playSafeAudio(() => playGermanSpeech(data.fullText, {
       onEnd: () => setIsAudioPlaying(false),
-    });
-    onAnswer(false, true);
+    }));
+    try {
+      onAnswer(false, true);
+    } catch (e) {}
   }, [data.shuffledChunks, data.fullText, status, onAnswer]);
 
   // Available chunks for keyboard shortcuts and hotkey badge
@@ -7807,18 +8012,20 @@ export function RedemittelStudyCard({
             >
               <HelpCircle className="w-5 h-5" />
             </button>
-            <div className="flex gap-1.5 items-center">
-              {[0, 1, 2, 3].map((step) => (
-                <div
-                  key={step}
-                  className={cn(
-                    "w-2.5 h-2.5 rounded-full transition-colors",
-                    step < localMastery
-                      ? "bg-blue-600 dark:bg-blue-500"
-                      : "bg-gray-200 dark:bg-zinc-700"
-                  )}
-                />
-              ))}
+            <div className="flex items-center gap-1.5 select-none">
+              {[1, 2, 3, 4].map((step) => {
+                const isCompleted = step <= (localMastery || 0);
+                return (
+                  <span
+                    key={step}
+                    className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                      isCompleted
+                        ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
+                        : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
+                    }`}
+                  />
+                );
+              })}
             </div>
           </div>
         </div>
