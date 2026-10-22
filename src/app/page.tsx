@@ -218,10 +218,15 @@ export const checkAndResetDailyProgress = () => {
 };
 
 function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState(false);
+  const [isMobile, setIsMobile] = React.useState(() => {
+    if (typeof window === 'undefined') return false;
+    const hasTouch = 'ontouchstart' in window || (typeof navigator !== 'undefined' && ((navigator.maxTouchPoints || 0) > 0 || (navigator as any).msMaxTouchPoints > 0));
+    const isNarrow = window.innerWidth < 768;
+    return hasTouch || isNarrow;
+  });
   React.useEffect(() => {
     const check = () => {
-      const hasTouch = 'ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+      const hasTouch = 'ontouchstart' in window || (typeof navigator !== 'undefined' && ((navigator.maxTouchPoints || 0) > 0 || (navigator as any).msMaxTouchPoints > 0));
       const isNarrow = typeof window !== 'undefined' && window.innerWidth < 768;
       setIsMobile(hasTouch || isNarrow);
     };
@@ -2536,20 +2541,28 @@ function RapidFlashcardMode({
             className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none cursor-text"
           >
             {/* Шапка: Звук, статус-точки, помощь */}
-            <div className="h-12 shrink-0 flex items-center justify-between w-full">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between w-full h-12 shrink-0 mb-6">
+              {/* Кнопки звука и скорости */}
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); speak(); }}
-                  className="w-9 h-9 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/10 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white transition active:scale-95 cursor-pointer"
+                  className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 cursor-pointer"
                   title="Aussprache anhören (R)"
                 >
                   <Volume2 className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="flex items-center gap-3">
-                {/* Точки раундов */}
+              {/* Название темы со свободным отступом слева и защитой от перекрытия */}
+              {deckTitle && (
+                <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-400 uppercase tracking-wider select-none">
+                  {deckTitle}
+                </div>
+              )}
+
+              {/* Правая часть: точки прогресса и помощь */}
+              <div className="flex items-center gap-3 shrink-0">
                 <div className="flex items-center gap-1.5">
                   {[1, 2, 3, 4].map((step) => (
                     <span
@@ -2558,7 +2571,7 @@ function RapidFlashcardMode({
                         "w-2 h-2 rounded-full transition-all duration-200",
                         step <= localMastery
                           ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]"
-                          : "bg-zinc-300 dark:bg-zinc-800"
+                          : "bg-zinc-800"
                       )}
                     />
                   ))}
@@ -2569,7 +2582,7 @@ function RapidFlashcardMode({
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
                   disabled={isAnswered || locked}
-                  className="w-7 h-7 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 border border-black/10 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white transition active:scale-95 disabled:opacity-40 cursor-pointer"
+                  className="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
                   title="Сдаться (-1 раунд)"
                 >
                   <HelpCircle className="w-3.5 h-3.5" />
@@ -2600,23 +2613,26 @@ function RapidFlashcardMode({
                   <input
                     ref={inputRef}
                     type="text"
-                    inputMode={isMobile ? "none" : "text"}
                     readOnly={isMobile || locked}
+                    inputMode="none"
+                    tabIndex={isMobile ? -1 : 0}
                     value={typedValue}
-                    onChange={(e) => handleInputChange(e.target.value)}
+                    onChange={(e) => !isMobile && handleInputChange(e.target.value)}
                     onKeyDown={(e) => {
                       e.stopPropagation();
                       if (e.key === 'Enter') {
-                        handleEnterSubmit();
+                        if (isAnswered) handleProceedNext();
+                        else handleEnterSubmit();
                       }
                     }}
-                    autoFocus={!isMobile}
+                    autoFocus={false}
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
-                    placeholder=""
+                    placeholder={isAnswered ? '' : 'Tippen...'}
                     className={cn(
                       "w-full text-center font-medium py-3.5 px-4 sm:px-6 rounded-2xl outline-none transition-colors duration-150 caret-transparent border break-words",
+                      isMobile && "pointer-events-none select-none",
                       getAdaptiveFontSize(typedValue || parsedNoun.full || card.targetWord || ''),
                       isErrorMismatch
                         ? "text-rose-500 dark:text-rose-400 border-rose-500/50 bg-rose-500/5"
@@ -3751,10 +3767,10 @@ function StudyCard({
   }, [checkInputValidation, inputText]);
 
   useEffect(() => {
-    if (phase === "Answer" && nextButtonRef.current) {
+    if (!isMobile && phase === "Answer" && nextButtonRef.current) {
       nextButtonRef.current.focus();
     }
-  }, [phase]);
+  }, [isMobile, phase]);
 
   // Attach typing sound natively to window to bypass React event limitations and ensure it fires
   useEffect(() => {
@@ -3978,76 +3994,71 @@ function StudyCard({
           }
         }}
       >
-        <div className="w-full flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between w-full h-12 shrink-0 mb-6">
+          {/* Кнопки звука и скорости */}
+          <div className="flex items-center gap-2 shrink-0">
             <button 
+              type="button"
               onClick={() => {
                 const speechSentence = phase === "Answer" ? fullSentence : (parts[0] + "Lücke" + parts[1]);
                 playAudio(speechSentence);
               }}
               disabled={isPlayingAudio}
-              className="relative w-11 h-11 flex items-center justify-center bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-500 dark:text-[#8E8E93] rounded-full transition-transform duration-150 ease-out active:scale-[0.96] disabled:opacity-50"
+              className="relative w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-50 cursor-pointer"
+              title="Aussprache anhören (R)"
             >
-              <Volume2 className="w-5 h-5" />
-              <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded-[4px] px-1 shadow-sm pointer-events-none">
+              <Volume2 className="w-4 h-4" />
+              <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded px-0.5 shadow-sm pointer-events-none">
                 R
               </span>
             </button>
             
             <button
+              type="button"
               onClick={() => setPlaybackSpeed(playbackSpeed === 1 ? 0.75 : 1)}
-              className="flex items-center justify-center h-[28px] px-3 rounded-full bg-gray-50/80 dark:bg-[#2C2C2E]/60 backdrop-blur-md border border-black/[0.03] dark:border-white/[0.05] text-gray-500 dark:text-[#8E8E93] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] hover:text-gray-700 dark:hover:text-[#EBEBF5] transition-all active:scale-[0.96] shadow-sm select-none"
+              className="text-xs font-medium text-zinc-400 hover:text-white px-2 py-0.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition active:scale-95 cursor-pointer"
               title="Playback Speed"
             >
-              <AnimatePresence mode="wait">
-                <motion.span
-                  key={playbackSpeed}
-                  initial={{ opacity: 0, y: 4, scale: 0.9 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -4, scale: 0.9 }}
-                  transition={{ duration: 0.15, ease: "easeOut" }}
-                  className="text-[11px] font-semibold tabular-nums tracking-wide leading-none"
-                >
-                  {playbackSpeed}x
-                </motion.span>
-              </AnimatePresence>
+              <span className="text-[11px] font-semibold tabular-nums tracking-wide leading-none">
+                {playbackSpeed}x
+              </span>
             </button>
           </div>
-          <div className="flex items-center gap-4">
-            <AnimatePresence>
-              {(hasErrored || phase === "Answer") && deckTitle && (
-                <motion.span 
-                  initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
-                  animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
-                >
-                  {deckTitle}
-                </motion.span>
-              )}
-            </AnimatePresence>
-            <button 
-              onClick={handleHilfe}
-              disabled={phase !== "Question"}
-              className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors",
-                phase !== "Question" && "opacity-0 pointer-events-none"
-              )}
-              title="Hilfe (H)"
-            >
-              <HelpCircle className="w-5 h-5" />
-            </button>
-            <div className="flex gap-1.5">
+
+          {/* Название темы со свободным отступом слева и защитой от перекрытия */}
+          {deckTitle && (
+            <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-400 uppercase tracking-wider select-none">
+              {deckTitle}
+            </div>
+          )}
+
+          {/* Правая часть: точки прогресса и помощь */}
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-1.5">
               {[0, 1, 2, 3].map((step) => (
-                <div 
+                <span 
                   key={step} 
                   className={cn(
-                    "w-2.5 h-2.5 rounded-full transition-colors",
-                    step < localMastery ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-200 dark:bg-gray-700"
+                    "w-2 h-2 rounded-full transition-colors duration-200",
+                    step < localMastery
+                      ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]"
+                      : "bg-zinc-800"
                   )}
                 />
               ))}
             </div>
+            <button 
+              type="button"
+              onClick={handleHilfe}
+              disabled={phase !== "Question"}
+              className={cn(
+                "w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+                phase !== "Question" && "opacity-0 pointer-events-none"
+              )}
+              title="Hilfe (H)"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
 
@@ -4073,23 +4084,35 @@ function StudyCard({
                     {displayAnswerWord}
                   </span>
                 ) : (
-                  <span className="inline-block relative align-baseline border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5">
+                  <span 
+                    className="inline-block relative align-baseline border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5"
+                    onClick={(e) => {
+                      if (isMobile) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    }}
+                  >
                     <span className="inline-block w-full text-center">
                       {renderInputChars()}
                     </span>
                     <input
                       ref={inputRef}
-                      autoFocus={!isMobile}
                       type="text"
-                      inputMode={isMobile ? "none" : "text"}
                       readOnly={isMobile}
+                      inputMode="none"
+                      tabIndex={isMobile ? -1 : 0}
                       value={inputText}
-                      onChange={handleInputChange}
+                      onChange={(e) => !isMobile && handleInputChange(e)}
                       onKeyDown={handleKeyDown}
-                      className="absolute inset-0 opacity-0 cursor-default w-full h-full"
+                      className={cn(
+                        "absolute inset-0 opacity-0 cursor-default w-full h-full",
+                        isMobile && "pointer-events-none select-none"
+                      )}
                       autoComplete="off"
                       autoCorrect="off"
                       spellCheck={false}
+                      autoFocus={false}
                     />
                   </span>
                 )}
@@ -6760,53 +6783,53 @@ function PrepStudyCard({
       key={card.id}
       className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
     >
-      <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
-        <button 
-          onClick={playAudio}
-          className="w-10 h-10 rounded-full bg-white dark:bg-[#2C2C2E] flex items-center justify-center text-gray-700 dark:text-[#E5E5EA] shadow-sm hover:scale-105 active:scale-95 transition-all border border-black/[0.05] dark:border-white/[0.05]"
-          title="Audio abspielen"
-        >
-          <Volume2 className="w-5 h-5" />
-        </button>
-        <div className="flex items-center gap-4">
-          <AnimatePresence>
-            {(hasErrored || isSuccess || isHilfe) && deckTitle && (
-              <motion.span 
-                initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
-                animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
-                exit={{ opacity: 0 }}
-                className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
-              >
-                {deckTitle}
-              </motion.span>
-            )}
-          </AnimatePresence>
+      <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
+        <div className="flex items-center gap-2 shrink-0">
           <button 
-            onClick={onHilfe}
-            disabled={isSuccess || isHilfe}
-            className={cn(
-              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors mr-1",
-              (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
-            )}
-            title="Ich weiß nicht"
+            type="button"
+            onClick={playAudio}
+            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95"
+            title="Audio abspielen"
           >
-            <HelpCircle className="w-5 h-5" />
+            <Volume2 className="w-4 h-4" />
           </button>
+        </div>
+
+        {deckTitle && (
+          <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-400 uppercase tracking-wider select-none">
+            {deckTitle}
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 shrink-0">
           <div className="flex gap-1.5">
             {[0, 1, 2, 3].map((step) => (
               <div 
                 key={step} 
                 className={cn(
-                  "w-2.5 h-2.5 rounded-full transition-all duration-300",
+                  "w-2 h-2 rounded-full transition-all duration-300",
                   step < localMastery
-                    ? "bg-blue-600 dark:bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
-                    : "bg-gray-200 dark:bg-white/10"
+                    ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]" 
+                    : "bg-zinc-800"
                 )}
               />
             ))}
           </div>
+          <button 
+            type="button"
+            onClick={onHilfe}
+            disabled={isSuccess || isHilfe}
+            className={cn(
+              "w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+              (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
+            )}
+            title="Ich weiß nicht"
+          >
+            <HelpCircle className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
+
 
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
         <div className="text-center mb-10 w-full mt-10">
@@ -7000,51 +7023,50 @@ function VerbStudyCard({
       key={card.id}
       className="w-full max-w-[720px] min-h-[440px] rounded-[32px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/10 p-8 sm:p-10 pb-9 sm:pb-11 shadow-2xl backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
     >
-      <div className="w-full flex justify-between items-start absolute top-0 left-0 p-6 z-20">
-        <button 
-          onClick={playAudio}
-          className="w-10 h-10 rounded-full bg-white dark:bg-[#2C2C2E] flex items-center justify-center text-gray-700 dark:text-[#E5E5EA] shadow-sm hover:scale-105 active:scale-95 transition-all border border-black/[0.05] dark:border-white/[0.05]"
-          title="Audio abspielen (A)"
-        >
-          <Volume2 className="w-5 h-5" />
-        </button>
-        <div className="flex items-center gap-4">
-          <AnimatePresence>
-            {(hasErrored || isSuccess || isHilfe) && deckTitle && (
-              <motion.span 
-                initial={{ opacity: 0, filter: "blur(4px)", x: 10 }}
-                animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
-                exit={{ opacity: 0 }}
-                className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest mr-1 mt-0.5"
-              >
-                {deckTitle}
-              </motion.span>
-            )}
-          </AnimatePresence>
+      <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
+        <div className="flex items-center gap-2 shrink-0">
           <button 
-            onClick={handleHilfe}
-            disabled={isSuccess || isHilfe}
-            className={cn(
-              "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors mr-1",
-              (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
-            )}
-            title="Ich weiß nicht"
+            type="button"
+            onClick={playAudio}
+            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95"
+            title="Audio abspielen (A)"
           >
-            <HelpCircle className="w-5 h-5" />
+            <Volume2 className="w-4 h-4" />
           </button>
+        </div>
+
+        {deckTitle && (
+          <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-400 uppercase tracking-wider select-none">
+            {deckTitle}
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 shrink-0">
           <div className="flex gap-1.5">
             {[0, 1, 2, 3].map((step) => (
               <div 
                 key={step} 
                 className={cn(
-                  "w-2.5 h-2.5 rounded-full transition-all duration-300",
+                  "w-2 h-2 rounded-full transition-all duration-300",
                   step < localMastery 
-                    ? "bg-blue-600 dark:bg-blue-500 scale-110 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
-                    : "bg-gray-200 dark:bg-white/10"
+                    ? "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.5)]" 
+                    : "bg-zinc-800"
                 )}
               />
             ))}
           </div>
+          <button 
+            type="button"
+            onClick={handleHilfe}
+            disabled={isSuccess || isHilfe}
+            className={cn(
+              "w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+              (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
+            )}
+            title="Ich weiß nicht"
+          >
+            <HelpCircle className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
