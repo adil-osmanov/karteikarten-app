@@ -69,16 +69,21 @@ async function fetchGoogleGermanTTS(text: string): Promise<Buffer | null> {
           "Referer": "https://translate.google.com/",
         },
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(`Google TTS status ${res.status}: ${errText.slice(0, 100)}`);
+      }
       const ab = await res.arrayBuffer();
-      if (!ab || ab.byteLength < 50) return null;
+      if (!ab || ab.byteLength < 50) {
+        throw new Error(`Google TTS empty buffer: ${ab ? ab.byteLength : 0}`);
+      }
       buffers.push(Buffer.from(ab));
     }
 
     return Buffer.concat(buffers);
-  } catch (err) {
+  } catch (err: any) {
     console.error("Google TTS fallback failed:", err);
-    return null;
+    throw err;
   }
 }
 
@@ -178,17 +183,24 @@ export async function POST(req: NextRequest) {
 
     // 4. Resilient Fallback to High-Quality Google German Neural Audio if EdgeTTS is blocked
     let source = "edge-fresh";
+    let fallbackError: unknown = null;
     if (!audioBuffer || audioBuffer.length < 100) {
       console.warn("EdgeTTS unavailable (datacenter block or rate limit), using resilient fallback:", edgeTtsError);
-      const fallbackBuf = await fetchGoogleGermanTTS(cleanText);
-      if (fallbackBuf && fallbackBuf.length > 100) {
-        audioBuffer = fallbackBuf;
-        source = "google-fallback";
+      try {
+        const fallbackBuf = await fetchGoogleGermanTTS(cleanText);
+        if (fallbackBuf && fallbackBuf.length > 100) {
+          audioBuffer = fallbackBuf;
+          source = "google-fallback";
+        }
+      } catch (fErr) {
+        fallbackError = fErr;
       }
     }
 
     if (!audioBuffer || audioBuffer.length < 100) {
-      throw edgeTtsError || new Error("Failed to synthesize audio after all fallbacks");
+      const eMsg = edgeTtsError instanceof Error ? edgeTtsError.message : String(edgeTtsError);
+      const fMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      throw new Error(`EdgeTTS failed: (${eMsg}) | Fallback failed: (${fMsg})`);
     }
 
     // Save to Disk Cache
