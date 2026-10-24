@@ -37,6 +37,51 @@ function getCacheFilename(text: string, voice: string = "default"): string {
   return path.join(DISK_CACHE_DIR, `${hash}.mp3`);
 }
 
+async function fetchGoogleGermanTTS(text: string): Promise<Buffer | null> {
+  try {
+    const clean = text.trim();
+    if (!clean) return null;
+
+    // Google Translate TTS handles up to ~180 chars per chunk cleanly
+    const chunks: string[] = [];
+    if (clean.length <= 180) {
+      chunks.push(clean);
+    } else {
+      const sentences = clean.split(/([,;:\.\?!]+\s+)/);
+      let cur = "";
+      for (const part of sentences) {
+        if ((cur + part).length > 180) {
+          if (cur.trim()) chunks.push(cur.trim());
+          cur = part;
+        } else {
+          cur += part;
+        }
+      }
+      if (cur.trim()) chunks.push(cur.trim());
+    }
+
+    const buffers: Buffer[] = [];
+    for (const chunk of chunks) {
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=de&client=tw-ob`;
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Referer": "https://translate.google.com/",
+        },
+      });
+      if (!res.ok) return null;
+      const ab = await res.arrayBuffer();
+      if (!ab || ab.byteLength < 50) return null;
+      buffers.push(Buffer.from(ab));
+    }
+
+    return Buffer.concat(buffers);
+  } catch (err) {
+    console.error("Google TTS fallback failed:", err);
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { text, voice } = await req.json();
@@ -91,44 +136,65 @@ export async function POST(req: NextRequest) {
         }
       }
     } catch {
-      // Ignore disk read error and proceed to network synthesis
+      // Ignore disk read error and proceed to synthesis
     }
 
-    // 3. Network synthesis via EdgeTTS with voice fallback
-    const voiceCandidates = [
-      requestedVoice,
-      ...FALLBACK_VOICES.filter((v) => v !== requestedVoice),
-    ];
-
+    // 3. Synthesis via Microsoft EdgeTTS
     let audioBuffer: Buffer | null = null;
-    let lastError: unknown = null;
+    let edgeTtsError: unknown = null;
 
-    const tts = new EdgeTTS();
+    try {
+      const voiceCandidates = [
+        requestedVoice,
+        ...FALLBACK_VOICES.filter((v) => v !== requestedVoice),
+      ];
 
-    for (let attempt = 0; attempt < voiceCandidates.length; attempt++) {
-      const vName = voiceCandidates[attempt];
-      try {
-        const result = await tts.generate(cleanText, vName, {
-          rate: "-4%",
-          timeout: 5000,
-        });
+      const tts = new EdgeTTS();
 
-        if (result?.audio && result.audio.length > 100) {
-          audioBuffer = Buffer.isBuffer(result.audio) ? result.audio : Buffer.from(result.audio);
-          try {
-            fs.writeFileSync(diskPath, audioBuffer);
-          } catch {}
-          break;
+      for (let attempt = 0; attempt < voiceCandidates.length; attempt++) {
+        const vName = voiceCandidates[attempt];
+        try {
+          const result = await tts.generate(cleanText, vName, {
+            rate: "-4%",
+            timeout: 3000,
+          });
+
+          if (result?.audio && result.audio.length > 100) {
+            audioBuffer = Buffer.isBuffer(result.audio) ? result.audio : Buffer.from(result.audio);
+            break;
+          }
+        } catch (err) {
+          edgeTtsError = err;
+          // If server returned 200 or 429 (datacenter block), retrying won't change IP
+          if (String(err).includes("200") || String(err).includes("429")) {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
         }
-      } catch (err) {
-        lastError = err;
-        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+    } catch (err) {
+      edgeTtsError = err;
+    }
+
+    // 4. Resilient Fallback to High-Quality Google German Neural Audio if EdgeTTS is blocked
+    let source = "edge-fresh";
+    if (!audioBuffer || audioBuffer.length < 100) {
+      console.warn("EdgeTTS unavailable (datacenter block or rate limit), using resilient fallback:", edgeTtsError);
+      const fallbackBuf = await fetchGoogleGermanTTS(cleanText);
+      if (fallbackBuf && fallbackBuf.length > 100) {
+        audioBuffer = fallbackBuf;
+        source = "google-fallback";
       }
     }
 
-    if (!audioBuffer) {
-      throw lastError || new Error("Failed to synthesize audio after retries");
+    if (!audioBuffer || audioBuffer.length < 100) {
+      throw edgeTtsError || new Error("Failed to synthesize audio after all fallbacks");
     }
+
+    // Save to Disk Cache
+    try {
+      fs.writeFileSync(diskPath, audioBuffer);
+    } catch {}
 
     // Save to RAM cache
     if (serverTtsCache.size >= MAX_SERVER_CACHE_ITEMS) {
@@ -141,7 +207,7 @@ export async function POST(req: NextRequest) {
       headers: {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "public, max-age=31536000, immutable",
-        "X-TTS-Source": "edge-fresh",
+        "X-TTS-Source": source,
       },
     });
   } catch (error: any) {
