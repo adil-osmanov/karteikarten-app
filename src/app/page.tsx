@@ -2666,6 +2666,16 @@ function RapidFlashcardMode({
     return raw.replace(/[|·\u2506\u250A]/g, '').trim();
   }, [currentCard?.targetWord]);
 
+  const displaySentence = useMemo(() => {
+    const s = currentCard?.sentence;
+    if (!s || s === '-' || s === 'VERB_DRILL') return null;
+    if (s.includes('___')) {
+      const fillWord = (wordOnly || currentCard?.targetWord || '').replace(/[|·\u2506\u250A]/g, '').trim();
+      return s.replace(/___+/g, fillWord).trim();
+    }
+    return s.trim();
+  }, [currentCard?.sentence, currentCard?.targetWord, wordOnly]);
+
   const playCardAudio = useCallback((word?: string) => {
     const textToSpeak = (word || speechText || '').replace(/[|·\u2506\u250A]/g, '').trim();
     if (!textToSpeak) return;
@@ -3048,9 +3058,9 @@ function RapidFlashcardMode({
                 </p>
 
                 {/* 6. Чистая цитата примера (без серой плашки, строго как на скриншоте 3) */}
-                {currentCard?.sentence && currentCard?.sentence !== '-' && (
+                {displaySentence && (
                   <div className="mt-8 border-l border-zinc-600/70 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-500 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
-                    {currentCard.sentence}
+                    {displaySentence}
                   </div>
                 )}
               </div>
@@ -3230,6 +3240,22 @@ function RapidFlashcardMode({
                     {displayParts.stem && <span>{displayParts.stem}</span>}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Пример предложения и формы слова после ввода ответа (как в раундах 1-2) */}
+            {isAnswered && (
+              <div className="w-full max-w-lg mx-auto mt-6 space-y-3 animate-in fade-in duration-300">
+                {plural && (
+                  <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal">
+                    {plural}
+                  </p>
+                )}
+                {displaySentence && (
+                  <div className="border-l border-zinc-600/70 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-500 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
+                    {displaySentence}
+                  </div>
+                )}
               </div>
             )}
           </div>
