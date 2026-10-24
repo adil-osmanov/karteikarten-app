@@ -2430,6 +2430,17 @@ export interface ParsedTargetPhrase {
   article: string | null;
 }
 
+export function TrennbarDottedBar() {
+  return (
+    <span 
+      className="inline-flex items-center justify-center mx-[1px] align-baseline select-none pointer-events-none"
+      aria-hidden="true"
+    >
+      <span className="inline-block w-[1.5px] h-[0.72em] border-l-[1.5px] border-dotted border-current opacity-40 translate-y-[-0.05em]" />
+    </span>
+  );
+}
+
 export function parseTargetPhrase(raw: string): ParsedTargetPhrase {
   const trimmed = (raw || '').replace(/\s+/g, ' ').trim();
   if (!trimmed) {
@@ -2466,17 +2477,19 @@ export function parseTargetPhrase(raw: string): ParsedTargetPhrase {
     }
   }
 
-  // 2. Существительное с артиклем (der/die/das)
+  // 2. Существительное с артиклем (der/die/das) — артикль и пробел обязательны для изучения и ввода!
   const nounMatch = trimmed.match(/^(der|die|das)\s+([A-ZÄÖÜ][a-zA-ZäöüÄÖÜß-]*)$/i);
   if (nounMatch) {
+    const art = nounMatch[1].toLowerCase();
+    const noun = nounMatch[2];
     return {
       prefixContext: '',
-      coreWord: nounMatch[2],
+      coreWord: trimmed,
       suffixContext: '',
-      cleanCoreWord: nounMatch[2],
+      cleanCoreWord: `${art} ${noun}`,
       splitIndex: -1,
       isTrennbar: false,
-      article: nounMatch[1].toLowerCase()
+      article: art
     };
   }
 
@@ -2570,27 +2583,29 @@ function RapidFlashcardMode({
   }, [currentCard?.targetWord]);
 
   // Извлечение артикля, основного слова и множественного числа
+  // Устранена ошибка повторного артикля ("die die Aushilfe"): артикль строго отделяется от слова!
   const { article, wordOnly, plural } = useMemo(() => {
     let raw = (currentCard?.targetWord || '').trim();
-    let art: string | null = (currentCard as any)?.article || parsedTarget.article || null;
-    let noun = (currentCard as any)?.wordOnly || raw;
+    let art: string | null = null;
+    let noun = raw;
     let pl: string | null = (currentCard as any)?.plural || null;
 
-    if (!art) {
-      const directMatch = raw.match(/^(der|die|das)\s+(.+)$/i);
-      if (directMatch) {
-        art = directMatch[1];
-        noun = directMatch[2].trim();
+    const directMatch = raw.match(/^(der|die|das)\s+(.+)$/i);
+    if (directMatch) {
+      art = directMatch[1].toLowerCase();
+      noun = directMatch[2].trim();
+    } else if ((currentCard as any)?.article) {
+      art = ((currentCard as any).article as string).toLowerCase();
+      noun = (currentCard as any)?.wordOnly || raw;
+    } else {
+      const hintText = (currentCard?.hint || currentCard?.forms || '').trim();
+      const hintMatch = hintText.match(/^(der|die|das)\b\s*([a-zA-ZäöüÄÖÜß\s-]+?)(?:,\s*([-a-zA-ZäöüÄÖÜß]+))?(?:\s*—|\s*-\s*|\s*\(|$)/i);
+      if (hintMatch && (/^[A-ZÄÖÜ]/.test(raw) || hintMatch[2].trim().toLowerCase() === raw.toLowerCase())) {
+        art = hintMatch[1].toLowerCase();
       } else {
-        const hintText = (currentCard?.hint || currentCard?.forms || '').trim();
-        const hintMatch = hintText.match(/^(der|die|das)\b\s*([a-zA-ZäöüÄÖÜß\s-]+?)(?:,\s*([-a-zA-ZäöüÄÖÜß]+))?(?:\s*—|\s*-\s*|\s*\(|$)/i);
-        if (hintMatch && (/^[A-ZÄÖÜ]/.test(raw) || hintMatch[2].trim().toLowerCase() === raw.toLowerCase())) {
-          art = hintMatch[1];
-        } else {
-          const simpleArt = hintText.match(/^(der|die|das)\b/i);
-          if (simpleArt && /^[A-ZÄÖÜ]/.test(raw)) {
-            art = simpleArt[1];
-          }
+        const simpleArt = hintText.match(/^(der|die|das)\b/i);
+        if (simpleArt && /^[A-ZÄÖÜ]/.test(raw)) {
+          art = simpleArt[1].toLowerCase();
         }
       }
     }
@@ -2622,7 +2637,7 @@ function RapidFlashcardMode({
     }
 
     return { article: art, wordOnly: noun, plural: pl };
-  }, [currentCard?.targetWord, currentCard?.forms, currentCard?.hint, parsedTarget.article, (currentCard as any)?.article, (currentCard as any)?.wordOnly, (currentCard as any)?.plural]);
+  }, [currentCard?.targetWord, currentCard?.forms, currentCard?.hint, (currentCard as any)?.article, (currentCard as any)?.wordOnly, (currentCard as any)?.plural]);
 
   const getArticleColor = (art: string | null) => {
     if (!art) return '';
@@ -2633,26 +2648,26 @@ function RapidFlashcardMode({
     return 'text-rose-500 dark:text-rose-400 font-semibold mr-2';
   };
 
-  // Элегантный рендер слова с подсветкой отделяемой приставки в Раундах 1-2
+  // Элегантный рендер слова с тонкой пунктирной чертой того же цвета, что и текст (Раунды 1-2)
   const renderFormattedWord = useCallback((text: string) => {
     if (!text || !text.includes('|')) return text;
     const parts = text.split('|');
     return (
-      <>
+      <span className="inline-flex items-baseline flex-wrap justify-center">
         {parts[0]}
-        <span className="text-sky-500 dark:text-sky-400 mx-0.5 font-light select-none">|</span>
+        <TrennbarDottedBar />
         {parts.slice(1).join('')}
-      </>
+      </span>
     );
   }, []);
 
   const speechText = useMemo(() => {
     const raw = currentCard?.targetWord || '';
-    return raw.replace(/\|/g, '').trim();
+    return raw.replace(/[|·\u2506\u250A]/g, '').trim();
   }, [currentCard?.targetWord]);
 
   const playCardAudio = useCallback((word?: string) => {
-    const textToSpeak = (word || speechText || '').replace(/\|/g, '').trim();
+    const textToSpeak = (word || speechText || '').replace(/[|·\u2506\u250A]/g, '').trim();
     if (!textToSpeak) return;
     playSafeAudio(() => {
       playGermanSpeech(textToSpeak, { forceAudioEl: getSharedSpeechAudio() });
@@ -2772,46 +2787,53 @@ function RapidFlashcardMode({
 
   // Проверка совпадения ввода с целевым словом или всей фразой
   const checkTargetMatch = useCallback((input: string) => {
-    const cleanInput = (input || '').toLowerCase().replace(/[|·\s]/g, '');
-    if (!cleanInput) return { isMatch: false, isPrefix: true };
+    const trimmedInput = (input || '').replace(/[|·\u2506\u250A]/g, '').trimStart();
+    if (!trimmedInput) return { isMatch: false, isPrefix: true };
 
-    const targetCore = parsedTarget.cleanCoreWord.toLowerCase().replace(/[|·\s]/g, '');
-    const targetFull = (parsedTarget.prefixContext + ' ' + parsedTarget.cleanCoreWord + ' ' + parsedTarget.suffixContext)
-      .toLowerCase().replace(/[|·\s]/g, '');
-    const targetWithArt = parsedTarget.article 
-      ? (parsedTarget.article + ' ' + parsedTarget.cleanCoreWord).toLowerCase().replace(/[|·\s]/g, '') 
-      : '';
+    const targetCore = parsedTarget.cleanCoreWord.trim();
+    const targetFull = `${parsedTarget.prefixContext} ${parsedTarget.cleanCoreWord} ${parsedTarget.suffixContext}`.trim();
 
-    const isMatch = (cleanInput === targetCore) || 
-                    (cleanInput === targetFull) || 
-                    (!!targetWithArt && cleanInput === targetWithArt);
+    const lowerInput = trimmedInput.toLowerCase();
+    const lowerCore = targetCore.toLowerCase();
+    const lowerFull = targetFull.toLowerCase();
 
-    const isPrefix = targetCore.startsWith(cleanInput) || 
-                     targetFull.startsWith(cleanInput) || 
-                     (!!targetWithArt && targetWithArt.startsWith(cleanInput));
+    // Для отделяемых глаголов (напр., ausleihen) сравниваем без внутренних пробелов
+    if (parsedTarget.isTrennbar) {
+      const inputNoSpace = lowerInput.replace(/\s+/g, '');
+      const coreNoSpace = lowerCore.replace(/\s+/g, '');
+      const fullNoSpace = lowerFull.replace(/\s+/g, '');
+
+      const isMatch = (inputNoSpace === coreNoSpace) || (inputNoSpace === fullNoSpace);
+      const isPrefix = coreNoSpace.startsWith(inputNoSpace) || fullNoSpace.startsWith(inputNoSpace);
+      return { isMatch, isPrefix };
+    }
+
+    // Для существительных (напр., "die Voraussetzung") и фраз пробел строго обязателен!
+    const isMatch = (lowerInput.trim() === lowerCore) || (lowerInput.trim() === lowerFull);
+    const isPrefix = lowerCore.startsWith(lowerInput) || lowerFull.startsWith(lowerInput);
 
     return { isMatch, isPrefix };
   }, [parsedTarget]);
 
   // Динамическое отображение в поле ввода:
-  // При вводе отделяемого глагола (напр., ausleihen) слитно — автоматически отображается "aus | leihen"
+  // При вводе отделяемого глагола (напр., ausleihen) слитно — отображается "aus┆leihen" (тонкая пунктирная палочка без пробелов)
   const displayValue = useMemo(() => {
     if (isAnswered) {
       if (parsedTarget.isTrennbar && parsedTarget.splitIndex > 0) {
         const clean = parsedTarget.cleanCoreWord;
         const sIdx = parsedTarget.splitIndex;
-        return `${clean.slice(0, sIdx)} | ${clean.slice(sIdx)}`;
+        return `${clean.slice(0, sIdx)}┆${clean.slice(sIdx)}`;
       }
       return parsedTarget.cleanCoreWord || currentCard?.targetWord || '';
     }
 
     if (parsedTarget.isTrennbar && parsedTarget.splitIndex > 0) {
       const sIdx = parsedTarget.splitIndex;
-      const pure = typedValue.replace(/[|·\s]/g, '');
+      const pure = typedValue.replace(/[|·\u2506\u250A\s]/g, '');
       if (pure.length >= sIdx) {
         const p1 = pure.slice(0, sIdx);
         const p2 = pure.slice(sIdx);
-        return p2 ? `${p1} | ${p2}` : `${p1} | `;
+        return `${p1}┆${p2}`;
       }
     }
 
@@ -2825,9 +2847,14 @@ function RapidFlashcardMode({
     
     // Проверка удаления (backspace) на разделителе
     const isDeletion = converted.length < displayValue.length;
-    let cleanInput = converted.replace(/[|·]/g, '');
-    if (!parsedTarget.cleanCoreWord.includes(' ')) {
+    let cleanInput = converted.replace(/[|·\u2506\u250A]/g, '');
+
+    // Для отделяемых глаголов вводим слитно без пробелов
+    if (parsedTarget.isTrennbar && !parsedTarget.cleanCoreWord.includes(' ')) {
       cleanInput = cleanInput.replace(/\s+/g, '');
+    } else {
+      // Для существительных с артиклями (die Voraussetzung) сохраняем пробелы!
+      cleanInput = cleanInput.replace(/\s{2,}/g, ' ');
     }
     
     if (isDeletion && cleanInput === typedValue && cleanInput.length > 0) {
