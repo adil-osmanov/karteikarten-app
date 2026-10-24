@@ -2420,6 +2420,101 @@ export const getDynamicInputFontSize = (textLength: number) => {
   return 'text-xl sm:text-2xl leading-normal tracking-wide';
 };
 
+export interface ParsedTargetPhrase {
+  prefixContext: string;
+  coreWord: string;
+  suffixContext: string;
+  cleanCoreWord: string;
+  splitIndex: number;
+  isTrennbar: boolean;
+  article: string | null;
+}
+
+export function parseTargetPhrase(raw: string): ParsedTargetPhrase {
+  const trimmed = (raw || '').replace(/\s+/g, ' ').trim();
+  if (!trimmed) {
+    return {
+      prefixContext: '',
+      coreWord: '',
+      suffixContext: '',
+      cleanCoreWord: '',
+      splitIndex: -1,
+      isTrennbar: false,
+      article: null
+    };
+  }
+
+  // 1. Разделяемый глагол с пайпом (напр., "jemandem etwas aus|leihen", "aus|leihen", "sich an|passen")
+  if (trimmed.includes('|')) {
+    const tokens = trimmed.split(' ');
+    const pipeIndex = tokens.findIndex(t => t.includes('|'));
+    if (pipeIndex !== -1) {
+      const coreWordWithPipe = tokens[pipeIndex];
+      const prefix = tokens.slice(0, pipeIndex).join(' ');
+      const suffix = tokens.slice(pipeIndex + 1).join(' ');
+      const cleanCore = coreWordWithPipe.replace(/\|/g, '');
+      const splitIdx = coreWordWithPipe.indexOf('|');
+      return {
+        prefixContext: prefix,
+        coreWord: coreWordWithPipe,
+        suffixContext: suffix,
+        cleanCoreWord: cleanCore,
+        splitIndex: splitIdx,
+        isTrennbar: true,
+        article: null
+      };
+    }
+  }
+
+  // 2. Существительное с артиклем (der/die/das)
+  const nounMatch = trimmed.match(/^(der|die|das)\s+([A-ZÄÖÜ][a-zA-ZäöüÄÖÜß-]*)$/i);
+  if (nounMatch) {
+    return {
+      prefixContext: '',
+      coreWord: nounMatch[2],
+      suffixContext: '',
+      cleanCoreWord: nounMatch[2],
+      splitIndex: -1,
+      isTrennbar: false,
+      article: nounMatch[1].toLowerCase()
+    };
+  }
+
+  // 3. Фразовый глагол с грамматическим управлением (напр., "an jemandem verzweifeln", "jemanden bezeichnen")
+  const tokens = trimmed.split(' ');
+  if (tokens.length > 1) {
+    const GRAMMAR_WORDS = /^(jemand(em|en|es|er)?|jdm\.?|jdn\.?|etwas|etw\.?|sich|einander|an|auf|aus|bei|für|gegen|in|mit|nach|über|um|unter|von|vor|zu|\+|\(D\)|\(A\)|\(G\)|\(Dat\)|\(Akk\)|\+D|\+A|\+Dat|\+Akk|als|wer|was|wie)$/i;
+    const lastWord = tokens[tokens.length - 1];
+    const prevTokens = tokens.slice(0, -1);
+    
+    const hasGrammarWord = prevTokens.some(t => GRAMMAR_WORDS.test(t));
+    const isGermanVerb = /^[a-zäöüß]+(en|eln|ern|sein|tun)$/i.test(lastWord);
+    
+    if (hasGrammarWord && isGermanVerb) {
+      return {
+        prefixContext: prevTokens.join(' '),
+        coreWord: lastWord,
+        suffixContext: '',
+        cleanCoreWord: lastWord,
+        splitIndex: -1,
+        isTrennbar: false,
+        article: null
+      };
+    }
+  }
+
+  // 4. Обычное слово / фраза по умолчанию
+  return {
+    prefixContext: '',
+    coreWord: trimmed.replace(/\|/g, ''),
+    suffixContext: '',
+    cleanCoreWord: trimmed.replace(/\|/g, ''),
+    splitIndex: -1,
+    isTrennbar: false,
+    article: null
+  };
+}
+
 function RapidFlashcardMode({
   card,
   progress,
@@ -2469,10 +2564,15 @@ function RapidFlashcardMode({
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
   }, [currentCard?.id]);
 
+  // Парсинг целевой конструкции (управление, отделяемая приставка, артикль)
+  const parsedTarget = useMemo(() => {
+    return parseTargetPhrase(currentCard?.targetWord || '');
+  }, [currentCard?.targetWord]);
+
   // Извлечение артикля, основного слова и множественного числа
   const { article, wordOnly, plural } = useMemo(() => {
-    let raw = (currentCard?.targetWord || '').replace(/\|/g, '').trim();
-    let art: string | null = (currentCard as any)?.article || null;
+    let raw = (currentCard?.targetWord || '').trim();
+    let art: string | null = (currentCard as any)?.article || parsedTarget.article || null;
     let noun = (currentCard as any)?.wordOnly || raw;
     let pl: string | null = (currentCard as any)?.plural || null;
 
@@ -2502,7 +2602,7 @@ function RapidFlashcardMode({
         if (/^(der|die|das)\s+/i.test(forms)) {
           pl = forms;
         } else if (forms.startsWith('-') || forms.startsWith('·')) {
-          pl = art ? `die ${noun}${forms.replace(/^[-·]\s*/, '')}` : forms;
+          pl = art ? `die ${noun.replace(/\|/g, '')}${forms.replace(/^[-·]\s*/, '')}` : forms;
         } else {
           pl = forms;
         }
@@ -2511,7 +2611,7 @@ function RapidFlashcardMode({
         if (plMatch) {
           const rawPl = plMatch[1].trim();
           if (rawPl.startsWith('-')) {
-            pl = `die ${noun}${rawPl.slice(1)}`;
+            pl = `die ${noun.replace(/\|/g, '')}${rawPl.slice(1)}`;
           } else if (/^(der|die|das)\s+/i.test(rawPl)) {
             pl = rawPl;
           } else {
@@ -2522,7 +2622,7 @@ function RapidFlashcardMode({
     }
 
     return { article: art, wordOnly: noun, plural: pl };
-  }, [currentCard?.targetWord, currentCard?.forms, currentCard?.hint, (currentCard as any)?.article, (currentCard as any)?.wordOnly, (currentCard as any)?.plural]);
+  }, [currentCard?.targetWord, currentCard?.forms, currentCard?.hint, parsedTarget.article, (currentCard as any)?.article, (currentCard as any)?.wordOnly, (currentCard as any)?.plural]);
 
   const getArticleColor = (art: string | null) => {
     if (!art) return '';
@@ -2533,31 +2633,18 @@ function RapidFlashcardMode({
     return 'text-rose-500 dark:text-rose-400 font-semibold mr-2';
   };
 
-  const parsedNoun = useMemo(() => {
-    let raw = (currentCard?.targetWord || '').replace(/\|/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    const directMatch = raw.match(/^(der|die|das)\s+(.+)$/i);
-    if (directMatch) {
-      return {
-        article: directMatch[1].toLowerCase(),
-        noun: directMatch[2].trim(),
-        full: `${directMatch[1].toLowerCase()} ${directMatch[2].trim()}`
-      };
-    }
-    const hintText = (currentCard?.hint || currentCard?.forms || currentCard?.translation || '').trim();
-    const hintMatch = hintText.match(/\b(der|die|das)\b/i);
-    if (hintMatch && /^[A-ZÄÖÜ]/.test(raw)) {
-      return {
-        article: hintMatch[1].toLowerCase(),
-        noun: raw,
-        full: `${hintMatch[1].toLowerCase()} ${raw}`
-      };
-    }
-    return {
-      article: null,
-      noun: raw,
-      full: raw
-    };
-  }, [currentCard?.targetWord, currentCard?.hint, currentCard?.forms, currentCard?.translation]);
+  // Элегантный рендер слова с подсветкой отделяемой приставки в Раундах 1-2
+  const renderFormattedWord = useCallback((text: string) => {
+    if (!text || !text.includes('|')) return text;
+    const parts = text.split('|');
+    return (
+      <>
+        {parts[0]}
+        <span className="text-sky-500 dark:text-sky-400 mx-0.5 font-light select-none">|</span>
+        {parts.slice(1).join('')}
+      </>
+    );
+  }, []);
 
   const speechText = useMemo(() => {
     const raw = currentCard?.targetWord || '';
@@ -2613,8 +2700,6 @@ function RapidFlashcardMode({
     setCardAnimClass('opacity-0 scale-[0.97] transition-all duration-140 ease-out');
 
     setTimeout(() => {
-      // НЕ вызываем setIsFlipped(false), чтобы карточка не крутилась обратно на глазах!
-      // Сразу передаем ответ родителю (wasFlipped: false, чтобы переключение произошло сразу)
       onAnswer(remembered, false);
     }, 140);
   }, [locked, isTransitioning, localMastery, onAnswer, onHintPenalty]);
@@ -2658,14 +2743,13 @@ function RapidFlashcardMode({
     const updatedMastery = Math.max(0, (localMastery || 0) - 1);
     setLocalMastery(updatedMastery);
 
-    const revealWord = parsedNoun.full || (currentCard?.targetWord || '').replace(/\|/g, '').trim();
-    setTypedValue(revealWord);
+    setTypedValue(parsedTarget.cleanCoreWord);
 
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     try {
       onHintPenalty?.(updatedMastery);
     } catch {}
-  }, [locked, isAnswered, localMastery, parsedNoun, currentCard?.targetWord, playCardAudio, onHintPenalty]);
+  }, [locked, isAnswered, localMastery, parsedTarget, currentCard?.targetWord, playCardAudio, onHintPenalty]);
 
   const handleProceedNext = useCallback(() => {
     if (!isAnswered || isTransitioning) return;
@@ -2686,47 +2770,100 @@ function RapidFlashcardMode({
     }, 140);
   }, [isAnswered, isTransitioning, isSurrendered, onAnswer]);
 
+  // Проверка совпадения ввода с целевым словом или всей фразой
+  const checkTargetMatch = useCallback((input: string) => {
+    const cleanInput = (input || '').toLowerCase().replace(/[|·\s]/g, '');
+    if (!cleanInput) return { isMatch: false, isPrefix: true };
+
+    const targetCore = parsedTarget.cleanCoreWord.toLowerCase().replace(/[|·\s]/g, '');
+    const targetFull = (parsedTarget.prefixContext + ' ' + parsedTarget.cleanCoreWord + ' ' + parsedTarget.suffixContext)
+      .toLowerCase().replace(/[|·\s]/g, '');
+    const targetWithArt = parsedTarget.article 
+      ? (parsedTarget.article + ' ' + parsedTarget.cleanCoreWord).toLowerCase().replace(/[|·\s]/g, '') 
+      : '';
+
+    const isMatch = (cleanInput === targetCore) || 
+                    (cleanInput === targetFull) || 
+                    (!!targetWithArt && cleanInput === targetWithArt);
+
+    const isPrefix = targetCore.startsWith(cleanInput) || 
+                     targetFull.startsWith(cleanInput) || 
+                     (!!targetWithArt && targetWithArt.startsWith(cleanInput));
+
+    return { isMatch, isPrefix };
+  }, [parsedTarget]);
+
+  // Динамическое отображение в поле ввода:
+  // При вводе отделяемого глагола (напр., ausleihen) слитно — автоматически отображается "aus | leihen"
+  const displayValue = useMemo(() => {
+    if (isAnswered) {
+      if (parsedTarget.isTrennbar && parsedTarget.splitIndex > 0) {
+        const clean = parsedTarget.cleanCoreWord;
+        const sIdx = parsedTarget.splitIndex;
+        return `${clean.slice(0, sIdx)} | ${clean.slice(sIdx)}`;
+      }
+      return parsedTarget.cleanCoreWord || currentCard?.targetWord || '';
+    }
+
+    if (parsedTarget.isTrennbar && parsedTarget.splitIndex > 0) {
+      const sIdx = parsedTarget.splitIndex;
+      const pure = typedValue.replace(/[|·\s]/g, '');
+      if (pure.length >= sIdx) {
+        const p1 = pure.slice(0, sIdx);
+        const p2 = pure.slice(sIdx);
+        return p2 ? `${p1} | ${p2}` : `${p1} | `;
+      }
+    }
+
+    return typedValue;
+  }, [typedValue, isAnswered, parsedTarget, currentCard?.targetWord]);
+
   const handleInputChange = (rawVal: string) => {
     if (locked || isAnswered) return;
 
-    const val = convertRuToDeLayout(rawVal, parsedNoun.full || currentCard?.targetWord || '');
-    setTypedValue(val);
+    const converted = convertRuToDeLayout(rawVal, parsedTarget.cleanCoreWord || currentCard?.targetWord || '');
+    
+    // Проверка удаления (backspace) на разделителе
+    const isDeletion = converted.length < displayValue.length;
+    let cleanInput = converted.replace(/[|·]/g, '');
+    if (!parsedTarget.cleanCoreWord.includes(' ')) {
+      cleanInput = cleanInput.replace(/\s+/g, '');
+    }
+    
+    if (isDeletion && cleanInput === typedValue && cleanInput.length > 0) {
+      cleanInput = cleanInput.slice(0, -1);
+    }
+
+    setTypedValue(cleanInput);
     playSafeAudio(() => playTockSound());
     if (isShaking) setIsShaking(false);
 
-    if (!val) {
+    if (!cleanInput) {
       setIsErrorMismatch(false);
       return;
     }
 
-    const cleanInput = val.toLowerCase().replace(/\s{2,}/g, ' ');
-    const targetA = parsedNoun.noun.toLowerCase().trim();
-    const targetB = parsedNoun.full.toLowerCase().trim();
-
-    const isPrefixMatch = targetA.startsWith(cleanInput) || targetB.startsWith(cleanInput);
-    setIsErrorMismatch(!isPrefixMatch);
-    if (!isPrefixMatch) {
+    const { isMatch, isPrefix } = checkTargetMatch(cleanInput);
+    setIsErrorMismatch(!isPrefix);
+    if (!isPrefix) {
       triggerHaptic('error');
     }
 
-    const trimmedInput = cleanInput.trim();
-    if (trimmedInput === targetA || trimmedInput === targetB) {
+    if (isMatch) {
       handleSuccessAnswer();
     }
   };
 
   const handleEnterSubmit = useCallback(() => {
     if (locked || isAnswered) return;
-    const trimmedInput = typedValue.toLowerCase().replace(/\s{2,}/g, ' ').trim();
-    const targetA = parsedNoun.noun.toLowerCase().trim();
-    const targetB = parsedNoun.full.toLowerCase().trim();
+    const { isMatch } = checkTargetMatch(typedValue);
 
-    if (trimmedInput && (trimmedInput === targetA || trimmedInput === targetB)) {
+    if (isMatch) {
       handleSuccessAnswer();
     } else {
       triggerErrorShake();
     }
-  }, [locked, isAnswered, typedValue, parsedNoun, handleSuccessAnswer, triggerErrorShake]);
+  }, [locked, isAnswered, typedValue, checkTargetMatch, handleSuccessAnswer, triggerErrorShake]);
 
   // 3. Двухшаговое управление стрелками, Space для бесконечного флипа туда-обратно, Enter/Space для Weiter
   useEffect(() => {
@@ -2828,7 +2965,7 @@ function RapidFlashcardMode({
               <div className="my-auto text-center space-y-2 select-text">
                 <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
                   {article && <span className={getArticleColor(article)}>{article}</span>}
-                  {wordOnly || currentCard?.targetWord}
+                  {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                 </h2>
                 {plural && (
                   <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal mt-1">
@@ -2865,7 +3002,7 @@ function RapidFlashcardMode({
                 <div className="space-y-1">
                   <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
                     {article && <span className={getArticleColor(article)}>{article}</span>}
-                    {wordOnly || currentCard?.targetWord}
+                    {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                   </h2>
                   {plural && (
                     <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal mt-1">
@@ -2951,7 +3088,7 @@ function RapidFlashcardMode({
             </div>
           </div>
 
-          {/* Центр: ТОЛЬКО русский перевод и инпут (БЕЗ ПРИМЕРА, БЕЗ ПЛЕЙСХОЛДЕРА И БЕЗ МИГАЮЩЕЙ КАРЕТКИ) */}
+          {/* Центр: Русский перевод и Cloze поле ввода */}
           <div 
             className="my-auto w-full flex flex-col items-center text-center select-text"
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
@@ -2960,40 +3097,87 @@ function RapidFlashcardMode({
               {currentCard?.translation || currentCard?.hint}
             </h2>
 
-            <div className="w-full max-w-lg">
-              <input
-                ref={inputRef}
-                type="text"
-                value={typedValue}
-                onChange={(e) => !isMobile && handleInputChange(e.target.value)}
-                readOnly={isMobile || isAnswered}
-                inputMode={isMobile ? "none" : undefined}
-                tabIndex={isMobile ? -1 : 0}
-                autoFocus={!isMobile}
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="" /* ПЛЕЙСХОЛДЕР СТРОГО ПУСТОЙ */
-                style={{ caretColor: 'transparent' }}
-                className={`w-full text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border caret-transparent ${
-                  typedValue.length > 22
-                    ? 'text-lg sm:text-xl'
-                    : typedValue.length > 14
-                    ? 'text-xl sm:text-2xl'
-                    : 'text-2xl sm:text-[28px]'
-                } ${
-                  isMobile ? 'pointer-events-none select-none ' : ''
-                }${
-                  isAnswered
-                    ? (!isSurrendered
-                        ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                        : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
-                    : isErrorMismatch
-                      ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
-                      : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus:border-sky-500/60 dark:focus:border-sky-400/60'
-                }${isShaking ? ' animate-shake' : ''}`}
-              />
-            </div>
+            {parsedTarget.prefixContext ? (
+              <div className="w-full max-w-xl flex flex-wrap items-center justify-center gap-x-3.5 gap-y-2.5">
+                <span className="text-xl sm:text-2xl font-medium text-zinc-400 dark:text-zinc-500 tracking-normal select-none">
+                  {parsedTarget.prefixContext}
+                </span>
+                <div className="min-w-[200px] max-w-sm flex-1">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={displayValue}
+                    onChange={(e) => !isMobile && handleInputChange(e.target.value)}
+                    readOnly={isMobile || isAnswered}
+                    inputMode={isMobile ? "none" : undefined}
+                    tabIndex={isMobile ? -1 : 0}
+                    autoFocus={!isMobile}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder=""
+                    style={{ caretColor: 'transparent' }}
+                    className={`w-full text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border caret-transparent ${
+                      displayValue.length > 22
+                        ? 'text-lg sm:text-xl'
+                        : displayValue.length > 14
+                        ? 'text-xl sm:text-2xl'
+                        : 'text-2xl sm:text-[28px]'
+                    } ${
+                      isMobile ? 'pointer-events-none select-none ' : ''
+                    }${
+                      isAnswered
+                        ? (!isSurrendered
+                            ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
+                            : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
+                        : isErrorMismatch
+                          ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
+                          : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus:border-sky-500/60 dark:focus:border-sky-400/60'
+                    }${isShaking ? ' animate-shake' : ''}`}
+                  />
+                </div>
+                {parsedTarget.suffixContext && (
+                  <span className="text-xl sm:text-2xl font-medium text-zinc-400 dark:text-zinc-500 tracking-normal select-none">
+                    {parsedTarget.suffixContext}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="w-full max-w-lg">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={displayValue}
+                  onChange={(e) => !isMobile && handleInputChange(e.target.value)}
+                  readOnly={isMobile || isAnswered}
+                  inputMode={isMobile ? "none" : undefined}
+                  tabIndex={isMobile ? -1 : 0}
+                  autoFocus={!isMobile}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder=""
+                  style={{ caretColor: 'transparent' }}
+                  className={`w-full text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border caret-transparent ${
+                    displayValue.length > 22
+                      ? 'text-lg sm:text-xl'
+                      : displayValue.length > 14
+                      ? 'text-xl sm:text-2xl'
+                      : 'text-2xl sm:text-[28px]'
+                  } ${
+                    isMobile ? 'pointer-events-none select-none ' : ''
+                  }${
+                    isAnswered
+                      ? (!isSurrendered
+                          ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
+                          : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
+                      : isErrorMismatch
+                        ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
+                        : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus:border-sky-500/60 dark:focus:border-sky-400/60'
+                  }${isShaking ? ' animate-shake' : ''}`}
+                />
+              </div>
+            )}
           </div>
 
           {/* Низ: Кнопка Weiter с хоткеями */}
