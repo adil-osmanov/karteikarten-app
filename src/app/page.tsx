@@ -2815,29 +2815,39 @@ function RapidFlashcardMode({
     return { isMatch, isPrefix };
   }, [parsedTarget]);
 
-  // Динамическое отображение в поле ввода:
-  // При вводе отделяемого глагола (напр., ausleihen) слитно — отображается "aus┆leihen" (тонкая пунктирная палочка без пробелов)
-  const displayValue = useMemo(() => {
+  // Структурированное отображение в поле ввода:
+  // При вводе отделяемого глагола (напр., ausdrücken) вставляется <TrennbarDottedBar />
+  // с точно таким же идеальным микро-расстоянием (1-2px), как на флешкарте (Скриншот 2)!
+  const displayParts = useMemo(() => {
     if (isAnswered) {
       if (parsedTarget.isTrennbar && parsedTarget.splitIndex > 0) {
         const clean = parsedTarget.cleanCoreWord;
         const sIdx = parsedTarget.splitIndex;
-        return `${clean.slice(0, sIdx)}┆${clean.slice(sIdx)}`;
+        return {
+          prefix: clean.slice(0, sIdx),
+          hasDivider: true,
+          stem: clean.slice(sIdx),
+          totalLength: clean.length
+        };
       }
-      return parsedTarget.cleanCoreWord || currentCard?.targetWord || '';
+      const full = parsedTarget.cleanCoreWord || currentCard?.targetWord || '';
+      return { prefix: full, hasDivider: false, stem: '', totalLength: full.length };
     }
 
     if (parsedTarget.isTrennbar && parsedTarget.splitIndex > 0) {
       const sIdx = parsedTarget.splitIndex;
-      const pure = typedValue.replace(/[|·\u2506\u250A\s]/g, '');
-      if (pure.length >= sIdx) {
-        const p1 = pure.slice(0, sIdx);
-        const p2 = pure.slice(sIdx);
-        return `${p1}┆${p2}`;
+      const clean = typedValue.replace(/[|·\u2506\u250A\s]/g, '');
+      if (clean.length >= sIdx) {
+        return {
+          prefix: clean.slice(0, sIdx),
+          hasDivider: true,
+          stem: clean.slice(sIdx),
+          totalLength: clean.length
+        };
       }
     }
 
-    return typedValue;
+    return { prefix: typedValue, hasDivider: false, stem: '', totalLength: typedValue.length };
   }, [typedValue, isAnswered, parsedTarget, currentCard?.targetWord]);
 
   const handleInputChange = (rawVal: string) => {
@@ -2845,8 +2855,7 @@ function RapidFlashcardMode({
 
     const converted = convertRuToDeLayout(rawVal, parsedTarget.cleanCoreWord || currentCard?.targetWord || '');
     
-    // Проверка удаления (backspace) на разделителе
-    const isDeletion = converted.length < displayValue.length;
+    // Clean separator glyphs
     let cleanInput = converted.replace(/[|·\u2506\u250A]/g, '');
 
     // Для отделяемых глаголов вводим слитно без пробелов
@@ -2855,10 +2864,6 @@ function RapidFlashcardMode({
     } else {
       // Для существительных с артиклями (die Voraussetzung) сохраняем пробелы!
       cleanInput = cleanInput.replace(/\s{2,}/g, ' ');
-    }
-    
-    if (isDeletion && cleanInput === typedValue && cleanInput.length > 0) {
-      cleanInput = cleanInput.slice(0, -1);
     }
 
     setTypedValue(cleanInput);
@@ -3130,10 +3135,76 @@ function RapidFlashcardMode({
                   {parsedTarget.prefixContext}
                 </span>
                 <div className="min-w-[200px] max-w-sm flex-1">
+                  <div
+                    onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
+                    className={`relative w-full min-h-[62px] text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border flex items-center justify-center cursor-text ${
+                      isMobile ? 'select-none ' : ''
+                    }${
+                      isAnswered
+                        ? (!isSurrendered
+                            ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
+                            : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
+                        : isErrorMismatch
+                          ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
+                          : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
+                    }${isShaking ? ' animate-shake' : ''}`}
+                  >
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={typedValue}
+                      onChange={(e) => !isMobile && handleInputChange(e.target.value)}
+                      readOnly={isMobile || isAnswered}
+                      inputMode={isMobile ? "none" : undefined}
+                      tabIndex={isMobile ? -1 : 0}
+                      autoFocus={!isMobile}
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder=""
+                      style={{ caretColor: 'transparent' }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
+                    />
+                    <div className={`pointer-events-none select-none flex items-baseline justify-center flex-wrap whitespace-pre ${
+                      displayParts.totalLength > 22
+                        ? 'text-lg sm:text-xl'
+                        : displayParts.totalLength > 14
+                        ? 'text-xl sm:text-2xl'
+                        : 'text-2xl sm:text-[28px]'
+                    }`}>
+                      {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
+                      <span>{displayParts.prefix}</span>
+                      {displayParts.hasDivider && <TrennbarDottedBar />}
+                      {displayParts.stem && <span>{displayParts.stem}</span>}
+                    </div>
+                  </div>
+                </div>
+                {parsedTarget.suffixContext && (
+                  <span className="text-xl sm:text-2xl font-medium text-zinc-400 dark:text-zinc-500 tracking-normal select-none">
+                    {parsedTarget.suffixContext}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="w-full max-w-lg">
+                <div
+                  onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
+                  className={`relative w-full min-h-[62px] text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border flex items-center justify-center cursor-text ${
+                    isMobile ? 'select-none ' : ''
+                  }${
+                    isAnswered
+                      ? (!isSurrendered
+                          ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
+                          : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
+                      : isErrorMismatch
+                        ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
+                        : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
+                  }${isShaking ? ' animate-shake' : ''}`}
+                >
                   <input
                     ref={inputRef}
                     type="text"
-                    value={displayValue}
+                    value={typedValue}
                     onChange={(e) => !isMobile && handleInputChange(e.target.value)}
                     readOnly={isMobile || isAnswered}
                     inputMode={isMobile ? "none" : undefined}
@@ -3144,65 +3215,21 @@ function RapidFlashcardMode({
                     spellCheck={false}
                     placeholder=""
                     style={{ caretColor: 'transparent' }}
-                    className={`w-full text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border caret-transparent ${
-                      displayValue.length > 22
-                        ? 'text-lg sm:text-xl'
-                        : displayValue.length > 14
-                        ? 'text-xl sm:text-2xl'
-                        : 'text-2xl sm:text-[28px]'
-                    } ${
-                      isMobile ? 'pointer-events-none select-none ' : ''
-                    }${
-                      isAnswered
-                        ? (!isSurrendered
-                            ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                            : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
-                        : isErrorMismatch
-                          ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
-                          : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus:border-sky-500/60 dark:focus:border-sky-400/60'
-                    }${isShaking ? ' animate-shake' : ''}`}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
                   />
-                </div>
-                {parsedTarget.suffixContext && (
-                  <span className="text-xl sm:text-2xl font-medium text-zinc-400 dark:text-zinc-500 tracking-normal select-none">
-                    {parsedTarget.suffixContext}
-                  </span>
-                )}
-              </div>
-            ) : (
-              <div className="w-full max-w-lg">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={displayValue}
-                  onChange={(e) => !isMobile && handleInputChange(e.target.value)}
-                  readOnly={isMobile || isAnswered}
-                  inputMode={isMobile ? "none" : undefined}
-                  tabIndex={isMobile ? -1 : 0}
-                  autoFocus={!isMobile}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder=""
-                  style={{ caretColor: 'transparent' }}
-                  className={`w-full text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border caret-transparent ${
-                    displayValue.length > 22
+                  <div className={`pointer-events-none select-none flex items-baseline justify-center flex-wrap whitespace-pre ${
+                    displayParts.totalLength > 22
                       ? 'text-lg sm:text-xl'
-                      : displayValue.length > 14
+                      : displayParts.totalLength > 14
                       ? 'text-xl sm:text-2xl'
                       : 'text-2xl sm:text-[28px]'
-                  } ${
-                    isMobile ? 'pointer-events-none select-none ' : ''
-                  }${
-                    isAnswered
-                      ? (!isSurrendered
-                          ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                          : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
-                      : isErrorMismatch
-                        ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
-                        : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus:border-sky-500/60 dark:focus:border-sky-400/60'
-                  }${isShaking ? ' animate-shake' : ''}`}
-                />
+                  }`}>
+                    {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
+                    <span>{displayParts.prefix}</span>
+                    {displayParts.hasDivider && <TrennbarDottedBar />}
+                    {displayParts.stem && <span>{displayParts.stem}</span>}
+                  </div>
+                </div>
               </div>
             )}
           </div>
