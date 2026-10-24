@@ -15,6 +15,8 @@ const STATS_I18N: Record<string, {
   title: string;
   resetSubtitle: string;
   inFocus: string;
+  unitHour: string;
+  unitMinute: string;
   timeHours: (h: number, m: number) => string;
   timeMinutes: (m: number) => string;
   timeLessThanMin: string;
@@ -30,6 +32,8 @@ const STATS_I18N: Record<string, {
     title: "Tagesstatistik",
     resetSubtitle: "Reset um 00:00",
     inFocus: "Im Fokus",
+    unitHour: "Std.",
+    unitMinute: "Min.",
     timeHours: (h, m) => `${h} Std. ${m} Min.`,
     timeMinutes: (m) => `${m} Min.`,
     timeLessThanMin: "< 1 Min.",
@@ -45,6 +49,8 @@ const STATS_I18N: Record<string, {
     title: "Daily Statistics",
     resetSubtitle: "Resets at 00:00",
     inFocus: "Focus Time",
+    unitHour: "h",
+    unitMinute: "min",
     timeHours: (h, m) => `${h} h ${m} min`,
     timeMinutes: (m) => `${m} min`,
     timeLessThanMin: "< 1 min",
@@ -60,6 +66,8 @@ const STATS_I18N: Record<string, {
     title: "Статистика дня",
     resetSubtitle: "Сброс в 00:00",
     inFocus: "В фокусе",
+    unitHour: "ч",
+    unitMinute: "мин",
     timeHours: (h, m) => `${h} ч ${m} мин`,
     timeMinutes: (m) => `${m} мин`,
     timeLessThanMin: "< 1 мин",
@@ -138,15 +146,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
   const minutes = Math.floor(totalSeconds / 60);
   const hours = Math.floor(minutes / 60);
-  
-  let timeDisplay = t.timeZero;
-  if (hours > 0) {
-    timeDisplay = t.timeHours(hours, minutes % 60);
-  } else if (minutes > 0) {
-    timeDisplay = t.timeMinutes(minutes);
-  } else if (totalSeconds > 0) {
-    timeDisplay = t.timeLessThanMin;
-  }
+  const remainingMinutes = minutes % 60;
 
   const target = 200;
   const progressPercent = Math.min(Math.round((totalDone / target) * 100), 100);
@@ -206,29 +206,78 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
           </button>
         </div>
 
-        {/* 2 Карточки метрик (Время и Точность) */}
+        {/* 2 Карточки метрик (Время и Точность в стиле Apple) */}
         <div className="grid grid-cols-2 gap-3 my-5">
-          <div className="p-4 rounded-2xl bg-[#F8F9FA]/90 dark:bg-zinc-800/40 border border-black/[0.05] dark:border-white/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center backdrop-blur-sm">
-            <span className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">
-              {timeDisplay}
-            </span>
-            <span className="text-[11px] font-medium tracking-wider text-zinc-500 dark:text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
+          <div className="p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center min-h-[96px] backdrop-blur-sm">
+            {hours > 0 ? (
+              <div className="flex items-baseline justify-center whitespace-nowrap">
+                <span className="text-[25px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">
+                  {hours}
+                </span>
+                <span className="text-[12px] font-medium text-zinc-400 dark:text-zinc-500 ml-0.5 mr-1.5">
+                  {t.unitHour}
+                </span>
+                {remainingMinutes > 0 && (
+                  <>
+                    <span className="text-[25px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">
+                      {remainingMinutes}
+                    </span>
+                    <span className="text-[12px] font-medium text-zinc-400 dark:text-zinc-500 ml-0.5">
+                      {t.unitMinute}
+                    </span>
+                  </>
+                )}
+              </div>
+            ) : minutes > 0 ? (
+              <div className="flex items-baseline justify-center whitespace-nowrap">
+                <span className="text-[25px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">
+                  {minutes}
+                </span>
+                <span className="text-[12px] font-medium text-zinc-400 dark:text-zinc-500 ml-1">
+                  {t.unitMinute}
+                </span>
+              </div>
+            ) : totalSeconds > 0 ? (
+              <div className="flex items-baseline justify-center whitespace-nowrap">
+                <span className="text-[20px] font-semibold tracking-tight text-zinc-600 dark:text-zinc-300 tabular-nums">
+                  &lt; 1
+                </span>
+                <span className="text-[12px] font-medium text-zinc-400 dark:text-zinc-500 ml-1">
+                  {t.unitMinute}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-baseline justify-center whitespace-nowrap">
+                <span className="text-[25px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">
+                  0
+                </span>
+                <span className="text-[12px] font-medium text-zinc-400 dark:text-zinc-500 ml-1">
+                  {t.unitMinute}
+                </span>
+              </div>
+            )}
+            <span className="text-[11.5px] font-medium text-zinc-400 dark:text-zinc-500 mt-1 flex items-center gap-1.5 select-none tracking-normal">
               <Clock className="w-3 h-3 text-zinc-400 dark:text-zinc-500"/> {t.inFocus}
             </span>
           </div>
 
-          <div className="p-4 rounded-2xl bg-[#F8F9FA]/90 dark:bg-zinc-800/40 border border-black/[0.05] dark:border-white/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center backdrop-blur-sm">
-            <span className={`text-2xl font-bold tracking-tight ${accuracyColor} tabular-nums`}>
-              {accuracy}%
-            </span>
-            <span className="text-[11px] font-medium tracking-wider text-zinc-500 dark:text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
+          <div className="p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center min-h-[96px] backdrop-blur-sm">
+            <div className="flex items-baseline justify-center whitespace-nowrap">
+              <span className={`text-[25px] font-semibold tracking-tight ${accuracyColor} tabular-nums`}>
+                {accuracy}
+              </span>
+              <span className={`text-[13px] font-medium ml-0.5 ${accuracyColor} opacity-75`}>
+                %
+              </span>
+            </div>
+            <span className="text-[11.5px] font-medium text-zinc-400 dark:text-zinc-500 mt-1 flex items-center gap-1.5 select-none tracking-normal">
               <Target className="w-3 h-3 text-zinc-400 dark:text-zinc-500"/> {t.accuracy}
             </span>
           </div>
         </div>
 
         {/* Блок прогресса карточек */}
-        <div className="mb-5 p-4 rounded-2xl bg-[#F8F9FA]/90 dark:bg-zinc-800/40 border border-black/[0.05] dark:border-white/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+        <div className="mb-5 p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
           <div className="flex justify-between items-baseline mb-2.5">
             <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t.cardsToday}</span>
             <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
