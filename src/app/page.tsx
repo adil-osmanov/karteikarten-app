@@ -1893,18 +1893,38 @@ function getBestGermanVoice(): SpeechSynthesisVoice | null {
   const germanVoices = voices.filter(v => v.lang && (v.lang.startsWith('de') || v.lang.startsWith('DE')));
   if (germanVoices.length === 0) return null;
 
-  // Filter out any female voice names
+  // Strictly filter out any female voice names
   const isFemale = (name: string) =>
-    /anna|katja|petra|hedda|gisela|marlene|vicki|amala|louisa|elke|klara|helena|zira|steffi|maren|gudrun|sybille|sabine|monika|claudia|birgit|ulrike|heike|brigitte|ingrid|renate|ursula|female|weiblich/i.test(name);
+    /anna|katja|petra|hedda|gisela|marlene|vicki|amala|louisa|elke|klara|helena|zira|steffi|maren|gudrun|sybille|sabine|monika|claudia|birgit|ulrike|heike|brigitte|ingrid|renate|ursula|female|weiblich|frauen|frau/i.test(name);
 
   const maleVoices = germanVoices.filter(v => !isFemale(v.name));
 
-  // Prioritize known high-quality male German voices
-  const preferred = maleVoices.find(v => 
-    /markus|yannick|viktor|martin|conrad|killian|stefan|bernd|christoph|ralf|kasper|male|männlich/i.test(v.name)
-  );
-  // Strictly enforce male voice only; do not fall back to female voices
-  cachedGermanVoice = preferred || (maleVoices.length > 0 ? maleVoices[0] : null);
+  // Prioritize known high-quality male German voices: Microsoft Killian/Conrad, Apple Yannick/Martin/Viktor, Google Deutsch Male, Markus/Stefan/Bernd
+  const topMalePriority = [
+    /killian/i,
+    /conrad/i,
+    /yannick/i,
+    /martin/i,
+    /viktor/i,
+    /markus/i,
+    /stefan/i,
+    /bernd/i,
+    /christoph/i,
+    /ralf/i,
+    /kasper/i,
+    /male|männlich/i,
+  ];
+
+  for (const regex of topMalePriority) {
+    const found = maleVoices.find(v => regex.test(v.name));
+    if (found) {
+      cachedGermanVoice = found;
+      return found;
+    }
+  }
+
+  // Strictly enforce male voice only
+  cachedGermanVoice = maleVoices.length > 0 ? maleVoices[0] : null;
   return cachedGermanVoice;
 }
 
@@ -1926,73 +1946,83 @@ export function speakNative(
     return false;
   }
 
-  try {
-    const clean = text.replace(/\|/g, '').replace(/___+/g, '').trim();
-    if (!clean) {
-      if (onEnded) onEnded();
-      return false;
-    }
-
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
-    }
-    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
-      window.speechSynthesis.cancel();
-    }
-
-    const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = 'de-DE';
-    const voice = getBestGermanVoice();
-    // Strictly prevent female voice playback when online
-    if (typeof navigator !== 'undefined' && navigator.onLine && !voice) {
-      if (onEnded) onEnded();
-      return false;
-    }
-    if (voice) {
-      utterance.voice = voice;
-    } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      const anyGerman = window.speechSynthesis.getVoices().find(v => v.lang && (v.lang.startsWith('de') || v.lang.startsWith('DE')));
-      if (anyGerman) utterance.voice = anyGerman;
-    }
-    utterance.rate = Math.max(0.7, Math.min(1.3, rate));
-
-    let hasEnded = false;
-    let timeoutId: any = null;
-
-    const finish = () => {
-      if (hasEnded) return;
-      hasEnded = true;
-      if (timeoutId) clearTimeout(timeoutId);
-      activeSpeechUtterance = null;
-      if (onEnded) onEnded();
-    };
-
-    // Watchdog: guarantee onEnded fires even if browser speech engine drops the callback
-    timeoutId = setTimeout(finish, 6000);
-
-    utterance.onstart = () => {
-      if (onStart) onStart();
-    };
-    utterance.onend = finish;
-    utterance.onerror = finish;
-
-    activeSpeechUtterance = utterance;
-
-    // Small delay after cancel() prevents IPC deadlocks on WebKit/macOS
-    setTimeout(() => {
-      try {
-        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        finish();
-      }
-    }, 20);
-
-    return true;
-  } catch (err) {
+  const clean = text.replace(/\|/g, '').replace(/___+/g, '').trim();
+  if (!clean) {
     if (onEnded) onEnded();
     return false;
   }
+
+  const executeSpeak = () => {
+    try {
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        window.speechSynthesis.cancel();
+      }
+
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.lang = 'de-DE';
+      utterance.pitch = 0.88; // Deep masculine resonance
+
+      const voice = getBestGermanVoice();
+      if (voice) {
+        utterance.voice = voice;
+      }
+      utterance.rate = Math.max(0.7, Math.min(1.2, rate));
+
+      let hasEnded = false;
+      let timeoutId: any = null;
+
+      const finish = () => {
+        if (hasEnded) return;
+        hasEnded = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        activeSpeechUtterance = null;
+        if (onEnded) onEnded();
+      };
+
+      // Watchdog: guarantee onEnded fires even if browser speech engine drops the callback
+      timeoutId = setTimeout(finish, 6000);
+
+      utterance.onstart = () => {
+        if (onStart) onStart();
+      };
+      utterance.onend = finish;
+      utterance.onerror = finish;
+
+      activeSpeechUtterance = utterance;
+
+      // Small delay after cancel() prevents IPC deadlocks on WebKit/macOS
+      setTimeout(() => {
+        try {
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+          window.speechSynthesis.speak(utterance);
+        } catch {
+          finish();
+        }
+      }, 20);
+
+      return true;
+    } catch {
+      if (onEnded) onEnded();
+      return false;
+    }
+  };
+
+  const currentVoice = getBestGermanVoice();
+  if (!currentVoice && window.speechSynthesis.getVoices().length === 0) {
+    const onVoices = () => {
+      window.speechSynthesis.removeEventListener('voiceschanged', onVoices);
+      cachedGermanVoice = null;
+      executeSpeak();
+    };
+    window.speechSynthesis.addEventListener('voiceschanged', onVoices);
+    setTimeout(onVoices, 200);
+    return true;
+  }
+
+  return executeSpeak();
 }
 
 export interface PlaySpeechOptions {
