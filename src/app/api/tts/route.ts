@@ -1,21 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { EdgeTTS } from "node-edge-tts";
+import { EdgeTTS } from "@andresaya/edge-tts";
 import fs from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
 
-// Persistent disk cache directory (survives server restarts & page refreshes)
-const DISK_CACHE_DIR = path.join(process.cwd(), ".tts_cache");
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// Persistent disk cache directory in /tmp (safe for Vercel serverless and local dev)
+const DISK_CACHE_DIR = path.join(os.tmpdir(), "tts_cache");
 try {
   if (!fs.existsSync(DISK_CACHE_DIR)) {
     fs.mkdirSync(DISK_CACHE_DIR, { recursive: true });
   }
 } catch (e) {
-  console.warn("Could not create .tts_cache directory:", e);
+  console.warn("Could not create tts_cache directory:", e);
 }
 
-// In-memory cache for hot words to eliminate disk I/O completely (1ms response)
+// In-memory cache for hot words to eliminate disk I/O completely (0ms response)
 const serverTtsCache = new Map<string, Buffer>();
 const MAX_SERVER_CACHE_ITEMS = 1000;
 
@@ -47,7 +50,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Empty text" }, { status: 400 });
     }
 
-    let requestedVoice = (typeof voice === 'string' && voice.trim()) ? voice.trim() : "de-DE-KillianNeural";
+    let requestedVoice = (typeof voice === "string" && voice.trim()) ? voice.trim() : "de-DE-KillianNeural";
     if (requestedVoice.toLowerCase().includes("katja") || requestedVoice.toLowerCase().includes("female")) {
       requestedVoice = "de-DE-KillianNeural";
     }
@@ -87,7 +90,7 @@ export async function POST(req: NextRequest) {
           });
         }
       }
-    } catch (e) {
+    } catch {
       // Ignore disk read error and proceed to network synthesis
     }
 
@@ -96,47 +99,30 @@ export async function POST(req: NextRequest) {
       requestedVoice,
       ...FALLBACK_VOICES.filter((v) => v !== requestedVoice),
     ];
-    const lang = requestedVoice.split('-').slice(0, 2).join('-') || "de-DE";
+
     let audioBuffer: Buffer | null = null;
-    let lastError: any = null;
+    let lastError: unknown = null;
+
+    const tts = new EdgeTTS();
 
     for (let attempt = 0; attempt < voiceCandidates.length; attempt++) {
       const vName = voiceCandidates[attempt];
-      const tempFilePath = path.join(
-        os.tmpdir(),
-        `tts-${Date.now()}-${Math.random().toString(36).substring(7)}.mp3`
-      );
-
       try {
-        const tts = new EdgeTTS({
-          voice: vName,
-          lang,
-          outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+        const result = await tts.generate(cleanText, vName, {
           rate: "-4%",
-          timeout: 4500,
+          timeout: 5000,
         });
 
-        await tts.ttsPromise(cleanText, tempFilePath);
-
-        if (fs.existsSync(tempFilePath)) {
-          const tempBuf = fs.readFileSync(tempFilePath);
-          if (tempBuf && tempBuf.length > 100) {
-            audioBuffer = tempBuf;
-            try {
-              fs.writeFileSync(diskPath, tempBuf);
-            } catch (err) {}
-          }
+        if (result?.audio && result.audio.length > 100) {
+          audioBuffer = Buffer.isBuffer(result.audio) ? result.audio : Buffer.from(result.audio);
           try {
-            fs.unlinkSync(tempFilePath);
+            fs.writeFileSync(diskPath, audioBuffer);
           } catch {}
-          if (audioBuffer) break;
+          break;
         }
       } catch (err) {
         lastError = err;
-        try {
-          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-        } catch {}
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 80));
       }
     }
 
@@ -158,8 +144,11 @@ export async function POST(req: NextRequest) {
         "X-TTS-Source": "edge-fresh",
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("TTS Server Error:", error);
-    return NextResponse.json({ error: "Failed to fetch TTS" }, { status: 500 });
+    return NextResponse.json({
+      error: "Failed to fetch TTS",
+      details: error?.message || String(error),
+    }, { status: 500 });
   }
 }

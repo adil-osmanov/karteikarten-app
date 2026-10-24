@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@andresaya/edge-tts": "^1.9.1",
     "@supabase/supabase-js": "^2.116.0",
     "clsx": "^2.1.1",
     "framer-motion": "^13.2.0",
@@ -16,7 +17,6 @@
     "howler": "^2.2.4",
     "lucide-react": "^1.45.0",
     "next": "16.3.5",
-    "node-edge-tts": "^1.2.11",
     "openai": "^7.15.0",
     "puppeteer": "^25.11.0",
     "react": "19.2.8",
