@@ -1150,9 +1150,9 @@ interface DeckState {
   syncError: string | null;
   setSyncError: (msg: string | null) => void;
   deckOrder: string[];
-  setDeckOrder: (order: string[]) => void;
+  setDeckOrder: (order: string[], skipCloudSync?: boolean) => void;
   bookOrder: string[];
-  setBookOrder: (order: string[]) => void;
+  setBookOrder: (order: string[], skipCloudSync?: boolean) => void;
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
 }
@@ -1183,6 +1183,30 @@ const getInitialCachedDecks = (): Deck[] => {
   return [];
 };
 
+const getInitialBookOrder = (): string[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const saved = localStorage.getItem('book_order');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+};
+
+const getInitialDeckOrder = (): string[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const saved = localStorage.getItem('deck_order');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+};
+
 const initialBooks = getInitialCachedBooks();
 const initialDecks = getInitialCachedDecks();
 
@@ -1210,19 +1234,19 @@ const useStore = create<DeckState>()((set, get) => ({
   dailyProgress: {},
   syncError: null,
   setSyncError: (msg) => set({ syncError: msg }),
-  deckOrder: [],
-  setDeckOrder: (order) => {
+  deckOrder: getInitialDeckOrder(),
+  setDeckOrder: (order, skipCloudSync = false) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('deck_order', JSON.stringify(order));
-      syncAppStateToCloud();
+      safeSetStorage('deck_order', JSON.stringify(order));
+      if (!skipCloudSync) syncAppStateToCloud({ deckOrder: order });
     }
     set({ deckOrder: order });
   },
-  bookOrder: [],
-  setBookOrder: (order) => {
+  bookOrder: getInitialBookOrder(),
+  setBookOrder: (order, skipCloudSync = false) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('book_order', JSON.stringify(order));
-      syncAppStateToCloud();
+      safeSetStorage('book_order', JSON.stringify(order));
+      if (!skipCloudSync) syncAppStateToCloud({ bookOrder: order });
     }
     set({ bookOrder: order });
   },
@@ -1663,17 +1687,10 @@ const useStore = create<DeckState>()((set, get) => ({
         isArchived: validCard.isArchived,
         nextReviewDate: validCard.nextReviewDate,
         interval: validCard.interval,
-        repetitions: validCard.repetitions,
-        easeFactor: validCard.easeFactor
+        repetitions: validCard.repetitions
       };
 
-      let { error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId);
-
-      if (error && (error.code === 'PGRST204' || error.message?.includes('easeFactor'))) {
-        const { easeFactor, ...withoutEase } = fullUpdate;
-        const retry = await supabase.from('cards').update(withoutEase).eq('id', cardId);
-        error = retry.error;
-      }
+      const { error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId);
       
       if (error) {
         console.error("Supabase Update Card Error:", error.message);
@@ -1720,17 +1737,10 @@ const useStore = create<DeckState>()((set, get) => ({
         isArchived: validCard.isArchived,
         nextReviewDate: validCard.nextReviewDate,
         interval: validCard.interval,
-        repetitions: validCard.repetitions,
-        easeFactor: validCard.easeFactor
+        repetitions: validCard.repetitions
       };
 
-      let { error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId);
-
-      if (error && (error.code === 'PGRST204' || error.message?.includes('easeFactor'))) {
-        const { easeFactor, ...withoutEase } = fullUpdate;
-        const retry = await supabase.from('cards').update(withoutEase).eq('id', cardId);
-        error = retry.error;
-      }
+      const { error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId);
 
       if (error) {
         console.error("Supabase Update Card Error:", error.message);
@@ -7309,14 +7319,30 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
 
 // --- CLOUD SYNC HELPER ---
-export const syncAppStateToCloud = async () => {
+export const syncAppStateToCloud = async (override?: { bookOrder?: string[]; deckOrder?: string[] }) => {
   if (typeof window === 'undefined') return;
   const state: any = { theory: {} };
   
-  const order = localStorage.getItem('deck_order');
-  if (order) state.deckOrder = JSON.parse(order);
-  const bOrder = localStorage.getItem('book_order');
-  if (bOrder) state.bookOrder = JSON.parse(bOrder);
+  const currentDeckOrder = override?.deckOrder || useStore.getState().deckOrder || [];
+  const currentBookOrder = override?.bookOrder || useStore.getState().bookOrder || [];
+  
+  if (currentDeckOrder.length > 0) {
+    state.deckOrder = currentDeckOrder;
+  } else {
+    try {
+      const order = localStorage.getItem('deck_order');
+      if (order) state.deckOrder = JSON.parse(order);
+    } catch {}
+  }
+
+  if (currentBookOrder.length > 0) {
+    state.bookOrder = currentBookOrder;
+  } else {
+    try {
+      const bOrder = localStorage.getItem('book_order');
+      if (bOrder) state.bookOrder = JSON.parse(bOrder);
+    } catch {}
+  }
   
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
@@ -7324,11 +7350,40 @@ export const syncAppStateToCloud = async () => {
       state.theory[key] = localStorage.getItem(key);
     }
   }
+
+  state.updatedAt = Date.now();
   
-  await supabase.from('user_stats').upsert({
-    language: 'GLOBAL_APP_STATE',
-    daily_activity: state
-  }, { onConflict: 'language' });
+  try {
+    await supabase.from('user_stats').upsert({
+      language: 'GLOBAL_APP_STATE',
+      daily_activity: state
+    }, { onConflict: 'language' });
+  } catch (err) {
+    console.error('[Sync Error] Failed to sync app state to cloud:', err);
+  }
+};
+
+export const applyCloudAppState = (cloudState: any) => {
+  if (!cloudState || typeof cloudState !== 'object') return;
+  
+  if (cloudState.bookOrder && Array.isArray(cloudState.bookOrder) && cloudState.bookOrder.length > 0) {
+    safeSetStorage('book_order', JSON.stringify(cloudState.bookOrder));
+    useStore.getState().setBookOrder(cloudState.bookOrder, true);
+  }
+  
+  if (cloudState.deckOrder && Array.isArray(cloudState.deckOrder) && cloudState.deckOrder.length > 0) {
+    safeSetStorage('deck_order', JSON.stringify(cloudState.deckOrder));
+    useStore.getState().setDeckOrder(cloudState.deckOrder, true);
+  }
+  
+  if (cloudState.theory) {
+    for (const [key, val] of Object.entries(cloudState.theory)) {
+      if (typeof val === 'string') safeSetStorage(key, val);
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('theory-update'));
+    }
+  }
 };
 
 
@@ -8856,21 +8911,7 @@ export default function App() {
           
           const globalStat = statsRes.data.find((s: any) => s.language === 'GLOBAL_APP_STATE');
           if (globalStat && globalStat.daily_activity) {
-            const state = globalStat.daily_activity;
-            if (state.deckOrder && Array.isArray(state.deckOrder)) {
-              safeSetStorage('deck_order', JSON.stringify(state.deckOrder));
-              useStore.getState().setDeckOrder(state.deckOrder);
-            }
-            if (state.bookOrder && Array.isArray(state.bookOrder)) {
-              safeSetStorage('book_order', JSON.stringify(state.bookOrder));
-              useStore.setState({ bookOrder: state.bookOrder });
-            }
-            if (state.theory) {
-              for (const [key, val] of Object.entries(state.theory)) {
-                if (typeof val === 'string') safeSetStorage(key, val);
-              }
-              window.dispatchEvent(new Event('theory-update'));
-            }
+            applyCloudAppState(globalStat.daily_activity);
           }
         }
 
@@ -8988,6 +9029,46 @@ export default function App() {
       }
     };
     fetchData();
+
+    // 1. Supabase Realtime channel for instant cross-browser and cross-device sync of bookOrder & global state
+    const globalStateChannel = supabase
+      .channel('realtime-global-app-state')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'user_stats',
+        filter: 'language=eq.GLOBAL_APP_STATE'
+      }, (payload: any) => {
+        if (payload?.new?.daily_activity) {
+          applyCloudAppState(payload.new.daily_activity);
+        }
+      })
+      .subscribe();
+
+    // 2. Refetch on focus and visibilitychange (e.g. switching between Safari and Chrome tabs/windows)
+    const handleSyncOnFocus = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        try {
+          const { data } = await supabase
+            .from('user_stats')
+            .select('daily_activity')
+            .eq('language', 'GLOBAL_APP_STATE')
+            .maybeSingle();
+          if (data?.daily_activity) {
+            applyCloudAppState(data.daily_activity);
+          }
+        } catch (e) {}
+      }
+    };
+
+    window.addEventListener('focus', handleSyncOnFocus);
+    document.addEventListener('visibilitychange', handleSyncOnFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleSyncOnFocus);
+      document.removeEventListener('visibilitychange', handleSyncOnFocus);
+      supabase.removeChannel(globalStateChannel);
+    };
   }, [setDecks]);
 
   const filteredDecksList = useMemo(() => {
@@ -9042,7 +9123,7 @@ export default function App() {
     const filtered = books.filter(b => b.language === appLanguage);
     if (bookOrder && bookOrder.length > 0) {
       const map = new Map(bookOrder.map((id, index) => [id, index]));
-      return filtered.sort((a, b) => {
+      return [...filtered].sort((a, b) => {
         const idxA = map.has(a.id) ? map.get(a.id)! : 999;
         const idxB = map.has(b.id) ? map.get(b.id)! : 999;
         return idxA - idxB;
