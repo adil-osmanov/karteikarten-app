@@ -2996,7 +2996,7 @@ function RapidFlashcardMode({
                     e.stopPropagation();
                     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
                   }}
-                  className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition active:scale-95 cursor-pointer"
+                  className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
                   title="Aussprache anhören (R)"
                 >
                   <Volume2 className="w-4 h-4"/>
@@ -3111,7 +3111,7 @@ function RapidFlashcardMode({
             <button
               type="button"
               onClick={() => playSafeAudio(() => playCardAudio(currentCard?.targetWord))}
-              className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition cursor-pointer"
+              className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
               title="Aussprache anhören (R)"
             >
               <Volume2 className="w-4 h-4"/>
@@ -3134,7 +3134,7 @@ function RapidFlashcardMode({
                 type="button"
                 onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
                 disabled={isAnswered || locked}
-                className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
+                className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
                 title="Сдаться (-1 раунд)"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
@@ -3575,14 +3575,11 @@ function RapidSession({
           <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <button
-            type="button"
-            onClick={() => setIsStatsOpen(true)}
-            className="text-xs font-mono tabular-nums text-gray-400 hover:text-gray-900 dark:text-gray-500 dark:hover:text-zinc-200 transition-colors cursor-pointer py-1 px-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 select-none"
-            title="Статистика дня"
+          <span
+            className="text-xs font-mono font-medium text-zinc-400 dark:text-zinc-500 select-none cursor-default py-1 px-2"
           >
             {mastered} / {total}
-          </button>
+          </span>
         </div>
         <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div
@@ -4059,14 +4056,11 @@ function StudyInterface({
                 Runde {Math.min(4, roundCounter + 1)} / 4
               </span>
             )}
-            <button
-              type="button"
-              onClick={() => setIsStatsOpen(true)}
-              className="text-xs font-mono tabular-nums text-gray-400 hover:text-gray-900 dark:text-gray-500 dark:hover:text-zinc-200 transition-colors cursor-pointer py-1 px-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 select-none"
-              title="Статистика дня"
+            <span
+              className="text-xs font-mono font-medium text-zinc-400 dark:text-zinc-500 select-none cursor-default py-1 px-2"
             >
               {currentIndex + 1} / {activeCards.length}
-            </button>
+            </span>
           </div>
         </div>
         <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
@@ -4791,11 +4785,11 @@ function StudyCard({
                 playAudio(speechSentence);
               }}
               disabled={isPlayingAudio}
-              className="relative w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-50 cursor-pointer"
+              className="relative w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-50 cursor-pointer"
               title="Aussprache anhören (R)"
             >
               <Volume2 className="w-4 h-4" />
-              <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-bold text-gray-400 dark:text-[#8E8E93] bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded px-0.5 shadow-sm pointer-events-none">
+              <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-bold text-zinc-400 dark:text-zinc-500 bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded px-0.5 shadow-sm pointer-events-none">
                 R
               </span>
             </button>
@@ -4803,7 +4797,7 @@ function StudyCard({
             <button
               type="button"
               onClick={() => setPlaybackSpeed(playbackSpeed === 1 ? 0.75 : 1)}
-              className="text-xs font-medium text-zinc-400 hover:text-white px-2 py-0.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition active:scale-95 cursor-pointer"
+              className="text-xs font-medium text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 transition-colors duration-150 active:scale-95 cursor-pointer"
               title="Playback Speed"
             >
               <span className="text-[11px] font-semibold tabular-nums tracking-wide leading-none">
@@ -4841,7 +4835,7 @@ function StudyCard({
               onClick={handleHilfe}
               disabled={phase !== "Question"}
               className={cn(
-                "w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+                "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
                 phase !== "Question" && "opacity-0 pointer-events-none"
               )}
               title="Hilfe (H)"
@@ -7654,7 +7648,7 @@ function PrepStudyCard({
           <button 
             type="button"
             onClick={playAudio}
-            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95"
+            className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
             title="Audio abspielen"
           >
             <Volume2 className="w-4 h-4" />
@@ -7688,7 +7682,7 @@ function PrepStudyCard({
             onClick={onHilfe}
             disabled={isSuccess || isHilfe}
             className={cn(
-              "w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+              "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
               (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
             )}
             title="Ich weiß nicht"
@@ -7904,7 +7898,7 @@ function VerbStudyCard({
           <button 
             type="button"
             onClick={playAudio}
-            className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95"
+            className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
             title="Audio abspielen (A)"
           >
             <Volume2 className="w-4 h-4" />
@@ -7938,7 +7932,7 @@ function VerbStudyCard({
             onClick={handleHilfe}
             disabled={isSuccess || isHilfe}
             className={cn(
-              "w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+              "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
               (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
             )}
             title="Ich weiß nicht"
@@ -8405,7 +8399,7 @@ export function RedemittelStudyCard({
             {placedChunks.length > 0 && status !== 'success' && status !== 'surrender' && (
               <button
                 onClick={handleReset}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer"
                 title="Zurücksetzen (Esc)"
               >
                 <RotateCcw className="w-4 h-4" />
@@ -8415,7 +8409,7 @@ export function RedemittelStudyCard({
               onClick={handleSurrender}
               disabled={status === 'success' || status === 'surrender'}
               className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors cursor-pointer",
+                "w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer",
                 (status === 'success' || status === 'surrender') && "opacity-0 pointer-events-none"
               )}
               title="Hilfe (H)"
