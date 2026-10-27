@@ -6058,21 +6058,40 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
       </TiltBookCard>
 
       {/* Название книги, автор/издательство и прогресс в стиле Apple Books */}
-      <div className="flex flex-col text-left w-full">
-        <h3 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 mt-3 line-clamp-2">
+      <div className="mt-3.5 flex flex-col text-left w-full">
+        <h3 
+          className="text-[13px] sm:text-sm font-semibold tracking-tight leading-snug text-zinc-900 group-hover:text-blue-650 dark:text-zinc-100 dark:group-hover:text-blue-400 transition-colors truncate"
+          title={cleanTitle}
+        >
           {cleanTitle}
         </h3>
         {book.subtitle && (
-          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-1">
+          <p 
+            className="text-xs font-normal leading-normal text-zinc-500 dark:text-zinc-450 mt-0.5 truncate"
+            title={book.subtitle}
+          >
             {book.subtitle}
           </p>
         )}
         {totalCards > 0 && (
-          <div className="w-full h-1 rounded-full bg-zinc-200 dark:bg-zinc-800 mt-2.5 overflow-hidden">
-            <div 
-              className={cn("h-full rounded-full transition-all duration-500", progressPercent === 100 ? "bg-emerald-500" : "bg-blue-500")}
-              style={{ width: `${progressPercent}%` }}
-            />
+          <div className="w-full mt-2.5">
+            <div className="w-full h-1 bg-zinc-200/80 dark:bg-zinc-800/80 rounded-full overflow-hidden">
+              <div 
+                className={cn(
+                  "h-full rounded-full transition-all duration-300", 
+                  progressPercent === 100 
+                    ? "bg-emerald-500" 
+                    : "bg-blue-600 dark:bg-blue-500"
+                )}
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            {masteredCards > 0 && (
+              <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 dark:text-zinc-500 mt-1 tabular-nums">
+                <span>{progressPercent}%</span>
+                <span>{masteredCards} / {totalCards}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -10478,7 +10497,7 @@ export default function App() {
                 [1, 2, 3, 4].map((i) => (
                   <div key={i} className="flex flex-col animate-pulse">
                     <div className="aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
-                    <div className="pt-3 space-y-1.5">
+                    <div className="mt-3.5 space-y-1.5">
                       <div className="h-4 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
                       <div className="h-3 w-1/2 bg-zinc-200/60 dark:bg-zinc-800/60 rounded" />
                     </div>
@@ -10543,11 +10562,11 @@ export default function App() {
                   </div>
 
                   {/* Текстовый блок под книгой в строгом левом выравнивании */}
-                  <div className="flex flex-col text-left w-full">
-                    <span className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 mt-3 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                  <div className="mt-3.5 flex flex-col text-left w-full">
+                    <span className="text-[13px] sm:text-sm font-semibold tracking-tight leading-snug text-zinc-900 group-hover:text-blue-650 dark:text-zinc-100 dark:group-hover:text-blue-400 transition-colors truncate">
                       {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
                     </span>
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-1">
+                    <p className="text-xs font-normal leading-normal text-zinc-500 dark:text-zinc-450 mt-0.5 truncate">
                       Buch hinzufügen
                     </p>
                   </div>
