@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { CustomCursor } from '@/components/CustomCursor';
 
 export const viewport: Viewport = {
   themeColor: [
@@ -50,6 +51,7 @@ export default function RootLayout({
 
       <body className="min-h-screen bg-[#FAFAFA] dark:bg-[#000000] text-gray-900 dark:text-[#F5F5F7] font-sans antialiased selection:bg-blue-600/20 dark:selection:bg-blue-500/30 transition-colors duration-200">
         {children}
+        <CustomCursor />
       </body>
     </html>
   );
