@@ -6,15 +6,15 @@ import { cn } from '@/lib/utils';
 
 export interface DueCardsBadgeProps {
   count?: number;
-  language?: 'DE' | 'EN' | 'RU';
+  language?: 'DE' | 'EN' | 'RU' | string;
   onClick?: () => void;
   className?: string;
 }
 
 const TEXT_MAP = {
-  DE: { action: 'Karten wiederholen', title: 'Karten zu wiederholen' },
-  EN: { action: 'Cards to review', title: 'cards to review' },
-  RU: { action: 'Карточек повторить', title: 'карточек ждут повторения' },
+  de: { action: 'Karten wiederholen', title: 'Karten zu wiederholen' },
+  en: { action: 'Review Cards', title: 'cards to review' },
+  ru: { action: 'Повторить карточки', title: 'карточек ждут повторения' },
 } as const;
 
 export function DueCardsBadge({ count = 0, language = 'DE', onClick, className }: DueCardsBadgeProps) {
@@ -23,27 +23,26 @@ export function DueCardsBadge({ count = 0, language = 'DE', onClick, className }
     return null;
   }
 
-  const langKey = (language in TEXT_MAP ? language : 'DE') as keyof typeof TEXT_MAP;
-  const { action, title } = TEXT_MAP[langKey];
+  const normalizedLang = (language || 'DE').toLowerCase() as keyof typeof TEXT_MAP;
+  const { action, title } = TEXT_MAP[normalizedLang] || TEXT_MAP.de;
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full cursor-pointer select-none",
-        "bg-zinc-950 text-white hover:bg-zinc-800 shadow-[0_8px_20px_rgba(0,0,0,0.16)]",
-        "dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:shadow-[0_0_25px_rgba(255,255,255,0.16)]",
-        "transition-all duration-200 active:scale-95 group",
+        "inline-flex items-center gap-2.5 px-5 py-2 rounded-full cursor-pointer select-none transition-all duration-200 active:scale-95 shadow-sm group",
+        "bg-white/90 hover:bg-zinc-50 text-zinc-900 border border-zinc-200/80 hover:border-zinc-300 shadow-[0_4px_16px_rgba(0,0,0,0.06)]",
+        "dark:bg-zinc-900/90 dark:hover:bg-zinc-800/90 dark:text-zinc-100 dark:border dark:border-white/10 dark:hover:border-white/20 dark:shadow-[0_4px_20px_rgba(0,0,0,0.5)]",
         className
       )}
       title={`${count} ${title}`}
     >
-      <RotateCcw className="w-[15px] h-[15px] text-white/80 dark:text-zinc-950/80 group-hover:rotate-[-45deg] transition-transform duration-300 shrink-0" />
-      <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-blue-600 text-white shadow-sm tabular-nums">
+      <RotateCcw className="w-[15px] h-[15px] text-zinc-500 dark:text-zinc-400 group-hover:rotate-[-45deg] transition-transform duration-300 shrink-0" />
+      <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-zinc-900 text-amber-300 dark:bg-white/10 dark:text-amber-400 dark:border dark:border-amber-400/20 tabular-nums">
         {count}
       </span>
-      <span className="text-xs font-semibold tracking-wider uppercase font-sans">
+      <span className="text-xs font-medium tracking-wide uppercase font-sans">
         {action}
       </span>
     </button>

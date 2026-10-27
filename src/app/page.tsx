@@ -5410,16 +5410,46 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
 
 
 
-export function getBookCategory(book?: BookMeta | null): 'textbooks' | 'grammar' | 'custom' {
+export interface TabConfig {
+  id: 'textbooks' | 'flashcards' | 'structures';
+  label: string;
+}
+
+export const getTabsForLanguage = (lang?: string): TabConfig[] => {
+  const normalizedLang = (lang || 'de').toLowerCase();
+
+  if (normalizedLang === 'de') {
+    return [
+      { id: 'textbooks', label: 'Lehrbücher' },
+      { id: 'flashcards', label: 'Karteikarten' },
+      { id: 'structures', label: 'Strukturen & NVV' }, // Только для немецкого языка
+    ];
+  }
+
+  if (normalizedLang === 'ru') {
+    return [
+      { id: 'textbooks', label: 'Учебники' },
+      { id: 'flashcards', label: 'Флешкарты' },
+    ];
+  }
+
+  // Дефолт / English
+  return [
+    { id: 'textbooks', label: 'Textbooks' },
+    { id: 'flashcards', label: 'Flashcards' },
+  ];
+};
+
+export function getBookCategory(book?: BookMeta | null): 'textbooks' | 'flashcards' | 'structures' {
   if (!book) return 'textbooks';
   if (book.category === 'textbooks' || book.category === 'coursebook') return 'textbooks';
-  if (book.category === 'grammar') return 'grammar';
-  if (book.category === 'custom') return 'custom';
+  if (book.category === 'structures' || book.category === 'grammar') return 'structures';
+  if (book.category === 'flashcards' || book.category === 'custom' || book.category === 'deck') return 'flashcards';
 
   const title = (book.title || '').toLowerCase();
   const mode = book.training_mode;
 
-  // 1. Specialized grammar trainers
+  // 1. Specialized grammar and structure trainers
   if (
     mode === 'starke_verben' ||
     mode === 'preposition_drill' ||
@@ -5428,9 +5458,10 @@ export function getBookCategory(book?: BookMeta | null): 'textbooks' | 'grammar'
     title.includes('nvv') ||
     title.includes('präposition') ||
     title.includes('starke verben') ||
-    title.includes('redemittel')
+    title.includes('redemittel') ||
+    title.includes('struktur')
   ) {
-    return 'grammar';
+    return 'structures';
   }
 
   // 2. Course textbooks (Aspekte, Schritte Plus, Basis Deutsch, DTZ, etc.)
@@ -5447,8 +5478,8 @@ export function getBookCategory(book?: BookMeta | null): 'textbooks' | 'grammar'
     return 'textbooks';
   }
 
-  // 3. Fallback: custom personal decks (ChatGPT, etc.)
-  return 'custom';
+  // 3. Fallback: flashcards
+  return 'flashcards';
 }
 
 const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete }: { book: BookMeta, priority?: boolean, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
@@ -5744,7 +5775,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | { catego
 
   const [title, setTitle] = useState(existingBook?.title || "");
   const [subtitle, setSubtitle] = useState(existingBook?.subtitle || "");
-  const [category, setCategory] = useState<'textbooks' | 'grammar' | 'custom'>(
+  const [category, setCategory] = useState<'textbooks' | 'flashcards' | 'structures'>(
     existingBook ? getBookCategory(existingBook) : ((book?.category as any) || 'textbooks')
   );
   const [trainingMode, setTrainingMode] = useState<'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' | 'redemittel'>(existingBook?.training_mode || 'standard_cloze');
@@ -5859,9 +5890,11 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | { catego
                 }
               }
             }} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
-              <option value="textbooks">Lehrbücher</option>
-              <option value="grammar">Grammatik & NVV</option>
-              <option value="custom">Eigene Decks</option>
+              <option value="textbooks">{appLanguage === 'RU' ? 'Учебники' : appLanguage === 'EN' ? 'Textbooks' : 'Lehrbücher'}</option>
+              <option value="flashcards">{appLanguage === 'RU' ? 'Флешкарты' : appLanguage === 'EN' ? 'Flashcards' : 'Karteikarten'}</option>
+              {(appLanguage === 'DE' || category === 'structures') && (
+                <option value="structures">{appLanguage === 'DE' ? 'Strukturen & NVV' : 'Structures & NVV'}</option>
+              )}
             </select>
           </div>
           
@@ -8499,9 +8532,17 @@ export default function App() {
   const [isReviewingMistakes, setIsReviewingMistakes] = useState(false);
   const [drillCards, setDrillCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
-  const [activeCategory, setActiveCategory] = useState<'textbooks' | 'grammar' | 'custom'>('textbooks');
+  const [activeCategory, setActiveCategory] = useState<'textbooks' | 'flashcards' | 'structures'>('textbooks');
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [bookModal, setBookModal] = useState<{ id?: string, category?: string } | null>(null);
+
+  // Automatically reset category to 'textbooks' if current activeCategory is not available for new language
+  useEffect(() => {
+    const tabs = getTabsForLanguage(appLanguage);
+    if (!tabs.some(t => t.id === activeCategory)) {
+      setActiveCategory('textbooks');
+    }
+  }, [appLanguage, activeCategory]);
   
   const [targetLevelForUpload, setTargetLevelForUpload] = useState<CEFRLevel>('B1');
   const [isUploadingCSV, setIsUploadingCSV] = useState(false);
@@ -9850,21 +9891,17 @@ export default function App() {
               </div>
             )}
 
-            {/* Apple Segmented Control */}
+            {/* Dynamic Apple Segmented Control with i18n */}
             <div className="flex justify-center mb-10">
-              <div className="inline-flex p-1 rounded-full bg-zinc-200/60 dark:bg-zinc-900/80 border border-zinc-300/40 dark:border-zinc-800/80 backdrop-blur-md">
-                {[
-                  { id: 'textbooks', label: 'Lehrbücher' },
-                  { id: 'grammar', label: 'Grammatik & NVV' },
-                  { id: 'custom', label: 'Eigene Decks' },
-                ].map((tab) => (
+              <div className="inline-flex p-1 rounded-full bg-zinc-200/50 dark:bg-zinc-900/60 border border-zinc-300/30 dark:border-white/5 backdrop-blur-md">
+                {getTabsForLanguage(appLanguage).map((tab) => (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveCategory(tab.id as any)}
+                    onClick={() => setActiveCategory(tab.id)}
                     className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all duration-200 cursor-pointer ${
                       activeCategory === tab.id
                         ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'
+                        : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
                     }`}
                   >
                     {tab.label}
