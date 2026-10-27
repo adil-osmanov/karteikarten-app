@@ -4907,7 +4907,7 @@ function StudyCard({
           </div>
 
           <div className="mt-4 mb-6 w-full text-center">
-            <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
+            <p className="text-sm font-normal mt-3 text-center max-w-2xl mx-auto leading-relaxed text-zinc-500 dark:text-zinc-400 opacity-60 hover:opacity-100 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all duration-200 cursor-pointer">
               {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
             </p>
 
@@ -5449,6 +5449,56 @@ function getBookModeBadge(book: BookMeta): ModeBadgeInfo | null {
   return null;
 }
 
+export function getBookLevelDot(book: BookMeta): string {
+  const text = `${book.title} ${book.subtitle || ''}`.toUpperCase();
+
+  // 1. Check title and subtitle for explicit level mentions
+  if (/\b(B2|C1|C2)\b/.test(text) || text.includes('B2') || text.includes('C1') || text.includes('C2')) {
+    return 'bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.4)]';
+  }
+  if (/\b(A1\s*[\+\-]\s*A2|A1\/A2|1\+2)\b/.test(text)) {
+    return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
+  }
+  if (/\b(A2|B1)\b/.test(text) || text.includes('DTZ') || text.includes('B1') || text.includes('A2') || text.includes('3+4')) {
+    return 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]';
+  }
+  if (/\bA1\b/.test(text)) {
+    return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
+  }
+
+  // 2. Check activeLevels
+  const levels = book.activeLevels || [];
+  const isAllLevels = levels.length >= 5;
+
+  if (!isAllLevels && levels.length > 0) {
+    if (levels.includes('B2') || levels.includes('C1-C2')) {
+      return 'bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.4)]';
+    }
+    const hasA1 = levels.includes('A1');
+    const hasA2 = levels.includes('A2');
+    const hasB1 = levels.includes('B1');
+
+    if (hasA1 && hasA2 && !hasB1) {
+      return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
+    }
+    if (hasB1 || (hasA2 && !hasA1)) {
+      return 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]';
+    }
+    if (hasA1) {
+      return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
+    }
+  }
+
+  // 3. Fallback: if highest level is B2 or C1
+  if (levels.includes('C1-C2') || levels.includes('B2')) {
+    return 'bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.4)]';
+  }
+  if (levels.includes('B1') || levels.includes('A2')) {
+    return 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]';
+  }
+  return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
+}
+
 const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete }: { book: BookMeta, priority?: boolean, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
   const initialCoverStr = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
   let lightCover = initialCoverStr;
@@ -5465,6 +5515,8 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
   const badge = getBookModeBadge(book);
   const BadgeIcon = badge?.icon;
+  const levelDotClass = getBookLevelDot(book);
+  const cleanTitle = book.title.replace(/^[🟢🟠🟣🔵●🔴🟡]\s*/, '');
 
   const decks = useStore(s => s.decks);
   const { totalCards, masteredCards } = useMemo(() => {
@@ -5504,7 +5556,8 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
       {/* Book Title, Author/Publisher/Subtitle & Progress in authentic Apple Books style */}
       <div className="pt-3.5 pb-1 flex flex-col">
         <h3 className="text-[14px] md:text-[15px] font-semibold text-gray-900 dark:text-white leading-snug line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-          {book.title}
+          <span className={cn("w-2 h-2 rounded-full inline-block mr-2 shrink-0 align-middle mb-0.5", levelDotClass)} />
+          {cleanTitle}
         </h3>
         {book.subtitle && (
           <p className="text-[12px] font-medium text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">
