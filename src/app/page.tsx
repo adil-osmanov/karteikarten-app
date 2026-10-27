@@ -10311,6 +10311,15 @@ export default function App() {
 
   return (
       <>
+        {/* Кинематографический фоновый свет (Studio Key Light) */}
+        <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+          {/* Темная тема: лунный студийный софтбокс */}
+          <div className="hidden dark:block absolute -top-[25%] left-1/2 -translate-x-1/2 w-[1200px] h-[650px] rounded-full bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.06)_0%,rgba(59,130,246,0.03)_40%,transparent_75%)] blur-[90px]" />
+          
+          {/* Светлая тема: мягкий керамический свет с деликатной виньеткой */}
+          <div className="block dark:hidden absolute -top-[20%] left-1/2 -translate-x-1/2 w-[1100px] h-[600px] rounded-full bg-[radial-gradient(ellipse_at_center,#ffffff_0%,rgba(241,245,249,0.8)_60%,transparent_100%)] blur-[80px]" />
+        </div>
+
         <AmbientSpotlight />
         {activeBookId && (
         <div className="fixed inset-0 pointer-events-none -z-50 overflow-hidden">
@@ -10539,7 +10548,9 @@ export default function App() {
                     />
 
                     {/* Обложка-форзац с книжными пропорциями и корешком */}
-                    <div className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all duration-300 ease-out group-hover:-translate-y-1.5 shadow-sm flex flex-col items-center justify-center p-6 text-center z-10">
+                    <div className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all duration-300 ease-out group-hover:-translate-y-1.5 shadow-[0_4px_12px_rgba(0,0,0,0.03),0_12px_24px_-10px_rgba(15,23,42,0.08)] dark:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.4),0_16px_32px_-10px_rgba(0,0,0,0.6)] flex flex-col items-center justify-center p-6 text-center z-10">
+                      {/* Интерактивный скользящий блик (Specular Sheen) */}
+                      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 rounded-[inherit] pointer-events-none z-20" />
                       {/* Корешок слева */}
                       <div 
                         aria-hidden="true"
