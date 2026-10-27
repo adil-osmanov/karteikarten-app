@@ -5103,30 +5103,36 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
 
 export const UI_TRANSLATIONS = {
   DE: {
+    libraryKicker: "Deine Bibliothek",
     libraryTitle: "Lehrbücher",
     dueCardsBadge: (count: number) => `${count} zu wiederholen`,
     dueCardsTitle: (count: number) => `${count} Karten zu wiederholen`,
     today: "heute",
+    trainingKicker: "Intervall-Wiederholung",
     trainingTitle: "Blitzkarten & Training",
     newBook: "Neues Buch",
     archived: "Archiv anzeigen",
     noDecks: "Noch keine Decks in diesem Level.",
   },
   EN: {
+    libraryKicker: "Your Library",
     libraryTitle: "Textbooks",
     dueCardsBadge: (count: number) => `${count} to review`,
     dueCardsTitle: (count: number) => `${count} cards to review`,
     today: "today",
+    trainingKicker: "Spaced Repetition",
     trainingTitle: "Flashcards & Training",
     newBook: "New Book",
     archived: "Archived",
     noDecks: "No decks in this level yet.",
   },
   RU: {
+    libraryKicker: "Ваша библиотека",
     libraryTitle: "Учебники",
     dueCardsBadge: (count: number) => `${count} к повторению`,
     dueCardsTitle: (count: number) => `${count} карточек ждут повторения`,
     today: "сегодня",
+    trainingKicker: "Интервальное повторение",
     trainingTitle: "Карточки и тренировки",
     newBook: "Новая книга",
     archived: "Архив",
@@ -5450,16 +5456,16 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
 
       {/* Название книги, автор/издательство и прогресс в стиле Apple Books */}
       <div className="flex flex-col">
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 tracking-tight mt-3 line-clamp-2">
+        <h3 className="text-xs font-semibold tracking-tight text-zinc-900 dark:text-zinc-300 mt-4 line-clamp-2">
           {cleanTitle}
         </h3>
         {book.subtitle && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-1">
+          <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 line-clamp-1">
             {book.subtitle}
           </p>
         )}
         {totalCards > 0 && (
-          <div className="w-full h-1 rounded-full bg-zinc-200 dark:bg-zinc-800 mt-2 overflow-hidden">
+          <div className="w-full h-1 rounded-full bg-zinc-200 dark:bg-zinc-800 mt-2.5 overflow-hidden">
             <div 
               className={cn("h-full rounded-full transition-all duration-500", progressPercent === 100 ? "bg-emerald-500" : "bg-blue-500")}
               style={{ width: `${progressPercent}%` }}
@@ -5696,7 +5702,6 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const [subtitle, setSubtitle] = useState(book?.subtitle || "");
   const [category, setCategory] = useState<'book' | 'deck'>((book?.category as 'book' | 'deck') || 'book');
   const [trainingMode, setTrainingMode] = useState<'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' | 'redemittel'>(book?.training_mode || 'standard_cloze');
-  const [tintColor, setTintColor] = useState(book?.tintColor || book?.accentColor || book?.coverValue || "#1C1C1E");
   
   const initialCoverStr = book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null);
   let initLight = initialCoverStr;
@@ -5777,7 +5782,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
       subtitle: subtitle.trim(),
       category,
       training_mode: trainingMode,
-      tintColor,
+      tintColor: book?.tintColor || '#1C1C1E',
       coverImage: finalCoverImage,
       activeLevels: activeLevels.length ? activeLevels : ['A1']
     });
@@ -5881,43 +5886,6 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-          
-          <div>
-            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Tint Color (Akzent & Glow)</label>
-            <div className="flex gap-2 flex-wrap items-center">
-              {['#1C1C1E', '#FFFFFF', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6', '#AF52DE'].map(c => {
-                const isActive = tintColor.toUpperCase() === c.toUpperCase();
-                return (
-                  <button 
-                    key={c} 
-                    onClick={() => setTintColor(c)} 
-                    className={`w-8 h-8 rounded-full border border-black/10 dark:border-white/10 transition-all ${isActive ? 'ring-2 ring-blue-500 dark:ring-blue-400 ring-offset-2 ring-offset-white dark:ring-offset-[#1C1C1E] scale-110 shadow-md' : 'hover:scale-105 shadow-sm'}`} 
-                    style={{ backgroundColor: c }} 
-                  />
-                );
-              })}
-              
-              {(() => {
-                const predefined = ['#1C1C1E', '#FFFFFF', '#FF3B30', '#FF9500', '#34C759', '#007AFF', '#5856D6', '#AF52DE'];
-                const isCustom = !predefined.map(c => c.toUpperCase()).includes(tintColor.toUpperCase());
-                return (
-                  <div 
-                    className={`relative w-8 h-8 rounded-full overflow-hidden shadow-sm transition-all cursor-pointer flex items-center justify-center border border-black/10 dark:border-white/10 ${isCustom ? 'ring-2 ring-blue-500 dark:ring-blue-400 ring-offset-2 ring-offset-white dark:ring-offset-[#1C1C1E] scale-110 shadow-md' : 'hover:scale-105'}`}
-                    style={{ background: isCustom ? tintColor : 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)' }}
-                    title="Eigene Farbe wählen"
-                  >
-                    {!isCustom && <div className="absolute inset-0 bg-white/20 dark:bg-black/20 pointer-events-none" />}
-                    <input 
-                      type="color" 
-                      value={tintColor} 
-                      onChange={e => setTintColor(e.target.value)} 
-                      className="absolute opacity-0 w-[200%] h-[200%] cursor-pointer"
-                    />
-                  </div>
-                );
-              })()}
             </div>
           </div>
           
@@ -9812,9 +9780,9 @@ export default function App() {
         onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
       />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-6 pb-12 md:pt-8 md:pb-24">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-8 pb-16 md:pt-12 md:pb-28">
         {!activeBookId ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-2 pb-16 space-y-16">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-2 pb-16 space-y-20">
             
             {/* Секция 1: Учебники */}
             <section
@@ -9827,13 +9795,18 @@ export default function App() {
               }}
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
-              <div className="flex items-center gap-3 mb-6">
-                <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                  {UI_TRANSLATIONS[appLanguage]?.libraryTitle || 'Lehrbücher'}
-                </h2>
+              <div className="flex items-end justify-between mb-8">
+                <div>
+                  <span className="block text-[10px] font-bold tracking-widest text-zinc-400 dark:text-zinc-500 uppercase mb-1">
+                    {UI_TRANSLATIONS[appLanguage]?.libraryKicker || 'Deine Bibliothek'}
+                  </span>
+                  <h1 className="text-3xl font-light tracking-tight text-zinc-900 dark:text-zinc-100">
+                    {UI_TRANSLATIONS[appLanguage]?.libraryTitle || 'Lehrbücher'}
+                  </h1>
+                </div>
                 <DueCardsBadge count={dueCards.length} language={appLanguage} onClick={() => { if (dueCards.length > 0) { setIsReviewingMistakes(false); setReviewCards(dueCards); } }} />
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-8">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-12">
                 {isLoadingBooks && displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).length === 0 ? (
                   [1, 2, 3, 4].map((i) => (
                     <div key={i} className="flex flex-col animate-pulse">
@@ -9872,10 +9845,15 @@ export default function App() {
               }}
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
-              <h2 className="text-2xl font-semibold tracking-tight mb-6 text-zinc-900 dark:text-zinc-100">
-                {UI_TRANSLATIONS[appLanguage]?.trainingTitle || 'Blitzkarten & Training'}
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-8">
+              <div className="mb-8">
+                <span className="block text-[10px] font-bold tracking-widest text-zinc-400 dark:text-zinc-500 uppercase mb-1">
+                  {UI_TRANSLATIONS[appLanguage]?.trainingKicker || 'Intervall-Wiederholung'}
+                </span>
+                <h2 className="text-3xl font-light tracking-tight text-zinc-900 dark:text-zinc-100">
+                  {UI_TRANSLATIONS[appLanguage]?.trainingTitle || 'Blitzkarten & Training'}
+                </h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-12">
                 {isLoadingBooks && displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).length === 0 ? (
                   [1, 2, 3].map((i) => (
                     <div key={i} className="flex flex-col animate-pulse">
@@ -9939,10 +9917,10 @@ export default function App() {
 
                     {/* Текстовый блок под книгой в едином стиле */}
                     <div className="flex flex-col">
-                      <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 tracking-tight mt-3 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      <span className="text-xs font-semibold tracking-tight text-zinc-900 dark:text-zinc-300 mt-4 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                         {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
                       </span>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-1">
+                      <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 line-clamp-1">
                         Buch hinzufügen
                       </p>
                     </div>

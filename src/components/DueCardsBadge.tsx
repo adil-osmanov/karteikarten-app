@@ -31,13 +31,13 @@ export function DueCardsBadge({ count = 0, language = 'DE', onClick, className }
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-800/80 hover:bg-zinc-200 dark:hover:bg-zinc-700/80 text-zinc-600 dark:text-zinc-400 text-xs px-2.5 py-1 rounded-full font-medium transition-all duration-150 cursor-pointer select-none active:scale-95",
+        "inline-flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200/50 dark:border-zinc-800/80 text-[11px] px-2.5 py-1 rounded-full font-medium transition-all duration-150 cursor-pointer select-none active:scale-95 hover:bg-zinc-200/60 dark:hover:bg-zinc-850",
         className
       )}
       title={`${count} ${title}`}
     >
-      <RotateCcw className="w-3 h-3 text-blue-500 dark:text-blue-400 shrink-0" />
-      <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono tabular-nums">
+      <RotateCcw className="w-3 h-3 text-zinc-400 dark:text-zinc-500 shrink-0" />
+      <span className="font-semibold text-zinc-800 dark:text-zinc-200 font-mono tabular-nums">
         {count}
       </span>
       <span>
