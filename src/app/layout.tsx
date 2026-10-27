@@ -8,7 +8,7 @@ export const viewport: Viewport = {
   ],
 };
 
-const ICON_VERSION = "20261028";
+const ICON_VERSION = "20261028-v2";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://kontext.app'),
