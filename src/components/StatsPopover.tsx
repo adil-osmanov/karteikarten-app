@@ -161,9 +161,11 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     ? currentLangStats.totalCount
     : (totalDone + mistakesToday);
 
-  const accuracy = (currentLangStats?.totalCount && currentLangStats.totalCount > 0)
-    ? Math.round((currentLangStats.correctCount / currentLangStats.totalCount) * 100)
-    : (totalAttempts > 0 ? Math.round((totalDone / totalAttempts) * 100) : 100);
+  const accuracy = typeof currentLangStats?.accuracy === 'number'
+    ? currentLangStats.accuracy
+    : ((currentLangStats?.totalCount && currentLangStats.totalCount > 0)
+        ? Math.round((currentLangStats.correctCount / currentLangStats.totalCount) * 100)
+        : (totalAttempts > 0 ? Math.round((totalDone / totalAttempts) * 100) : 100));
 
   const accuracyColor = totalAttempts === 0
     ? 'text-zinc-900 dark:text-zinc-100'

@@ -153,6 +153,128 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
   return result;
 }
 
+// --- SUPABASE PER-CARD PROGRESS & STATS REGISTRATION ---
+let cardStatsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingCardStatsQueue: Array<{
+  cardId: string;
+  isCorrect: boolean;
+  meta?: { deckId?: string; bookId?: string; card?: any; language?: string };
+}> = [];
+
+export async function recordCardProgress(
+  cardId: string,
+  isCorrect: boolean,
+  meta?: { deckId?: string; bookId?: string; card?: any; language?: string }
+): Promise<void> {
+  if (!cardId) return;
+  const nowIso = new Date().toISOString();
+
+  // 1. Get authenticated user ID (single source of truth for user)
+  let userId = 'default_user';
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData?.user?.id) {
+      userId = authData.user.id;
+    }
+  } catch {}
+
+  // 2. Try Supabase RPCs if available in public schema
+  try {
+    if (isCorrect) {
+      await supabase.rpc('increment_card_correct', { p_card_id: cardId });
+    } else {
+      await supabase.rpc('increment_card_mistake', { p_card_id: cardId });
+    }
+  } catch {}
+
+  // 3. Try Supabase card_progress table if available
+  try {
+    await supabase.from('card_progress').upsert({
+      user_id: userId,
+      card_id: cardId,
+      deck_id: meta?.deckId || null,
+      book_id: meta?.bookId || null,
+      review_count: 1,
+      correct_count: isCorrect ? 1 : 0,
+      mistake_count: isCorrect ? 0 : 1,
+      last_reviewed_at: nowIso
+    }, { onConflict: 'user_id,card_id' });
+  } catch {}
+
+  // 4. Update CARD_STATS row in user_stats (guaranteed to succeed via JSONB)
+  pendingCardStatsQueue.push({ cardId, isCorrect, meta });
+
+  const flushCardStats = async () => {
+    if (pendingCardStatsQueue.length === 0) return;
+    const batch = [...pendingCardStatsQueue];
+    pendingCardStatsQueue = [];
+
+    try {
+      const { data: statsRow } = await supabase
+        .from('user_stats')
+        .select('daily_activity')
+        .eq('language', 'CARD_STATS')
+        .maybeSingle();
+
+      const currentStats = (statsRow?.daily_activity && typeof statsRow.daily_activity === 'object')
+        ? statsRow.daily_activity
+        : { totalCorrect: 0, totalMistakes: 0, totalReviews: 0, cardRecords: {} };
+
+      let totalCorrect = currentStats.totalCorrect || 0;
+      let totalMistakes = currentStats.totalMistakes || 0;
+      let totalReviews = currentStats.totalReviews || 0;
+      const records = { ...(currentStats.cardRecords || {}) };
+
+      for (const item of batch) {
+        totalReviews += 1;
+        if (item.isCorrect) {
+          totalCorrect += 1;
+        } else {
+          totalMistakes += 1;
+        }
+
+        const existing = records[item.cardId] || {
+          user_id: userId,
+          card_id: item.cardId,
+          deck_id: item.meta?.deckId || '',
+          book_id: item.meta?.bookId || '',
+          review_count: 0,
+          correct_count: 0,
+          mistake_count: 0,
+          last_reviewed_at: nowIso
+        };
+
+        existing.review_count = (existing.review_count || 0) + 1;
+        if (item.isCorrect) {
+          existing.correct_count = (existing.correct_count || 0) + 1;
+        } else {
+          existing.mistake_count = (existing.mistake_count || 0) + 1;
+        }
+        existing.last_reviewed_at = nowIso;
+        if (item.meta?.deckId) existing.deck_id = item.meta.deckId;
+        if (item.meta?.bookId) existing.book_id = item.meta.bookId;
+        records[item.cardId] = existing;
+      }
+
+      await supabase.from('user_stats').upsert({
+        language: 'CARD_STATS',
+        daily_activity: {
+          totalCorrect,
+          totalMistakes,
+          totalReviews,
+          updated_at: new Date().toISOString(),
+          cardRecords: records
+        }
+      }, { onConflict: 'language' });
+    } catch (e) {
+      console.warn('CARD_STATS sync notice:', e);
+    }
+  };
+
+  if (cardStatsDebounceTimer) clearTimeout(cardStatsDebounceTimer);
+  cardStatsDebounceTimer = setTimeout(flushCardStats, 400);
+}
+
 // --- SUPABASE MULTI-DEVICE CLOUD SYNC FOR DAILY COUNTER ---
 
 // Загрузка статистики из Supabase (Single Source of Truth в таблице user_stats)
@@ -207,12 +329,35 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de')
   const current = getLanguageDailyStats(cleanLang);
   const finalCount = countFromDb !== null ? Math.max(countFromDb, current.learnedToday) : current.learnedToday;
 
+  // Single Source of Truth from Supabase:
+  // If Supabase has dailyRowActivity / dayRowActivity, use its canonical mistakes and correct counts!
+  const cloudCorrect = typeof dailyRowActivity?.correctCount === 'number'
+    ? dailyRowActivity.correctCount
+    : (typeof dayRowActivity?.correctCount === 'number' ? dayRowActivity.correctCount : finalCount);
+
+  const cloudMistakes = typeof dailyRowActivity?.mistakesCount === 'number'
+    ? dailyRowActivity.mistakesCount
+    : (typeof dayRowActivity?.mistakesCountToday === 'number'
+        ? dayRowActivity.mistakesCountToday
+        : (current.mistakesCount || 0));
+
+  const cloudTotal = typeof dailyRowActivity?.totalCount === 'number'
+    ? dailyRowActivity.totalCount
+    : (cloudCorrect + cloudMistakes);
+
+  const cloudAccuracy = cloudTotal > 0
+    ? Math.round((cloudCorrect / cloudTotal) * 100)
+    : 100;
+
   if (typeof window !== 'undefined') {
     const updated: LanguageDailyProgress = {
       ...current,
       learnedToday: finalCount,
-      correctCount: Math.max(current.correctCount, finalCount),
-      totalCount: Math.max(current.totalCount, finalCount + (current.mistakesCount || 0)),
+      correctCount: cloudCorrect,
+      mistakesCount: cloudMistakes,
+      totalCount: cloudTotal,
+      accuracy: cloudAccuracy,
+      mistakes: Array.isArray(dailyRowActivity?.mistakes) ? dailyRowActivity.mistakes : (current.mistakes || []),
       focusSeconds: Math.max(
         current.focusSeconds || 0,
         typeof dailyRowActivity?.focusSeconds === 'number' ? dailyRowActivity.focusSeconds : 0,
@@ -220,7 +365,6 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de')
       )
     };
     updated.focusMinutes = Math.floor(updated.focusSeconds / 60);
-    updated.accuracy = updated.totalCount > 0 ? Math.round((updated.correctCount / updated.totalCount) * 100) : 100;
 
     persistDailyStatsLocal(cleanLang, today, updated);
 
@@ -229,7 +373,8 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de')
         ...(dayRowActivity || {}),
         date: today,
         cardsDone: finalCount,
-        correctCount: finalCount
+        correctCount: cloudCorrect,
+        mistakesCountToday: cloudMistakes
       });
     }
 
@@ -282,6 +427,7 @@ export async function syncDailyStatsToCloud(lang: string, count: number, current
           localCur.learnedToday = effectiveCount;
           localCur.correctCount = Math.max(localCur.correctCount, effectiveCount);
           localCur.totalCount = Math.max(localCur.totalCount, effectiveCount + (localCur.mistakesCount || 0));
+          localCur.accuracy = localCur.totalCount > 0 ? Math.round((localCur.correctCount / localCur.totalCount) * 100) : 100;
           persistDailyStatsLocal(cleanLang, today, localCur);
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: effectiveCount } }));
@@ -2729,9 +2875,6 @@ function RapidFlashcardMode({
       playSafeAudio(() => playErrorSound());
       const nextMastery = Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
-      try {
-        onHintPenalty?.(nextMastery);
-      } catch {}
     }
 
     // Мягкое угасание (fade-out) текущей обратной стороны без обратного переворота
@@ -2740,7 +2883,7 @@ function RapidFlashcardMode({
     setTimeout(() => {
       onAnswer(remembered, false);
     }, 140);
-  }, [locked, isTransitioning, localMastery, onAnswer, onHintPenalty]);
+  }, [locked, isTransitioning, localMastery, onAnswer]);
 
   const toggleFlip = useCallback(() => {
     setIsFlipped(prev => !prev);
@@ -3308,6 +3451,165 @@ function RapidFlashcardMode({
   );
 }
 
+// =======================================================
+// SESSION RESULT SCREEN (APPLE HIG RESULT MODAL)
+// =======================================================
+function SessionResultScreen({
+  sessionCorrect,
+  sessionTotal,
+  sessionMistakes,
+  onReviewMistakes,
+  onBack,
+  title = "Großartig!",
+  subtitle
+}: {
+  sessionCorrect: number;
+  sessionTotal: number;
+  sessionMistakes: Flashcard[];
+  onReviewMistakes: () => void;
+  onBack: () => void;
+  title?: string;
+  subtitle?: string;
+}) {
+  const actualTotal = Math.max(sessionTotal, sessionCorrect + sessionMistakes.length);
+  const accuracy = actualTotal > 0 ? Math.round((sessionCorrect / actualTotal) * 100) : 100;
+  const mistakesCount = sessionMistakes.length;
+
+  return (
+    <div className="flex-1 flex flex-col justify-center items-center max-w-xl mx-auto px-6 py-12 text-center select-none w-full animate-in fade-in zoom-in-95 duration-200">
+      {/* Icon / Top Hero Badge */}
+      <div className={cn(
+        "w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 border shadow-sm",
+        accuracy >= 80
+          ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+          : accuracy >= 50
+            ? "bg-amber-50 dark:bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400"
+            : "bg-rose-50 dark:bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400"
+      )}>
+        {accuracy >= 80 ? (
+          <CheckCircle2 className="w-10 h-10 stroke-[2.2]" />
+        ) : (
+          <RotateCcw className="w-10 h-10 stroke-[2.2]" />
+        )}
+      </div>
+
+      <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white mb-2">
+        {title}
+      </h1>
+      <p className="text-[15px] text-zinc-500 dark:text-zinc-400 mb-8 max-w-md mx-auto">
+        {subtitle || (mistakesCount === 0 
+          ? "Du hast alle Karten dieser Session gemeistert!" 
+          : `Session beendet. Du hast ${mistakesCount} ${mistakesCount === 1 ? 'Karte' : 'Karten'} zum Vertiefen.`)}
+      </p>
+
+      {/* 3 Metric Cards (Genauigkeit, Richtig, Fehler) */}
+      <div className="grid grid-cols-3 gap-3 w-full mb-8">
+        <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
+          <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+            Genauigkeit
+          </span>
+          <span className={cn(
+            "text-2xl font-bold tabular-nums tracking-tight",
+            accuracy >= 80 
+              ? "text-emerald-600 dark:text-emerald-400" 
+              : accuracy >= 50 
+                ? "text-amber-600 dark:text-amber-400" 
+                : "text-rose-600 dark:text-rose-400"
+          )}>
+            {accuracy}%
+          </span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
+          <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+            Richtig
+          </span>
+          <span className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
+            {sessionCorrect}
+          </span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
+          <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+            Fehler
+          </span>
+          <span className={cn(
+            "text-2xl font-bold tabular-nums tracking-tight",
+            mistakesCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-zinc-400 dark:text-zinc-500"
+          )}>
+            {mistakesCount}
+          </span>
+        </div>
+      </div>
+
+      {/* Mistakes Block */}
+      {mistakesCount > 0 ? (
+        <div className="w-full mb-8 text-left bg-zinc-50/70 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/10 rounded-2xl p-4 sm:p-5">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+              Fehler ({mistakesCount})
+            </span>
+            <button
+              onClick={onReviewMistakes}
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition active:scale-95 cursor-pointer shadow-sm shadow-blue-500/20"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Fehler wiederholen
+            </button>
+          </div>
+
+          <div className="divide-y divide-zinc-200/60 dark:divide-white/[0.06] max-h-60 overflow-y-auto overscroll-contain pr-1">
+            {sessionMistakes.map((card, idx) => {
+              const germanWord = card.targetWord || (card.sentence ? card.sentence.replace(/\|/g, '') : '—');
+              const translation = card.translation || card.hint || '—';
+              return (
+                <div key={card.id || idx} className="py-2.5 flex items-center justify-between text-sm gap-3">
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100 truncate max-w-[50%]">
+                    {germanWord}
+                  </span>
+                  <div className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 text-xs shrink-0">
+                    <span>→</span>
+                    <span className="text-zinc-600 dark:text-zinc-300 font-normal truncate max-w-[180px]">
+                      {translation}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="mb-8 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-sm font-semibold">
+          <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+          Keine Fehler! Perfekt!
+        </div>
+      )}
+
+      {/* Buttons */}
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full">
+        {mistakesCount > 0 && (
+          <button
+            onClick={onReviewMistakes}
+            type="button"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition active:scale-95 cursor-pointer shadow-md shadow-blue-600/20"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Fehler wiederholen
+          </button>
+        )}
+        <button
+          onClick={onBack}
+          type="button"
+          className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3.5 rounded-xl bg-zinc-200/80 hover:bg-zinc-300/80 dark:bg-white/10 dark:hover:bg-white/15 text-zinc-800 dark:text-zinc-100 font-semibold text-sm transition active:scale-95 cursor-pointer"
+        >
+          Zurück zur Bibliothek
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function RapidSession({
   deckId,
   reviewCards,
@@ -3338,15 +3640,8 @@ function RapidSession({
 
   useEffect(() => {
     setLangStats(getLanguageDailyStats(studyLanguage));
-    syncCloudDailyStats(undefined, studyLanguage).then(count => {
-      if (typeof count === 'number' && count > 0) {
-        setLangStats(prev => ({
-          ...prev,
-          learnedToday: Math.max(prev.learnedToday, count),
-          totalCount: Math.max(prev.totalCount, count),
-          correctCount: Math.max(prev.correctCount, count)
-        }));
-      }
+    syncCloudDailyStats(undefined, studyLanguage).then(() => {
+      setLangStats(getLanguageDailyStats(studyLanguage));
     });
   }, [studyLanguage]);
 
@@ -3355,15 +3650,8 @@ function RapidSession({
       setLangStats(getLanguageDailyStats(studyLanguage));
     };
     const handleSync = () => {
-      syncCloudDailyStats(undefined, studyLanguage).then(count => {
-        if (typeof count === 'number' && count > 0) {
-          setLangStats(prev => ({
-            ...prev,
-            learnedToday: Math.max(prev.learnedToday, count),
-            totalCount: Math.max(prev.totalCount, count),
-            correctCount: Math.max(prev.correctCount, count)
-          }));
-        }
+      syncCloudDailyStats(undefined, studyLanguage).then(() => {
+        setLangStats(getLanguageDailyStats(studyLanguage));
       });
     };
     window.addEventListener('stats-update', handleStatsUpdate);
@@ -3385,6 +3673,9 @@ function RapidSession({
   const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [wordProgress, setWordProgress] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
+  const [sessionTotal, setSessionTotal] = useState(0);
+  const [sessionCorrect, setSessionCorrect] = useState(0);
+  const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
   const [mastered, setMastered] = useState(0);
   const [turn, setTurn] = useState(0);
   const [locked, setLocked] = useState(false);
@@ -3398,9 +3689,27 @@ function RapidSession({
     }));
     setQueue([...list].sort(() => Math.random() - 0.5));
     setTotal(list.length);
+    setSessionTotal(list.length);
     setMastered(0);
+    setSessionCorrect(0);
+    setSessionMistakes([]);
     setIsMistakesReviewMode(true);
     setIsStatsOpen(false);
+  };
+
+  const handleReviewOnlyMistakes = () => {
+    if (sessionMistakes.length === 0) return;
+    const list = sessionMistakes.map(c => ({
+      deckId: deckId || '',
+      card: c
+    }));
+    setQueue([...list].sort(() => Math.random() - 0.5));
+    setTotal(list.length);
+    setSessionTotal(list.length);
+    setMastered(0);
+    setSessionCorrect(0);
+    setSessionMistakes([]);
+    setIsMistakesReviewMode(true);
   };
 
   useEffect(() => {
@@ -3428,6 +3737,9 @@ function RapidSession({
     });
     setQueue(list);
     setTotal(list.length);
+    setSessionTotal(list.length);
+    setSessionCorrect(0);
+    setSessionMistakes([]);
     setMastered(0);
     setWordProgress(initialProgress);
     setLocked(false);
@@ -3466,6 +3778,12 @@ function RapidSession({
     }
 
     if (correct) {
+      setSessionCorrect(prev => prev + 1);
+      recordCardProgress(id, true, {
+        deckId: current.deckId,
+        card: liveCard,
+        language: studyLanguage
+      });
       updateLanguageDailyStats(studyLanguage, 1, true, id);
       setLangStats(prev => ({
         ...prev,
@@ -3474,6 +3792,12 @@ function RapidSession({
         correctCount: (prev?.correctCount || 0) + 1
       }));
     } else {
+      setSessionMistakes(prev => (prev.some(c => c.id === id) ? prev : [...prev, liveCard]));
+      recordCardProgress(id, false, {
+        deckId: current.deckId,
+        card: liveCard,
+        language: studyLanguage
+      });
       updateLanguageDailyStats(studyLanguage, 0, false, id);
       setLangStats(prev => ({
         ...prev,
@@ -3532,7 +3856,13 @@ function RapidSession({
     }
     setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
 
-    // 2) Record mistake in daily stats pool for focused repetition
+    // 2) Record mistake in session and daily stats pool
+    setSessionMistakes(prev => (prev.some(c => c.id === id) ? prev : [...prev, liveCard]));
+    recordCardProgress(id, false, {
+      deckId: current.deckId,
+      card: liveCard,
+      language: studyLanguage
+    });
     updateLanguageDailyStats(studyLanguage, 0, false, id);
     setLangStats(prev => ({
       ...prev,
@@ -3549,20 +3879,14 @@ function RapidSession({
 
   if (queue.length === 0) {
     return (
-      <div className="flex-1 flex flex-col justify-center max-w-2xl mx-auto px-6 py-24 text-center">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-          <div className="w-24 h-24 bg-green-50 dark:bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-8">
-            <CheckCircle2 className="w-12 h-12 text-green-500" />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-4">Großartig!</h1>
-          <p className="text-lg text-gray-500 mb-10">
-            {reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
-          </p>
-          <button onClick={onBack} className="w-full md:w-auto bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]">
-            Zurück zur Bibliothek
-          </button>
-        </motion.div>
-      </div>
+      <SessionResultScreen
+        sessionCorrect={sessionCorrect}
+        sessionTotal={sessionTotal || total}
+        sessionMistakes={sessionMistakes}
+        onReviewMistakes={handleReviewOnlyMistakes}
+        onBack={onBack}
+        subtitle={reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
+      />
     );
   }
 
@@ -3634,6 +3958,11 @@ function RapidStudyCard({
 }) {
   const [locked, setLocked] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const penaltyReportedRef = useRef(false);
+
+  useEffect(() => {
+    penaltyReportedRef.current = false;
+  }, [card.id]);
 
   useEffect(() => {
     getRapidSounds();
@@ -3647,9 +3976,10 @@ function RapidStudyCard({
   const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = false, isSurrendered: boolean = false) => {
     if (locked) return;
     setLocked(true);
-    if (!isSurrendered) {
+    if (!isSurrendered && !penaltyReportedRef.current) {
       onAnswer(correct, false);
     }
+    penaltyReportedRef.current = false;
     const delay = wasFlipped ? 120 : 20;
     timerRef.current = setTimeout(() => {
       onNext();
@@ -3658,6 +3988,8 @@ function RapidStudyCard({
   }, [locked, onAnswer, onNext]);
 
   const handleHintPenalty = useCallback(() => {
+    if (penaltyReportedRef.current) return;
+    penaltyReportedRef.current = true;
     onAnswer(false, true);
   }, [onAnswer]);
 
@@ -3751,12 +4083,16 @@ function StudyInterface({
     return 0;
   });
   const [masteredInSession, setMasteredInSession] = useState(0);
+  const [sessionCorrect, setSessionCorrect] = useState(0);
+  const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
 
   useEffect(() => {
     if (reviewCards) {
       setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
       setInitialTotal(reviewCards.length);
       setMasteredInSession(0);
+      setSessionCorrect(0);
+      setSessionMistakes([]);
       setCurrentIndex(0);
     } else if (deckId) {
       const deck = useStore.getState().decks.find((d) => d.id === deckId);
@@ -3766,6 +4102,8 @@ function StudyInterface({
         setActiveCards(list.sort(() => Math.random() - 0.5));
         setInitialTotal(list.length);
         setMasteredInSession(0);
+        setSessionCorrect(0);
+        setSessionMistakes([]);
         setCurrentIndex(0);
       }
     }
@@ -3812,15 +4150,8 @@ function StudyInterface({
 
   useEffect(() => {
     setLangStats(getLanguageDailyStats(studyLanguage));
-    syncCloudDailyStats(undefined, studyLanguage).then(count => {
-      if (typeof count === 'number' && count > 0) {
-        setLangStats(prev => ({
-          ...prev,
-          learnedToday: Math.max(prev.learnedToday, count),
-          totalCount: Math.max(prev.totalCount, count),
-          correctCount: Math.max(prev.correctCount, count)
-        }));
-      }
+    syncCloudDailyStats(undefined, studyLanguage).then(() => {
+      setLangStats(getLanguageDailyStats(studyLanguage));
     });
   }, [studyLanguage]);
 
@@ -3829,15 +4160,8 @@ function StudyInterface({
       setLangStats(getLanguageDailyStats(studyLanguage));
     };
     const handleSync = () => {
-      syncCloudDailyStats(undefined, studyLanguage).then(count => {
-        if (typeof count === 'number' && count > 0) {
-          setLangStats(prev => ({
-            ...prev,
-            learnedToday: Math.max(prev.learnedToday, count),
-            totalCount: Math.max(prev.totalCount, count),
-            correctCount: Math.max(prev.correctCount, count)
-          }));
-        }
+      syncCloudDailyStats(undefined, studyLanguage).then(() => {
+        setLangStats(getLanguageDailyStats(studyLanguage));
       });
     };
     window.addEventListener('stats-update', handleStatsUpdate);
@@ -3893,9 +4217,10 @@ function StudyInterface({
       return item;
     }));
 
-    // 3. МГНОВЕННЫЙ ИНКРЕМЕНТ ДНЕВНОГО СЧЕТЧИКА (+1) ПРИ ПРАВИЛЬНОМ ОТВЕТЕ
+    // 3. Запись в статистику сессии и дневной счетчик
     if (isActualCorrect) {
       setMasteredInSession(prev => prev + 1);
+      setSessionCorrect(prev => prev + 1);
       updateLanguageDailyStats(studyLanguage, 1, true, currentCardSnapshot.id);
       setLangStats(prev => ({
         ...prev,
@@ -3904,6 +4229,7 @@ function StudyInterface({
         correctCount: (prev?.correctCount || 0) + 1
       }));
     } else {
+      setSessionMistakes(prev => (prev.some(c => c.id === currentCardSnapshot.id) ? prev : [...prev, currentCardSnapshot]));
       updateLanguageDailyStats(studyLanguage, 0, false, currentCardSnapshot.id);
       setLangStats(prev => ({
         ...prev,
@@ -3916,21 +4242,29 @@ function StudyInterface({
       }
     }
 
-    // 4. Запись в статистику сессии и базу Supabase через answerCard
+    // 4. Запись в статистику карточки в Supabase
+    recordCardProgress(currentCardSnapshot.id, isActualCorrect, {
+      deckId: currentDeckId,
+      bookId: currentDeck?.bookId,
+      card: currentCardSnapshot,
+      language: studyLanguage
+    });
+
+    // 5. Запись в статистику сессии и базу Supabase через answerCard
     recordCardResult(isActualCorrect, { deckId: currentDeckId, card: { ...liveCard, masteryLevel: nextMastery }, ...liveCard, masteryLevel: nextMastery }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
     answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage);
 
-    // 5. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
+    // 6. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: studyLanguage.toLowerCase() } }));
     window.dispatchEvent(new Event('storage-update'));
-  }, [currentCardSnapshot, currentDeckId, liveCard, currentIndex, studyLanguage, isDrillMode, isReviewingMistakesSession, recordCardResult, answerCard]);
+  }, [currentCardSnapshot, currentDeckId, liveCard, currentIndex, studyLanguage, isDrillMode, isReviewingMistakesSession, recordCardResult, answerCard, currentDeck?.bookId]);
   
   const handleNext = useCallback(() => {
     if (currentIndex < activeCards.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     } else {
       if (reviewCards) {
-        onBack(); // End of review mode
+        setActiveCards([]); // End of review mode - triggers SessionResultScreen!
       } else {
         const deck = useStore.getState().decks.find((d) => d.id === deckId);
         if (deck) {
@@ -3962,7 +4296,7 @@ function StudyInterface({
         }
       }
     }
-  }, [currentIndex, activeCards.length, reviewCards, onBack, deckId, isInitialArchivedDeck, roundCounter]);
+  }, [currentIndex, activeCards.length, reviewCards, deckId, isInitialArchivedDeck, roundCounter]);
 
   const handleReviewMistakes = () => {
     if (!stats.mistakesPool || stats.mistakesPool.length === 0) return;
@@ -3977,6 +4311,22 @@ function StudyInterface({
     setRoundCounter(0);
     setIsMistakesReviewMode(true);
     setIsStatsOpen(false);
+  };
+
+  const handleReviewOnlyMistakes = () => {
+    if (sessionMistakes.length === 0) return;
+    const cardsToReview = sessionMistakes.map(c => ({
+      deckId: currentDeckId || deckId || '',
+      card: c
+    }));
+    setActiveCards(cardsToReview.sort(() => Math.random() - 0.5));
+    setCurrentIndex(0);
+    setInitialTotal(cardsToReview.length);
+    setMasteredInSession(0);
+    setSessionCorrect(0);
+    setSessionMistakes([]);
+    setRoundCounter(0);
+    setIsMistakesReviewMode(true);
   };
 
   // PRELOAD NEXT AUDIO
@@ -4020,27 +4370,20 @@ function StudyInterface({
 
   if (activeCards.length === 0 || !currentCardSnapshot || !liveCard) {
     return (
-      <div className="flex-1 flex flex-col justify-center max-w-2xl mx-auto px-6 py-24 text-center">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
-          <div className="w-24 h-24 bg-green-50 dark:bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-8">
-            <CheckCircle2 className="w-12 h-12 text-green-500" />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-[#F5F5F7] mb-4">Großartig!</h1>
-          <p className="text-lg text-gray-500 mb-10">
-            {reviewCards 
-              ? "Alle fälligen Karten wurden wiederholt." 
-              : isInitialArchivedDeck 
-                ? "Du hast alle 4 Runden abgeschlossen und die Wiederholung gemeistert!" 
-                : "Du hast alle Karten in diesem Deck gemeistert!"}
-          </p>
-          <button
-            onClick={onBack}
-            className="w-full md:w-auto bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all active:scale-[0.98]"
-          >
-            Zurück zur Bibliothek
-          </button>
-        </motion.div>
-      </div>
+      <SessionResultScreen
+        sessionCorrect={sessionCorrect}
+        sessionTotal={initialTotal}
+        sessionMistakes={sessionMistakes}
+        onReviewMistakes={handleReviewOnlyMistakes}
+        onBack={onBack}
+        subtitle={
+          reviewCards 
+            ? "Alle fälligen Karten wurden wiederholt." 
+            : isInitialArchivedDeck 
+              ? "Du hast alle 4 Runden abgeschlossen und die Wiederholung gemeistert!" 
+              : "Du hast alle Karten in diesem Deck gemeistert!"
+        }
+      />
     );
   }
 
@@ -5212,14 +5555,9 @@ function HeaderWidgets({
 
   const fetchCloudTodayStats = useCallback(async (lang: string) => {
     try {
-      const finalCount = await syncCloudDailyStats(undefined, lang);
+      await syncCloudDailyStats(undefined, lang);
       const updated = getLanguageDailyStats(lang);
-      setLangStats({
-        ...updated,
-        learnedToday: Math.max(updated.learnedToday, finalCount),
-        totalCount: Math.max(updated.totalCount, finalCount),
-        correctCount: Math.max(updated.correctCount, finalCount)
-      });
+      setLangStats(updated);
     } catch (err) {
       console.error('Failed to sync daily stats:', err);
     }
