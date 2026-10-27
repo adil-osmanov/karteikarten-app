@@ -25,7 +25,6 @@ import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
-import { AmbientSpotlight } from "@/components/AmbientSpotlight";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
 
@@ -5282,7 +5281,7 @@ function StudyCard({
     <>
       <div 
         key={card.id}
-        className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
+        className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-md flex flex-col justify-between mx-auto relative animate-card-appear select-none"
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -5565,11 +5564,12 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
   }, [decks, activeBook]);
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md" onClick={onClose}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60" onClick={onClose}>
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.1, ease: "easeOut" }}
         onClick={(e) => e.stopPropagation()}
         className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-8 w-full max-w-lg border border-black/5 dark:border-white/10 text-gray-900 dark:text-[#F2F2F7] shadow-2xl relative"
       >
@@ -5802,7 +5802,7 @@ function HeaderWidgets({
         className={cn(
           "sticky top-0 z-50 w-full select-none transition-all duration-300",
           isScrolled 
-            ? "bg-white/80 dark:bg-black/75 backdrop-blur-xl border-b border-black/[0.06] dark:border-white/10 shadow-sm" 
+            ? "bg-white/80 dark:bg-black/75 backdrop-blur-md border-b border-black/[0.06] dark:border-white/10 shadow-sm" 
             : "bg-transparent border-b border-transparent"
         )}
       >
@@ -5896,7 +5896,7 @@ function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="h-9 px-3.5 rounded-full bg-white/80 dark:bg-zinc-900/80 hover:bg-white dark:hover:bg-zinc-800/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-xl transition-all duration-200 active:scale-95 flex items-center gap-2 shadow-sm dark:shadow-lg text-zinc-800 dark:text-zinc-200 cursor-pointer"
+              className="h-9 px-3.5 rounded-full bg-white/80 dark:bg-zinc-900/80 hover:bg-white dark:hover:bg-zinc-800/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-md transition-all duration-200 active:scale-95 flex items-center gap-2 shadow-sm dark:shadow-lg text-zinc-800 dark:text-zinc-200 cursor-pointer"
               title="Статистика дня"
             >
               <svg className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -5913,7 +5913,7 @@ function HeaderWidgets({
             <button 
               type="button"
               onClick={toggleTheme}
-              className="w-9 h-9 rounded-full bg-white/80 dark:bg-zinc-900/80 hover:bg-white dark:hover:bg-zinc-800/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-xl flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition shadow-sm active:scale-95 cursor-pointer"
+              className="w-9 h-9 rounded-full bg-white/80 dark:bg-zinc-900/80 hover:bg-white dark:hover:bg-zinc-800/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition shadow-sm active:scale-95 cursor-pointer"
               aria-label="Toggle theme"
               title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
@@ -6404,8 +6404,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | { catego
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} onClick={e => e.stopPropagation()} className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-5 max-h-[85vh] overflow-y-auto custom-scrollbar">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 overscroll-contain touch-none" onClick={onClose}>
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.1, ease: "easeOut" }} onClick={e => e.stopPropagation()} className="bg-white dark:bg-[#1C1C1E] border border-gray-200 dark:border-white/10 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-5 max-h-[85vh] overflow-y-auto custom-scrollbar">
         <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{existingBook ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
         
         <div className="space-y-3">
@@ -7304,19 +7304,19 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-0 md:p-6 overscroll-contain touch-none" 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-0 md:p-6 overscroll-contain touch-none" 
       onClick={onClose}
     >
       <motion.div 
-        initial={{ opacity: 0, y: 60, scale: 0.98 }} 
+        initial={{ opacity: 0, y: 30, scale: 0.98 }} 
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 60, scale: 0.98 }}
-        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        exit={{ opacity: 0, y: 30, scale: 0.98 }}
+        transition={{ duration: 0.12, ease: "easeOut" }}
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-4xl h-[100dvh] md:h-auto md:max-h-[88vh] mx-auto bg-zinc-950 border-0 md:border md:border-white/10 shadow-2xl rounded-none md:rounded-3xl flex flex-col overflow-hidden relative text-zinc-100 transform-gpu"
       >
         {/* Sticky Header */}
-        <div className="px-5 sm:px-8 pt-[max(env(safe-area-inset-top),1rem)] pb-3.5 md:py-5 border-b border-white/10 flex items-center justify-between bg-zinc-900/90 md:bg-zinc-900/60 backdrop-blur-md sticky top-0 z-20 shrink-0">
+        <div className="px-5 sm:px-8 pt-[max(env(safe-area-inset-top),1rem)] pb-3.5 md:py-5 border-b border-white/10 flex items-center justify-between bg-zinc-900 sticky top-0 z-20 shrink-0">
           <h2 className="text-xl font-bold tracking-tight text-white">
             {displayTitle}
           </h2>
@@ -7783,7 +7783,7 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
         </div>
 
         {/* Плавающий футер (Floating Action Bar) */}
-        <div className="px-8 py-4 bg-zinc-950/80 backdrop-blur-xl border-t border-white/10 flex items-center justify-between sticky bottom-0 z-20 mt-auto shrink-0">
+        <div className="px-8 py-4 bg-zinc-950 border-t border-white/10 flex items-center justify-between sticky bottom-0 z-20 mt-auto shrink-0">
           <div className="text-xs text-zinc-400 font-medium">
             Готовы закрепить на практике?
           </div>
@@ -8130,7 +8130,7 @@ function PrepStudyCard({
     <>
     <div 
       key={card.id}
-      className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
+      className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-md flex flex-col justify-between mx-auto relative animate-card-appear select-none"
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -8380,7 +8380,7 @@ function VerbStudyCard({
   return (
     <div 
       key={card.id}
-      className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none"
+      className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-md flex flex-col justify-between mx-auto relative animate-card-appear select-none"
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -8861,7 +8861,7 @@ export function RedemittelStudyCard({
       <div
         key={card.id}
         className={cn(
-          "w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-2xl flex flex-col justify-between mx-auto relative animate-card-appear select-none",
+          "w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-md flex flex-col justify-between mx-auto relative animate-card-appear select-none",
           status === 'success'
             ? "border-emerald-500/40 dark:border-emerald-500/40"
             : status === 'surrender'
@@ -10298,21 +10298,8 @@ export default function App() {
     : ((activeBook?.accentColor && activeBook.accentColor.startsWith('#')) ? activeBook.accentColor : '#3B82F6');
 
   return (
-      <>
-
-        <AmbientSpotlight />
-        {activeBookId && (
-        <div className="fixed inset-0 pointer-events-none -z-50 overflow-hidden">
-          <div 
-            className="absolute left-1/2 top-0 -translate-x-1/2 w-[150vw] md:w-[120vw] h-[80vh] opacity-0 dark:opacity-30 transition-colors duration-1000 transform-gpu translate-z-0 will-change-transform"
-            style={{
-              background: `radial-gradient(ellipse 70% 60% at 50% 0%, ${activeColorHex}40 0%, ${activeColorHex}10 45%, transparent 80%)`
-            }}
-          />
-        </div>
-      )}
-        
-        <HeaderWidgets 
+    <div className="min-h-screen w-full bg-[#fbfbfd] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30">
+      <HeaderWidgets 
           activeBook={activeBook} 
           onBack={() => startTransition(() => setActiveBookId(null))} 
           dueCount={displayDueCount}
@@ -10358,10 +10345,10 @@ export default function App() {
       <AnimatePresence>
         {renameModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setRenameModal(null)} 
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1, ease: "easeOut" }}
+              className="absolute inset-0 bg-black/50" onClick={() => setRenameModal(null)} 
             />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.1, ease: "easeOut" }}
               className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
               <h3 className="text-xl font-bold tracking-tight text-gray-900  dark:text-[#F5F5F7] mb-6">Deck umbenennen</h3>
@@ -10387,14 +10374,13 @@ export default function App() {
       </AnimatePresence>
 
       {/* DELETE MODAL */}
-      
       <AnimatePresence>
         {deleteModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteModal(null)} 
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1, ease: "easeOut" }}
+              className="absolute inset-0 bg-black/50" onClick={() => setDeleteModal(null)} 
             />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.1, ease: "easeOut" }}
               className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
               <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -10415,15 +10401,14 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      
       {/* DELETE BOOK MODAL */}
       <AnimatePresence>
         {deleteBookModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overscroll-contain touch-none">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setDeleteBookModal(null)} 
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1, ease: "easeOut" }}
+              className="absolute inset-0 bg-black/50" onClick={() => setDeleteBookModal(null)} 
             />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.1, ease: "easeOut" }}
               className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
               <div className="w-16 h-16 bg-red-50 dark:bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -10520,28 +10505,26 @@ export default function App() {
                   onClick={() => setBookModal({ category: activeCategory })}
                   className="cursor-pointer group flex flex-col w-full h-full text-left select-none"
                 >
-                  <div className="relative w-full">
-                    {/* Срез страниц сзади */}
+                  <div className="group relative cursor-pointer select-none">
+                    {/* Срез бумажных страниц справа (выглядывает сбоку из-под обложки) */}
                     <div 
+                      className="absolute right-0 top-1.5 bottom-1.5 w-2.5 bg-gradient-to-r from-zinc-300 via-zinc-100 to-zinc-200 dark:from-zinc-800 dark:via-zinc-650 dark:to-zinc-700 rounded-r-[3px] shadow-sm transform translate-x-1 group-hover:translate-x-1.5 transition-transform duration-300 ease-out -z-10" 
                       aria-hidden="true"
-                      className="absolute top-[3px] bottom-[3px] right-[-4px] w-[8px] rounded-r-[4px] bg-zinc-200/50 dark:bg-zinc-800/40 border-y border-r border-dashed border-zinc-300 dark:border-white/10 z-0"
                     />
 
                     {/* Обложка-форзац с книжными пропорциями и корешком */}
-                    <div className="relative overflow-hidden aspect-[2/3] rounded-l-[3px] rounded-r-[8px] border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all duration-300 ease-out group-hover:-translate-y-1.5 shadow-[0_4px_12px_rgba(0,0,0,0.03),0_12px_24px_-10px_rgba(15,23,42,0.08)] dark:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.4),0_16px_32px_-10px_rgba(0,0,0,0.6)] flex flex-col items-center justify-center p-6 text-center z-10 transform-gpu will-change-transform">
-                      {/* Интерактивный скользящий блик (Specular Sheen) */}
-                      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 rounded-[inherit] pointer-events-none z-20" />
-                      {/* Корешок слева */}
-                      <div 
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-y-0 left-0 w-[24px] bg-gradient-to-r from-black/[0.05] via-white/[0.04] to-transparent dark:from-white/[0.03] dark:to-transparent border-r border-dashed border-zinc-300 dark:border-white/10"
-                      />
+                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[2px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_8px_18px_-4px_rgba(0,0,0,0.35),0_2px_4px_-1px_rgba(0,0,0,0.2)] dark:shadow-[0_12px_24px_-6px_rgba(0,0,0,0.7),0_2px_6px_rgba(0,0,0,0.5)] group-hover:-translate-y-2 group-hover:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.5)] dark:group-hover:shadow-[0_22px_40px_-8px_rgba(0,0,0,0.9)] transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
+                      {/* Сгиб переплёта (вертикальная светотень у корешка слева) */}
+                      <div className="absolute inset-y-0 left-0 w-3.5 bg-gradient-to-r from-black/45 via-white/10 to-transparent pointer-events-none z-10" />
+                      
+                      {/* Микро-шов корешка */}
+                      <div className="absolute inset-y-0 left-2.5 w-[1px] bg-black/25 dark:bg-black/50 pointer-events-none z-10" />
 
-                      {/* Тонкий желобок сгиба обложки */}
-                      <div 
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-y-0 left-[20px] w-[1px] bg-black/[0.04] dark:bg-white/[0.05]"
-                      />
+                      {/* Фаска твердого переплёта (тончайший блик по периметру) */}
+                      <div className="absolute inset-0 rounded-r-[5px] rounded-l-[2px] ring-1 ring-inset ring-white/20 dark:ring-white/10 pointer-events-none z-10" />
+
+                      {/* Деликатный скользящий блик при наведении */}
+                      <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 pointer-events-none z-10" />
 
                       <div className="w-12 h-12 rounded-full bg-white dark:bg-white/10 border border-black/[0.05] dark:border-white/10 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 group-hover:border-blue-500/30 transition-all duration-300">
                         <Plus className="w-6 h-6 text-zinc-400 group-hover:text-blue-600 dark:text-zinc-400 dark:group-hover:text-blue-400 transition-colors" />
@@ -10660,7 +10643,7 @@ export default function App() {
                       {levelIdx === 0 && displayDueCount > 0 && (
                         <button 
                           onClick={handleStartReviewDue}
-                          className="h-8 px-3.5 rounded-full flex items-center gap-2 text-xs font-medium transition-all duration-200 active:scale-95 shadow-sm bg-white/80 dark:bg-zinc-900/80 border border-black/[0.08] dark:border-white/10 backdrop-blur-xl hover:bg-white hover:shadow-md hover:shadow-black/[0.04] hover:border-black/[0.12] dark:hover:bg-zinc-800/90 dark:hover:border-white/20 text-zinc-800 dark:text-zinc-200 cursor-pointer select-none group"
+                          className="h-8 px-3.5 rounded-full flex items-center gap-2 text-xs font-medium transition-all duration-200 active:scale-95 shadow-sm bg-white/80 dark:bg-zinc-900/80 border border-black/[0.08] dark:border-white/10 backdrop-blur-md hover:bg-white hover:shadow-md hover:shadow-black/[0.04] hover:border-black/[0.12] dark:hover:bg-zinc-800/90 dark:hover:border-white/20 text-zinc-800 dark:text-zinc-200 cursor-pointer select-none group"
                         >
                           <RotateCcw className="w-3 h-3 text-blue-600 dark:text-blue-400 transition-transform duration-300 group-hover:-rotate-45 shrink-0" />
                           <span className="font-semibold text-zinc-900 dark:text-white font-mono tabular-nums">{displayDueCount}</span>
@@ -10771,7 +10754,7 @@ export default function App() {
         </motion.div>
         )}
       </main>
-    </>
+    </div>
   );
 }
 

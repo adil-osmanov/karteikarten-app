@@ -208,11 +208,11 @@ export function StoryReaderModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/75 backdrop-blur-md animate-in fade-in duration-200 select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/75 animate-in fade-in duration-100 select-none"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-3xl h-[86vh] rounded-[32px] bg-zinc-900/95 border border-white/10 p-6 sm:p-8 shadow-2xl backdrop-blur-2xl text-white flex flex-col relative animate-in zoom-in-95 duration-200"
+        className="w-full max-w-3xl h-[86vh] rounded-[32px] bg-zinc-900 border border-white/10 p-6 sm:p-8 shadow-2xl text-white flex flex-col relative animate-in zoom-in-95 duration-100"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Apple Header */}
@@ -390,7 +390,7 @@ export function StoryReaderModal({
 
         {/* Apple Quick-Translate Bottom Card */}
         <div className="shrink-0 pt-3 border-t border-white/[0.08]">
-          <div className="rounded-2xl bg-zinc-800/70 border border-white/10 p-4 backdrop-blur-xl shadow-xl flex items-start gap-3">
+          <div className="rounded-2xl bg-zinc-800 border border-white/10 p-4 shadow-xl flex items-start gap-3">
             <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center text-[10px] font-bold text-zinc-200 shrink-0 mt-0.5">
               RU
             </div>

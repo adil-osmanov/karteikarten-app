@@ -44,29 +44,26 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
   const hasImage = Boolean(light || dark);
 
   return (
-    <div className={`relative group select-none ${className}`}>
-      {/* 1. Срез страниц сзади (толщина книги) */}
+    <div className={`group relative cursor-pointer select-none ${className}`}>
+      {/* Срез бумажных страниц справа (выглядывает сбоку из-под обложки) */}
       <div 
+        className="absolute right-0 top-1.5 bottom-1.5 w-2.5 bg-gradient-to-r from-zinc-300 via-zinc-100 to-zinc-200 dark:from-zinc-800 dark:via-zinc-650 dark:to-zinc-700 rounded-r-[3px] shadow-sm transform translate-x-1 group-hover:translate-x-1.5 transition-transform duration-300 ease-out -z-10" 
         aria-hidden="true"
-        className="absolute top-[3px] bottom-[3px] right-[-4px] w-[8px] rounded-r-[4px] bg-gradient-to-r from-zinc-400 via-zinc-200 to-zinc-300 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-500 shadow-sm z-0"
       />
 
-      {/* 2. Основной блок обложки книги: фиксированные пропорции 2/3, подъем -translate-y-1.5 и многослойные кино-тени */}
+      {/* Контейнер книги с многослойной физической тенью и физикой Apple */}
       <div 
-        className="relative overflow-hidden aspect-[2/3] rounded-l-[3px] rounded-r-[8px] bg-zinc-900 shadow-[0_4px_12px_rgba(0,0,0,0.05),0_20px_40px_-15px_rgba(15,23,42,0.18),0_0_0_1px_rgba(0,0,0,0.04)_inset] group-hover:shadow-[0_8px_20px_rgba(0,0,0,0.08),0_28px_56px_-12px_rgba(15,23,42,0.25),0_0_0_1px_rgba(0,0,0,0.06)_inset] dark:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.6),0_24px_48px_-12px_rgba(0,0,0,0.85),0_0_0_1px_rgba(255,255,255,0.08)_inset] dark:group-hover:shadow-[0_8px_16px_-1px_rgba(0,0,0,0.7),0_32px_64px_-10px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.14)_inset] transition-all duration-300 ease-out group-hover:-translate-y-1.5 z-10"
+        className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[2px] overflow-hidden bg-zinc-900 shadow-[0_8px_18px_-4px_rgba(0,0,0,0.35),0_2px_4px_-1px_rgba(0,0,0,0.2)] dark:shadow-[0_12px_24px_-6px_rgba(0,0,0,0.7),0_2px_6px_rgba(0,0,0,0.5)] group-hover:-translate-y-2 group-hover:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.5)] dark:group-hover:shadow-[0_22px_40px_-8px_rgba(0,0,0,0.9)] transition-all duration-300 ease-out transform-gpu will-change-transform"
         style={hasImage ? undefined : { backgroundColor: tintColor || '#1C1C1E' }}
       >
-        {/* Интерактивный скользящий блик (Specular Sheen) */}
-        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 rounded-[inherit] pointer-events-none z-25" />
-
-        {/* Изображение обложки */}
+        {/* Исходная обложка */}
         {hasImage ? (
           <>
             {light && (
               <img
                 src={light}
                 alt={title}
-                className={`w-full h-full object-cover object-center ${dark && light !== dark ? 'dark:hidden' : ''}`}
+                className={`w-full h-full object-cover select-none pointer-events-none ${dark && light !== dark ? 'dark:hidden' : ''}`}
                 loading={priority ? 'eager' : 'lazy'}
                 decoding="async"
               />
@@ -75,40 +72,31 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
               <img
                 src={dark}
                 alt={title}
-                className="w-full h-full object-cover object-center hidden dark:block"
+                className="w-full h-full object-cover select-none pointer-events-none hidden dark:block"
                 loading={priority ? 'eager' : 'lazy'}
                 decoding="async"
               />
             )}
           </>
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center">
+          <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center select-none pointer-events-none">
             <span className="text-white/80 font-bold text-sm line-clamp-3">{title}</span>
           </div>
         )}
 
-        {/* 3. Реалистичный корешок (Spine Crease & Highlights) */}
-        <div 
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-0 w-[24px] z-20"
-          style={{
-            background: 'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(255,255,255,0.22) 28%, rgba(0,0,0,0.35) 75%, rgba(0,0,0,0.02) 100%)',
-          }}
-        />
+        {/* Сгиб переплёта (вертикальная светотень у корешка слева) */}
+        <div className="absolute inset-y-0 left-0 w-3.5 bg-gradient-to-r from-black/45 via-white/10 to-transparent pointer-events-none z-10" />
+        
+        {/* Микро-шов корешка */}
+        <div className="absolute inset-y-0 left-2.5 w-[1px] bg-black/25 dark:bg-black/50 pointer-events-none z-10" />
 
-        {/* Тонкий желобок сгиба обложки (Hinge line) */}
-        <div 
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-[20px] w-[1px] bg-black/25 dark:bg-black/40 z-20"
-        />
+        {/* Фаска твердого переплёта (тончайший блик по периметру) */}
+        <div className="absolute inset-0 rounded-r-[5px] rounded-l-[2px] ring-1 ring-inset ring-white/20 dark:ring-white/10 pointer-events-none z-10" />
 
-        {/* 4. Мягкий виньетирующий градиент по краю обложки */}
-        <div 
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-l-[3px] rounded-r-[8px] ring-1 ring-inset ring-white/10 z-20"
-        />
+        {/* Деликатный скользящий блик при наведении */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 pointer-events-none z-10" />
 
-        {/* 5. Минималистичная кнопка действий «···» (три точки) */}
+        {/* Минималистичная кнопка действий «···» (три точки) */}
         {(onEdit || onDelete) && (
           <div ref={menuRef} className="absolute top-2.5 right-2.5 z-40">
             <button 
@@ -117,7 +105,7 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
                 e.stopPropagation();
                 setMenuOpen(!menuOpen);
               }} 
-              className="w-7 h-7 rounded-full bg-black/40 backdrop-blur-md text-white/70 hover:text-white hover:bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 shadow-md cursor-pointer"
+              className="w-7 h-7 rounded-full bg-black/50 text-white/80 hover:text-white hover:bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 shadow-md cursor-pointer"
               title="Aktionen"
             >
               <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
@@ -130,7 +118,7 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
             {menuOpen && (
               <div 
                 onClick={(e) => e.stopPropagation()}
-                className="absolute right-0 top-8 w-36 py-1 bg-white/95 dark:bg-zinc-800/95 backdrop-blur-xl rounded-xl shadow-xl border border-black/5 dark:border-white/10 z-50 text-left animate-in fade-in zoom-in-95 duration-100"
+                className="absolute right-0 top-8 w-36 py-1 bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 z-50 text-left animate-in fade-in zoom-in-95 duration-100"
               >
                 {onEdit && (
                   <button

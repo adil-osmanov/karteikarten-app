@@ -242,7 +242,7 @@ export const VirtualKeyboard = React.memo(function VirtualKeyboard({
       onPointerDown={handlePointerDown}
       className={cn(
         docked
-          ? "fixed bottom-0 left-0 right-0 w-full bg-zinc-950/95 border-t border-white/10 px-1.5 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] z-40 backdrop-blur-2xl shadow-2xl flex flex-col items-center select-none touch-manipulation"
+          ? "fixed bottom-0 left-0 right-0 w-full bg-zinc-950/95 border-t border-white/10 px-1.5 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] z-40 backdrop-blur-md shadow-2xl flex flex-col items-center select-none touch-manipulation"
           : "w-full max-w-full mx-auto p-1.5 sm:p-2.5 bg-zinc-900/95 dark:bg-[#161618] border border-zinc-800/80 dark:border-white/[0.08] rounded-2xl flex flex-col gap-1.5 sm:gap-2 select-none touch-none shadow-lg",
         className
       )}

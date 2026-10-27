@@ -32,7 +32,7 @@ export function MobileKeyboard({ onKeyPress, onBackspace, onSpace }: MobileKeybo
 
   const keyboardContent = (
     <div 
-      className="fixed bottom-0 left-0 right-0 w-full bg-[#d2d4dc]/95 dark:bg-[#18181b]/98 border-t border-black/10 dark:border-white/[0.08] px-1.5 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] z-[9999] select-none touch-manipulation flex flex-col items-center gap-[6px] shadow-[0_-8px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_-10px_35px_rgba(0,0,0,0.7)] backdrop-blur-2xl"
+      className="fixed bottom-0 left-0 right-0 w-full bg-[#d2d4dc]/95 dark:bg-[#18181b]/98 border-t border-black/10 dark:border-white/[0.08] px-1.5 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] z-[9999] select-none touch-manipulation flex flex-col items-center gap-[6px] shadow-[0_-8px_30px_rgba(0,0,0,0.12)] dark:shadow-[0_-10px_35px_rgba(0,0,0,0.7)] backdrop-blur-md"
       style={{ touchAction: 'none' }}
     >
       {/* Ряд 1 (10 клавиш: q w e r t z u i o p) */}

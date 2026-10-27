@@ -179,13 +179,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30 dark:bg-black/60 backdrop-blur-md animate-in fade-in duration-150 select-none overscroll-contain touch-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 dark:bg-black/60 animate-in fade-in duration-100 select-none overscroll-contain touch-none"
       onClick={onClose}
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => e.stopPropagation()}
     >
       <div 
-        className="stats-modal-content w-full max-w-sm rounded-[28px] bg-white/95 dark:bg-zinc-900/95 border border-black/[0.08] dark:border-white/10 p-6 shadow-2xl backdrop-blur-2xl text-zinc-900 dark:text-white relative animate-in zoom-in-95 duration-200 font-sans"
+        className="stats-modal-content w-full max-w-sm rounded-[28px] bg-white dark:bg-zinc-900 border border-black/[0.08] dark:border-white/10 p-6 shadow-2xl text-zinc-900 dark:text-white relative animate-in zoom-in-95 duration-100 font-sans"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Шапка модалки */}
@@ -210,7 +210,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
         {/* 2 Карточки метрик (Время и Точность в стиле Apple) */}
         <div className="grid grid-cols-2 gap-3 my-5">
-          <div className="p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center min-h-[96px] backdrop-blur-sm">
+          <div className="p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center min-h-[96px]">
             {hours > 0 ? (
               <div className="flex items-baseline justify-center whitespace-nowrap">
                 <span className="text-[25px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 tabular-nums">
@@ -263,7 +263,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
             </span>
           </div>
 
-          <div className="p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center min-h-[96px] backdrop-blur-sm">
+          <div className="p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center min-h-[96px]">
             <div className="flex items-baseline justify-center whitespace-nowrap">
               <span className={`text-[25px] font-semibold tracking-tight ${accuracyColor} tabular-nums`}>
                 {accuracy}
