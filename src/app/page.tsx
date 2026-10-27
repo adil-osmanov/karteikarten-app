@@ -5410,7 +5410,8 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
 
 
 
-export function getBookCategory(book: BookMeta): 'textbooks' | 'grammar' | 'custom' {
+export function getBookCategory(book?: BookMeta | null): 'textbooks' | 'grammar' | 'custom' {
+  if (!book) return 'textbooks';
   if (book.category === 'textbooks' || book.category === 'coursebook') return 'textbooks';
   if (book.category === 'grammar') return 'grammar';
   if (book.category === 'custom') return 'custom';
@@ -5464,7 +5465,7 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
   }
   
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
-  const cleanTitle = book.title.replace(/^[🟢🟠🟣🔵●🔴🟡]\s*/, '');
+  const cleanTitle = (book.title || '').replace(/^[🟢🟠🟣🔵●🔴🟡]\s*/, '');
 
   const decks = useStore(s => s.decks);
   const { totalCards, masteredCards } = useMemo(() => {
@@ -5869,14 +5870,14 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | { catego
             <select value={trainingMode} onChange={async e => {
               const val = e.target.value as any;
               setTrainingMode(val);
-              if (book?.id) {
-                const ok = await updateBookSettings(book.id, { training_mode: val });
+              if (existingBook?.id) {
+                const ok = await updateBookSettings(existingBook.id, { training_mode: val });
                 if (ok) {
                   toast.success('Gespeichert');
                   router.refresh();
                 } else {
                   toast.error('Fehler beim Speichern');
-                  setTrainingMode(book.training_mode || 'standard_cloze'); // rollback
+                  setTrainingMode(existingBook.training_mode || 'standard_cloze'); // rollback
                 }
               }
             }} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
@@ -8496,6 +8497,7 @@ export default function App() {
   const [shadowingDeckId, setShadowingDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [isReviewingMistakes, setIsReviewingMistakes] = useState(false);
+  const [drillCards, setDrillCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   const [activeCategory, setActiveCategory] = useState<'textbooks' | 'grammar' | 'custom'>('textbooks');
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
