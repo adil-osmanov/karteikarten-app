@@ -9,6 +9,7 @@ interface AppleBookCoverProps {
   tintColor?: string;
   title: string;
   className?: string;
+  priority?: boolean;
   onEdit?: (e: React.MouseEvent) => void;
   onDelete?: (e: React.MouseEvent) => void;
 }
@@ -20,6 +21,7 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
   tintColor,
   title,
   className = '',
+  priority = false,
   onEdit,
   onDelete,
 }) => {
@@ -49,9 +51,9 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
         className="absolute top-[3px] bottom-[3px] right-[-4px] w-[8px] rounded-r-[4px] bg-gradient-to-r from-zinc-400 via-zinc-200 to-zinc-300 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-500 shadow-sm z-0"
       />
 
-      {/* 2. Основной блок обложки книги: подъем -translate-y-1.5 и многослойные кино-тени */}
+      {/* 2. Основной блок обложки книги: фиксированные пропорции 2/3, подъем -translate-y-1.5 и многослойные кино-тени */}
       <div 
-        className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-900 shadow-[0_4px_12px_rgba(0,0,0,0.05),0_20px_40px_-15px_rgba(15,23,42,0.18),0_0_0_1px_rgba(0,0,0,0.04)_inset] group-hover:shadow-[0_8px_20px_rgba(0,0,0,0.08),0_28px_56px_-12px_rgba(15,23,42,0.25),0_0_0_1px_rgba(0,0,0,0.06)_inset] dark:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.6),0_24px_48px_-12px_rgba(0,0,0,0.85),0_0_0_1px_rgba(255,255,255,0.08)_inset] dark:group-hover:shadow-[0_8px_16px_-1px_rgba(0,0,0,0.7),0_32px_64px_-10px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.14)_inset] transition-all duration-300 ease-out group-hover:-translate-y-1.5 z-10"
+        className="relative overflow-hidden aspect-[2/3] rounded-l-[3px] rounded-r-[8px] bg-zinc-900 shadow-[0_4px_12px_rgba(0,0,0,0.05),0_20px_40px_-15px_rgba(15,23,42,0.18),0_0_0_1px_rgba(0,0,0,0.04)_inset] group-hover:shadow-[0_8px_20px_rgba(0,0,0,0.08),0_28px_56px_-12px_rgba(15,23,42,0.25),0_0_0_1px_rgba(0,0,0,0.06)_inset] dark:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.6),0_24px_48px_-12px_rgba(0,0,0,0.85),0_0_0_1px_rgba(255,255,255,0.08)_inset] dark:group-hover:shadow-[0_8px_16px_-1px_rgba(0,0,0,0.7),0_32px_64px_-10px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.14)_inset] transition-all duration-300 ease-out group-hover:-translate-y-1.5 z-10"
         style={hasImage ? undefined : { backgroundColor: tintColor || '#1C1C1E' }}
       >
         {/* Интерактивный скользящий блик (Specular Sheen) */}
@@ -65,7 +67,8 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
                 src={light}
                 alt={title}
                 className={`w-full h-full object-cover object-center ${dark && light !== dark ? 'dark:hidden' : ''}`}
-                loading="lazy"
+                loading={priority ? 'eager' : 'lazy'}
+                decoding="async"
               />
             )}
             {dark && light !== dark && (
@@ -73,7 +76,8 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
                 src={dark}
                 alt={title}
                 className="w-full h-full object-cover object-center hidden dark:block"
-                loading="lazy"
+                loading={priority ? 'eager' : 'lazy'}
+                decoding="async"
               />
             )}
           </>

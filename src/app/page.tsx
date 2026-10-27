@@ -5806,10 +5806,10 @@ function HeaderWidgets({
             : "bg-transparent border-b border-transparent"
         )}
       >
-        <div className="w-full max-w-6xl mx-auto py-4 px-6 md:px-12 flex items-center justify-between">
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-2.5 sm:py-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-y-2.5 sm:gap-y-0">
           
           {/* 1. ЛЕВЫЙ УГОЛ: ЯЗЫКОВАЯ ПИЛЮЛЯ / BACK PILL */}
-          <div className="flex items-center justify-start flex-1 min-w-0">
+          <div className="flex items-center justify-start flex-1 min-w-0 order-1 sm:order-1">
             {activeBook ? (
               <button
                 onClick={onBack}
@@ -5874,18 +5874,18 @@ function HeaderWidgets({
           </div>
 
           {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
-          <div className="flex items-center justify-center shrink-0 px-2">
-            {!activeBook && dueCount > 0 && onStartReview ? (
+          {!activeBook && dueCount > 0 && onStartReview && (
+            <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
               <DueCardsBadge 
                 count={dueCount} 
                 language={appLanguage} 
                 onClick={onStartReview} 
               />
-            ) : null}
-          </div>
+            </div>
+          )}
 
           {/* 3. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
-          <div className="flex items-center justify-end flex-1 gap-2">
+          <div className="flex items-center justify-end flex-1 gap-2 order-2 sm:order-3">
             {/* Капсула счетчика */}
             <button 
               type="button"
@@ -6043,7 +6043,7 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
   const progressPercent = totalCards > 0 ? (masteredCards / totalCards) * 100 : 0;
 
   return (
-    <div onClick={onClick} className="group flex flex-col w-full text-left cursor-pointer select-none bg-transparent">
+    <div onClick={onClick} className="group flex flex-col w-full text-left cursor-pointer select-none bg-transparent transform-gpu will-change-transform">
       {/* 3D-обложка книги с интерактивным наклоном и бликом */}
       <TiltBookCard className="w-full">
         <AppleBookCover
@@ -6052,6 +6052,7 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
           darkImageSrc={darkCover}
           tintColor={tintColor}
           title={cleanTitle}
+          priority={priority}
           onEdit={onEdit}
           onDelete={onDelete}
         />
@@ -6060,38 +6061,25 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
       {/* Название книги, автор/издательство и прогресс в стиле Apple Books */}
       <div className="mt-3.5 flex flex-col text-left w-full">
         <h3 
-          className="text-[13px] sm:text-sm font-semibold tracking-tight leading-snug text-zinc-900 group-hover:text-blue-650 dark:text-zinc-100 dark:group-hover:text-blue-400 transition-colors truncate"
+          className="text-zinc-900 dark:text-zinc-100 font-semibold text-sm tracking-tight truncate"
           title={cleanTitle}
         >
           {cleanTitle}
         </h3>
         {book.subtitle && (
           <p 
-            className="text-xs font-normal leading-normal text-zinc-500 dark:text-zinc-450 mt-0.5 truncate"
+            className="text-xs font-normal leading-normal text-zinc-500 dark:text-zinc-400 mt-0.5 truncate"
             title={book.subtitle}
           >
             {book.subtitle}
           </p>
         )}
         {totalCards > 0 && (
-          <div className="w-full mt-2.5">
-            <div className="w-full h-1 bg-zinc-200/80 dark:bg-zinc-800/80 rounded-full overflow-hidden">
-              <div 
-                className={cn(
-                  "h-full rounded-full transition-all duration-300", 
-                  progressPercent === 100 
-                    ? "bg-emerald-500" 
-                    : "bg-blue-600 dark:bg-blue-500"
-                )}
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-            {masteredCards > 0 && (
-              <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 dark:text-zinc-500 mt-1 tabular-nums">
-                <span>{progressPercent}%</span>
-                <span>{masteredCards} / {totalCards}</span>
-              </div>
-            )}
+          <div className="w-full h-1 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden mt-2.5">
+            <div 
+              className="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-all duration-300"
+              style={{ width: `${Math.min(100, Math.max(0, Math.round(progressPercent)))}%` }}
+            />
           </div>
         )}
       </div>
@@ -9729,7 +9717,7 @@ export default function App() {
 
   const activeBook = useMemo(() => books.find(b => b.id === activeBookId), [books, activeBookId]);
 
-  if (!isMounted) return <main className="min-h-screen bg-white dark:bg-black" />;
+  if (!isMounted) return <main className="min-h-screen bg-[#fbfbfd] dark:bg-[#09090b]" />;
 
 
   if (activeDeckId) {
@@ -10311,14 +10299,6 @@ export default function App() {
 
   return (
       <>
-        {/* Кинематографический фоновый свет (Studio Key Light) */}
-        <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-          {/* Темная тема: лунный студийный софтбокс */}
-          <div className="hidden dark:block absolute -top-[25%] left-1/2 -translate-x-1/2 w-[1200px] h-[650px] rounded-full bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.06)_0%,rgba(59,130,246,0.03)_40%,transparent_75%)] blur-[90px]" />
-          
-          {/* Светлая тема: мягкий керамический свет с деликатной виньеткой */}
-          <div className="block dark:hidden absolute -top-[20%] left-1/2 -translate-x-1/2 w-[1100px] h-[600px] rounded-full bg-[radial-gradient(ellipse_at_center,#ffffff_0%,rgba(241,245,249,0.8)_60%,transparent_100%)] blur-[80px]" />
-        </div>
 
         <AmbientSpotlight />
         {activeBookId && (
@@ -10474,18 +10454,18 @@ export default function App() {
         onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
       />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pb-16 md:pb-28">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-28">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
             
             {/* Dynamic Apple Segmented Control with i18n */}
-            <div className="flex justify-center mt-6 mb-8">
-              <div className="inline-flex p-1 rounded-full bg-zinc-200/50 dark:bg-zinc-900/60 border border-zinc-300/30 dark:border-white/5 backdrop-blur-md">
+            <div className="w-full flex justify-center mt-4 sm:mt-6 mb-6 sm:mb-8 px-4">
+              <div className="max-w-full overflow-x-auto no-scrollbar inline-flex p-1 rounded-full bg-zinc-200/50 dark:bg-zinc-900/60 border border-zinc-300/30 dark:border-white/5 backdrop-blur-md">
                 {getTabsForLanguage(appLanguage).map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveCategory(tab.id)}
-                    className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all duration-200 cursor-pointer ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs whitespace-nowrap font-medium transition-all duration-200 cursor-pointer ${
                       activeCategory === tab.id
                         ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm'
                         : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
@@ -10500,12 +10480,12 @@ export default function App() {
             {/* Единая абсолютно симметричная сетка книг для выбранной категории */}
             <div 
               key={activeCategory}
-              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-12 transition-opacity duration-200 animate-in fade-in"
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 transition-opacity duration-200 animate-in fade-in"
             >
               {isLoadingBooks && filteredCategoryBooks.length === 0 ? (
                 [1, 2, 3, 4].map((i) => (
                   <div key={i} className="flex flex-col animate-pulse">
-                    <div className="aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
+                    <div className="aspect-[2/3] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
                     <div className="mt-3.5 space-y-1.5">
                       <div className="h-4 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
                       <div className="h-3 w-1/2 bg-zinc-200/60 dark:bg-zinc-800/60 rounded" />
@@ -10525,7 +10505,7 @@ export default function App() {
                   >
                     <BookCard 
                       book={book} 
-                      priority={idx < 4} 
+                      priority={idx < 2} 
                       onClick={() => handleBookClick(book.id)} 
                       onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} 
                       onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} 
@@ -10548,7 +10528,7 @@ export default function App() {
                     />
 
                     {/* Обложка-форзац с книжными пропорциями и корешком */}
-                    <div className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all duration-300 ease-out group-hover:-translate-y-1.5 shadow-[0_4px_12px_rgba(0,0,0,0.03),0_12px_24px_-10px_rgba(15,23,42,0.08)] dark:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.4),0_16px_32px_-10px_rgba(0,0,0,0.6)] flex flex-col items-center justify-center p-6 text-center z-10">
+                    <div className="relative overflow-hidden aspect-[2/3] rounded-l-[3px] rounded-r-[8px] border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all duration-300 ease-out group-hover:-translate-y-1.5 shadow-[0_4px_12px_rgba(0,0,0,0.03),0_12px_24px_-10px_rgba(15,23,42,0.08)] dark:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.4),0_16px_32px_-10px_rgba(0,0,0,0.6)] flex flex-col items-center justify-center p-6 text-center z-10 transform-gpu will-change-transform">
                       {/* Интерактивный скользящий блик (Specular Sheen) */}
                       <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 rounded-[inherit] pointer-events-none z-20" />
                       {/* Корешок слева */}
@@ -10574,7 +10554,7 @@ export default function App() {
 
                   {/* Текстовый блок под книгой в строгом левом выравнивании */}
                   <div className="mt-3.5 flex flex-col text-left w-full">
-                    <span className="text-[13px] sm:text-sm font-semibold tracking-tight leading-snug text-zinc-900 group-hover:text-blue-650 dark:text-zinc-100 dark:group-hover:text-blue-400 transition-colors truncate">
+                    <span className="text-[13px] sm:text-sm font-semibold tracking-tight leading-snug text-zinc-900 dark:text-zinc-100 truncate">
                       {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
                     </span>
                     <p className="text-xs font-normal leading-normal text-zinc-500 dark:text-zinc-450 mt-0.5 truncate">
