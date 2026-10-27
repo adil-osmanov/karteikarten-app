@@ -25,6 +25,8 @@ import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
+import { AmbientSpotlight } from "@/components/AmbientSpotlight";
+import { TiltBookCard } from "@/components/TiltBookCard";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -9761,6 +9763,7 @@ export default function App() {
 
   return (
       <>
+        <AmbientSpotlight />
         {activeBookId && (
         <div className="fixed inset-0 pointer-events-none -z-50 overflow-hidden">
           <div 
@@ -9955,9 +9958,9 @@ export default function App() {
                       onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
                       className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                     >
-                      <div className="w-full h-full min-h-[250px] relative">
+                      <TiltBookCard key={book.id} onClick={() => handleBookClick(book.id)} className="w-full h-full min-h-[250px] flex flex-col">
                         <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
-                      </div>
+                      </TiltBookCard>
                     </div>
                   ))
                 )}
@@ -9999,9 +10002,9 @@ export default function App() {
                       onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
                       className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                     >
-                      <div className="w-full h-full min-h-[250px] relative">
+                      <TiltBookCard key={book.id} onClick={() => handleBookClick(book.id)} className="w-full h-full min-h-[250px] flex flex-col">
                         <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
-                      </div>
+                      </TiltBookCard>
                     </div>
                   ))
                 )}
