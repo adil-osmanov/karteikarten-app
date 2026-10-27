@@ -1076,6 +1076,112 @@ export interface CardSRSUpdate {
   nextReviewDate: number | null;
 }
 
+export async function fetchDueCardsCount(lang: string = 'DE', userId?: string): Promise<number> {
+  const cleanLang = normalizeLanguage(lang);
+  const now = Date.now();
+
+  // 1. Try Supabase RPC get_due_cards_count if available
+  try {
+    let uid = userId;
+    if (!uid) {
+      const { data: authData } = await supabase.auth.getUser();
+      uid = authData?.user?.id;
+    }
+    if (uid) {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_due_cards_count', {
+        p_user_id: uid,
+        p_lang: cleanLang
+      });
+      if (!rpcError && typeof rpcData === 'number') {
+        return rpcData;
+      }
+    }
+  } catch (e) {
+    // fall through to direct query
+  }
+
+  // 2. Direct exact query on cards table joined with decks (single source of truth)
+  try {
+    const { count, error } = await supabase
+      .from('cards')
+      .select('id, decks!inner(language)', { count: 'exact', head: true })
+      .eq('isArchived', true)
+      .lte('nextReviewDate', now)
+      .eq('decks.language', cleanLang);
+
+    if (!error && typeof count === 'number') {
+      return count;
+    }
+  } catch (e) {
+    console.warn('Direct query on cards count error:', e);
+  }
+
+  // 3. Fallback: query without inner join
+  try {
+    const { count, error } = await supabase
+      .from('cards')
+      .select('id', { count: 'exact', head: true })
+      .eq('isArchived', true)
+      .lte('nextReviewDate', now);
+    if (!error && typeof count === 'number') {
+      return count;
+    }
+  } catch (e) {}
+
+  return 0;
+}
+
+export async function fetchDueCardsFromCloud(lang: string = 'DE'): Promise<{ deckId: string, card: Flashcard }[]> {
+  const cleanLang = normalizeLanguage(lang);
+  const now = Date.now();
+
+  try {
+    const { data, error } = await supabase
+      .from('cards')
+      .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language)')
+      .eq('isArchived', true)
+      .lte('nextReviewDate', now)
+      .eq('decks.language', cleanLang)
+      .order('nextReviewDate', { ascending: true })
+      .limit(100);
+
+    if (!error && Array.isArray(data) && data.length > 0) {
+      return data.map((row: any) => ({
+        deckId: row.deck_id || row.decks?.id || '',
+        card: {
+          id: row.id,
+          targetWord: row.targetWord,
+          sentence: row.sentence,
+          translation: row.translation,
+          options: Array.isArray(row.options) ? row.options : [],
+          masteryLevel: row.masteryLevel ?? 4,
+          isArchived: Boolean(row.isArchived),
+          nextReviewDate: row.nextReviewDate,
+          interval: row.interval ?? 0,
+          repetitions: row.repetitions ?? 0,
+          baseWordInfo: row.baseWordInfo,
+          forms: row.forms
+        } as Flashcard
+      }));
+    }
+  } catch (e) {
+    console.error('Failed to fetch due cards from cloud:', e);
+  }
+
+  // Fallback to in-memory decks if cloud query returns empty or fails
+  const list: { deckId: string, card: Flashcard }[] = [];
+  useStore.getState().decks.forEach(deck => {
+    if (normalizeLanguage(deck.language || 'DE') === cleanLang) {
+      deck.cards.forEach(card => {
+        if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+          list.push({ deckId: deck.id, card });
+        }
+      });
+    }
+  });
+  return list;
+}
+
 export function calculateNextSRSState(
   card: any,
   isCorrect: boolean,
@@ -1131,17 +1237,19 @@ export function calculateNextSRSState(
   // ФАЗА 2: ДОЛГОСРОЧНОЕ ПОВТОРЕНИЕ (SRS для карточек из архива)
   // -------------------------------------------------------------
   if (isCorrect && !isHilfe) {
-    // Успешное извлечение из памяти
+    // Успешное извлечение из памяти: 1 день -> 3 дня -> 7 дней -> 14+ дней
     const newReps = currentReps + 1;
     let nextInterval = 1;
 
     if (newReps === 1) {
-      nextInterval = 1;
+      nextInterval = 1; // 1 день
     } else if (newReps === 2) {
-      nextInterval = 3;
+      nextInterval = 3; // 3 дня
+    } else if (newReps === 3) {
+      nextInterval = 7; // 7 дней
     } else {
-      // Экспоненциальный рост с учетом индивидуальной легкости слова
-      nextInterval = Math.max(newReps >= 3 ? 6 : 3, Math.round(currentInterval * currentEase));
+      // 4+ повтора: от 14 дней с учетом easeFactor
+      nextInterval = Math.max(14, Math.round(currentInterval * currentEase));
     }
 
     // Легкость слова слегка повышается (макс 2.8)
@@ -1157,17 +1265,16 @@ export function calculateNextSRSState(
     };
   } else {
     // ЗАБЫВАНИЕ (Lapse): Сбой при долгосрочном повторении
-    // Критически важно: интервал сбрасывается на 1 день (реконсолидация следа),
-    // а easeFactor снижается, чтобы слово росло медленнее.
+    // Ошибка («Не знаю»): сброс интервала, next_review_at = NOW() + interval '10 minutes'
     const newEase = Math.max(1.3, currentEase - 0.2);
 
     return {
       masteryLevel: 3, // откат в предвыпускное состояние
       isArchived: true,
       repetitions: 0,  // сброс серии
-      interval: 1,     // ОБЯЗАТЕЛЬНО повторить завтра!
+      interval: 0,     // сброс интервала
       easeFactor: Number(newEase.toFixed(2)),
-      nextReviewDate: Date.now() + 1 * 86400000
+      nextReviewDate: Date.now() + 10 * 60 * 1000 // +10 минут
     };
   }
 }
@@ -1304,6 +1411,10 @@ interface DeckState {
   setBookOrder: (order: string[], skipCloudSync?: boolean) => void;
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
+  dueCardsCount: number;
+  setDueCardsCount: (count: number) => void;
+  decrementDueCardsCount: () => void;
+  refreshDueCardsCount: (targetLang?: string) => Promise<number>;
 }
 
 const getInitialCachedBooks = (): BookMeta[] => {
@@ -1379,6 +1490,16 @@ const useStore = create<DeckState>()((set, get) => ({
     const norm = normalizeLanguage(lang);
     if (typeof window !== 'undefined') localStorage.setItem('selected_language', norm);
     set({ appLanguage: norm as any });
+    get().refreshDueCardsCount(norm);
+  },
+  dueCardsCount: 0,
+  setDueCardsCount: (count: number) => set({ dueCardsCount: Math.max(0, count) }),
+  decrementDueCardsCount: () => set((state) => ({ dueCardsCount: Math.max(0, state.dueCardsCount - 1) })),
+  refreshDueCardsCount: async (targetLang?: string) => {
+    const lang = targetLang || get().appLanguage || 'DE';
+    const count = await fetchDueCardsCount(lang);
+    set({ dueCardsCount: count });
+    return count;
   },
   dailyProgress: {},
   syncError: null,
@@ -1804,6 +1925,7 @@ const useStore = create<DeckState>()((set, get) => ({
     }
     const previousDecks = get().decks;
     let updatedCard: Flashcard | null = null;
+    let wasDueBefore = false;
 
     set((state) => {
       const newDecks = [...state.decks];
@@ -1814,6 +1936,7 @@ const useStore = create<DeckState>()((set, get) => ({
       if (cardIndex === -1) return state;
 
       const card = { ...deck.cards[cardIndex] };
+      wasDueBefore = Boolean(card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now());
       const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe);
       Object.assign(card, srsUpdate);
 
@@ -1822,6 +1945,10 @@ const useStore = create<DeckState>()((set, get) => ({
 
       return { decks: newDecks };
     });
+
+    if (wasDueBefore || isHilfe || !isCorrect || (updatedCard && (updatedCard as Flashcard).isArchived)) {
+      get().decrementDueCardsCount();
+    }
 
     if (updatedCard) {
       const validCard = updatedCard as Flashcard;
@@ -1845,6 +1972,25 @@ const useStore = create<DeckState>()((set, get) => ({
         console.error("Supabase Update Card Error:", error.message);
         set({ decks: previousDecks });
       }
+
+      // Also attempt upsert into user_card_progress for compatibility with multi-user / RPC
+      try {
+        let currentUserId: string | null = null;
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          currentUserId = authData?.user?.id || null;
+        } catch {}
+        if (currentUserId) {
+          const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
+          await supabase.from('user_card_progress').upsert({
+            user_id: currentUserId,
+            card_id: cardId,
+            next_review_at: nextIso,
+            repetition_level: validCard.repetitions || 0,
+            last_reviewed_at: new Date().toISOString()
+          }, { onConflict: 'user_id,card_id' });
+        }
+      } catch {}
     }
   },
 
@@ -1852,6 +1998,7 @@ const useStore = create<DeckState>()((set, get) => ({
   setCardProgress: async (deckId, cardId, score, targetLang?: string) => {
     const previousDecks = get().decks;
     let updatedCard: Flashcard | null = null;
+    let wasDueBefore = false;
 
     set((state) => {
       const di = state.decks.findIndex((d) => d.id === deckId);
@@ -1860,6 +2007,7 @@ const useStore = create<DeckState>()((set, get) => ({
       const ci = deck.cards.findIndex((c) => c.id === cardId);
       if (ci === -1) return state;
       const card = { ...deck.cards[ci] };
+      wasDueBefore = Boolean(card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now());
       if (score >= 4) {
         const srsUpdate = calculateNextSRSState({ ...card, masteryLevel: 3, isArchived: false }, true, false);
         Object.assign(card, srsUpdate);
@@ -1872,6 +2020,10 @@ const useStore = create<DeckState>()((set, get) => ({
       newDecks[di] = { ...deck, cards: newCards };
       return { decks: newDecks };
     });
+
+    if (wasDueBefore || (updatedCard && (updatedCard as Flashcard).isArchived)) {
+      get().decrementDueCardsCount();
+    }
 
     if (updatedCard) {
       const validCard = updatedCard as Flashcard;
@@ -1895,6 +2047,24 @@ const useStore = create<DeckState>()((set, get) => ({
         console.error("Supabase Update Card Error:", error.message);
         set({ decks: previousDecks });
       }
+
+      try {
+        let currentUserId: string | null = null;
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          currentUserId = authData?.user?.id || null;
+        } catch {}
+        if (currentUserId) {
+          const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
+          await supabase.from('user_card_progress').upsert({
+            user_id: currentUserId,
+            card_id: cardId,
+            next_review_at: nextIso,
+            repetition_level: validCard.repetitions || 0,
+            last_reviewed_at: new Date().toISOString()
+          }, { onConflict: 'user_id,card_id' });
+        }
+      } catch {}
     }
   }
 }));
@@ -8872,7 +9042,7 @@ export function RedemittelStudyCard({
 export default function App() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder } = useStore();
+  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder, dueCardsCount, refreshDueCardsCount } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [isLoadingBooks, setIsLoadingBooks] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
@@ -8935,22 +9105,43 @@ export default function App() {
 
   useEffect(() => {
     checkAndResetDailyProgress();
+    refreshDueCardsCount(appLanguage);
 
-    // Сброс при возвращении на вкладку (если вкладка висела открытой ночью)
+    const handleSync = () => {
+      checkAndResetDailyProgress();
+      refreshDueCardsCount(appLanguage);
+    };
+
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        checkAndResetDailyProgress();
+        handleSync();
       }
     };
 
-    window.addEventListener('focus', checkAndResetDailyProgress);
+    window.addEventListener('focus', handleSync);
+    window.addEventListener('pageshow', handleSync);
     document.addEventListener('visibilitychange', handleVisibility);
 
+    // Supabase Realtime subscription on cards table for cross-browser sync
+    const upperLang = normalizeLanguage(appLanguage);
+    const cardsChannel = supabase
+      .channel(`realtime-cards-sync-${upperLang}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'cards'
+      }, () => {
+        refreshDueCardsCount(appLanguage);
+      })
+      .subscribe();
+
     return () => {
-      window.removeEventListener('focus', checkAndResetDailyProgress);
+      supabase.removeChannel(cardsChannel);
+      window.removeEventListener('focus', handleSync);
+      window.removeEventListener('pageshow', handleSync);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, []);
+  }, [appLanguage, refreshDueCardsCount]);
 
 
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
@@ -9488,6 +9679,25 @@ export default function App() {
     return list;
   }, [filteredDecksList]);
 
+  const displayDueCount = dueCardsCount > 0 ? dueCardsCount : dueCards.length;
+
+  const handleStartReviewDue = useCallback(async () => {
+    setIsReviewingMistakes(false);
+    initAudioCtx();
+    try {
+      const freshCards = await fetchDueCardsFromCloud(appLanguage);
+      if (freshCards.length > 0) {
+        setReviewCards(freshCards);
+        return;
+      }
+    } catch (e) {
+      console.warn('Failed to load fresh due cards from cloud, falling back to local:', e);
+    }
+    if (dueCards.length > 0) {
+      setReviewCards(dueCards);
+    }
+  }, [appLanguage, dueCards]);
+
   const archivedCards = useMemo(() => {
     const list: { deckId: string, deckName: string, card: Flashcard }[] = [];
     filteredDecksList.forEach(deck => {
@@ -9517,7 +9727,7 @@ export default function App() {
       else tm = 'standard_cloze';
     }
     return (
-      <StudyEntry deckId={activeDeckId} onBack={() => setActiveDeckId(null)} trainingMode={tm} />
+      <StudyEntry deckId={activeDeckId} onBack={() => { setActiveDeckId(null); refreshDueCardsCount(appLanguage); }} trainingMode={tm} />
     );
   }
 
@@ -9526,14 +9736,14 @@ export default function App() {
       <StudyEntry 
         reviewCards={reviewCards} 
         isMistakesReview={isReviewingMistakes}
-        onBack={() => { setReviewCards(null); setIsReviewingMistakes(false); }} 
+        onBack={() => { setReviewCards(null); setIsReviewingMistakes(false); refreshDueCardsCount(appLanguage); }} 
       />
     );
   }
 
   if (drillCards) {
     return (
-      <StudyEntry reviewCards={drillCards} isDrillMode={true} onBack={() => setDrillCards(null)} />
+      <StudyEntry reviewCards={drillCards} isDrillMode={true} onBack={() => { setDrillCards(null); refreshDueCardsCount(appLanguage); }} />
     );
   }
 
@@ -10097,11 +10307,8 @@ export default function App() {
         <HeaderWidgets 
           activeBook={activeBook} 
           onBack={() => startTransition(() => setActiveBookId(null))} 
-          dueCount={dueCards.length}
-          onStartReview={() => {
-            setIsReviewingMistakes(false); 
-            setReviewCards(dueCards); 
-          }}
+          dueCount={displayDueCount}
+          onStartReview={handleStartReviewDue}
           onReviewMistakes={() => {
             try {
               const lang = normalizeLanguage(activeBook?.language || appLanguage || 'DE');
@@ -10440,13 +10647,13 @@ export default function App() {
                       </div>
 
                       {/* Справа: компактная пилюля повторения */}
-                      {levelIdx === 0 && dueCards.length > 0 && (
+                      {levelIdx === 0 && displayDueCount > 0 && (
                         <button 
-                          onClick={() => { initAudioCtx(); setIsReviewingMistakes(false); setReviewCards(dueCards); }}
+                          onClick={handleStartReviewDue}
                           className="h-8 px-3.5 rounded-full flex items-center gap-2 text-xs font-medium transition-all duration-200 active:scale-95 shadow-sm bg-white/80 dark:bg-zinc-900/80 border border-black/[0.08] dark:border-white/10 backdrop-blur-xl hover:bg-white hover:shadow-md hover:shadow-black/[0.04] hover:border-black/[0.12] dark:hover:bg-zinc-800/90 dark:hover:border-white/20 text-zinc-800 dark:text-zinc-200 cursor-pointer select-none group"
                         >
                           <RotateCcw className="w-3 h-3 text-blue-600 dark:text-blue-400 transition-transform duration-300 group-hover:-rotate-45 shrink-0" />
-                          <span className="font-semibold text-zinc-900 dark:text-white font-mono tabular-nums">{dueCards.length}</span>
+                          <span className="font-semibold text-zinc-900 dark:text-white font-mono tabular-nums">{displayDueCount}</span>
                           <span className="hidden sm:inline text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
                             {appLanguage === 'RU' ? 'повторить' : appLanguage === 'EN' ? 'review' : 'wiederholen'}
                           </span>
