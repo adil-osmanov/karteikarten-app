@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 interface AppleBookCoverProps {
   imageSrc?: string;
@@ -8,9 +8,6 @@ interface AppleBookCoverProps {
   darkImageSrc?: string | null;
   tintColor?: string;
   title: string;
-  badge?: string;
-  badgeIcon?: React.ComponentType<{ className?: string }>;
-  badgeColor?: string;
   className?: string;
   onEdit?: (e: React.MouseEvent) => void;
   onDelete?: (e: React.MouseEvent) => void;
@@ -22,13 +19,24 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
   darkImageSrc,
   tintColor,
   title,
-  badge,
-  badgeIcon: BadgeIcon,
-  badgeColor,
   className = '',
   onEdit,
   onDelete,
 }) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener('click', handleClickOutside);
+    return () => window.removeEventListener('click', handleClickOutside);
+  }, [menuOpen]);
+
   const light = lightImageSrc || imageSrc;
   const dark = darkImageSrc || imageSrc;
   const hasImage = Boolean(light || dark);
@@ -41,12 +49,12 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
         className="absolute top-[3px] bottom-[3px] right-[-4px] w-[8px] rounded-r-[4px] bg-gradient-to-r from-zinc-400 via-zinc-200 to-zinc-300 dark:from-zinc-700 dark:via-zinc-600 dark:to-zinc-500 shadow-sm z-0"
       />
 
-      {/* 2. Основной блок обложки книги */}
+      {/* 2. Основной блок обложки книги: подъем -translate-y-1.5 и усиление тени строго на обложке */}
       <div 
-        className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-900 shadow-[-3px_6px_16px_rgba(0,0,0,0.6),_10px_20px_32px_rgba(0,0,0,0.45)] transition-transform duration-300 ease-out group-hover:-translate-y-1 z-10"
+        className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-900 shadow-[-3px_6px_16px_rgba(0,0,0,0.6),_10px_20px_32px_rgba(0,0,0,0.45)] transition-all duration-300 ease-out group-hover:-translate-y-1.5 group-hover:shadow-[-4px_10px_24px_rgba(0,0,0,0.65),_14px_28px_40px_rgba(0,0,0,0.5)] z-10"
         style={hasImage ? undefined : { backgroundColor: tintColor || '#1C1C1E' }}
       >
-        {/* Изображение обложки (с поддержкой светлой/темной темы) */}
+        {/* Изображение обложки */}
         {hasImage ? (
           <>
             {light && (
@@ -93,48 +101,63 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
           className="pointer-events-none absolute inset-0 rounded-l-[3px] rounded-r-[8px] ring-1 ring-inset ring-white/10 z-20"
         />
 
-        {/* Action Buttons: Native macOS Buttons on hover */}
+        {/* 5. Минималистичная кнопка действий «···» (три точки) */}
         {(onEdit || onDelete) && (
-          <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-40">
-            {onEdit && (
-              <button 
-                type="button"
-                onClick={onEdit} 
-                className="w-7 h-7 rounded-full bg-zinc-900/80 hover:bg-zinc-800 border border-white/15 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-md cursor-pointer backdrop-blur-sm"
-                title="Bearbeiten"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-                </svg>
-              </button>
-            )}
-            {onDelete && (
-              <button 
-                type="button"
-                onClick={onDelete} 
-                className="w-7 h-7 rounded-full bg-zinc-900/80 hover:bg-zinc-800 border border-white/15 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-md cursor-pointer backdrop-blur-sm"
-                title="Löschen"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6"/>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                </svg>
-              </button>
-            )}
-          </div>
-        )}
+          <div ref={menuRef} className="absolute top-2.5 right-2.5 z-40">
+            <button 
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(!menuOpen);
+              }} 
+              className="w-7 h-7 rounded-full bg-black/40 backdrop-blur-md text-white/70 hover:text-white hover:bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 shadow-md cursor-pointer"
+              title="Aktionen"
+            >
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                <circle cx="5" cy="12" r="1.75"/>
+                <circle cx="12" cy="12" r="1.75"/>
+                <circle cx="19" cy="12" r="1.75"/>
+              </svg>
+            </button>
 
-        {/* Плашка Blitzkarten / режима книги внизу */}
-        {badge && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none w-max max-w-[90%]">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold tracking-wider uppercase bg-black/60 dark:bg-black/75 backdrop-blur-md text-amber-300/90 border border-amber-400/20 shadow-md">
-              {BadgeIcon ? (
-                <BadgeIcon className={`w-3 h-3 ${badgeColor || 'text-amber-400'}`} />
-              ) : (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              )}
-              <span className="truncate">{badge}</span>
-            </span>
+            {menuOpen && (
+              <div 
+                onClick={(e) => e.stopPropagation()}
+                className="absolute right-0 top-8 w-36 py-1 bg-white/95 dark:bg-zinc-800/95 backdrop-blur-xl rounded-xl shadow-xl border border-black/5 dark:border-white/10 z-50 text-left animate-in fade-in zoom-in-95 duration-100"
+              >
+                {onEdit && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      setMenuOpen(false);
+                      onEdit(e);
+                    }}
+                    className="w-full px-3 py-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                    </svg>
+                    Bearbeiten
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      setMenuOpen(false);
+                      onDelete(e);
+                    }}
+                    className="w-full px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                    Löschen
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

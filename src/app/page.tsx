@@ -4907,7 +4907,7 @@ function StudyCard({
           </div>
 
           <div className="mt-4 mb-6 w-full text-center">
-            <p className="text-sm font-normal mt-3 text-center max-w-2xl mx-auto leading-relaxed text-zinc-500 dark:text-zinc-400 opacity-60 hover:opacity-100 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all duration-200 cursor-pointer">
+            <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
               {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
             </p>
 
@@ -5404,101 +5404,6 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
 
 
 
-interface ModeBadgeInfo {
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  iconColor: string;
-}
-
-function getBookModeBadge(book: BookMeta): ModeBadgeInfo | null {
-  const mode = book.training_mode;
-  const isFlashcardCategory = book.category === 'flashcards';
-
-  if (mode === 'rapid_flashcards' || isFlashcardCategory) {
-    return {
-      label: 'BLITZKARTEN',
-      icon: Layers,
-      iconColor: 'text-amber-400',
-    };
-  }
-
-  if (mode === 'redemittel') {
-    return {
-      label: 'REDEMITTEL',
-      icon: Shuffle,
-      iconColor: 'text-sky-400',
-    };
-  }
-
-  if (mode === 'starke_verben') {
-    return {
-      label: 'STARKE VERBEN',
-      icon: Flame,
-      iconColor: 'text-rose-400',
-    };
-  }
-
-  if (mode === 'preposition_drill') {
-    return {
-      label: 'PRÄPOSITIONEN',
-      icon: Database,
-      iconColor: 'text-purple-400',
-    };
-  }
-
-  return null;
-}
-
-export function getBookLevelDot(book: BookMeta): string {
-  const text = `${book.title} ${book.subtitle || ''}`.toUpperCase();
-
-  // 1. Check title and subtitle for explicit level mentions
-  if (/\b(B2|C1|C2)\b/.test(text) || text.includes('B2') || text.includes('C1') || text.includes('C2')) {
-    return 'bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.4)]';
-  }
-  if (/\b(A1\s*[\+\-]\s*A2|A1\/A2|1\+2)\b/.test(text)) {
-    return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
-  }
-  if (/\b(A2|B1)\b/.test(text) || text.includes('DTZ') || text.includes('B1') || text.includes('A2') || text.includes('3+4')) {
-    return 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]';
-  }
-  if (/\bA1\b/.test(text)) {
-    return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
-  }
-
-  // 2. Check activeLevels
-  const levels = book.activeLevels || [];
-  const isAllLevels = levels.length >= 5;
-
-  if (!isAllLevels && levels.length > 0) {
-    if (levels.includes('B2') || levels.includes('C1-C2')) {
-      return 'bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.4)]';
-    }
-    const hasA1 = levels.includes('A1');
-    const hasA2 = levels.includes('A2');
-    const hasB1 = levels.includes('B1');
-
-    if (hasA1 && hasA2 && !hasB1) {
-      return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
-    }
-    if (hasB1 || (hasA2 && !hasA1)) {
-      return 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]';
-    }
-    if (hasA1) {
-      return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
-    }
-  }
-
-  // 3. Fallback: if highest level is B2 or C1
-  if (levels.includes('C1-C2') || levels.includes('B2')) {
-    return 'bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.4)]';
-  }
-  if (levels.includes('B1') || levels.includes('A2')) {
-    return 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]';
-  }
-  return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
-}
-
 const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete }: { book: BookMeta, priority?: boolean, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
   const initialCoverStr = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
   let lightCover = initialCoverStr;
@@ -5513,9 +5418,6 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
   }
   
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
-  const badge = getBookModeBadge(book);
-  const BadgeIcon = badge?.icon;
-  const levelDotClass = getBookLevelDot(book);
   const cleanTitle = book.title.replace(/^[🟢🟠🟣🔵●🔴🟡]\s*/, '');
 
   const decks = useStore(s => s.decks);
@@ -5532,40 +5434,32 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
   const progressPercent = totalCards > 0 ? (masteredCards / totalCards) * 100 : 0;
 
   return (
-    <div onClick={onClick} className="relative group w-full h-full flex flex-col cursor-pointer select-none">
-      {/* Subtle Atmospheric Glow Behind (Dark Mode) */}
-      <div 
-        className="absolute inset-0 opacity-0 dark:group-hover:opacity-40 transition-opacity duration-500 rounded-[12px] transform-gpu translate-z-0 will-change-transform pointer-events-none" 
-        style={{ boxShadow: `0 20px 60px -10px ${tintColor}` }} 
-      />
+    <div onClick={onClick} className="group flex flex-col w-full cursor-pointer select-none bg-transparent">
+      {/* 3D-обложка книги с интерактивным наклоном и бликом */}
+      <TiltBookCard className="w-full">
+        <AppleBookCover
+          imageSrc={lightCover || darkCover || ''}
+          lightImageSrc={lightCover}
+          darkImageSrc={darkCover}
+          tintColor={tintColor}
+          title={cleanTitle}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      </TiltBookCard>
 
-      {/* Apple Book Cover with Spine, Hinge, and Paper Page Block */}
-      <AppleBookCover
-        imageSrc={lightCover || darkCover || ''}
-        lightImageSrc={lightCover}
-        darkImageSrc={darkCover}
-        tintColor={tintColor}
-        title={book.title}
-        badge={badge?.label}
-        badgeIcon={BadgeIcon}
-        badgeColor={badge?.iconColor}
-        onEdit={onEdit}
-        onDelete={onDelete}
-      />
-
-      {/* Book Title, Author/Publisher/Subtitle & Progress in authentic Apple Books style */}
-      <div className="pt-3.5 pb-1 flex flex-col">
-        <h3 className="text-[14px] md:text-[15px] font-semibold text-gray-900 dark:text-white leading-snug line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-          <span className={cn("w-2 h-2 rounded-full inline-block mr-2 shrink-0 align-middle mb-0.5", levelDotClass)} />
+      {/* Название книги, автор/издательство и прогресс в стиле Apple Books */}
+      <div className="flex flex-col">
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 tracking-tight mt-3 line-clamp-2">
           {cleanTitle}
         </h3>
         {book.subtitle && (
-          <p className="text-[12px] font-medium text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-1">
             {book.subtitle}
           </p>
         )}
         {totalCards > 0 && (
-          <div className="w-full h-1 bg-zinc-200/80 dark:bg-zinc-800 rounded-full mt-2.5 overflow-hidden">
+          <div className="w-full h-1 rounded-full bg-zinc-200 dark:bg-zinc-800 mt-2 overflow-hidden">
             <div 
               className={cn("h-full rounded-full transition-all duration-500", progressPercent === 100 ? "bg-emerald-500" : "bg-blue-500")}
               style={{ width: `${progressPercent}%` }}
@@ -9934,12 +9828,12 @@ export default function App() {
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
               <div className="flex items-center gap-3 mb-6">
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                   {UI_TRANSLATIONS[appLanguage]?.libraryTitle || 'Lehrbücher'}
                 </h2>
                 <DueCardsBadge count={dueCards.length} language={appLanguage} onClick={() => { if (dueCards.length > 0) { setIsReviewingMistakes(false); setReviewCards(dueCards); } }} />
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-8">
                 {isLoadingBooks && displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).length === 0 ? (
                   [1, 2, 3, 4].map((i) => (
                     <div key={i} className="flex flex-col animate-pulse">
@@ -9961,9 +9855,7 @@ export default function App() {
                       onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
                       className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                     >
-                      <TiltBookCard key={book.id} onClick={() => handleBookClick(book.id)} className="w-full h-full min-h-[250px] flex flex-col">
-                        <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
-                      </TiltBookCard>
+                      <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
                     </div>
                   ))
                 )}
@@ -9980,10 +9872,10 @@ export default function App() {
               }}
               className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
             >
-              <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-white">
+              <h2 className="text-2xl font-semibold tracking-tight mb-6 text-zinc-900 dark:text-zinc-100">
                 {UI_TRANSLATIONS[appLanguage]?.trainingTitle || 'Blitzkarten & Training'}
               </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-8">
                 {isLoadingBooks && displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).length === 0 ? (
                   [1, 2, 3].map((i) => (
                     <div key={i} className="flex flex-col animate-pulse">
@@ -10005,9 +9897,7 @@ export default function App() {
                       onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
                       className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                     >
-                      <TiltBookCard key={book.id} onClick={() => handleBookClick(book.id)} className="w-full h-full min-h-[250px] flex flex-col">
-                        <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
-                      </TiltBookCard>
+                      <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
                     </div>
                   ))
                 )}
@@ -10048,11 +9938,11 @@ export default function App() {
                     </div>
 
                     {/* Текстовый блок под книгой в едином стиле */}
-                    <div className="pt-3.5 pb-1 flex flex-col">
-                      <span className="font-semibold text-[14px] md:text-[15px] text-zinc-400 dark:text-zinc-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 tracking-tight mt-3 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                         {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
                       </span>
-                      <p className="text-[12px] font-medium text-zinc-400 dark:text-zinc-600 mt-0.5">
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-1">
                         Buch hinzufügen
                       </p>
                     </div>
