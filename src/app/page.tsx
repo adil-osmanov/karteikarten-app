@@ -5146,7 +5146,19 @@ const LANGUAGES = [
   { code: 'RU', flag: '🇷🇺', label: 'Русский' },
 ] as const;
 
-function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: BookMeta | null, onBack?: () => void, onReviewMistakes?: () => void }) {
+function HeaderWidgets({ 
+  activeBook, 
+  onBack, 
+  onReviewMistakes,
+  dueCount = 0,
+  onStartReview
+}: { 
+  activeBook?: BookMeta | null, 
+  onBack?: () => void, 
+  onReviewMistakes?: () => void,
+  dueCount?: number,
+  onStartReview?: () => void
+}) {
   const [adminOpen, setAdminOpen] = useState(false);
   const [isLangOpen, setIsLangOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -5286,10 +5298,10 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
             : "bg-transparent border-b border-transparent"
         )}
       >
-        <div className="w-full max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div className="w-full max-w-6xl mx-auto py-4 px-6 md:px-12 flex items-center justify-between">
           
           {/* 1. ЛЕВЫЙ УГОЛ: ЯЗЫКОВАЯ ПИЛЮЛЯ / BACK PILL */}
-          <div className="flex items-center">
+          <div className="flex items-center justify-start flex-1 min-w-0">
             {activeBook ? (
               <button
                 onClick={onBack}
@@ -5353,8 +5365,19 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
             )}
           </div>
 
-          {/* 2. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
-          <div className="flex items-center gap-2">
+          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
+          <div className="flex items-center justify-center shrink-0 px-2">
+            {!activeBook && dueCount > 0 && onStartReview ? (
+              <DueCardsBadge 
+                count={dueCount} 
+                language={appLanguage} 
+                onClick={onStartReview} 
+              />
+            ) : null}
+          </div>
+
+          {/* 3. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
+          <div className="flex items-center justify-end flex-1 gap-2">
             {/* Капсула счетчика */}
             <button 
               type="button"
@@ -9736,6 +9759,11 @@ export default function App() {
         <HeaderWidgets 
           activeBook={activeBook} 
           onBack={() => startTransition(() => setActiveBookId(null))} 
+          dueCount={dueCards.length}
+          onStartReview={() => {
+            setIsReviewingMistakes(false); 
+            setReviewCards(dueCards); 
+          }}
           onReviewMistakes={() => {
             try {
               const lang = normalizeLanguage(activeBook?.language || appLanguage || 'DE');
@@ -9873,26 +9901,12 @@ export default function App() {
         onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
       />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-6 pb-16 md:pt-8 md:pb-28">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pb-16 md:pb-28">
         {!activeBookId ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-2 pb-16">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
             
-            {/* Центрированная интерактивная панель повторения (Hero Action CTA) */}
-            {dueCards.length > 0 && (
-              <div className="flex justify-center my-6">
-                <DueCardsBadge 
-                  count={dueCards.length} 
-                  language={appLanguage} 
-                  onClick={() => { 
-                    setIsReviewingMistakes(false); 
-                    setReviewCards(dueCards); 
-                  }} 
-                />
-              </div>
-            )}
-
             {/* Dynamic Apple Segmented Control with i18n */}
-            <div className="flex justify-center mb-10">
+            <div className="flex justify-center mt-6 mb-8">
               <div className="inline-flex p-1 rounded-full bg-zinc-200/50 dark:bg-zinc-900/60 border border-zinc-300/30 dark:border-white/5 backdrop-blur-md">
                 {getTabsForLanguage(appLanguage).map((tab) => (
                   <button
