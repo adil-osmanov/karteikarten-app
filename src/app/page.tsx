@@ -27,6 +27,7 @@ import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { AmbientSpotlight } from "@/components/AmbientSpotlight";
 import { TiltBookCard } from "@/components/TiltBookCard";
+import { AppleBookCover } from "@/components/AppleBookCover";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -5461,7 +5462,6 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
     } catch {}
   }
   
-  const isImage = !!(lightCover || darkCover);
   const tintColor = book.tintColor || book.coverValue || '#1C1C1E';
   const badge = getBookModeBadge(book);
   const BadgeIcon = badge?.icon;
@@ -5480,89 +5480,45 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
   const progressPercent = totalCards > 0 ? (masteredCards / totalCards) * 100 : 0;
 
   return (
-    <div className="relative group w-full h-full flex flex-col">
-      {/* Glow Behind (Dark Mode Only) */}
+    <div onClick={onClick} className="relative group w-full h-full flex flex-col cursor-pointer select-none">
+      {/* Subtle Atmospheric Glow Behind (Dark Mode) */}
       <div 
-        className="absolute inset-0 opacity-0 dark:group-hover:opacity-60 transition-opacity duration-500 rounded-[20px] transform-gpu translate-z-0 will-change-transform" 
+        className="absolute inset-0 opacity-0 dark:group-hover:opacity-40 transition-opacity duration-500 rounded-[12px] transform-gpu translate-z-0 will-change-transform pointer-events-none" 
         style={{ boxShadow: `0 20px 60px -10px ${tintColor}` }} 
       />
-      
-      {/* Unified Card */}
-      <div onClick={onClick} className="relative z-10 cursor-pointer w-full h-full rounded-[20px] overflow-hidden bg-white dark:bg-[#1C1C1E] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-none border border-black/[0.04] dark:border-white/10 hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 flex flex-col">
-        
-        {/* Cover Image Section */}
-        <div className="relative w-full aspect-[3/4] shrink-0 overflow-hidden" style={isImage ? {} : { backgroundColor: tintColor }}>
-          {lightCover && (
-            <Image 
-              src={lightCover} 
-              alt={book.title || "Light Cover"}
-              fill
-              sizes="(max-width: 768px) 100vw, 320px"
-              quality={85}
-              priority={priority}
-              className={cn("object-cover group-hover:scale-105 transition-transform duration-300 ease-out", darkCover ? "dark:hidden" : "")} 
-            />
-          )}
-          {darkCover && (
-            <Image 
-              src={darkCover} 
-              alt={book.title || "Dark Cover"}
-              fill
-              sizes="(max-width: 768px) 100vw, 320px"
-              quality={85}
-              priority={priority}
-              className={cn("object-cover group-hover:scale-105 transition-transform duration-300 ease-out", lightCover ? "hidden dark:block" : "")} 
-            />
-          )}
-          
-          {/* Inner Ring for Cover */}
-          <div className="absolute inset-0 ring-1 ring-black/5 dark:ring-white/10 pointer-events-none z-30" />
-          
-          {/* Dynamic Apple Glassmorphism Mode Badge */}
-          {badge && BadgeIcon && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none w-max max-w-[90%]">
-              <div className="rounded-full px-3.5 py-1.5 backdrop-blur-md shadow-lg border border-white/15 flex items-center gap-1.5 whitespace-nowrap select-none text-[11px] font-semibold tracking-wider uppercase bg-black/45 group-hover:bg-black/60 dark:bg-black/55 dark:group-hover:bg-black/70 text-white transition-all duration-300 transform-gpu">
-                <BadgeIcon className={cn("w-3.5 h-3.5 shrink-0", badge.iconColor)} />
-                <span className="text-[11px] font-semibold tracking-wider uppercase text-white/95 select-none truncate antialiased">
-                  {badge.label}
-                </span>
-              </div>
-            </div>
-          )}
 
-          {/* Action Buttons: Native macOS Buttons */}
-          <div className="absolute top-3 right-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-40">
-            <button 
-              onClick={onEdit} 
-              className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
-              title="Bearbeiten"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-            </button>
-            <button 
-              onClick={onDelete} 
-              className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
-              title="Löschen"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+      {/* Apple Book Cover with Spine, Hinge, and Paper Page Block */}
+      <AppleBookCover
+        imageSrc={lightCover || darkCover || ''}
+        lightImageSrc={lightCover}
+        darkImageSrc={darkCover}
+        tintColor={tintColor}
+        title={book.title}
+        badge={badge?.label}
+        badgeIcon={BadgeIcon}
+        badgeColor={badge?.iconColor}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
+
+      {/* Book Title, Author/Publisher/Subtitle & Progress in authentic Apple Books style */}
+      <div className="pt-3.5 pb-1 flex flex-col">
+        <h3 className="text-[14px] md:text-[15px] font-semibold text-gray-900 dark:text-white leading-snug line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+          {book.title}
+        </h3>
+        {book.subtitle && (
+          <p className="text-[12px] font-medium text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">
+            {book.subtitle}
+          </p>
+        )}
+        {totalCards > 0 && (
+          <div className="w-full h-1 bg-zinc-200/80 dark:bg-zinc-800 rounded-full mt-2.5 overflow-hidden">
+            <div 
+              className={cn("h-full rounded-full transition-all duration-500", progressPercent === 100 ? "bg-emerald-500" : "bg-blue-500")}
+              style={{ width: `${progressPercent}%` }}
+            />
           </div>
-        </div>
-        
-        {/* Text Section with minimal bottom padding & progress bar */}
-        <div className="flex-1 flex flex-col justify-start px-4 pt-3.5 pb-4 bg-white dark:bg-[#1C1C1E]">
-          <h3 className="text-[15px] md:text-[17px] font-bold text-gray-900 dark:text-white leading-tight line-clamp-2">{book.title}</h3>
-          {book.subtitle && <p className="text-[12px] md:text-[13px] font-medium text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">{book.subtitle}</p>}
-          {totalCards > 0 && (
-            <div className="w-full h-1 bg-zinc-100 dark:bg-zinc-800 rounded-full mt-3 overflow-hidden">
-              <div 
-                className={cn("h-full rounded-full transition-all duration-500", progressPercent === 100 ? "bg-emerald-500" : "bg-blue-500")}
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-          )}
-        </div>
-
+        )}
       </div>
     </div>
   );
@@ -9933,12 +9889,12 @@ export default function App() {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
                 {isLoadingBooks && displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).length === 0 ? (
                   [1, 2, 3, 4].map((i) => (
-                    <div 
-                      key={i} 
-                      className="h-80 rounded-[28px] bg-zinc-900/40 border border-white/5 animate-pulse flex flex-col justify-end p-5"
-                    >
-                      <div className="h-4 w-32 bg-white/10 rounded-md mb-2" />
-                      <div className="h-3 w-20 bg-white/5 rounded-md" />
+                    <div key={i} className="flex flex-col animate-pulse">
+                      <div className="aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
+                      <div className="pt-3 space-y-1.5">
+                        <div className="h-4 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                        <div className="h-3 w-1/2 bg-zinc-200/60 dark:bg-zinc-800/60 rounded" />
+                      </div>
                     </div>
                   ))
                 ) : (
@@ -9977,12 +9933,12 @@ export default function App() {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-10">
                 {isLoadingBooks && displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).length === 0 ? (
                   [1, 2, 3].map((i) => (
-                    <div 
-                      key={i} 
-                      className="h-80 rounded-[28px] bg-zinc-900/40 border border-white/5 animate-pulse flex flex-col justify-end p-5"
-                    >
-                      <div className="h-4 w-32 bg-white/10 rounded-md mb-2" />
-                      <div className="h-3 w-20 bg-white/5 rounded-md" />
+                    <div key={i} className="flex flex-col animate-pulse">
+                      <div className="aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
+                      <div className="pt-3 space-y-1.5">
+                        <div className="h-4 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                        <div className="h-3 w-1/2 bg-zinc-200/60 dark:bg-zinc-800/60 rounded" />
+                      </div>
                     </div>
                   ))
                 ) : (
@@ -10003,14 +9959,50 @@ export default function App() {
                   ))
                 )}
                 
-                <div className="w-full h-full min-h-[250px]">
-                  <div onClick={() => setBookModal({})} className="cursor-pointer w-full h-full min-h-[250px] rounded-[20px] bg-gray-50 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 border border-black/[0.04] dark:border-white/10 transition-all flex flex-col items-center justify-center text-gray-400 hover:text-blue-600 dark:text-blue-400 group shadow-[0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] hover:-translate-y-1">
-                    <div className="w-12 h-12 rounded-full bg-white dark:bg-black/20 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 transition-transform">
-                      <Plus className="w-6 h-6 text-gray-500 group-hover:text-blue-600 dark:text-gray-300 dark:group-hover:text-blue-400 transition-colors" />
+                <div className="w-full h-full">
+                  <div
+                    onClick={() => setBookModal({})}
+                    className="cursor-pointer group flex flex-col w-full h-full select-none"
+                  >
+                    <div className="relative w-full">
+                      {/* Срез страниц сзади */}
+                      <div 
+                        aria-hidden="true"
+                        className="absolute top-[3px] bottom-[3px] right-[-4px] w-[8px] rounded-r-[4px] bg-zinc-200/50 dark:bg-zinc-800/40 border-y border-r border-dashed border-zinc-300 dark:border-white/10 z-0"
+                      />
+
+                      {/* Обложка-форзац с книжными пропорциями и корешком */}
+                      <div className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all duration-300 ease-out group-hover:-translate-y-1 shadow-sm flex flex-col items-center justify-center p-6 text-center z-10">
+                        {/* Корешок слева */}
+                        <div 
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-y-0 left-0 w-[24px] bg-gradient-to-r from-black/[0.05] via-white/[0.04] to-transparent dark:from-white/[0.03] dark:to-transparent border-r border-dashed border-zinc-300 dark:border-white/10"
+                        />
+
+                        {/* Тонкий желобок сгиба обложки */}
+                        <div 
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-y-0 left-[20px] w-[1px] bg-black/[0.04] dark:bg-white/[0.05]"
+                        />
+
+                        <div className="w-12 h-12 rounded-full bg-white dark:bg-white/10 border border-black/[0.05] dark:border-white/10 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 group-hover:border-blue-500/30 transition-all duration-300">
+                          <Plus className="w-6 h-6 text-zinc-400 group-hover:text-blue-600 dark:text-zinc-400 dark:group-hover:text-blue-400 transition-colors" />
+                        </div>
+                        <span className="font-semibold text-[13px] text-zinc-600 dark:text-zinc-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                          {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
+                        </span>
+                      </div>
                     </div>
-                    <span className="font-semibold text-[14px] text-gray-600 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                      {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
-                    </span>
+
+                    {/* Текстовый блок под книгой в едином стиле */}
+                    <div className="pt-3.5 pb-1 flex flex-col">
+                      <span className="font-semibold text-[14px] md:text-[15px] text-zinc-400 dark:text-zinc-500 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                        {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
+                      </span>
+                      <p className="text-[12px] font-medium text-zinc-400 dark:text-zinc-600 mt-0.5">
+                        Buch hinzufügen
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
