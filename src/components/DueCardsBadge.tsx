@@ -12,9 +12,18 @@ export interface DueCardsBadgeProps {
 }
 
 const TEXT_MAP = {
-  DE: { badge: 'wiederholen', title: 'Karten zu wiederholen' },
-  EN: { badge: 'review', title: 'cards to review' },
-  RU: { badge: 'повторить', title: 'карточек ждут повторения' },
+  DE: {
+    getText: (c: number) => `${c} Karten wiederholen`,
+    title: 'Karten zu wiederholen',
+  },
+  EN: {
+    getText: (c: number) => `${c} Cards to review`,
+    title: 'Cards to review',
+  },
+  RU: {
+    getText: (c: number) => `${c} Карточек повторить`,
+    title: 'Карточек ждут повторения',
+  },
 } as const;
 
 export function DueCardsBadge({ count = 0, language = 'DE', onClick, className }: DueCardsBadgeProps) {
@@ -24,24 +33,25 @@ export function DueCardsBadge({ count = 0, language = 'DE', onClick, className }
   }
 
   const langKey = (language in TEXT_MAP ? language : 'DE') as keyof typeof TEXT_MAP;
-  const { badge, title } = TEXT_MAP[langKey];
+  const { getText, title } = TEXT_MAP[langKey];
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200/50 dark:border-zinc-800/80 text-[11px] px-2.5 py-1 rounded-full font-medium transition-all duration-150 cursor-pointer select-none active:scale-95 hover:bg-zinc-200/60 dark:hover:bg-zinc-850",
+        "inline-flex items-center gap-2 px-5 py-2.5 rounded-full",
+        "bg-zinc-100/80 dark:bg-zinc-900/60 backdrop-blur-md",
+        "border border-zinc-200/50 dark:border-zinc-800/80",
+        "hover:bg-zinc-200/50 dark:hover:bg-zinc-850",
+        "transition-all duration-150 active:scale-[0.98] shadow-sm cursor-pointer select-none group",
         className
       )}
       title={`${count} ${title}`}
     >
-      <RotateCcw className="w-3 h-3 text-zinc-400 dark:text-zinc-500 shrink-0" />
-      <span className="font-semibold text-zinc-800 dark:text-zinc-200 font-mono tabular-nums">
-        {count}
-      </span>
-      <span>
-        {badge}
+      <RotateCcw className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 group-hover:rotate-[-45deg] transition-transform duration-300 shrink-0" />
+      <span className="text-xs font-semibold tracking-wide text-zinc-800 dark:text-zinc-200 uppercase font-sans">
+        {getText(count)}
       </span>
     </button>
   );

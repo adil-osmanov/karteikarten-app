@@ -5440,7 +5440,7 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
   const progressPercent = totalCards > 0 ? (masteredCards / totalCards) * 100 : 0;
 
   return (
-    <div onClick={onClick} className="group flex flex-col w-full cursor-pointer select-none bg-transparent">
+    <div onClick={onClick} className="group flex flex-col w-full text-left cursor-pointer select-none bg-transparent">
       {/* 3D-обложка книги с интерактивным наклоном и бликом */}
       <TiltBookCard className="w-full">
         <AppleBookCover
@@ -5455,12 +5455,12 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
       </TiltBookCard>
 
       {/* Название книги, автор/издательство и прогресс в стиле Apple Books */}
-      <div className="flex flex-col">
-        <h3 className="text-xs font-semibold tracking-tight text-zinc-900 dark:text-zinc-300 mt-4 line-clamp-2">
+      <div className="flex flex-col text-left w-full">
+        <h3 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 mt-3 line-clamp-2">
           {cleanTitle}
         </h3>
         {book.subtitle && (
-          <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 line-clamp-1">
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-1">
             {book.subtitle}
           </p>
         )}
@@ -9780,154 +9780,106 @@ export default function App() {
         onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
       />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-8 pb-16 md:pt-12 md:pb-28">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-6 pt-6 pb-16 md:pt-8 md:pb-28">
         {!activeBookId ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-2 pb-16 space-y-20">
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-2 pb-16">
             
-            {/* Секция 1: Учебники */}
-            <section
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-              onDrop={(e) => {
-                // If dropped on the section container itself, and not on a specific book
-                if ((e.target as HTMLElement).closest('.cursor-grab')) return;
-                e.preventDefault();
-                handleBookDrop('section-coursebook', e);
-              }}
-              className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
-            >
-              <div className="flex items-end justify-between mb-8">
-                <div>
-                  <span className="block text-[10px] font-bold tracking-widest text-zinc-400 dark:text-zinc-500 uppercase mb-1">
-                    {UI_TRANSLATIONS[appLanguage]?.libraryKicker || 'Deine Bibliothek'}
-                  </span>
-                  <h1 className="text-3xl font-light tracking-tight text-zinc-900 dark:text-zinc-100">
-                    {UI_TRANSLATIONS[appLanguage]?.libraryTitle || 'Lehrbücher'}
-                  </h1>
-                </div>
-                <DueCardsBadge count={dueCards.length} language={appLanguage} onClick={() => { if (dueCards.length > 0) { setIsReviewingMistakes(false); setReviewCards(dueCards); } }} />
+            {/* Центрированная интерактивная панель повторения */}
+            {dueCards.length > 0 && (
+              <div className="flex justify-center mb-10 sm:mb-12">
+                <DueCardsBadge 
+                  count={dueCards.length} 
+                  language={appLanguage} 
+                  onClick={() => { 
+                    setIsReviewingMistakes(false); 
+                    setReviewCards(dueCards); 
+                  }} 
+                />
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-12">
-                {isLoadingBooks && displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).length === 0 ? (
-                  [1, 2, 3, 4].map((i) => (
-                    <div key={i} className="flex flex-col animate-pulse">
-                      <div className="aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
-                      <div className="pt-3 space-y-1.5">
-                        <div className="h-4 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
-                        <div className="h-3 w-1/2 bg-zinc-200/60 dark:bg-zinc-800/60 rounded" />
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  displayBooks.filter(b => (b.category === 'coursebook' || b.category === 'book')).map((book, idx) => (
-                    <div
-                      key={book.id}
-                      draggable
-                      onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
-                      onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
-                      onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
-                      className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
-                    >
-                      <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
+            )}
 
-            {/* Секция 2: Тренировки и карточки */}
-            <section
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-              onDrop={(e) => {
-                if ((e.target as HTMLElement).closest('.cursor-grab')) return;
-                e.preventDefault();
-                handleBookDrop('section-deck', e);
-              }}
-              className="min-h-[150px] rounded-2xl transition-colors border border-transparent"
-            >
-              <div className="mb-8">
-                <span className="block text-[10px] font-bold tracking-widest text-zinc-400 dark:text-zinc-500 uppercase mb-1">
-                  {UI_TRANSLATIONS[appLanguage]?.trainingKicker || 'Intervall-Wiederholung'}
-                </span>
-                <h2 className="text-3xl font-light tracking-tight text-zinc-900 dark:text-zinc-100">
-                  {UI_TRANSLATIONS[appLanguage]?.trainingTitle || 'Blitzkarten & Training'}
-                </h2>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-12">
-                {isLoadingBooks && displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).length === 0 ? (
-                  [1, 2, 3].map((i) => (
-                    <div key={i} className="flex flex-col animate-pulse">
-                      <div className="aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
-                      <div className="pt-3 space-y-1.5">
-                        <div className="h-4 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
-                        <div className="h-3 w-1/2 bg-zinc-200/60 dark:bg-zinc-800/60 rounded" />
-                      </div>
+            {/* Единая абсолютно симметричная сетка книг */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-12">
+              {isLoadingBooks && displayBooks.length === 0 ? (
+                [1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex flex-col animate-pulse">
+                    <div className="aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
+                    <div className="pt-3 space-y-1.5">
+                      <div className="h-4 w-3/4 bg-zinc-200 dark:bg-zinc-800 rounded" />
+                      <div className="h-3 w-1/2 bg-zinc-200/60 dark:bg-zinc-800/60 rounded" />
                     </div>
-                  ))
-                ) : (
-                  displayBooks.filter(b => (b.category !== 'coursebook' && b.category !== 'book')).map((book, idx) => (
-                    <div
-                      key={book.id}
-                      draggable
-                      onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
-                      onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
-                      onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
-                      className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
-                    >
-                      <BookCard book={book} priority={idx < 4} onClick={() => handleBookClick(book.id)} onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} />
-                    </div>
-                  ))
-                )}
-                
-                <div className="w-full h-full">
+                  </div>
+                ))
+              ) : (
+                displayBooks.map((book, idx) => (
                   <div
-                    onClick={() => setBookModal({})}
-                    className="cursor-pointer group flex flex-col w-full h-full select-none"
+                    key={book.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
+                    onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
+                    onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
+                    className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                   >
-                    <div className="relative w-full">
-                      {/* Срез страниц сзади */}
+                    <BookCard 
+                      book={book} 
+                      priority={idx < 4} 
+                      onClick={() => handleBookClick(book.id)} 
+                      onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} 
+                      onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} 
+                    />
+                  </div>
+                ))
+              )}
+
+              {/* Карточка добавления новой книги «+ Neues Buch» */}
+              <div className="w-full h-full">
+                <div
+                  onClick={() => setBookModal({})}
+                  className="cursor-pointer group flex flex-col w-full h-full text-left select-none"
+                >
+                  <div className="relative w-full">
+                    {/* Срез страниц сзади */}
+                    <div 
+                      aria-hidden="true"
+                      className="absolute top-[3px] bottom-[3px] right-[-4px] w-[8px] rounded-r-[4px] bg-zinc-200/50 dark:bg-zinc-800/40 border-y border-r border-dashed border-zinc-300 dark:border-white/10 z-0"
+                    />
+
+                    {/* Обложка-форзац с книжными пропорциями и корешком */}
+                    <div className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all duration-300 ease-out group-hover:-translate-y-1.5 shadow-sm flex flex-col items-center justify-center p-6 text-center z-10">
+                      {/* Корешок слева */}
                       <div 
                         aria-hidden="true"
-                        className="absolute top-[3px] bottom-[3px] right-[-4px] w-[8px] rounded-r-[4px] bg-zinc-200/50 dark:bg-zinc-800/40 border-y border-r border-dashed border-zinc-300 dark:border-white/10 z-0"
+                        className="pointer-events-none absolute inset-y-0 left-0 w-[24px] bg-gradient-to-r from-black/[0.05] via-white/[0.04] to-transparent dark:from-white/[0.03] dark:to-transparent border-r border-dashed border-zinc-300 dark:border-white/10"
                       />
 
-                      {/* Обложка-форзац с книжными пропорциями и корешком */}
-                      <div className="relative overflow-hidden aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 transition-all duration-300 ease-out group-hover:-translate-y-1 shadow-sm flex flex-col items-center justify-center p-6 text-center z-10">
-                        {/* Корешок слева */}
-                        <div 
-                          aria-hidden="true"
-                          className="pointer-events-none absolute inset-y-0 left-0 w-[24px] bg-gradient-to-r from-black/[0.05] via-white/[0.04] to-transparent dark:from-white/[0.03] dark:to-transparent border-r border-dashed border-zinc-300 dark:border-white/10"
-                        />
+                      {/* Тонкий желобок сгиба обложки */}
+                      <div 
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-y-0 left-[20px] w-[1px] bg-black/[0.04] dark:bg-white/[0.05]"
+                      />
 
-                        {/* Тонкий желобок сгиба обложки */}
-                        <div 
-                          aria-hidden="true"
-                          className="pointer-events-none absolute inset-y-0 left-[20px] w-[1px] bg-black/[0.04] dark:bg-white/[0.05]"
-                        />
-
-                        <div className="w-12 h-12 rounded-full bg-white dark:bg-white/10 border border-black/[0.05] dark:border-white/10 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 group-hover:border-blue-500/30 transition-all duration-300">
-                          <Plus className="w-6 h-6 text-zinc-400 group-hover:text-blue-600 dark:text-zinc-400 dark:group-hover:text-blue-400 transition-colors" />
-                        </div>
-                        <span className="font-semibold text-[13px] text-zinc-600 dark:text-zinc-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                          {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
-                        </span>
+                      <div className="w-12 h-12 rounded-full bg-white dark:bg-white/10 border border-black/[0.05] dark:border-white/10 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 group-hover:border-blue-500/30 transition-all duration-300">
+                        <Plus className="w-6 h-6 text-zinc-400 group-hover:text-blue-600 dark:text-zinc-400 dark:group-hover:text-blue-400 transition-colors" />
                       </div>
-                    </div>
-
-                    {/* Текстовый блок под книгой в едином стиле */}
-                    <div className="flex flex-col">
-                      <span className="text-xs font-semibold tracking-tight text-zinc-900 dark:text-zinc-300 mt-4 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      <span className="font-semibold text-[13px] text-zinc-600 dark:text-zinc-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                         {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
                       </span>
-                      <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 line-clamp-1">
-                        Buch hinzufügen
-                      </p>
                     </div>
+                  </div>
+
+                  {/* Текстовый блок под книгой в строгом левом выравнивании */}
+                  <div className="flex flex-col text-left w-full">
+                    <span className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 mt-3 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
+                    </span>
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-1">
+                      Buch hinzufügen
+                    </p>
                   </div>
                 </div>
               </div>
-            </section>
+            </div>
 
           </div>
         ) : (
