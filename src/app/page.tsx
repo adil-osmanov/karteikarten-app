@@ -5410,6 +5410,46 @@ function HeaderWidgets({ activeBook, onBack, onReviewMistakes }: { activeBook?: 
 
 
 
+export function getBookCategory(book: BookMeta): 'textbooks' | 'grammar' | 'custom' {
+  if (book.category === 'textbooks' || book.category === 'coursebook') return 'textbooks';
+  if (book.category === 'grammar') return 'grammar';
+  if (book.category === 'custom') return 'custom';
+
+  const title = (book.title || '').toLowerCase();
+  const mode = book.training_mode;
+
+  // 1. Specialized grammar trainers
+  if (
+    mode === 'starke_verben' ||
+    mode === 'preposition_drill' ||
+    mode === 'redemittel' ||
+    title.includes('nomen-verb') ||
+    title.includes('nvv') ||
+    title.includes('präposition') ||
+    title.includes('starke verben') ||
+    title.includes('redemittel')
+  ) {
+    return 'grammar';
+  }
+
+  // 2. Course textbooks (Aspekte, Schritte Plus, Basis Deutsch, DTZ, etc.)
+  if (
+    book.category === 'book' ||
+    title.includes('aspekte') ||
+    title.includes('schritte') ||
+    title.includes('basis') ||
+    title.includes('dtz') ||
+    title.includes('lehrbuch') ||
+    title.includes('kurs') ||
+    title.includes('schritt')
+  ) {
+    return 'textbooks';
+  }
+
+  // 3. Fallback: custom personal decks (ChatGPT, etc.)
+  return 'custom';
+}
+
 const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete }: { book: BookMeta, priority?: boolean, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
   const initialCoverStr = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
   let lightCover = initialCoverStr;
@@ -5693,17 +5733,22 @@ function parseCardsFromCSV(text: string, isRedemittel: boolean, isRapidMode: boo
   return cards;
 }
 
-function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
+function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | { category?: string } | null, onClose: () => void, onSave: (b: BookMeta) => void }) {
   useScrollLock(true);
   const router = useRouter();
   const updateBookSettings = useStore(s => s.updateBookSettings);
   const { appLanguage } = useStore();
-  const [title, setTitle] = useState(book?.title || "");
-  const [subtitle, setSubtitle] = useState(book?.subtitle || "");
-  const [category, setCategory] = useState<'book' | 'deck'>((book?.category as 'book' | 'deck') || 'book');
-  const [trainingMode, setTrainingMode] = useState<'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' | 'redemittel'>(book?.training_mode || 'standard_cloze');
+  const isExistingBook = Boolean(book && 'id' in book && (book as BookMeta).id);
+  const existingBook = isExistingBook ? (book as BookMeta) : null;
+
+  const [title, setTitle] = useState(existingBook?.title || "");
+  const [subtitle, setSubtitle] = useState(existingBook?.subtitle || "");
+  const [category, setCategory] = useState<'textbooks' | 'grammar' | 'custom'>(
+    existingBook ? getBookCategory(existingBook) : ((book?.category as any) || 'textbooks')
+  );
+  const [trainingMode, setTrainingMode] = useState<'standard_cloze' | 'starke_verben' | 'preposition_drill' | 'rapid_flashcards' | 'redemittel'>(existingBook?.training_mode || 'standard_cloze');
   
-  const initialCoverStr = book?.coverImage || (book?.coverType === 'image' ? book.coverValue || null : null);
+  const initialCoverStr = existingBook?.coverImage || (existingBook?.coverType === 'image' ? existingBook.coverValue || null : null);
   let initLight = initialCoverStr;
   let initDark = initialCoverStr;
   
@@ -5718,7 +5763,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   const [coverLight, setCoverLight] = useState<string | null>(initLight);
   const [coverDark, setCoverDark] = useState<string | null>(initDark);
   
-  const [activeLevels, setActiveLevels] = useState<LanguageLevel[]>(book?.activeLevels || ['A1', 'A2', 'B1', 'B2', 'C1-C2']);
+  const [activeLevels, setActiveLevels] = useState<LanguageLevel[]>(existingBook?.activeLevels || ['A1', 'A2', 'B1', 'B2', 'C1-C2']);
   
   const fileInputLightRef = useRef<HTMLInputElement>(null);
   const fileInputDarkRef = useRef<HTMLInputElement>(null);
@@ -5776,13 +5821,13 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
     }
     
     onSave({
-      id: book?.id || crypto.randomUUID(),
-      language: book?.language || appLanguage,
+      id: existingBook?.id || crypto.randomUUID(),
+      language: existingBook?.language || appLanguage,
       title: title.trim(),
       subtitle: subtitle.trim(),
       category,
       training_mode: trainingMode,
-      tintColor: book?.tintColor || '#1C1C1E',
+      tintColor: existingBook?.tintColor || '#1C1C1E',
       coverImage: finalCoverImage,
       activeLevels: activeLevels.length ? activeLevels : ['A1']
     });
@@ -5791,7 +5836,7 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm overscroll-contain touch-none" onClick={onClose}>
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} onClick={e => e.stopPropagation()} className="backdrop-blur-xl bg-white/95 dark:bg-[#1C1C1E]/95 border border-gray-200 dark:border-white/10 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-5 max-h-[85vh] overflow-y-auto custom-scrollbar">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{book ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
+        <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{existingBook ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
         
         <div className="space-y-3">
           <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
@@ -5802,19 +5847,20 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | null, on
             <select value={category} onChange={async e => {
               const val = e.target.value as any;
               setCategory(val);
-              if (book?.id) {
-                const ok = await updateBookSettings(book.id, { category: val });
+              if (existingBook?.id) {
+                const ok = await updateBookSettings(existingBook.id, { category: val });
                 if (ok) {
                   toast.success('Gespeichert');
                   router.refresh();
                 } else {
                   toast.error('Fehler beim Speichern');
-                  setCategory((book.category as 'book' | 'deck') || 'book'); // rollback
+                  setCategory(getBookCategory(existingBook)); // rollback
                 }
               }
             }} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
-              <option value="book">Bücher (Lehrbücher)</option>
-              <option value="deck">Grammatik & Decks</option>
+              <option value="textbooks">Lehrbücher</option>
+              <option value="grammar">Grammatik & NVV</option>
+              <option value="custom">Eigene Decks</option>
             </select>
           </div>
           
@@ -8450,10 +8496,10 @@ export default function App() {
   const [shadowingDeckId, setShadowingDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [isReviewingMistakes, setIsReviewingMistakes] = useState(false);
-  const [drillCards, setDrillCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
+  const [activeCategory, setActiveCategory] = useState<'textbooks' | 'grammar' | 'custom'>('textbooks');
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
-  const [bookModal, setBookModal] = useState<{ id?: string } | null>(null);
+  const [bookModal, setBookModal] = useState<{ id?: string, category?: string } | null>(null);
   
   const [targetLevelForUpload, setTargetLevelForUpload] = useState<CEFRLevel>('B1');
   const [isUploadingCSV, setIsUploadingCSV] = useState(false);
@@ -8998,6 +9044,10 @@ export default function App() {
     }
     return filtered;
   }, [books, appLanguage, bookOrder]);
+
+  const filteredCategoryBooks = useMemo(() => {
+    return displayBooks.filter(book => getBookCategory(book) === activeCategory);
+  }, [displayBooks, activeCategory]);
 
   const groupedDecks = useMemo(() => {
     const map: Record<string, Deck[]> = {};
@@ -9661,7 +9711,7 @@ export default function App() {
         />
 
       <AnimatePresence>
-        {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : null} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
+        {bookModal && <BookEditorModal book={bookModal.id ? books.find(b => b.id === bookModal.id) : (bookModal.category ? { category: bookModal.category } : null)} onClose={() => setBookModal(null)} onSave={(b) => { if (bookModal.id) updateBook(b); else addBook(b); setBookModal(null); }} />}
         {theoryViewDeckId && <TheoryViewModal deckId={theoryViewDeckId} onClose={() => setTheoryViewDeckId(null)} onStartSession={() => { initAudioCtx(); setActiveDeckId(theoryViewDeckId); setTheoryViewDeckId(null); }} />}
         {dictationDeckId && <DictationPlayer deck={decks.find(d => d.id === dictationDeckId)!} onClose={() => setDictationDeckId(null)} />}
         {shadowingDeckId && <ShadowingPlayer deck={decks.find(d => d.id === shadowingDeckId)!} onClose={() => setShadowingDeckId(null)} />}
@@ -9784,9 +9834,9 @@ export default function App() {
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pt-2 pb-16">
             
-            {/* Центрированная интерактивная панель повторения */}
+            {/* Центрированная интерактивная панель повторения (Hero Action CTA) */}
             {dueCards.length > 0 && (
-              <div className="flex justify-center mb-10 sm:mb-12">
+              <div className="flex justify-center my-6">
                 <DueCardsBadge 
                   count={dueCards.length} 
                   language={appLanguage} 
@@ -9798,9 +9848,35 @@ export default function App() {
               </div>
             )}
 
-            {/* Единая абсолютно симметричная сетка книг */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-12">
-              {isLoadingBooks && displayBooks.length === 0 ? (
+            {/* Apple Segmented Control */}
+            <div className="flex justify-center mb-10">
+              <div className="inline-flex p-1 rounded-full bg-zinc-200/60 dark:bg-zinc-900/80 border border-zinc-300/40 dark:border-zinc-800/80 backdrop-blur-md">
+                {[
+                  { id: 'textbooks', label: 'Lehrbücher' },
+                  { id: 'grammar', label: 'Grammatik & NVV' },
+                  { id: 'custom', label: 'Eigene Decks' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveCategory(tab.id as any)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all duration-200 cursor-pointer ${
+                      activeCategory === tab.id
+                        ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Единая абсолютно симметричная сетка книг для выбранной категории */}
+            <div 
+              key={activeCategory}
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-8 gap-y-12 transition-opacity duration-200 animate-in fade-in"
+            >
+              {isLoadingBooks && filteredCategoryBooks.length === 0 ? (
                 [1, 2, 3, 4].map((i) => (
                   <div key={i} className="flex flex-col animate-pulse">
                     <div className="aspect-[1/1.38] rounded-l-[3px] rounded-r-[8px] bg-zinc-200/60 dark:bg-zinc-800/50 border border-black/5 dark:border-white/5" />
@@ -9811,7 +9887,7 @@ export default function App() {
                   </div>
                 ))
               ) : (
-                displayBooks.map((book, idx) => (
+                filteredCategoryBooks.map((book, idx) => (
                   <div
                     key={book.id}
                     draggable
@@ -9835,7 +9911,7 @@ export default function App() {
               {/* Карточка добавления новой книги «+ Neues Buch» */}
               <div className="w-full h-full">
                 <div
-                  onClick={() => setBookModal({})}
+                  onClick={() => setBookModal({ category: activeCategory })}
                   className="cursor-pointer group flex flex-col w-full h-full text-left select-none"
                 >
                   <div className="relative w-full">
