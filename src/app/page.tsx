@@ -5820,17 +5820,31 @@ function HeaderWidgets({
                 <span className="truncate max-w-[130px] sm:max-w-[200px]">{activeBook.title}</span>
               </button>
             ) : (
-              <div ref={langRef} className="relative">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsLangOpen(prev => !prev)}
-                  className="h-9 px-3 rounded-full flex items-center gap-2 bg-white dark:bg-[#1C1C1E] border border-zinc-200/80 dark:border-white/15 shadow-sm text-zinc-900 dark:text-white hover:bg-zinc-50 dark:hover:bg-[#2C2C2E] transition-all duration-150 active:scale-95 cursor-pointer select-none transform-gpu"
-                  title="Sprache wählen"
+                  onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                  className="w-9 h-9 rounded-xl overflow-hidden shadow-sm border border-black/[0.08] dark:border-white/15 shrink-0 bg-blue-600 select-none transition-transform active:scale-95 cursor-pointer"
+                  title="Kontext"
                 >
-                  <span className="text-base leading-none select-none">{currentLang.flag}</span>
-                  <span className="font-bold text-xs tracking-tight text-zinc-900 dark:text-white">{appLanguage}</span>
-                  <ChevronDown className={cn("w-3 h-3 text-zinc-500 dark:text-zinc-400 transition-transform duration-200", isLangOpen && "rotate-180")} />
+                  <img 
+                    src="/icon-192.png?v=20261028" 
+                    alt="Kontext Logo" 
+                    className="w-full h-full object-cover select-none pointer-events-none" 
+                  />
                 </button>
+
+                <div ref={langRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsLangOpen(prev => !prev)}
+                    className="h-9 px-3 rounded-full flex items-center gap-2 bg-white dark:bg-[#1C1C1E] border border-zinc-200/80 dark:border-white/15 shadow-sm text-zinc-900 dark:text-white hover:bg-zinc-50 dark:hover:bg-[#2C2C2E] transition-all duration-150 active:scale-95 cursor-pointer select-none transform-gpu"
+                    title="Sprache wählen"
+                  >
+                    <span className="text-base leading-none select-none">{currentLang.flag}</span>
+                    <span className="font-bold text-xs tracking-tight text-zinc-900 dark:text-white">{appLanguage}</span>
+                    <ChevronDown className={cn("w-3 h-3 text-zinc-500 dark:text-zinc-400 transition-transform duration-200", isLangOpen && "rotate-180")} />
+                  </button>
 
                 <AnimatePresence>
                   {isLangOpen && (
@@ -5870,8 +5884,9 @@ function HeaderWidgets({
                   )}
                 </AnimatePresence>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+        </div>
 
           {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
           {!activeBook && dueCount > 0 && onStartReview && (

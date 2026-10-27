@@ -8,13 +8,33 @@ export const viewport: Viewport = {
   ],
 };
 
+const ICON_VERSION = "20261028";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://kontext.app'),
   title: "Kontext",
   description: "Learn German effortlessly.",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Kontext",
+  },
+  icons: {
+    icon: [
+      { url: `/favicon.png?v=${ICON_VERSION}`, sizes: '32x32', type: 'image/png' },
+      { url: `/icon-192.png?v=${ICON_VERSION}`, sizes: '192x192', type: 'image/png' },
+      { url: `/icon-512.png?v=${ICON_VERSION}`, sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [
+      { url: `/apple-touch-icon.png?v=${ICON_VERSION}`, sizes: '180x180', type: 'image/png' },
+    ],
+    shortcut: [`/favicon.ico?v=${ICON_VERSION}`],
+  },
+  manifest: `/manifest.json?v=${ICON_VERSION}`,
+  openGraph: {
+    title: "Kontext",
+    description: "Learn German effortlessly.",
+    images: [{ url: `/logo.png?v=${ICON_VERSION}` }],
   },
 };
 
@@ -26,6 +46,12 @@ export default function RootLayout({
   return (
     <html lang="de" suppressHydrationWarning>
       <head>
+        <link rel="icon" type="image/png" sizes="32x32" href={`/favicon.png?v=${ICON_VERSION}`} />
+        <link rel="icon" type="image/png" sizes="192x192" href={`/icon-192.png?v=${ICON_VERSION}`} />
+        <link rel="icon" type="image/png" sizes="512x512" href={`/icon-512.png?v=${ICON_VERSION}`} />
+        <link rel="apple-touch-icon" sizes="180x180" href={`/apple-touch-icon.png?v=${ICON_VERSION}`} />
+        <link rel="shortcut icon" href={`/favicon.ico?v=${ICON_VERSION}`} />
+        <link rel="manifest" href={`/manifest.json?v=${ICON_VERSION}`} />
         <script
           dangerouslySetInnerHTML={{
             __html: `
