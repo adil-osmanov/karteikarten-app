@@ -1514,8 +1514,10 @@ const useStore = create<DeckState>()((set, get) => ({
   bookOrder: getInitialBookOrder(),
   setBookOrder: (order, skipCloudSync = false) => {
     if (typeof window !== 'undefined') {
+      const now = Date.now();
       safeSetStorage('book_order', JSON.stringify(order));
-      if (!skipCloudSync) syncAppStateToCloud({ bookOrder: order });
+      safeSetStorage('book_order_timestamp', String(now));
+      if (!skipCloudSync) syncAppStateToCloud({ bookOrder: order, bookOrderTimestamp: now });
     }
     set({ bookOrder: order });
   },
@@ -3273,9 +3275,8 @@ function RapidFlashcardMode({
         }
       }
 
-      // Озвучка по клавише R (только на лицевой стороне в раундах 1-2, или в раундах 3-4 если фокус не в инпуте)
+      // Озвучка по клавише R (в раундах 1-2 с обеих сторон карточки, или в раундах 3-4 если фокус не в инпуте)
       if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
-        if (isRound1or2 && isFlipped) return;
         if (!isRound1or2 && document.activeElement === inputRef.current) return;
         playSafeAudio(() => playCardAudio(currentCard?.targetWord));
       }
@@ -3345,11 +3346,21 @@ function RapidFlashcardMode({
               <div className="h-6" />
             </div>
 
-            {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР, БЕЗ ОЗВУЧКИ) */}
+            {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР + КНОПКА ДИНАМИКА) */}
             <div className="absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden rotate-y-180 bg-white dark:bg-zinc-900/98 rounded-[32px]">
-              {/* Шапка (без кнопки озвучки на обратной стороне) */}
+              {/* Шапка с кнопкой озвучки на обратной стороне */}
               <div className="flex items-center justify-between w-full">
-                <div className="w-9 h-9" />
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+                  }}
+                  className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
+                  title="Aussprache anhören (R)"
+                >
+                  <Volume2 className="w-4 h-4"/>
+                </button>
                 <div className="flex items-center gap-1.5">
                   {[1, 2, 3, 4].map(step => (
                     <span
@@ -7804,12 +7815,13 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
 
 // --- CLOUD SYNC HELPER ---
-export const syncAppStateToCloud = async (override?: { bookOrder?: string[]; deckOrder?: string[] }) => {
+export const syncAppStateToCloud = async (override?: { bookOrder?: string[]; deckOrder?: string[]; bookOrderTimestamp?: number }) => {
   if (typeof window === 'undefined') return;
   const state: any = { theory: {} };
   
   const currentDeckOrder = override?.deckOrder || useStore.getState().deckOrder || [];
   const currentBookOrder = override?.bookOrder || useStore.getState().bookOrder || [];
+  const bookOrderTimestamp = override?.bookOrderTimestamp || (typeof window !== 'undefined' ? parseInt(localStorage.getItem('book_order_timestamp') || '0', 10) : 0) || Date.now();
   
   if (currentDeckOrder.length > 0) {
     state.deckOrder = currentDeckOrder;
@@ -7829,6 +7841,8 @@ export const syncAppStateToCloud = async (override?: { bookOrder?: string[]; dec
     } catch {}
   }
   
+  state.bookOrderTimestamp = bookOrderTimestamp;
+
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (key && key.startsWith('deck_theory_')) {
@@ -7839,10 +7853,13 @@ export const syncAppStateToCloud = async (override?: { bookOrder?: string[]; dec
   state.updatedAt = Date.now();
   
   try {
-    await supabase.from('user_stats').upsert({
+    const res = await supabase.from('user_stats').upsert({
       language: 'GLOBAL_APP_STATE',
       daily_activity: state
     }, { onConflict: 'language' });
+    if (res.error) {
+      console.error('[Sync Error] Failed to sync app state to cloud:', res.error);
+    }
   } catch (err) {
     console.error('[Sync Error] Failed to sync app state to cloud:', err);
   }
@@ -7852,8 +7869,15 @@ export const applyCloudAppState = (cloudState: any) => {
   if (!cloudState || typeof cloudState !== 'object') return;
   
   if (cloudState.bookOrder && Array.isArray(cloudState.bookOrder) && cloudState.bookOrder.length > 0) {
-    safeSetStorage('book_order', JSON.stringify(cloudState.bookOrder));
-    useStore.getState().setBookOrder(cloudState.bookOrder, true);
+    const localTimestamp = typeof window !== 'undefined' ? parseInt(localStorage.getItem('book_order_timestamp') || '0', 10) : 0;
+    const cloudTimestamp = cloudState.bookOrderTimestamp || cloudState.updatedAt || 0;
+    
+    // Only accept cloud order if it is newer than or equal to local changes
+    if (cloudTimestamp >= localTimestamp) {
+      safeSetStorage('book_order', JSON.stringify(cloudState.bookOrder));
+      safeSetStorage('book_order_timestamp', String(cloudTimestamp));
+      useStore.getState().setBookOrder(cloudState.bookOrder, true);
+    }
   }
   
   if (cloudState.deckOrder && Array.isArray(cloudState.deckOrder) && cloudState.deckOrder.length > 0) {
@@ -9649,10 +9673,11 @@ export default function App() {
       return [...filtered].sort((a, b) => {
         const idxA = map.has(a.id) ? map.get(a.id)! : 999;
         const idxB = map.has(b.id) ? map.get(b.id)! : 999;
-        return idxA - idxB;
+        if (idxA !== idxB) return idxA - idxB;
+        return (a.title || '').localeCompare(b.title || '');
       });
     }
-    return filtered;
+    return [...filtered].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
   }, [books, appLanguage, bookOrder]);
 
   const filteredCategoryBooks = useMemo(() => {
@@ -10220,7 +10245,6 @@ export default function App() {
   };
 
   const handleBookDrop = async (targetId: string, e?: React.DragEvent) => {
-    // Надежно получаем draggedId из dataTransfer
     const draggedId = e?.dataTransfer?.getData('bookId') || draggedBookId;
     
     setDraggedBookId(null);
@@ -10228,67 +10252,44 @@ export default function App() {
     
     if (!draggedId || draggedId === targetId) return;
 
-    const { books: allBooks, bookOrder: curOrder, setBookOrder: saveOrder, updateBookSettings } = useStore.getState();
+    const { books: allBooks, bookOrder: curOrder, setBookOrder: saveOrder } = useStore.getState();
     const draggedBook = allBooks.find(b => b.id === draggedId);
-    let targetBook = allBooks.find(b => b.id === targetId);
+    const targetBook = allBooks.find(b => b.id === targetId);
+    if (!draggedBook || !targetBook) return;
 
-    if (!draggedBook) return;
+    // Get the current list of books in the category as displayed on the screen
+    const currentCategoryBooks = filteredCategoryBooks.map(b => b.id);
+    const oldCatIndex = currentCategoryBooks.indexOf(draggedId);
+    const newCatIndex = currentCategoryBooks.indexOf(targetId);
 
-    // Определяем источник и назначение (эмуляция библиотеки DnD для строгости)
-    const sourceDroppableId = draggedBook.category === 'coursebook' || draggedBook.category === 'book' ? 'coursebook' : 'flashcards';
-    let destinationDroppableId = sourceDroppableId;
+    if (oldCatIndex === -1 || newCatIndex === -1) return;
 
-    if (targetId.startsWith('section-')) {
-      const secCat = targetId.replace('section-', '');
-      destinationDroppableId = secCat === 'coursebook' ? 'coursebook' : 'flashcards';
-      targetBook = undefined;
-    } else if (targetBook) {
-      destinationDroppableId = targetBook.category === 'coursebook' || targetBook.category === 'book' ? 'coursebook' : 'flashcards';
-    }
+    // 1. Reorder the category books list
+    const updatedCategoryBooks = [...currentCategoryBooks];
+    updatedCategoryBooks.splice(oldCatIndex, 1);
+    updatedCategoryBooks.splice(newCatIndex, 0, draggedId);
 
-    const result = {
-      draggedId,
-      targetId,
-      source: { droppableId: sourceDroppableId },
-      destination: { droppableId: destinationDroppableId }
-    };
-    console.log('Drop Result:', result);
+    // 2. Build the new master order preserving ALL other books across categories and languages
+    const masterOrder = (curOrder && curOrder.length > 0) ? [...curOrder] : allBooks.map(b => b.id);
+    allBooks.forEach(b => {
+      if (!masterOrder.includes(b.id)) masterOrder.push(b.id);
+    });
 
-    const isCrossListDrop = sourceDroppableId !== destinationDroppableId;
-    const newCategoryToSave = destinationDroppableId === 'coursebook' ? 'book' : 'deck'; // MAP TO DB ALLOWED VALUES
-
-    // 1) ОПТИМИСТИЧНЫЙ UI: Сразу переставляем карточку в массиве сортировки
-    const base = (curOrder && curOrder.length > 0) ? [...curOrder] : [];
-    allBooks.forEach(b => { if (!base.includes(b.id)) base.push(b.id); });
-    
-    const from = base.indexOf(draggedId);
-    let to = base.indexOf(targetId);
-    
-    if (from !== -1 && to !== -1) {
-      base.splice(from, 1);
-      base.splice(to, 0, draggedId);
-      saveOrder(base);
-    } else if (from !== -1 && isCrossListDrop) {
-       base.splice(from, 1);
-       base.push(draggedId);
-       saveOrder(base);
-    }
-
-    // 2) АСИНХРОННЫЙ ЗАПРОС К SUPABASE
-    if (isCrossListDrop) {
-      try {
-        // Оптимистично обновляем стейт category в UI ДО завершения запроса (через updateBookSettings внутри)
-        await updateBookSettings(draggedId, { category: newCategoryToSave });
-        toast.success('Verschoben!');
-        // ЖЕСТКАЯ ИНВАЛИДАЦИЯ КЭША
-        router.refresh();
-      } catch (err: any) {
-        console.error("DND Database Error:", err);
-        toast.error('Fehler beim Verschieben');
-        // Откатываем порядок
-        saveOrder(curOrder); 
+    // Replace the items that belong to this category in masterOrder with the new relative order
+    let catIdx = 0;
+    const finalMasterOrder = masterOrder.map(id => {
+      if (updatedCategoryBooks.includes(id)) {
+        return updatedCategoryBooks[catIdx++];
       }
+      return id;
+    });
+
+    // If any category book wasn't in masterOrder, append it
+    while (catIdx < updatedCategoryBooks.length) {
+      finalMasterOrder.push(updatedCategoryBooks[catIdx++]);
     }
+
+    saveOrder(finalMasterOrder);
   };
 
   const handleLoadMore = (cat: string) => {
