@@ -10439,7 +10439,7 @@ export default function App() {
         onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
       />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-28">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-28 overflow-x-hidden">
         {!activeBookId ? (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
             
@@ -10508,20 +10508,29 @@ export default function App() {
                   <div className="group relative cursor-pointer select-none">
                     {/* Срез бумажных страниц справа (выглядывает сбоку из-под обложки) */}
                     <div 
-                      className="absolute right-0 top-1.5 bottom-1.5 w-2.5 bg-gradient-to-r from-zinc-300 via-zinc-100 to-zinc-200 dark:from-zinc-800 dark:via-zinc-650 dark:to-zinc-700 rounded-r-[3px] shadow-sm transform translate-x-1 group-hover:translate-x-1.5 transition-transform duration-300 ease-out -z-10" 
+                      className="absolute right-0 top-1 bottom-1 w-2 bg-gradient-to-r from-zinc-300 via-zinc-100 to-zinc-200 dark:from-zinc-800 dark:via-zinc-650 dark:to-zinc-700 rounded-r-[2px] transform translate-x-0.5 group-hover:translate-x-1 transition-transform duration-300 -z-10" 
                       aria-hidden="true"
                     />
 
                     {/* Обложка-форзац с книжными пропорциями и корешком */}
-                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[2px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_8px_18px_-4px_rgba(0,0,0,0.35),0_2px_4px_-1px_rgba(0,0,0,0.2)] dark:shadow-[0_12px_24px_-6px_rgba(0,0,0,0.7),0_2px_6px_rgba(0,0,0,0.5)] group-hover:-translate-y-2 group-hover:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.5)] dark:group-hover:shadow-[0_22px_40px_-8px_rgba(0,0,0,0.9)] transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
-                      {/* Сгиб переплёта (вертикальная светотень у корешка слева) */}
-                      <div className="absolute inset-y-0 left-0 w-3.5 bg-gradient-to-r from-black/45 via-white/10 to-transparent pointer-events-none z-10" />
-                      
-                      {/* Микро-шов корешка */}
-                      <div className="absolute inset-y-0 left-2.5 w-[1px] bg-black/25 dark:bg-black/50 pointer-events-none z-10" />
+                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_8px_18px_-4px_rgba(0,0,0,0.35),0_2px_4px_-1px_rgba(0,0,0,0.2)] dark:shadow-[0_12px_24px_-6px_rgba(0,0,0,0.7),0_2px_6px_rgba(0,0,0,0.5)] group-hover:-translate-y-2 group-hover:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.5)] dark:group-hover:shadow-[0_22px_40px_-8px_rgba(0,0,0,0.9)] transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
+                      {/* КОНТЕЙНЕР КОРЕШКА И ЖЕЛОБКА (SPINE & HINGE GROOVE) */}
+                      <div className="absolute inset-y-0 left-0 pointer-events-none z-10 select-none overflow-hidden rounded-l-[3px] w-[6%] min-w-[7px] max-w-[14px]">
+                        {/* 1. Объемное скругление самого левого ребра корешка (мягкий цилиндрический свет) */}
+                        <div className="absolute inset-y-0 left-0 w-full bg-gradient-to-r from-black/20 via-white/15 to-transparent mix-blend-overlay" />
+                        
+                        {/* 2. Мягкая тень ската желобка (не дает черных пятен на белом фоне) */}
+                        <div className="absolute inset-y-0 right-[2px] w-full bg-gradient-to-r from-transparent via-black/10 to-black/30 dark:to-black/60 mix-blend-multiply" />
+                        
+                        {/* 3. Физическая канавка шва (желобок переплета глубиной 1px) */}
+                        <div className="absolute inset-y-0 right-[1px] w-[1px] bg-black/35 dark:bg-black/70 mix-blend-multiply" />
+                        
+                        {/* 4. Световой реберный блик прямо рядом с канавкой (создает эффект продавленности) */}
+                        <div className="absolute inset-y-0 right-0 w-[1px] bg-white/40 dark:bg-white/20 mix-blend-screen" />
+                      </div>
 
-                      {/* Фаска твердого переплёта (тончайший блик по периметру) */}
-                      <div className="absolute inset-0 rounded-r-[5px] rounded-l-[2px] ring-1 ring-inset ring-white/20 dark:ring-white/10 pointer-events-none z-10" />
+                      {/* ВНЕШНЯЯ ПРЕДОХРАНИТЕЛЬНАЯ ФАСКА КНИГИ (1px Bevel) */}
+                      <div className="absolute inset-0 rounded-r-[5px] rounded-l-[3px] ring-1 ring-inset ring-black/10 dark:ring-white/10 pointer-events-none z-20" />
 
                       {/* Деликатный скользящий блик при наведении */}
                       <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 pointer-events-none z-10" />
