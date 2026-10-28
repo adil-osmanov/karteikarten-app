@@ -9101,6 +9101,14 @@ export default function App() {
   const handleBookEdit = useCallback((id: string) => setBookModal({ id }), []);
   const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
 
+  const catalogContainerRef = useRef<HTMLDivElement>(null);
+  const handleCatalogMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!catalogContainerRef.current) return;
+    const rect = catalogContainerRef.current.getBoundingClientRect();
+    catalogContainerRef.current.style.setProperty('--mouse-x', `${e.clientX - rect.left}px`);
+    catalogContainerRef.current.style.setProperty('--mouse-y', `${e.clientY - rect.top}px`);
+  }, []);
+
   useEffect(() => {
     if (renameModal || deleteModal || bookModal || deleteBookModal) {
       document.body.style.overflow = 'hidden';
@@ -10298,7 +10306,28 @@ export default function App() {
     : ((activeBook?.accentColor && activeBook.accentColor.startsWith('#')) ? activeBook.accentColor : '#3B82F6');
 
   return (
-    <div className="min-h-screen w-full bg-[#fbfbfd] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30">
+    <div className="min-h-screen relative w-full bg-[#fbfbfd] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
+      {/* Кинозерно (Аппаратный шум) */}
+      <div 
+        className="fixed inset-0 pointer-events-none opacity-[0.015] mix-blend-overlay z-[9999]"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+        }}
+        aria-hidden="true"
+      />
+
+      {/* Свободно плывущие слои тумана на GPU */}
+      <div className="absolute inset-x-0 bottom-0 h-64 pointer-events-none overflow-hidden -z-20 opacity-20 dark:opacity-40" aria-hidden="true">
+        {/* Первый слой */}
+        <div 
+          className="absolute bottom-0 w-[200%] h-full bg-repeat-x bg-bottom animate-[drift_80s_linear_infinite] transform-gpu will-change-transform"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='300' viewBox='0 0 1200 300'%3E%3Cpath d='M0,150 Q150,90 300,150 T600,150 T900,150 T1200,150 L1200,300 L0,300 Z' fill='%2318181b' opacity='0.08'/%3E%3Cpath d='M0,200 Q200,130 400,200 T800,200 T1200,200 L1200,300 L0,300 Z' fill='%2318181b' opacity='0.05'/%3E%3C/svg%3E")`,
+            backgroundSize: '1200px 100%',
+          }}
+        />
+      </div>
+
       <HeaderWidgets 
           activeBook={activeBook} 
           onBack={() => startTransition(() => setActiveBookId(null))} 
@@ -10441,7 +10470,25 @@ export default function App() {
 
       <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-28 overflow-x-hidden">
         {!activeBookId ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16">
+          <div 
+            ref={catalogContainerRef}
+            onMouseMove={handleCatalogMouseMove}
+            className="group/shelf relative animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16"
+          >
+            {/* Студийный свет сверху (Gallery Spotlight) */}
+            <div 
+              className="absolute -top-12 inset-x-0 h-[450px] pointer-events-none -z-10 bg-[radial-gradient(ellipse_60%_40%_at_50%_0%,rgba(0,0,0,0.015)_0%,transparent_100%)] dark:bg-[radial-gradient(ellipse_60%_40%_at_50%_0%,rgba(255,255,255,0.04)_0%,transparent_100%)]" 
+              aria-hidden="true"
+            />
+
+            {/* Интерактивный блуждающий свет за курсором */}
+            <div 
+              className="absolute inset-0 pointer-events-none opacity-0 group-hover/shelf:opacity-100 transition-opacity duration-700 -z-10"
+              style={{
+                background: `radial-gradient(600px circle at var(--mouse-x, 0px) var(--mouse-y, 0px), rgba(255, 255, 255, 0.018), transparent 70%)`
+              }}
+              aria-hidden="true"
+            />
             
             {/* Dynamic Apple Segmented Control with i18n */}
             <div className="w-full flex justify-center mt-4 sm:mt-6 mb-6 sm:mb-8 px-4">
@@ -10513,7 +10560,7 @@ export default function App() {
                     />
 
                     {/* Обложка-форзац с книжными пропорциями и корешком */}
-                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_8px_18px_-4px_rgba(0,0,0,0.35),0_2px_4px_-1px_rgba(0,0,0,0.2)] dark:shadow-[0_12px_24px_-6px_rgba(0,0,0,0.7),0_2px_6px_rgba(0,0,0,0.5)] group-hover:-translate-y-2 group-hover:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.5)] dark:group-hover:shadow-[0_22px_40px_-8px_rgba(0,0,0,0.9)] transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
+                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_15px_30px_-6px_rgba(0,0,0,0.15),0_3px_6px_rgba(0,0,0,0.06)] dark:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.7),0_4px_10px_rgba(0,0,0,0.4)] group-hover:-translate-y-3 group-hover:shadow-[0_30px_50px_-10px_rgba(0,0,0,0.9),0_10px_20px_rgba(0,0,0,0.5)] transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
                       {/* КОНТЕЙНЕР КОРЕШКА И ЖЕЛОБКА (SPINE & HINGE GROOVE) */}
                       <div className="absolute inset-y-0 left-0 pointer-events-none z-10 select-none overflow-hidden rounded-l-[3px] w-[6%] min-w-[7px] max-w-[14px]">
                         {/* 1. Объемное скругление самого левого ребра корешка (мягкий цилиндрический свет) */}
@@ -10555,6 +10602,12 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Премиальная линия полки */}
+            <div className="relative w-full h-[1px] my-6 bg-gradient-to-r from-transparent via-zinc-500/20 to-transparent dark:via-white/10 select-none" aria-hidden="true">
+              {/* Тонкий отблеск (фаска) */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent blur-[1px]" />
             </div>
 
           </div>
