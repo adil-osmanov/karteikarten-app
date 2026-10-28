@@ -23,6 +23,7 @@ const STATS_I18N: Record<string, {
   timeZero: string;
   accuracy: string;
   cardsToday: string;
+  progressLabel: string;
   mistakesLabel: string;
   noMistakes: string;
   reviewButton: string;
@@ -40,6 +41,7 @@ const STATS_I18N: Record<string, {
     timeZero: "0 Min.",
     accuracy: "Genauigkeit",
     cardsToday: "Karten",
+    progressLabel: "Fortschritt",
     mistakesLabel: "Fehler:",
     noMistakes: "Keine Fehler",
     reviewButton: "Wiederholen",
@@ -57,6 +59,7 @@ const STATS_I18N: Record<string, {
     timeZero: "0 min",
     accuracy: "Accuracy",
     cardsToday: "Cards",
+    progressLabel: "Progress",
     mistakesLabel: "Mistakes:",
     noMistakes: "No mistakes",
     reviewButton: "Review",
@@ -74,6 +77,7 @@ const STATS_I18N: Record<string, {
     timeZero: "0 мин",
     accuracy: "Точность",
     cardsToday: "Карточки",
+    progressLabel: "Прогресс",
     mistakesLabel: "Ошибки:",
     noMistakes: "Нет ошибок",
     reviewButton: "Повторить",
@@ -161,14 +165,18 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     ? currentLangStats.totalCount
     : (totalDone + mistakesToday);
 
-  const accuracy = typeof currentLangStats?.accuracy === 'number'
+  const hasAttempts = totalAttempts > 0;
+
+  const rawAccuracy = typeof currentLangStats?.accuracy === 'number'
     ? currentLangStats.accuracy
     : ((currentLangStats?.totalCount && currentLangStats.totalCount > 0)
         ? Math.round((currentLangStats.correctCount / currentLangStats.totalCount) * 100)
-        : (totalAttempts > 0 ? Math.round((totalDone / totalAttempts) * 100) : 100));
+        : (hasAttempts ? Math.round((totalDone / totalAttempts) * 100) : null));
 
-  const accuracyColor = totalAttempts === 0
-    ? 'text-zinc-900 dark:text-zinc-100'
+  const accuracy = rawAccuracy !== null ? rawAccuracy : null;
+
+  const accuracyColor = !hasAttempts || accuracy === null
+    ? 'text-zinc-400 dark:text-zinc-500'
     : accuracy >= 80 
       ? 'text-emerald-600 dark:text-emerald-400' 
       : accuracy >= 50 
@@ -265,12 +273,20 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
           <div className="p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center min-h-[96px]">
             <div className="flex items-baseline justify-center whitespace-nowrap">
-              <span className={`text-[25px] font-semibold tracking-tight ${accuracyColor} tabular-nums`}>
-                {accuracy}
-              </span>
-              <span className={`text-[13px] font-medium ml-0.5 ${accuracyColor} opacity-75`}>
-                %
-              </span>
+              {accuracy !== null ? (
+                <>
+                  <span className={`text-[25px] font-semibold tracking-tight ${accuracyColor} tabular-nums`}>
+                    {accuracy}
+                  </span>
+                  <span className={`text-[13px] font-medium ml-0.5 ${accuracyColor} opacity-75`}>
+                    %
+                  </span>
+                </>
+              ) : (
+                <span className="text-[25px] font-semibold tracking-tight text-zinc-400 dark:text-zinc-500 tabular-nums">
+                  —
+                </span>
+              )}
             </div>
             <span className="text-[11.5px] font-medium text-zinc-400 dark:text-zinc-500 mt-1 flex items-center gap-1.5 select-none tracking-normal">
               <Target className="w-3 h-3 text-zinc-400 dark:text-zinc-500"/> {t.accuracy}
@@ -278,10 +294,12 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
           </div>
         </div>
 
-        {/* Блок прогресса карточек */}
+        {/* Блок прогресса карточек (Fortschritt / Progress) */}
         <div className="mb-5 p-4 rounded-[22px] bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.08] shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
           <div className="flex justify-between items-baseline mb-2.5">
-            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t.cardsToday}</span>
+            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              {t.progressLabel} ({t.cardsToday})
+            </span>
             <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
               {totalDone} <span className="font-normal text-zinc-400 dark:text-zinc-500">/ {target}</span>
             </div>

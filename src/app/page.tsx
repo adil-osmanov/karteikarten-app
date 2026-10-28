@@ -27,6 +27,7 @@ import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
+import { playBookOpenSound } from "@/lib/audio/bookSounds";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -6124,7 +6125,11 @@ const DeckCard = React.memo(({
 
   return (
     <div 
-      onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
+      onClick={() => { 
+        initAudioCtx(); 
+        try { playBookOpenSound(); } catch (e) {}
+        onCardClick(deck.id); 
+      }}
       className={cn(
         "h-full min-h-[152px] p-5 rounded-2xl bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:hover:border-white/15 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-lg relative select-none cursor-pointer group",
         isCompleted && "opacity-75 hover:opacity-100"
@@ -9089,12 +9094,16 @@ export default function App() {
   const [deleteBookModal, setDeleteBookModal] = useState<{ id: string, title: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
 
-  const handleDeckClick = useCallback((id: string) => setActiveDeckId(id), []);
+  const handleDeckClick = useCallback((id: string) => {
+    try { playBookOpenSound(); } catch (e) {}
+    setActiveDeckId(id);
+  }, []);
   const handleRenameClick = useCallback((id: string, name: string) => { setRenameInput(name); setRenameModal({ id, name }); }, []);
   const handleDeleteClick = useCallback((id: string, name: string) => setDeleteModal({ id, name }), []);
   const handleViewTheory = useCallback((id: string) => setTheoryViewDeckId(id), []);
   
   const handleBookClick = useCallback((id: string) => {
+    try { playBookOpenSound(); } catch (e) {}
     startTransition(() => setActiveBookId(id));
     window.scrollTo({ top: 0 });
   }, []);
