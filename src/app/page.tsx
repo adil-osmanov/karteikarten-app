@@ -27,8 +27,6 @@ import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
-import { playBookOpenSound } from "@/lib/audio/bookSounds";
-import { BookReaderModal } from "@/components/books/BookReaderModal";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -6046,27 +6044,19 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
 
   return (
     <div onClick={onClick} className="group flex flex-col w-full text-left cursor-pointer select-none bg-transparent transform-gpu will-change-transform">
-      {/* 3D-обложка книги с интерактивным наклоном, бликом и Shared Layout анимацией */}
-      <motion.div
-        layoutId={`book-container-${book.id}`}
-        whileHover={{ y: -6 }}
-        transition={{ type: "spring", stiffness: 350, damping: 25 }}
-        className="w-full"
-      >
-        <TiltBookCard className="w-full">
-          <AppleBookCover
-            bookId={book.id}
-            imageSrc={lightCover || darkCover || ''}
-            lightImageSrc={lightCover}
-            darkImageSrc={darkCover}
-            tintColor={tintColor}
-            title={cleanTitle}
-            priority={priority}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        </TiltBookCard>
-      </motion.div>
+      {/* 3D-обложка книги с интерактивным наклоном и бликом */}
+      <TiltBookCard className="w-full">
+        <AppleBookCover
+          imageSrc={lightCover || darkCover || ''}
+          lightImageSrc={lightCover}
+          darkImageSrc={darkCover}
+          tintColor={tintColor}
+          title={cleanTitle}
+          priority={priority}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      </TiltBookCard>
 
       {/* Название книги, автор/издательство и прогресс в стиле Apple Books */}
       <div className="mt-3.5 flex flex-col text-left w-full">
@@ -6134,11 +6124,7 @@ const DeckCard = React.memo(({
 
   return (
     <div 
-      onClick={() => { 
-        initAudioCtx(); 
-        try { playBookOpenSound(); } catch (e) {}
-        onCardClick(deck.id); 
-      }}
+      onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
         "h-full min-h-[152px] p-5 rounded-2xl bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:hover:border-white/15 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-lg relative select-none cursor-pointer group",
         isCompleted && "opacity-75 hover:opacity-100"
@@ -9086,7 +9072,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"Grammatik" | "Wörter">("Grammatik");
   const [activeCategory, setActiveCategory] = useState<'textbooks' | 'flashcards' | 'structures'>('textbooks');
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
-  const [selectedBook, setSelectedBook] = useState<BookMeta | null>(null);
   const [bookModal, setBookModal] = useState<{ id?: string, category?: string } | null>(null);
 
   // Automatically reset category to 'textbooks' if current activeCategory is not available for new language
@@ -9104,38 +9089,26 @@ export default function App() {
   const [deleteBookModal, setDeleteBookModal] = useState<{ id: string, title: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
 
-  const handleDeckClick = useCallback((id: string) => {
-    try { playBookOpenSound(); } catch (e) {}
-    setActiveDeckId(id);
-  }, []);
+  const handleDeckClick = useCallback((id: string) => setActiveDeckId(id), []);
   const handleRenameClick = useCallback((id: string, name: string) => { setRenameInput(name); setRenameModal({ id, name }); }, []);
   const handleDeleteClick = useCallback((id: string, name: string) => setDeleteModal({ id, name }), []);
   const handleViewTheory = useCallback((id: string) => setTheoryViewDeckId(id), []);
   
-  const handleBookClick = useCallback((bookOrId: BookMeta | string) => {
-    try { playBookOpenSound(); } catch (e) {}
-    if (typeof bookOrId === 'object' && bookOrId !== null) {
-      setSelectedBook(bookOrId);
-    } else {
-      const b = useStore.getState().books.find(item => item.id === bookOrId);
-      if (b) setSelectedBook(b);
-      else {
-        startTransition(() => setActiveBookId(bookOrId));
-        window.scrollTo({ top: 0 });
-      }
-    }
+  const handleBookClick = useCallback((id: string) => {
+    startTransition(() => setActiveBookId(id));
+    window.scrollTo({ top: 0 });
   }, []);
   const handleBookEdit = useCallback((id: string) => setBookModal({ id }), []);
   const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
 
   useEffect(() => {
-    if (renameModal || deleteModal || bookModal || deleteBookModal || selectedBook) {
+    if (renameModal || deleteModal || bookModal || deleteBookModal) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
     }
     return () => { document.body.style.overflow = 'unset'; };
-  }, [renameModal, deleteModal, bookModal, deleteBookModal, selectedBook]);
+  }, [renameModal, deleteModal, bookModal, deleteBookModal]);
 
   useEffect(() => {
     checkAndResetDailyProgress();
@@ -10365,37 +10338,6 @@ export default function App() {
             onFeedbackSound={playFeedbackSound}
           />
         )}
-        {selectedBook && (
-          <BookReaderModal
-            book={(() => {
-              const bookDecks = decks.filter(d => d.bookId === selectedBook.id);
-              let totalCards = 0;
-              let masteredCards = 0;
-              bookDecks.forEach(d => {
-                totalCards += d.cards?.length || 0;
-                masteredCards += d.cards?.filter(c => c.isArchived)?.length || 0;
-              });
-              const langStats = getLanguageDailyStats(selectedBook.language || appLanguage || 'DE');
-              const accuracy = typeof langStats?.accuracy === 'number' && (langStats.totalCount || 0) > 0 
-                ? langStats.accuracy 
-                : null;
-              return {
-                ...selectedBook,
-                totalCards,
-                masteredCards,
-                accuracy
-              };
-            })()}
-            onClose={() => {
-              setSelectedBook(null);
-            }}
-            onStartLearning={(bookId) => {
-              setSelectedBook(null);
-              startTransition(() => setActiveBookId(bookId));
-              window.scrollTo({ top: 0 });
-            }}
-          />
-        )}
       </AnimatePresence>
 
 {/* RENAME MODAL */}
@@ -10549,7 +10491,7 @@ export default function App() {
                     <BookCard 
                       book={book} 
                       priority={idx < 2} 
-                      onClick={() => handleBookClick(book)} 
+                      onClick={() => handleBookClick(book.id)} 
                       onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} 
                       onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} 
                     />
