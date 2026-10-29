@@ -1075,72 +1075,111 @@ export interface CardSRSUpdate {
   nextReviewDate: number | null;
 }
 
-export async function fetchDueCardsCount(lang: string = 'DE', userId?: string): Promise<number> {
+export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, bookId?: string): Promise<number> {
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
 
-  // 1. Try Supabase RPC get_due_cards_count if available
-  try {
-    let uid = userId;
-    if (!uid) {
-      const { data: authData } = await supabase.auth.getUser();
-      uid = authData?.user?.id;
-    }
-    if (uid) {
-      const { data: rpcData, error: rpcError } = await supabase.rpc('get_due_cards_count', {
-        p_user_id: uid,
-        p_lang: cleanLang
-      });
-      if (!rpcError && typeof rpcData === 'number') {
-        return rpcData;
+  if (bookId) {
+    try {
+      const { count, error } = await supabase
+        .from('cards')
+        .select('id, decks!inner(book_id)', { count: 'exact', head: true })
+        .eq('isArchived', true)
+        .lte('nextReviewDate', now)
+        .eq('decks.book_id', bookId);
+
+      if (!error && typeof count === 'number') {
+        return count;
       }
+    } catch (e) {
+      console.warn('Direct query on cards count for book error:', e);
     }
-  } catch (e) {
-    // fall through to direct query
+  } else {
+    // 1. Try Supabase RPC get_due_cards_count if available
+    try {
+      let uid = userId;
+      if (!uid) {
+        const { data: authData } = await supabase.auth.getUser();
+        uid = authData?.user?.id;
+      }
+      if (uid) {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('get_due_cards_count', {
+          p_user_id: uid,
+          p_lang: cleanLang
+        });
+        if (!rpcError && typeof rpcData === 'number') {
+          return rpcData;
+        }
+      }
+    } catch (e) {
+      // fall through to direct query
+    }
+
+    // 2. Direct exact query on cards table joined with decks (single source of truth)
+    try {
+      const { count, error } = await supabase
+        .from('cards')
+        .select('id, decks!inner(language)', { count: 'exact', head: true })
+        .eq('isArchived', true)
+        .lte('nextReviewDate', now)
+        .eq('decks.language', cleanLang);
+
+      if (!error && typeof count === 'number') {
+        return count;
+      }
+    } catch (e) {
+      console.warn('Direct query on cards count error:', e);
+    }
+
+    // 3. Fallback: query without inner join
+    try {
+      const { count, error } = await supabase
+        .from('cards')
+        .select('id', { count: 'exact', head: true })
+        .eq('isArchived', true)
+        .lte('nextReviewDate', now);
+      if (!error && typeof count === 'number') {
+        return count;
+      }
+    } catch (e) {}
   }
 
-  // 2. Direct exact query on cards table joined with decks (single source of truth)
-  try {
-    const { count, error } = await supabase
-      .from('cards')
-      .select('id, decks!inner(language)', { count: 'exact', head: true })
-      .eq('isArchived', true)
-      .lte('nextReviewDate', now)
-      .eq('decks.language', cleanLang);
-
-    if (!error && typeof count === 'number') {
-      return count;
+  // Fallback to in-memory decks
+  let localCount = 0;
+  useStore.getState().decks.forEach(deck => {
+    if (bookId) {
+      const dBookId = deck.bookId || (deck as any).book_id;
+      if (dBookId !== bookId) return;
+    } else {
+      if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
     }
-  } catch (e) {
-    console.warn('Direct query on cards count error:', e);
-  }
-
-  // 3. Fallback: query without inner join
-  try {
-    const { count, error } = await supabase
-      .from('cards')
-      .select('id', { count: 'exact', head: true })
-      .eq('isArchived', true)
-      .lte('nextReviewDate', now);
-    if (!error && typeof count === 'number') {
-      return count;
-    }
-  } catch (e) {}
-
-  return 0;
+    deck.cards.forEach(card => {
+      if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+        localCount++;
+      }
+    });
+  });
+  return localCount;
 }
 
-export async function fetchDueCardsFromCloud(lang: string = 'DE'): Promise<{ deckId: string, card: Flashcard }[]> {
+export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: string): Promise<{ deckId: string, card: Flashcard }[]> {
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
 
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('cards')
-      .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language)')
+      .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
       .eq('isArchived', true)
-      .lte('nextReviewDate', now)
-      .eq('decks.language', cleanLang)
+      .lte('nextReviewDate', now);
+
+    if (bookId) {
+      query = query.eq('decks.book_id', bookId);
+    } else {
+      query = query.eq('decks.language', cleanLang);
+    }
+
+    const { data, error } = await query
       .order('nextReviewDate', { ascending: true })
       .limit(100);
 
@@ -1170,13 +1209,17 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE'): Promise<{ dec
   // Fallback to in-memory decks if cloud query returns empty or fails
   const list: { deckId: string, card: Flashcard }[] = [];
   useStore.getState().decks.forEach(deck => {
-    if (normalizeLanguage(deck.language || 'DE') === cleanLang) {
-      deck.cards.forEach(card => {
-        if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
-          list.push({ deckId: deck.id, card });
-        }
-      });
+    if (bookId) {
+      const dBookId = deck.bookId || (deck as any).book_id;
+      if (dBookId !== bookId) return;
+    } else {
+      if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
     }
+    deck.cards.forEach(card => {
+      if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+        list.push({ deckId: deck.id, card });
+      }
+    });
   });
   return list;
 }
@@ -5885,12 +5928,13 @@ function HeaderWidgets({
           </div>
 
           {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
-          {!activeBook && dueCount > 0 && onStartReview && (
+          {onStartReview && (dueCount > 0 || activeBook) && (
             <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
               <DueCardsBadge 
                 count={dueCount} 
-                language={appLanguage} 
+                language={effectiveLang} 
                 onClick={onStartReview} 
+                allowZero={Boolean(activeBook)}
               />
             </div>
           )}
@@ -9706,6 +9750,8 @@ export default function App() {
     return map;
   }, [filteredDecksList, deckOrder]);
 
+  const activeBook = useMemo(() => books.find(b => b.id === activeBookId), [books, activeBookId]);
+
   const dueCards = useMemo(() => {
     const list: { deckId: string, card: Flashcard }[] = [];
     const now = Date.now();
@@ -9719,13 +9765,14 @@ export default function App() {
     return list;
   }, [filteredDecksList]);
 
-  const displayDueCount = dueCardsCount > 0 ? dueCardsCount : dueCards.length;
+  const displayDueCount = activeBookId ? dueCards.length : (dueCardsCount > 0 ? dueCardsCount : dueCards.length);
 
   const handleStartReviewDue = useCallback(async () => {
     setIsReviewingMistakes(false);
     initAudioCtx();
     try {
-      const freshCards = await fetchDueCardsFromCloud(appLanguage);
+      const targetLang = activeBook?.language || appLanguage;
+      const freshCards = await fetchDueCardsFromCloud(targetLang, activeBookId || undefined);
       if (freshCards.length > 0) {
         setReviewCards(freshCards);
         return;
@@ -9736,7 +9783,7 @@ export default function App() {
     if (dueCards.length > 0) {
       setReviewCards(dueCards);
     }
-  }, [appLanguage, dueCards]);
+  }, [appLanguage, activeBook, activeBookId, dueCards]);
 
   const archivedCards = useMemo(() => {
     const list: { deckId: string, deckName: string, card: Flashcard }[] = [];
@@ -9747,8 +9794,6 @@ export default function App() {
     });
     return list;
   }, [filteredDecksList]);
-
-  const activeBook = useMemo(() => books.find(b => b.id === activeBookId), [books, activeBookId]);
 
   if (!isMounted) return <main className="min-h-screen bg-[#fbfbfd] dark:bg-[#09090b]" />;
 
@@ -10701,20 +10746,6 @@ export default function App() {
                           )}
                         </label>
                       </div>
-
-                      {/* Справа: компактная пилюля повторения */}
-                      {levelIdx === 0 && displayDueCount > 0 && (
-                        <button 
-                          onClick={handleStartReviewDue}
-                          className="h-8 px-3.5 rounded-full flex items-center gap-2 text-xs font-medium transition-all duration-200 active:scale-95 shadow-sm bg-white/80 dark:bg-zinc-900/80 border border-black/[0.08] dark:border-white/10 backdrop-blur-md hover:bg-white hover:shadow-md hover:shadow-black/[0.04] hover:border-black/[0.12] dark:hover:bg-zinc-800/90 dark:hover:border-white/20 text-zinc-800 dark:text-zinc-200 cursor-pointer select-none group"
-                        >
-                          <RotateCcw className="w-3 h-3 text-blue-600 dark:text-blue-400 transition-transform duration-300 group-hover:-rotate-45 shrink-0" />
-                          <span className="font-semibold text-zinc-900 dark:text-white font-mono tabular-nums">{displayDueCount}</span>
-                          <span className="hidden sm:inline text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">
-                            {appLanguage === 'RU' ? 'повторить' : appLanguage === 'EN' ? 'review' : 'wiederholen'}
-                          </span>
-                        </button>
-                      )}
                     </div>
                     
                     {sortedDecks.length === 0 ? (
