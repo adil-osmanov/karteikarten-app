@@ -27,7 +27,7 @@ import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
-import { CardContainer, CARD_CONTAINER_SURFACE_CLASSES, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
+import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3336,21 +3336,36 @@ function RapidFlashcardMode({
         /* =======================================================
            РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
            ======================================================= */
-        <div className="w-full max-w-[760px] flex flex-col items-center gap-6 perspective-1000">
+        <div 
+          className="w-full max-w-[760px] flex flex-col items-center gap-6 perspective-1000"
+          style={{ perspective: 1000, WebkitPerspective: 1000 }}
+        >
           {/* 3D Оболочка */}
           <div
             onClick={toggleFlip}
             className={cn(
               "w-full min-h-[460px] relative cursor-pointer transform-style-3d",
-              CARD_CONTAINER_SURFACE_CLASSES,
-              isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
-              isFlipped ? 'rotate-y-180' : ''
+              isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
+            style={{
+              transformStyle: 'preserve-3d',
+              WebkitTransformStyle: 'preserve-3d',
+              transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+              WebkitTransform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+            }}
           >
             {/* ФРОНТАЛЬНАЯ СТОРОНА (СЛОВО НА НЕМЕЦКОМ) */}
-            <CardContainer is3DFace>
+            <CardContainer 
+              is3DFace 
+              style={{
+                WebkitBackfaceVisibility: 'hidden',
+                backfaceVisibility: 'hidden',
+                transform: 'rotateY(0deg) translateZ(1px)',
+                WebkitTransform: 'rotateY(0deg) translateZ(1px)',
+              }}
+            >
               {/* Шапка */}
-              <div className="flex items-center justify-between w-full">
+              <div className="flex items-center justify-between w-full shrink-0">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -3379,13 +3394,21 @@ function RapidFlashcardMode({
               </div>
 
               {/* Низ: Пусто для чистоты */}
-              <div className="h-6" />
+              <div className="h-6 shrink-0" />
             </CardContainer>
 
             {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР + КНОПКА ДИНАМИКА) */}
-            <CardContainer is3DFace className="rotate-y-180">
+            <CardContainer 
+              is3DFace 
+              style={{
+                WebkitBackfaceVisibility: 'hidden',
+                backfaceVisibility: 'hidden',
+                transform: 'rotateY(180deg) translateZ(1px)',
+                WebkitTransform: 'rotateY(180deg) translateZ(1px)',
+              }}
+            >
               {/* Шапка с кнопкой озвучки на обратной стороне */}
-              <div className="flex items-center justify-between w-full">
+              <div className="flex items-center justify-between w-full shrink-0">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -3426,7 +3449,7 @@ function RapidFlashcardMode({
                 )}
               </div>
 
-              <div className="h-6" />
+              <div className="h-6 shrink-0" />
             </CardContainer>
           </div>
 

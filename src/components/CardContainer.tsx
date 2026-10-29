@@ -21,10 +21,8 @@ export const CARD_CONTAINER_SURFACE_CLASSES = cn(
   "rounded-[32px] border transition-all duration-200 select-none",
   // Light Mode (Apple Pure White Card)
   "bg-white border-black/[0.06] shadow-[0_12px_32px_rgba(0,0,0,0.05),_0_2px_6px_rgba(0,0,0,0.03)]",
-  // Dark Mode (Apple HIG layered depth & subtle vertical gradient)
-  "dark:bg-gradient-to-b dark:from-[#1e1e22] dark:to-[#141416] dark:border-white/[0.08] dark:shadow-[0_20px_50px_rgba(0,0,0,0.6)] backdrop-blur-md",
-  // Top specular highlight reflection
-  "before:absolute before:inset-x-0 before:top-0 before:h-px before:rounded-t-[32px] before:bg-gradient-to-r before:from-transparent dark:before:via-white/[0.12] before:to-transparent before:pointer-events-none"
+  // Dark Mode (Apple Dark Mode clean, deep & matte)
+  "dark:bg-[#1c1c1e] dark:border-white/[0.08] dark:shadow-2xl dark:shadow-black/50"
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
@@ -33,7 +31,7 @@ export const CARD_CONTAINER_BASE_CLASSES = cn(
 );
 
 export const AUDIO_BUTTON_CLASSES = cn(
-  "w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-300 border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-50 cursor-pointer"
+  "w-9 h-9 shrink-0 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-300 border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-50 cursor-pointer"
 );
 
 export function ProgressDots({ 
@@ -46,7 +44,7 @@ export function ProgressDots({
   className?: string; 
 }) {
   return (
-    <div className={cn("flex items-center gap-1.5 select-none", className)}>
+    <div className={cn("flex items-center gap-1.5 select-none shrink-0", className)}>
       {Array.from({ length: max }, (_, idx) => {
         const step = idx + 1;
         const isCompleted = step <= level;
@@ -54,7 +52,7 @@ export function ProgressDots({
           <span
             key={step}
             className={cn(
-              "w-2.5 h-2.5 rounded-full transition-all duration-200",
+              "w-2.5 h-2.5 shrink-0 rounded-full transition-all duration-200",
               isCompleted
                 ? "bg-blue-600 dark:bg-blue-500 shadow-[0_0_8px_rgba(37,99,235,0.4)] dark:shadow-[0_0_8px_rgba(59,130,246,0.5)]"
                 : "bg-zinc-200 dark:bg-white/10"
@@ -67,7 +65,7 @@ export function ProgressDots({
 }
 
 export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
-  ({ children, className, is3DFace = false, ...props }, ref) => {
+  ({ children, className, is3DFace = false, style, ...props }, ref) => {
     return (
       <div
         ref={ref}
@@ -77,6 +75,15 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
             : CARD_CONTAINER_BASE_CLASSES,
           className
         )}
+        style={{
+          ...(is3DFace
+            ? {
+                WebkitBackfaceVisibility: 'hidden',
+                backfaceVisibility: 'hidden',
+              }
+            : {}),
+          ...style,
+        }}
         {...props}
       >
         {children}
