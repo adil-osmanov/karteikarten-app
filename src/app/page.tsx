@@ -27,6 +27,7 @@ import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
+import { CardContainer, CARD_CONTAINER_SURFACE_CLASSES } from "@/components/CardContainer";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3339,12 +3340,15 @@ function RapidFlashcardMode({
           {/* 3D Оболочка */}
           <div
             onClick={toggleFlip}
-            className={`w-full min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 relative cursor-pointer transform-style-3d ${
-              isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
-            } ${isFlipped ? 'rotate-y-180' : ''}`}
+            className={cn(
+              "w-full min-h-[460px] relative cursor-pointer transform-style-3d",
+              CARD_CONTAINER_SURFACE_CLASSES,
+              isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
+              isFlipped ? 'rotate-y-180' : ''
+            )}
           >
             {/* ФРОНТАЛЬНАЯ СТОРОНА (СЛОВО НА НЕМЕЦКОМ) */}
-            <div className="absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden bg-white dark:bg-zinc-900/95 rounded-[32px]">
+            <CardContainer is3DFace>
               {/* Шапка */}
               <div className="flex items-center justify-between w-full">
                 <button
@@ -3387,10 +3391,10 @@ function RapidFlashcardMode({
 
               {/* Низ: Пусто для чистоты */}
               <div className="h-6" />
-            </div>
+            </CardContainer>
 
             {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР + КНОПКА ДИНАМИКА) */}
-            <div className="absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden rotate-y-180 bg-white dark:bg-zinc-900/98 rounded-[32px]">
+            <CardContainer is3DFace className="rotate-y-180">
               {/* Шапка с кнопкой озвучки на обратной стороне */}
               <div className="flex items-center justify-between w-full">
                 <button
@@ -3445,7 +3449,7 @@ function RapidFlashcardMode({
               </div>
 
               <div className="h-6" />
-            </div>
+            </CardContainer>
           </div>
 
           {/* 2. ПАРЯЩИЕ КНОПКИ УПРАВЛЕНИЯ [ ✕ ] И [ ✓ ] - ТОЛЬКО ДЛЯ ТАЧ-УСТРОЙСТВ */}
@@ -3472,7 +3476,7 @@ function RapidFlashcardMode({
         /* =======================================================
            РАУНДЫ 3-4: ЧИСТЫЙ АКТИВНЫЙ ВВОД (ACTIVE RECALL)
            ======================================================= */
-        <div className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 flex flex-col justify-between mx-auto relative">
+        <CardContainer>
           {/* Шапка */}
           <div className="flex items-center justify-between w-full shrink-0">
             <button
@@ -3651,7 +3655,7 @@ function RapidFlashcardMode({
               </button>
             )}
           </div>
-        </div>
+        </CardContainer>
       )}
 
       {isMobile && !isRound1or2 && !isAnswered && (
@@ -5333,9 +5337,8 @@ function StudyCard({
 
   return (
     <>
-      <div 
+      <CardContainer 
         key={card.id}
-        className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-md flex flex-col justify-between mx-auto relative animate-card-appear select-none"
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -5536,7 +5539,7 @@ function StudyCard({
             </div>
           )}
         </div>
-      </div>
+      </CardContainer>
 
       {phase === "Question" && !isMultipleChoice && isMobile && (
         <MobileKeyboard 
@@ -8196,10 +8199,7 @@ function PrepStudyCard({
 
   return (
     <>
-    <div 
-      key={card.id}
-      className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-md flex flex-col justify-between mx-auto relative animate-card-appear select-none"
-    >
+    <CardContainer key={card.id}>
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
           <button 
@@ -8342,7 +8342,7 @@ function PrepStudyCard({
            onSpace={() => handleVirtualKey(' ')}
          />
       )}
-    </div>
+    </CardContainer>
     </>
   );
 }
@@ -8446,10 +8446,7 @@ function VerbStudyCard({
   ));
 
   return (
-    <div 
-      key={card.id}
-      className="w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border border-zinc-200/80 dark:border-white/10 p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-md flex flex-col justify-between mx-auto relative animate-card-appear select-none"
-    >
+    <CardContainer key={card.id}>
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
           <button 
@@ -8549,7 +8546,7 @@ function VerbStudyCard({
           onSpace={() => virtualKeyRef.current?.(' ')}
         />
       )}
-    </div>
+    </CardContainer>
   );
 }
 
@@ -8926,17 +8923,16 @@ export function RedemittelStudyCard({
   }, [availableChunks, placedChunks, status, onNext, handleSelectChunk, handleRemoveChunk, handleReset, handlePlayAudio, handleSurrender]);
 
   return (
-      <div
+      <CardContainer
         key={card.id}
         className={cn(
-          "w-full max-w-[760px] min-h-[460px] rounded-[32px] bg-white dark:bg-zinc-900/95 border p-8 sm:p-12 pb-9 sm:pb-12 shadow-xl shadow-zinc-950/5 dark:shadow-2xl dark:shadow-black/50 backdrop-blur-md flex flex-col justify-between mx-auto relative animate-card-appear select-none",
           status === 'success'
-            ? "border-emerald-500/40 dark:border-emerald-500/40"
+            ? "!border-emerald-500/40"
             : status === 'surrender'
-            ? "border-zinc-300 dark:border-zinc-600/70"
+            ? "!border-zinc-300 dark:!border-zinc-600/70"
             : status === 'error'
-            ? "border-rose-500/40 dark:border-rose-500/40"
-            : "border-zinc-200/80 dark:border-white/10"
+            ? "!border-rose-500/40"
+            : undefined
         )}
       >
         {/* 1. Верхняя панель карточки */}
@@ -9110,7 +9106,7 @@ export function RedemittelStudyCard({
             )}
           </AnimatePresence>
         </div>
-      </div>
+      </CardContainer>
   );
 }
 
