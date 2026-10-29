@@ -10536,8 +10536,14 @@ export default function App() {
                   className="cursor-pointer group flex flex-col w-full h-full text-left select-none"
                 >
                   <div className="group relative cursor-pointer select-none">
+                    {/* Срез бумажных страниц справа (выглядывает сбоку из-под обложки) */}
+                    <div 
+                      className="absolute right-0 top-1 bottom-1 w-2 bg-gradient-to-r from-zinc-300 via-zinc-100 to-zinc-200 dark:from-zinc-800 dark:via-zinc-650 dark:to-zinc-700 rounded-r-[2px] transform translate-x-0.5 group-hover:translate-x-1 transition-transform duration-300 -z-10 shadow-sm" 
+                      aria-hidden="true"
+                    />
+
                     {/* Обложка-форзац с книжными пропорциями и корешком */}
-                    <div className="relative aspect-[2/3] w-full rounded-r-[6px] rounded-l-[3px] overflow-hidden bg-zinc-100/70 border border-dashed border-zinc-300 hover:border-zinc-400 text-zinc-500 hover:text-zinc-700 shadow-sm dark:bg-zinc-900/50 dark:border-dashed dark:border-zinc-800 dark:hover:border-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300 group-hover:-translate-y-1.5 transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
+                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_15px_30px_-6px_rgba(0,0,0,0.18),0_3px_8px_-1px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.75),0_4px_12px_rgba(0,0,0,0.45)] group-hover:-translate-y-2 group-hover:shadow-[0_25px_45px_-8px_rgba(0,0,0,0.25)] dark:group-hover:shadow-[0_30px_55px_-10px_rgba(0,0,0,0.95)] transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
                       {/* КОНТЕЙНЕР КОРЕШКА И ЖЕЛОБКА (SPINE & HINGE GROOVE) */}
                       <div className="absolute inset-y-0 left-0 pointer-events-none z-10 select-none overflow-hidden rounded-l-[3px] w-[6%] min-w-[7px] max-w-[14px]">
                         {/* 1. Объемное скругление самого левого ребра корешка (мягкий цилиндрический свет) */}
@@ -10552,6 +10558,9 @@ export default function App() {
                         {/* 4. Световой реберный блик прямо рядом с канавкой (создает эффект продавленности) */}
                         <div className="absolute inset-y-0 right-0 w-[1px] bg-white/40 dark:bg-white/20 mix-blend-screen" />
                       </div>
+
+                      {/* ВНЕШНЯЯ ПРЕДОХРАНИТЕЛЬНАЯ ФАСКА КНИГИ (1px Bevel) */}
+                      <div className="absolute inset-0 rounded-r-[5px] rounded-l-[3px] ring-1 ring-inset ring-black/10 dark:ring-white/10 pointer-events-none z-20" />
 
                       {/* Деликатный скользящий блик при наведении */}
                       <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 pointer-events-none z-10" />

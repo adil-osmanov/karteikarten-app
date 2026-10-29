@@ -26,14 +26,14 @@ export const TiltBookCard: React.FC<TiltBookCardProps> = ({
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
 
-    const rotateX = ((y - centerY) / centerY) * -4;
-    const rotateY = ((x - centerX) / centerX) * 4;
+    const rotateX = ((y - centerY) / centerY) * -5.5;
+    const rotateY = ((x - centerX) / centerX) * 5.5;
 
     setTransformStyle(
-      `perspective(1000px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg) scale3d(1.02, 1.02, 1.02)`
+      `perspective(1000px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg) scale3d(1.025, 1.025, 1.025)`
     );
     setGlareStyle({
-      opacity: 0.14,
+      opacity: 0.16,
       x: (x / rect.width) * 100,
       y: (y / rect.height) * 100,
     });
