@@ -27,7 +27,7 @@ import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
-import { CardContainer, CARD_CONTAINER_SURFACE_CLASSES } from "@/components/CardContainer";
+import { CardContainer, CARD_CONTAINER_SURFACE_CLASSES, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3357,23 +3357,12 @@ function RapidFlashcardMode({
                     e.stopPropagation();
                     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
                   }}
-                  className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
+                  className={AUDIO_BUTTON_CLASSES}
                   title="Aussprache anhören (R)"
                 >
                   <Volume2 className="w-4 h-4"/>
                 </button>
-                <div className="flex items-center gap-1.5">
-                  {[1, 2, 3, 4].map(step => (
-                    <span
-                      key={step}
-                      className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
-                        step <= (localMastery || 0)
-                          ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
-                          : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
-                      }`}
-                    />
-                  ))}
-                </div>
+                <ProgressDots level={localMastery || 0} />
               </div>
 
               {/* Центр: Слово + Множественное число */}
@@ -3383,7 +3372,7 @@ function RapidFlashcardMode({
                   {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                 </h2>
                 {plural && (
-                  <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal mt-1">
+                  <p className="text-sm font-normal text-zinc-600 dark:text-zinc-400 tracking-normal mt-1">
                     {plural}
                   </p>
                 )}
@@ -3403,23 +3392,12 @@ function RapidFlashcardMode({
                     e.stopPropagation();
                     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
                   }}
-                  className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
+                  className={AUDIO_BUTTON_CLASSES}
                   title="Aussprache anhören (R)"
                 >
                   <Volume2 className="w-4 h-4"/>
                 </button>
-                <div className="flex items-center gap-1.5">
-                  {[1, 2, 3, 4].map(step => (
-                    <span
-                      key={step}
-                      className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
-                        step <= (localMastery || 0)
-                          ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
-                          : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
-                      }`}
-                    />
-                  ))}
-                </div>
+                <ProgressDots level={localMastery || 0} />
               </div>
 
               {/* Центр: Слово, перевод, чистый пример без серой плашки */}
@@ -3430,7 +3408,7 @@ function RapidFlashcardMode({
                     {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                   </h2>
                   {plural && (
-                    <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal mt-1">
+                    <p className="text-sm font-normal text-zinc-600 dark:text-zinc-400 tracking-normal mt-1">
                       {plural}
                     </p>
                   )}
@@ -3442,7 +3420,7 @@ function RapidFlashcardMode({
 
                 {/* 6. Чистая цитата примера (без серой плашки, строго как на скриншоте 3) */}
                 {displaySentence && (
-                  <div className="mt-8 border-l border-zinc-600/70 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-500 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
+                  <div className="mt-8 border-l border-zinc-300 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-600 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
                     {displaySentence}
                   </div>
                 )}
@@ -3482,30 +3460,19 @@ function RapidFlashcardMode({
             <button
               type="button"
               onClick={() => playSafeAudio(() => playCardAudio(currentCard?.targetWord))}
-              className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
+              className={AUDIO_BUTTON_CLASSES}
               title="Aussprache anhören (R)"
             >
               <Volume2 className="w-4 h-4"/>
             </button>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5">
-                {[1, 2, 3, 4].map(step => (
-                  <span
-                    key={step}
-                    className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
-                      step <= (localMastery || 0)
-                        ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
-                        : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
-                    }`}
-                  />
-                ))}
-              </div>
+              <ProgressDots level={localMastery || 0} />
 
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
                 disabled={isAnswered || locked}
-                className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
+                className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
                 title="Сдаться (-1 раунд)"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
@@ -3524,7 +3491,7 @@ function RapidFlashcardMode({
 
             {parsedTarget.prefixContext ? (
               <div className="w-full max-w-xl flex flex-wrap items-center justify-center gap-x-3.5 gap-y-2.5">
-                <span className="text-xl sm:text-2xl font-medium text-zinc-400 dark:text-zinc-500 tracking-normal select-none">
+                <span className="text-xl sm:text-2xl font-medium text-zinc-600 dark:text-zinc-400 tracking-normal select-none">
                   {parsedTarget.prefixContext}
                 </span>
                 <div className="min-w-[200px] max-w-sm flex-1">
@@ -3703,136 +3670,138 @@ function SessionResultScreen({
   const mistakesCount = sessionMistakes.length;
 
   return (
-    <div className="flex-1 flex flex-col justify-center items-center max-w-xl mx-auto px-6 py-12 text-center select-none w-full animate-in fade-in zoom-in-95 duration-200">
-      {/* Icon / Top Hero Badge */}
-      <div className={cn(
-        "w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 border shadow-sm",
-        accuracy >= 80
-          ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-          : accuracy >= 50
-            ? "bg-amber-50 dark:bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400"
-            : "bg-rose-50 dark:bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400"
-      )}>
-        {accuracy >= 80 ? (
-          <CheckCircle2 className="w-10 h-10 stroke-[2.2]" />
-        ) : (
-          <RotateCcw className="w-10 h-10 stroke-[2.2]" />
-        )}
-      </div>
-
-      <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white mb-2">
-        {title}
-      </h1>
-      <p className="text-[15px] text-zinc-500 dark:text-zinc-400 mb-8 max-w-md mx-auto">
-        {subtitle || (mistakesCount === 0 
-          ? "Du hast alle Karten dieser Session gemeistert!" 
-          : `Session beendet. Du hast ${mistakesCount} ${mistakesCount === 1 ? 'Karte' : 'Karten'} zum Vertiefen.`)}
-      </p>
-
-      {/* 3 Metric Cards (Genauigkeit, Richtig, Fehler) */}
-      <div className="grid grid-cols-3 gap-3 w-full mb-8">
-        <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
-          <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
-            Genauigkeit
-          </span>
-          <span className={cn(
-            "text-2xl font-bold tabular-nums tracking-tight",
-            accuracy >= 80 
-              ? "text-emerald-600 dark:text-emerald-400" 
-              : accuracy >= 50 
-                ? "text-amber-600 dark:text-amber-400" 
-                : "text-rose-600 dark:text-rose-400"
-          )}>
-            {accuracy}%
-          </span>
+    <div className="flex-1 flex flex-col justify-center items-center max-w-xl mx-auto px-4 py-8 text-center select-none w-full animate-in fade-in zoom-in-95 duration-200">
+      <CardContainer className="w-full p-6 sm:p-8 flex flex-col items-center">
+        {/* Icon / Top Hero Badge */}
+        <div className={cn(
+          "w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 border shadow-sm",
+          accuracy >= 80
+            ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+            : accuracy >= 50
+              ? "bg-amber-50 dark:bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400"
+              : "bg-rose-50 dark:bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400"
+        )}>
+          {accuracy >= 80 ? (
+            <CheckCircle2 className="w-10 h-10 stroke-[2.2]" />
+          ) : (
+            <RotateCcw className="w-10 h-10 stroke-[2.2]" />
+          )}
         </div>
 
-        <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
-          <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
-            Richtig
-          </span>
-          <span className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
-            {sessionCorrect}
-          </span>
-        </div>
+        <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white mb-2">
+          {title}
+        </h1>
+        <p className="text-[15px] text-zinc-500 dark:text-zinc-400 mb-8 max-w-md mx-auto">
+          {subtitle || (mistakesCount === 0 
+            ? "Du hast alle Karten dieser Session gemeistert!" 
+            : `Session beendet. Du hast ${mistakesCount} ${mistakesCount === 1 ? 'Karte' : 'Karten'} zum Vertiefen.`)}
+        </p>
 
-        <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
-          <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
-            Fehler
-          </span>
-          <span className={cn(
-            "text-2xl font-bold tabular-nums tracking-tight",
-            mistakesCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-zinc-400 dark:text-zinc-500"
-          )}>
-            {mistakesCount}
-          </span>
-        </div>
-      </div>
-
-      {/* Mistakes Block */}
-      {mistakesCount > 0 ? (
-        <div className="w-full mb-8 text-left bg-zinc-50/70 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/10 rounded-2xl p-4 sm:p-5">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-              Fehler ({mistakesCount})
+        {/* 3 Metric Cards (Genauigkeit, Richtig, Fehler) */}
+        <div className="grid grid-cols-3 gap-3 w-full mb-8">
+          <div className="p-4 rounded-2xl bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
+            <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+              Genauigkeit
             </span>
+            <span className={cn(
+              "text-2xl font-bold tabular-nums tracking-tight",
+              accuracy >= 80 
+                ? "text-emerald-600 dark:text-emerald-400" 
+                : accuracy >= 50 
+                  ? "text-amber-600 dark:text-amber-400" 
+                  : "text-rose-600 dark:text-rose-400"
+            )}>
+              {accuracy}%
+            </span>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
+            <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+              Richtig
+            </span>
+            <span className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
+              {sessionCorrect}
+            </span>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
+            <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+              Fehler
+            </span>
+            <span className={cn(
+              "text-2xl font-bold tabular-nums tracking-tight",
+              mistakesCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-zinc-400 dark:text-zinc-500"
+            )}>
+              {mistakesCount}
+            </span>
+          </div>
+        </div>
+
+        {/* Mistakes Block */}
+        {mistakesCount > 0 ? (
+          <div className="w-full mb-8 text-left bg-zinc-50/70 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/10 rounded-2xl p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                Fehler ({mistakesCount})
+              </span>
+              <button
+                onClick={onReviewMistakes}
+                type="button"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition active:scale-95 cursor-pointer shadow-sm shadow-blue-500/20"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Fehler wiederholen
+              </button>
+            </div>
+
+            <div className="divide-y divide-zinc-200/60 dark:divide-white/[0.06] max-h-60 overflow-y-auto overscroll-contain pr-1">
+              {sessionMistakes.map((card, idx) => {
+                const germanWord = card.targetWord || (card.sentence ? card.sentence.replace(/\|/g, '') : '—');
+                const translation = card.translation || card.hint || '—';
+                return (
+                  <div key={card.id || idx} className="py-2.5 flex items-center justify-between text-sm gap-3">
+                    <span className="font-medium text-zinc-900 dark:text-zinc-100 truncate max-w-[50%]">
+                      {germanWord}
+                    </span>
+                    <div className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 text-xs shrink-0">
+                      <span>→</span>
+                      <span className="text-zinc-600 dark:text-zinc-300 font-normal truncate max-w-[180px]">
+                        {translation}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="mb-8 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-sm font-semibold">
+            <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+            Keine Fehler! Perfekt!
+          </div>
+        )}
+
+        {/* Buttons */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full">
+          {mistakesCount > 0 && (
             <button
               onClick={onReviewMistakes}
               type="button"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition active:scale-95 cursor-pointer shadow-sm shadow-blue-500/20"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition active:scale-95 cursor-pointer shadow-md shadow-blue-600/20"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
+              <RotateCcw className="w-4 h-4" />
               Fehler wiederholen
             </button>
-          </div>
-
-          <div className="divide-y divide-zinc-200/60 dark:divide-white/[0.06] max-h-60 overflow-y-auto overscroll-contain pr-1">
-            {sessionMistakes.map((card, idx) => {
-              const germanWord = card.targetWord || (card.sentence ? card.sentence.replace(/\|/g, '') : '—');
-              const translation = card.translation || card.hint || '—';
-              return (
-                <div key={card.id || idx} className="py-2.5 flex items-center justify-between text-sm gap-3">
-                  <span className="font-medium text-zinc-900 dark:text-zinc-100 truncate max-w-[50%]">
-                    {germanWord}
-                  </span>
-                  <div className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 text-xs shrink-0">
-                    <span>→</span>
-                    <span className="text-zinc-600 dark:text-zinc-300 font-normal truncate max-w-[180px]">
-                      {translation}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className="mb-8 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-sm font-semibold">
-          <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
-          Keine Fehler! Perfekt!
-        </div>
-      )}
-
-      {/* Buttons */}
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full">
-        {mistakesCount > 0 && (
+          )}
           <button
-            onClick={onReviewMistakes}
+            onClick={onBack}
             type="button"
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition active:scale-95 cursor-pointer shadow-md shadow-blue-600/20"
+            className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3.5 rounded-xl bg-zinc-200/80 hover:bg-zinc-300/80 dark:bg-white/10 dark:hover:bg-white/15 text-zinc-800 dark:text-zinc-100 font-semibold text-sm transition active:scale-95 cursor-pointer"
           >
-            <RotateCcw className="w-4 h-4" />
-            Fehler wiederholen
+            Zurück zur Bibliothek
           </button>
-        )}
-        <button
-          onClick={onBack}
-          type="button"
-          className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3.5 rounded-xl bg-zinc-200/80 hover:bg-zinc-300/80 dark:bg-white/10 dark:hover:bg-white/15 text-zinc-800 dark:text-zinc-100 font-semibold text-sm transition active:scale-95 cursor-pointer"
-        >
-          Zurück zur Bibliothek
-        </button>
-      </div>
+        </div>
+      </CardContainer>
     </div>
   );
 }
@@ -4124,11 +4093,11 @@ function RapidSession({
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
       <div className="w-full max-w-[760px] mx-auto px-4 mb-2.5">
         <div className="flex items-center justify-between mb-2">
-          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
+          <button onClick={onBack} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <span
-            className="text-xs font-mono font-medium text-zinc-400 dark:text-zinc-500 select-none cursor-default py-1 px-2"
+            className="text-xs font-mono font-medium text-zinc-500 dark:text-zinc-400 select-none cursor-default py-1 px-2"
           >
             {mastered} / {total}
           </span>
@@ -4250,10 +4219,15 @@ function StudyEntry(props: {
   isMistakesReview?: boolean;
   trainingMode?: string;
 }) {
-  if (props.deckId && !props.reviewCards && props.trainingMode === 'rapid_flashcards') {
-    return <RapidSession deckId={props.deckId} onBack={props.onBack} />;
-  }
-  return <StudyInterface {...props} />;
+  const content = props.deckId && !props.reviewCards && props.trainingMode === 'rapid_flashcards'
+    ? <RapidSession deckId={props.deckId} onBack={props.onBack} />
+    : <StudyInterface {...props} />;
+
+  return (
+    <main className="min-h-screen w-full bg-[#f2f2f7] dark:bg-black text-zinc-900 dark:text-zinc-100 transition-colors duration-200">
+      {content}
+    </main>
+  );
 }
 
 
@@ -4618,7 +4592,7 @@ function StudyInterface({
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
       <div className="w-full max-w-[760px] mx-auto px-4 mb-2.5">
         <div className="flex items-center justify-between mb-2">
-          <button onClick={onBack} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-gray-200/60 dark:hover:bg-white/10 active:scale-95 cursor-pointer">
+          <button onClick={onBack} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-2.5">
@@ -4628,7 +4602,7 @@ function StudyInterface({
               </span>
             )}
             <span
-              className="text-xs font-mono font-medium text-zinc-400 dark:text-zinc-500 select-none cursor-default py-1 px-2"
+              className="text-xs font-mono font-medium text-zinc-500 dark:text-zinc-400 select-none cursor-default py-1 px-2"
             >
               {currentIndex + 1} / {activeCards.length}
             </span>
@@ -5355,7 +5329,7 @@ function StudyCard({
                 playAudio(speechSentence);
               }}
               disabled={isPlayingAudio}
-              className="relative w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-50 cursor-pointer"
+              className={cn("relative", AUDIO_BUTTON_CLASSES)}
               title="Aussprache anhören (R)"
             >
               <Volume2 className="w-4 h-4" />
@@ -5367,7 +5341,7 @@ function StudyCard({
             <button
               type="button"
               onClick={() => setPlaybackSpeed(playbackSpeed === 1 ? 0.75 : 1)}
-              className="text-xs font-medium text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 transition-colors duration-150 active:scale-95 cursor-pointer"
+              className="text-xs font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-black/[0.06] dark:border-white/[0.08] transition-colors duration-150 active:scale-95 cursor-pointer"
               title="Playback Speed"
             >
               <span className="text-[11px] font-semibold tabular-nums tracking-wide leading-none">
@@ -5378,34 +5352,20 @@ function StudyCard({
 
           {/* Название темы со свободным отступом слева и защитой от перекрытия */}
           {deckTitle && (
-            <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-400 uppercase tracking-wider select-none">
+            <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
               {deckTitle}
             </div>
           )}
 
           {/* Правая часть: точки прогресса и помощь */}
           <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center gap-1.5 select-none">
-              {[1, 2, 3, 4].map((step) => {
-                const isCompleted = step <= (localMastery || 0);
-                return (
-                  <span 
-                    key={step} 
-                    className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
-                      isCompleted
-                        ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
-                        : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
-                    }`}
-                  />
-                );
-              })}
-            </div>
+            <ProgressDots level={localMastery || 0} />
             <button 
               type="button"
               onClick={handleHilfe}
               disabled={phase !== "Question"}
               className={cn(
-                "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+                "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
                 phase !== "Question" && "opacity-0 pointer-events-none"
               )}
               title="Hilfe (H)"
@@ -5416,7 +5376,7 @@ function StudyCard({
         </div>
 
         <div className="flex flex-col items-center text-center w-full">
-          <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-gray-900 dark:text-[#F5F5F7] w-full max-w-2xl mb-4">
+          <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-zinc-900 dark:text-white w-full max-w-2xl mb-4">
             {parts[0]}
             
             {phase === "Answer" ? (
@@ -5490,7 +5450,7 @@ function StudyCard({
                   )}
                 </div>
                 {parsedExtra.type !== 'none' && parsedExtra.sub && (
-                  <span className="text-xs sm:text-[13px] text-zinc-500 dark:text-[#8E8E93] font-medium tracking-wide">
+                  <span className="text-xs sm:text-[13px] text-zinc-600 dark:text-zinc-400 font-medium tracking-wide">
                     {parsedExtra.sub}
                   </span>
                 )}
@@ -8205,7 +8165,7 @@ function PrepStudyCard({
           <button 
             type="button"
             onClick={playAudio}
-            className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
+            className={AUDIO_BUTTON_CLASSES}
             title="Audio abspielen"
           >
             <Volume2 className="w-4 h-4" />
@@ -8213,33 +8173,19 @@ function PrepStudyCard({
         </div>
 
         {deckTitle && (
-          <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-400 uppercase tracking-wider select-none">
+          <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
             {deckTitle}
           </div>
         )}
 
         <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-1.5 select-none">
-            {[1, 2, 3, 4].map((step) => {
-              const isCompleted = step <= (localMastery || 0);
-              return (
-                <span 
-                  key={step} 
-                  className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
-                    isCompleted
-                      ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
-                      : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
-                  }`}
-                />
-              );
-            })}
-          </div>
+          <ProgressDots level={localMastery || 0} />
           <button 
             type="button"
             onClick={onHilfe}
             disabled={isSuccess || isHilfe}
             className={cn(
-              "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+              "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
               (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
             )}
             title="Ich weiß nicht"
@@ -8252,7 +8198,7 @@ function PrepStudyCard({
 
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
         <div className="text-center mb-10 w-full mt-10">
-          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
+          <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
             {translation}
           </h2>
         </div>
@@ -8452,7 +8398,7 @@ function VerbStudyCard({
           <button 
             type="button"
             onClick={playAudio}
-            className="w-9 h-9 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 cursor-pointer"
+            className={AUDIO_BUTTON_CLASSES}
             title="Audio abspielen (A)"
           >
             <Volume2 className="w-4 h-4" />
@@ -8460,33 +8406,19 @@ function VerbStudyCard({
         </div>
 
         {deckTitle && (
-          <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-400 uppercase tracking-wider select-none">
+          <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
             {deckTitle}
           </div>
         )}
 
         <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-1.5 select-none">
-            {[1, 2, 3, 4].map((step) => {
-              const isCompleted = step <= (localMastery || 0);
-              return (
-                <span 
-                  key={step} 
-                  className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
-                    isCompleted
-                      ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
-                      : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
-                  }`}
-                />
-              );
-            })}
-          </div>
+          <ProgressDots level={localMastery || 0} />
           <button 
             type="button"
             onClick={handleHilfe}
             disabled={isSuccess || isHilfe}
             className={cn(
-              "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200/80 dark:border-white/10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+              "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
               (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
             )}
             title="Ich weiß nicht"
@@ -8498,16 +8430,16 @@ function VerbStudyCard({
 
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
         <div className="text-center mb-8 w-full mt-10">
-          <h2 className="text-2xl sm:text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-1.5 tracking-wide flex items-center justify-center gap-0.5 whitespace-nowrap select-none">
+          <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5 whitespace-nowrap select-none">
             {displayInfinitiv}
           </h2>
-          <p className="text-[13px] sm:text-sm text-gray-400 dark:text-gray-500 font-medium">
+          <p className="text-[13px] sm:text-sm text-zinc-600 dark:text-zinc-400 font-medium">
             {card.translation}
           </p>
         </div>
 
         <div className="flex flex-row items-center justify-center gap-3 sm:gap-6 w-full max-w-lg mb-8">
-          <span className="text-[14px] font-medium text-gray-400 dark:text-gray-500 mr-1 sm:mr-2">er</span>
+          <span className="text-[14px] font-medium text-zinc-600 dark:text-zinc-400 mr-1 sm:mr-2">er</span>
           {targets.map((target, idx) => (
             <VerbSlot
               key={`${card.id}-${idx}`}
@@ -8941,10 +8873,10 @@ export function RedemittelStudyCard({
           <button
             onClick={handlePlayAudio}
             disabled={isAudioPlaying}
-            className="w-10 h-10 rounded-full bg-gray-50 dark:bg-[#2C2C2E] hover:bg-gray-100 dark:hover:bg-[#3A3A3C] text-gray-700 dark:text-[#E5E5EA] flex items-center justify-center transition-transform active:scale-[0.96] border border-black/[0.05] dark:border-white/[0.05] shadow-sm cursor-pointer"
+            className={AUDIO_BUTTON_CLASSES}
             title="Satz anhören (R)"
           >
-            <Volume2 className={cn("w-5 h-5", isAudioPlaying && "animate-pulse text-blue-500")} />
+            <Volume2 className={cn("w-4 h-4", isAudioPlaying && "animate-pulse text-blue-500")} />
           </button>
 
           {/* Right: Reset (Zurücksetzen), HelpCircle (?), 4 mastery round dots */}
@@ -8952,7 +8884,7 @@ export function RedemittelStudyCard({
             {placedChunks.length > 0 && status !== 'success' && status !== 'surrender' && (
               <button
                 onClick={handleReset}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer"
+                className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer"
                 title="Zurücksetzen (Esc)"
               >
                 <RotateCcw className="w-4 h-4" />
@@ -8962,28 +8894,14 @@ export function RedemittelStudyCard({
               onClick={handleSurrender}
               disabled={status === 'success' || status === 'surrender'}
               className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer",
+                "w-8 h-8 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer",
                 (status === 'success' || status === 'surrender') && "opacity-0 pointer-events-none"
               )}
               title="Hilfe (H)"
             >
               <HelpCircle className="w-5 h-5" />
             </button>
-            <div className="flex items-center gap-1.5 select-none">
-              {[1, 2, 3, 4].map((step) => {
-                const isCompleted = step <= (localMastery || 0);
-                return (
-                  <span
-                    key={step}
-                    className={`w-2.5 h-2.5 rounded-full transition-all duration-200 ${
-                      isCompleted
-                        ? 'bg-sky-500 dark:bg-sky-400 shadow-[0_0_8px_rgba(14,165,233,0.4)] dark:shadow-[0_0_8px_rgba(56,189,248,0.5)]'
-                        : 'bg-zinc-200 dark:bg-zinc-800 border border-zinc-300/80 dark:border-white/5'
-                    }`}
-                  />
-                );
-              })}
-            </div>
+            <ProgressDots level={localMastery || 0} />
           </div>
         </div>
 
