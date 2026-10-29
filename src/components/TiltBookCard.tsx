@@ -60,7 +60,7 @@ export const TiltBookCard: React.FC<TiltBookCardProps> = ({
 
       {/* Интерактивный блик по поверхности кожи */}
       <div
-        className="pointer-events-none absolute inset-0 rounded-l-[3px] rounded-r-[8px] transition-opacity duration-300 z-30"
+        className="pointer-events-none absolute inset-0 rounded-l-[3px] rounded-r-[5px] transition-opacity duration-300 z-30"
         style={{
           opacity: glareStyle.opacity,
           background: `radial-gradient(circle 260px at ${glareStyle.x}% ${glareStyle.y}%, rgba(255,255,255,0.7), transparent 75%)`,

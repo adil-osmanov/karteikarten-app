@@ -45,9 +45,9 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
 
   return (
     <div className={`group relative cursor-pointer select-none ${className}`}>
-      {/* Контейнер книги с деликатной Apple-style тенью */}
+      {/* Контейнер книги с составной 3D-тенью Apple Books */}
       <div 
-        className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden bg-zinc-900 border border-black/[0.08] dark:border-white/[0.08] shadow-[0_10px_25px_-5px_rgba(0,0,0,0.07),0_2px_8px_-2px_rgba(0,0,0,0.04)] dark:shadow-[0_20px_35px_-10px_rgba(0,0,0,0.75),0_4px_12px_rgba(0,0,0,0.5)] group-hover:-translate-y-3 group-hover:shadow-[0_16px_32px_-6px_rgba(0,0,0,0.12)] dark:group-hover:shadow-[0_30px_50px_-10px_rgba(0,0,0,0.9)] transition-all duration-300 ease-out transform-gpu will-change-transform"
+        className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden bg-zinc-900 shadow-[0_12px_24px_-6px_rgba(0,0,0,0.18),0_4px_10px_-2px_rgba(0,0,0,0.08),0_1px_3px_rgba(0,0,0,0.06)] dark:shadow-[0_20px_45px_-10px_rgba(0,0,0,0.9),0_6px_18px_-4px_rgba(0,0,0,0.7)] group-hover:-translate-y-1.5 group-hover:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.25),0_8px_16px_-4px_rgba(0,0,0,0.12)] dark:group-hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,1),0_10px_24px_-4px_rgba(0,0,0,0.85)] transition-all duration-300 ease-out transform-gpu will-change-transform"
         style={hasImage ? undefined : { backgroundColor: tintColor || '#1C1C1E' }}
       >
         {/* Исходная обложка */}
@@ -93,8 +93,8 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
           <div className="absolute inset-y-0 right-0 w-[1px] bg-white/40 dark:bg-white/20 mix-blend-screen" />
         </div>
 
-        {/* ВНЕШНЯЯ ПРЕДОХРАНИТЕЛЬНАЯ ФАСКА КНИГИ (1px Bevel) */}
-        <div className="absolute inset-0 rounded-r-[5px] rounded-l-[3px] ring-1 ring-inset ring-black/[0.08] dark:ring-white/[0.08] pointer-events-none z-20" />
+        {/* Деликатный диагональный блик ламинации (чистый объем) */}
+        <div className="absolute inset-0 pointer-events-none rounded-r-[5px] rounded-l-[3px] bg-gradient-to-tr from-black/10 via-transparent to-white/10 dark:from-black/30 dark:to-white/5 opacity-70" />
 
         {/* Деликатный скользящий блик при наведении */}
         <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 pointer-events-none z-10" />
