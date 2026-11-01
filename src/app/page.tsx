@@ -1083,25 +1083,24 @@ export interface CardSRSUpdate {
 export function isCardDueForReview(card: any): boolean {
   if (!card) return false;
 
-  // 1. Исключаем нетронутые новые карточки, которые пользователь еще ни разу не учил
-  const hasBeenStudied = (card.repetitions ?? 0) > 0 || (card.masteryLevel ?? 0) > 0;
-  if (!hasBeenStudied) {
-    return false;
+  // 1. В очередь общего повторения попадают ТОЛЬКО слова 4 этапа / архив!
+  const isMasteredOrArchived = (card.masteryLevel ?? 0) >= 4 || card.isArchived === true;
+  if (!isMasteredOrArchived) {
+    return false; // Карточки этапов 0, 1, 2, 3 исключены из хедера, они учатся внутри колод!
   }
 
-  // 2. Проверяем дату следующего повторения (поддерживаем camelCase и snake_case)
+  // 2. Проверяем срок ревью (поддерживаем camelCase и snake_case)
   const rawDate = card.nextReviewDate || card.next_review_date;
   if (!rawDate) {
-    // Если карточка начата, но даты нет — отдаем на повторение
-    return true;
+    return false; // Если дата не задана, не спамим
   }
 
   const reviewTimestamp = new Date(rawDate).getTime();
   if (isNaN(reviewTimestamp)) {
-    return true;
+    return false;
   }
 
-  // 3. Карточка готова к повторению (включая Stage 4 / Архив), если ее срок наступил:
+  // 3. Отдаем на повторение СТРОГО тогда, когда наступил срок
   return reviewTimestamp <= Date.now();
 }
 
@@ -1144,8 +1143,9 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       const { count, error } = await supabase
         .from('cards')
         .select('id, decks!inner(book_id)', { count: 'exact', head: true })
-        .or('repetitions.gt.0,masteryLevel.gt.0')
-        .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`)
+        .or('isArchived.eq.true,masteryLevel.gte.4')
+        .not('nextReviewDate', 'is', null)
+        .lte('nextReviewDate', now)
         .eq('decks.book_id', bookId);
 
       if (!error && typeof count === 'number') {
@@ -1176,8 +1176,9 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       const { count, error } = await supabase
         .from('cards')
         .select('id, decks!inner(language)', { count: 'exact', head: true })
-        .or('repetitions.gt.0,masteryLevel.gt.0')
-        .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`)
+        .or('isArchived.eq.true,masteryLevel.gte.4')
+        .not('nextReviewDate', 'is', null)
+        .lte('nextReviewDate', now)
         .eq('decks.language', cleanLang);
 
       if (!error && typeof count === 'number') {
@@ -1215,8 +1216,9 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
     let query = supabase
       .from('cards')
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
-      .or('repetitions.gt.0,masteryLevel.gt.0')
-      .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`);
+      .or('isArchived.eq.true,masteryLevel.gte.4')
+      .not('nextReviewDate', 'is', null)
+      .lte('nextReviewDate', now);
 
     if (bookId) {
       query = query.eq('decks.book_id', bookId);
@@ -3165,7 +3167,7 @@ function RapidFlashcardMode({
   const isMobile = useIsMobile();
 
   const [isFlipped, setIsFlipped] = useState(false);
-  const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived ? 4 : (isReview ? Math.max(3, currentCard?.masteryLevel ?? progress ?? 3) : (currentCard?.masteryLevel ?? progress ?? 0))));
+  const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived || isReview ? 4 : (currentCard?.masteryLevel ?? progress ?? 0)));
   const [isRound1or2, setIsRound1or2] = useState(() => (currentCard?.isArchived || isReview ? false : (currentCard?.masteryLevel ?? progress ?? 0) < 2));
   const [isAnswered, setIsAnswered] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
@@ -4722,7 +4724,7 @@ function StudyInterface({
         mistakesCount: (prev?.mistakesCount || 0) + 1,
         mistakes: prev?.mistakes?.includes(currentCardSnapshot.id) ? prev.mistakes : [...(prev?.mistakes || []), currentCardSnapshot.id]
       }));
-      if (!isDrillMode) {
+      if (!isDrillMode && !isReviewSession) {
         setActiveCards(prev => [...prev, { deckId: currentDeckId, card: { ...currentCardSnapshot, masteryLevel: 1, repetitions: 0, interval: 1 } }]);
       }
     }
@@ -5276,14 +5278,14 @@ function StudyCard({
   const hasErroredRef = useRef(false);
   const [localMastery, setLocalMastery] = useState(() => {
     if (isReview || forceInputMode) {
-      return Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3));
+      return 4;
     }
     return card.masteryLevel ?? (card.isArchived ? 4 : 0);
   });
 
   useEffect(() => {
     if (isReview || forceInputMode) {
-      setLocalMastery(Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)));
+      setLocalMastery(4);
     } else {
       setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
     }
@@ -8376,10 +8378,10 @@ function PrepStudyCard({
   const [isHilfe, setIsHilfe] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
-  const [localMastery, setLocalMastery] = useState(() => (isReview ? Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)) : (card.masteryLevel ?? (card.isArchived ? 4 : 0))));
+  const [localMastery, setLocalMastery] = useState(() => (isReview ? 4 : (card.masteryLevel ?? (card.isArchived ? 4 : 0))));
 
   useEffect(() => {
-    setLocalMastery(isReview ? Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)) : (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+    setLocalMastery(isReview ? 4 : (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
   }, [card.id, card.masteryLevel, card.isArchived, isReview]);
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
@@ -8629,10 +8631,10 @@ function VerbStudyCard({
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
   const [isHilfe, setIsHilfe] = useState(false);
-  const [localMastery, setLocalMastery] = useState(() => (isReview ? Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)) : (card.masteryLevel ?? (card.isArchived ? 4 : 0))));
+  const [localMastery, setLocalMastery] = useState(() => (isReview ? 4 : (card.masteryLevel ?? (card.isArchived ? 4 : 0))));
 
   useEffect(() => {
-    setLocalMastery(isReview ? Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)) : (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+    setLocalMastery(isReview ? 4 : (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
   }, [card.id, card.masteryLevel, card.isArchived, isReview]);
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
