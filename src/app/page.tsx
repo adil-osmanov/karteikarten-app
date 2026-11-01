@@ -24,6 +24,7 @@ import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
 import { recordMasteredLemma, removeMasteredLemma, backfillMasteredWordsFromDecks } from "@/hooks/useWortschatzMatrix";
+import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
@@ -1543,7 +1544,7 @@ const getInitialLanguage = (): 'DE' | 'EN' | 'RU' => {
   return 'DE';
 };
 
-const useStore = create<DeckState>()((set, get) => ({
+export const useStore = create<DeckState>()((set, get) => ({
   decks: initialDecks,
   isLoaded: typeof window !== 'undefined' && (initialBooks.length > 0 || initialDecks.length > 0),
   appLanguage: getInitialLanguage(),
@@ -2018,20 +2019,26 @@ const useStore = create<DeckState>()((set, get) => ({
     if (updatedCard) {
       const validCard = updatedCard as Flashcard;
 
-      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
+      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова (строго одна изолированная лемма)
+      const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+      const singleLemma = normalizeGermanLemma(rawWord);
+      const safeLemma = singleLemma.split(' ')[0].trim();
+
       if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
-        const currentDeck = get().decks.find(d => d.id === deckId);
-        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-        recordMasteredLemma({
-          rawWord: validCard.targetWord || (validCard as any).front || '',
-          bookId: currentDeck?.bookId,
-          bookLevel: currentBook?.activeLevels?.[0] || currentBook?.title || 'B2'
-        });
+        if (safeLemma && safeLemma.length >= 2) {
+          const currentDeck = get().decks.find(d => d.id === deckId);
+          const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+          recordMasteredLemma(
+            safeLemma,
+            currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
+            currentDeck?.bookId
+          );
+        }
       } else if (wasMasteredBefore && (!isCorrect || isHilfe || !validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel < 4))) {
         // Demotion! Списание при ошибке («Wiederholen / Не знаю»)
-        removeMasteredLemma({
-          rawWord: validCard.targetWord || (validCard as any).front || '',
-        });
+        if (safeLemma) {
+          removeMasteredLemma(safeLemma);
+        }
       }
 
       try {
@@ -2110,20 +2117,26 @@ const useStore = create<DeckState>()((set, get) => ({
     if (updatedCard) {
       const validCard = updatedCard as Flashcard;
 
-      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
+      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова (строго одна изолированная лемма)
+      const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+      const singleLemma = normalizeGermanLemma(rawWord);
+      const safeLemma = singleLemma.split(' ')[0].trim();
+
       if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
-        const currentDeck = get().decks.find(d => d.id === deckId);
-        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-        recordMasteredLemma({
-          rawWord: validCard.targetWord || (validCard as any).front || '',
-          bookId: currentDeck?.bookId,
-          bookLevel: currentBook?.activeLevels?.[0] || currentBook?.title || 'B2'
-        });
+        if (safeLemma && safeLemma.length >= 2) {
+          const currentDeck = get().decks.find(d => d.id === deckId);
+          const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+          recordMasteredLemma(
+            safeLemma,
+            currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
+            currentDeck?.bookId
+          );
+        }
       } else if (wasMasteredBefore && score < 4) {
         // Demotion! Списание при ошибке или понижении прогресса
-        removeMasteredLemma({
-          rawWord: validCard.targetWord || (validCard as any).front || '',
-        });
+        if (safeLemma) {
+          removeMasteredLemma(safeLemma);
+        }
       }
 
       try {

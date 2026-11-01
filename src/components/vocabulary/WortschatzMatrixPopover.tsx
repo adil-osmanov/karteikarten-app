@@ -1,21 +1,41 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useWortschatzMatrix } from '@/hooks/useWortschatzMatrix';
-import { CEFRLevel, CEFR_TARGETS, TOTAL_WORLD_LEXICON_GOAL } from '@/lib/vocabulary/defaultLexiconMap';
+import { Download } from 'lucide-react';
+import { useWortschatzMatrix, getMasteredLemmasSet } from '@/hooks/useWortschatzMatrix';
+import { CEFRLevel, CEFR_TARGETS, TOTAL_WORLD_LEXICON_GOAL, DEFAULT_LEXICON_MAP, resolveCEFRLevel } from '@/lib/vocabulary/defaultLexiconMap';
+import { extractGermanLemma, isValidGermanLemma } from '@/lib/vocabulary/normalizer';
+import { useStore } from '@/app/page';
 
 interface WortschatzMatrixPopoverProps {
   className?: string;
 }
 
-const levels: Array<{ key: CEFRLevel; target: number; label: string }> = [
-  { key: 'C1', target: CEFR_TARGETS.C1.target, label: CEFR_TARGETS.C1.label },
-  { key: 'B2', target: CEFR_TARGETS.B2.target, label: CEFR_TARGETS.B2.label },
-  { key: 'B1', target: CEFR_TARGETS.B1.target, label: CEFR_TARGETS.B1.label },
-  { key: 'A2', target: CEFR_TARGETS.A2.target, label: CEFR_TARGETS.A2.label },
-  { key: 'A1', target: CEFR_TARGETS.A1.target, label: CEFR_TARGETS.A1.label },
-];
+const LEVEL_CONFIG: Record<CEFRLevel, { target: number; badgeClass: string }> = {
+  C1: {
+    target: CEFR_TARGETS.C1.target,
+    badgeClass: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20',
+  },
+  B2: {
+    target: CEFR_TARGETS.B2.target,
+    badgeClass: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20',
+  },
+  B1: {
+    target: CEFR_TARGETS.B1.target,
+    badgeClass: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/20',
+  },
+  A2: {
+    target: CEFR_TARGETS.A2.target,
+    badgeClass: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20',
+  },
+  A1: {
+    target: CEFR_TARGETS.A1.target,
+    badgeClass: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20',
+  },
+};
+
+const CEFR_ORDER: CEFRLevel[] = ['C1', 'B2', 'B1', 'A2', 'A1'];
 
 export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = ({
   className = '',
@@ -54,18 +74,78 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
     };
   }, [isMatrixOpen]);
 
+  // Export remaining unlearned words of a given level for AI prompt generation
+  const exportRemainingWords = useCallback((levelKey: CEFRLevel) => {
+    const mastered = getMasteredLemmasSet();
+    const wordSet = new Set<string>();
+
+    // 1. All lemmas from default dictionary mapped to this level
+    Object.entries(DEFAULT_LEXICON_MAP).forEach(([lemma, lvl]) => {
+      if (lvl === levelKey) {
+        wordSet.add(lemma);
+      }
+    });
+
+    // 2. Also harvest words from user's loaded decks corresponding to this level
+    try {
+      const decks = useStore.getState().decks;
+      const books = useStore.getState().books;
+      const bookLevelMap = new Map<string, string>();
+      books.forEach((b: any) => {
+        const bLevel = b.activeLevels?.[0] || b.title || 'B2';
+        bookLevelMap.set(b.id, bLevel);
+      });
+
+      decks.forEach((d: any) => {
+        const bLevel = d.bookId ? bookLevelMap.get(d.bookId) : (d.level || 'B2');
+        if (d.cards) {
+          d.cards.forEach((c: any) => {
+            const raw = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+            const lemma = extractGermanLemma(raw);
+            if (lemma && isValidGermanLemma(lemma)) {
+              const resolved = resolveCEFRLevel(lemma, bLevel);
+              if (resolved === levelKey) {
+                wordSet.add(lemma);
+              }
+            }
+          });
+        }
+      });
+    } catch (e) {}
+
+    // 3. Exclude already mastered lemmas
+    const remaining = Array.from(wordSet)
+      .filter((w) => !mastered.has(w))
+      .sort((a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' }));
+
+    // 4. Build clean text document
+    const header = `Список невыученных слов немецкого языка уровня ${levelKey} (осталось: ${remaining.length}):\n\n`;
+    const content = header + (remaining.length > 0 ? remaining.map((w) => `- ${w}`).join('\n') : '(Все слова этого уровня выучены!)');
+
+    // 5. Trigger download in browser
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${levelKey}_restliche_woerter.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
+
   const percentTotal = Math.min(100, (totalMastered / TOTAL_WORLD_LEXICON_GOAL) * 100);
 
   return (
     <div className={`relative inline-block ${className}`}>
-      {/* 3. КНОПКА-ТРИГГЕР В ВЕРХНЕМ ХЕДЕРЕ */}
+      {/* 5. СИНХРОНИЗИРОВАННАЯ КНОПКА-ТРИГГЕР В ХЕДЕРЕ */}
       <button
         ref={buttonRef}
         type="button"
         onClick={() => setIsMatrixOpen(!isMatrixOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-200 select-none
-          bg-zinc-100 hover:bg-zinc-200/80 border-black/5 text-zinc-800
-          dark:bg-zinc-900/90 dark:hover:bg-zinc-800 dark:border-white/10 dark:text-zinc-200 shadow-sm active:scale-95 cursor-pointer"
+        className="h-9 px-3.5 rounded-full border transition-all duration-200 select-none shadow-sm active:scale-95 cursor-pointer flex items-center gap-2
+          bg-zinc-100 hover:bg-zinc-200/70 border-zinc-200/80 text-zinc-800
+          dark:bg-zinc-900 dark:hover:bg-zinc-850 dark:border-white/10 dark:text-zinc-200"
         title="Wortschatz-Matrix"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.6)]" />
@@ -73,65 +153,69 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
         <span className="text-xs text-zinc-400 dark:text-zinc-500 font-mono">• {currentLevel || 'A1'}</span>
       </button>
 
-      {/* 4. РЕДИЗАЙН ОКНА СТАТИСТИКИ (APPLE CONTROL CENTER LOOK) */}
+      {/* 1 & 4. РЕДИЗАЙН ПОПОВЕРА БЕЗ МЕРЦАНИЯ С АППАРАТНЫМ УСКОРЕНИЕМ */}
       <AnimatePresence>
         {isMatrixOpen && (
           <motion.div
             ref={popoverRef}
-            initial={{ opacity: 0, y: 8, scale: 0.97 }}
+            initial={{ opacity: 0, y: 6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.97 }}
-            transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed inset-x-4 top-20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 w-80 sm:w-96 p-5 rounded-2xl shadow-2xl backdrop-blur-2xl transition-all border bg-white/85 border-black/10 text-zinc-900 dark:bg-zinc-900/85 dark:border-white/10 dark:text-zinc-100 z-50 select-none text-left"
+            exit={{ opacity: 0, y: 4, scale: 0.98 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            style={{ willChange: 'transform, opacity' }}
+            className="fixed inset-x-4 top-20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 w-80 sm:w-96 p-5 rounded-2xl shadow-2xl backdrop-blur-2xl border bg-white/95 border-black/10 text-zinc-900 dark:bg-zinc-900/95 dark:border-white/10 dark:text-zinc-100 z-50 select-none text-left transform-gpu will-change-transform"
           >
-            {/* ШАПКА ПОПОВЕРА */}
-            <div className="flex items-baseline justify-between mb-4">
-              <div>
-                <h3 className="text-xs font-semibold tracking-wider uppercase text-zinc-400 dark:text-zinc-500">
-                  Wortschatz-Matrix
-                </h3>
-                <div className="text-2xl font-bold tracking-tight mt-0.5">
-                  {totalMastered.toLocaleString('de-DE')} <span className="text-sm font-normal text-zinc-500">/ 15.000</span>
-                </div>
+            {/* 1. ОЧИЩЕННАЯ ШАПКА: ТОЛЬКО ЦИФРЫ И СИНИЙ БЕЙДЖ % */}
+            <div className="flex items-center justify-between mb-5">
+              <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
+                {totalMastered.toLocaleString('de-DE')} <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500">/ 15.000</span>
               </div>
-              <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                 {percentTotal.toFixed(1)}% Gesamt
               </span>
             </div>
 
-            {/* СПИСОК УРОВНЕЙ (ЧИСТАЯ АРХИТЕКТУРА СТРОК) */}
-            <div className="space-y-1">
-              {levels.map((lvl) => {
-                const count = stats[lvl.key] || 0;
-                const percent = Math.min(Math.round((count / lvl.target) * 100), 100);
-                const isCurrent = currentLevel === lvl.key;
+            {/* СПИСОК УРОВНЕЙ C1 -> A1 */}
+            <div className="space-y-3">
+              {CEFR_ORDER.map((levelKey) => {
+                const config = LEVEL_CONFIG[levelKey];
+                const count = stats[levelKey] || 0;
+                const percent = Math.min(Math.round((count / config.target) * 100), 100);
 
                 return (
-                  <div key={lvl.key} className="py-2 first:pt-0 last:pb-0">
-                    <div className="flex justify-between items-center text-xs mb-1.5">
-                      <span className="flex items-center gap-1.5 font-medium">
-                        <span className={`w-6 text-center font-mono font-semibold rounded py-0.5 ${
-                          isCurrent 
-                            ? 'bg-blue-600 text-white' 
-                            : 'bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
-                        }`}>
-                          {lvl.key}
+                  <div key={levelKey} className="flex flex-col gap-1.5">
+                    {/* Строка заголовка уровня: бейдж слева, цифры и кнопка экспорта справа */}
+                    <div className="flex justify-between items-center text-xs">
+                      {/* ТОЛЬКО аккуратный цветной бейдж уровня */}
+                      <span className={`w-8 text-center font-mono font-bold rounded py-0.5 text-[11px] ${config.badgeClass}`}>
+                        {levelKey}
+                      </span>
+
+                      {/* Числа прогресса и кнопка экспорта оставшихся слов */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-zinc-500 dark:text-zinc-400">
+                          <strong className="text-zinc-900 dark:text-zinc-100 font-semibold">{count}</strong> / {config.target}
                         </span>
-                        <span className="text-zinc-500 dark:text-zinc-400">{lvl.label}</span>
-                      </span>
-                      <span className="font-mono text-zinc-500 dark:text-zinc-400">
-                        <strong className="text-zinc-900 dark:text-zinc-100 font-semibold">{count}</strong> / {lvl.target}
-                      </span>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            exportRemainingWords(levelKey);
+                          }}
+                          title="Оставшиеся слова уровня для создания карточек в ИИ"
+                          className="w-6 h-6 rounded flex items-center justify-center text-zinc-400 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                          aria-label={`Export ${levelKey}`}
+                        >
+                          <Download className="w-3.5 h-3.5 stroke-[2]" />
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Тонкий прогресс-бар */}
-                    <div className="w-full h-1.5 rounded-full bg-zinc-200/80 dark:bg-zinc-800 overflow-hidden">
+                    {/* 3. СИНЯЯ ПОЛОСА ПРОГРЕССА У ВСЕХ УРОВНЕЙ */}
+                    <div className="w-full h-1.5 rounded-full bg-zinc-200/70 dark:bg-zinc-800 overflow-hidden">
                       <div 
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          isCurrent 
-                            ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]' 
-                            : 'bg-zinc-400 dark:bg-zinc-600'
-                        }`}
+                        className="h-full rounded-full transition-all duration-500 bg-blue-500 dark:bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]"
                         style={{ width: `${percent}%` }}
                       />
                     </div>

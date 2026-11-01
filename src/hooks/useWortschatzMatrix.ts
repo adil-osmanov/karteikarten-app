@@ -76,16 +76,21 @@ function updateLocalState(lemma: string, level: CEFRLevel) {
 /**
  * Records a single mastered word into the deduplicated matrix.
  * Guaranteed to count each unique German lemma only once.
+ * Supports both recordMasteredLemma({ rawWord, bookId, bookLevel }) and recordMasteredLemma(rawWord, level, bookId).
  */
-export async function recordMasteredLemma(params: {
-  rawWord: string;
-  bookId?: string;
-  bookLevel?: string | null;
-}) {
-  const lemma = extractGermanLemma(params.rawWord);
+export async function recordMasteredLemma(
+  paramsOrWord: { rawWord: string; bookId?: string; bookLevel?: string | null } | string,
+  levelOrNull?: string | null,
+  bookIdOrNull?: string
+) {
+  const rawWord = typeof paramsOrWord === 'string' ? paramsOrWord : paramsOrWord.rawWord;
+  const bookLevel = typeof paramsOrWord === 'string' ? levelOrNull : paramsOrWord.bookLevel;
+  const bookId = typeof paramsOrWord === 'string' ? bookIdOrNull : paramsOrWord.bookId;
+
+  const lemma = extractGermanLemma(rawWord);
   if (!isValidGermanLemma(lemma)) return;
 
-  const level = resolveCEFRLevel(lemma, params.bookLevel);
+  const level = resolveCEFRLevel(lemma, bookLevel);
   const isNew = updateLocalState(lemma, level);
   if (!isNew) return; // Deduplication: word was already counted
 
@@ -102,7 +107,7 @@ export async function recordMasteredLemma(params: {
           user_id: userId,
           lemma,
           cefr_level: level,
-          source_book_id: params.bookId || null,
+          source_book_id: bookId || null,
           first_mastered_at: new Date().toISOString(),
         },
         { onConflict: 'user_id,lemma' }
@@ -117,10 +122,11 @@ export async function recordMasteredLemma(params: {
  * Immediately demotes and removes a word upon mistake during review.
  * Decrements matrix counts and deletes entry from Supabase user_mastered_words.
  */
-export async function removeMasteredLemma(params: {
-  rawWord: string;
-}) {
-  const lemma = extractGermanLemma(params.rawWord);
+export async function removeMasteredLemma(
+  paramsOrWord: { rawWord: string } | string
+) {
+  const rawWord = typeof paramsOrWord === 'string' ? paramsOrWord : paramsOrWord.rawWord;
+  const lemma = extractGermanLemma(rawWord);
   if (!isValidGermanLemma(lemma)) return;
 
   if (!masteredLemmasSet.has(lemma)) return;
@@ -169,6 +175,10 @@ export async function removeMasteredLemma(params: {
   }
 }
 
+export function getMasteredLemmasSet(): Set<string> {
+  return new Set(masteredLemmasSet);
+}
+
 /**
  * Performs backfill from existing in-memory/cached decks.
  * Scans all cards with masteryLevel >= 4 or isArchived === true,
@@ -208,7 +218,8 @@ export async function backfillMasteredWordsFromDecks(
       const isMastered = card.isArchived === true || (card.masteryLevel && card.masteryLevel >= 4);
       if (!isMastered) continue;
 
-      const lemma = extractGermanLemma(card.targetWord || card.front || '');
+      const rawWord = card.targetWord || card.missingWord || card.infinitive || card.front || '';
+      const lemma = extractGermanLemma(rawWord);
       if (!isValidGermanLemma(lemma)) continue;
 
       if (!masteredLemmasSet.has(lemma)) {
@@ -405,6 +416,7 @@ export function useWortschatzMatrix() {
     counts: stats.counts,
     totalWords: stats.totalWords,
     activeLevel: stats.activeLevel,
+    masteredLemmas: masteredLemmasSet,
     refreshMatrix,
   };
 }
