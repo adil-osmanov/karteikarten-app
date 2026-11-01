@@ -1554,6 +1554,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     if (typeof window !== 'undefined') localStorage.setItem('selected_language', norm);
     set({ appLanguage: norm as any });
     get().refreshDueCardsCount(norm);
+    reconcileMasteredWords(get().decks, norm);
   },
   dueCardsCount: 0,
   setDueCardsCount: (count: number) => set({ dueCardsCount: Math.max(0, count) }),
@@ -1708,7 +1709,7 @@ export const useStore = create<DeckState>()((set, get) => ({
   deleteBook: async (id) => {
     const previousBooks = get().books;
     set({ books: previousBooks.filter(b => b.id !== id) });
-    reconcileMasteredWords(get().decks);
+    reconcileMasteredWords(get().decks, get().appLanguage);
     
     const { error } = await supabase.from('books').delete().eq('id', id);
     
@@ -1716,7 +1717,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       console.error("SUPABASE ERROR:", error);
       if (typeof window !== 'undefined') toast.error("Fehler: Buch konnte nicht gespeichert werden. (RLS oder ID fehlt)");
       set({ books: previousBooks });
-      reconcileMasteredWords(get().decks);
+      reconcileMasteredWords(get().decks, get().appLanguage);
     }
   },
   incrementDailyProgress: (targetLang?: string) => {
@@ -1954,13 +1955,13 @@ export const useStore = create<DeckState>()((set, get) => ({
     const previousDecks = get().decks;
     const remainingDecks = previousDecks.filter(d => d.id !== deckId);
     set({ decks: remainingDecks });
-    reconcileMasteredWords(remainingDecks);
+    reconcileMasteredWords(remainingDecks, get().appLanguage);
     
     const { error } = await supabase.from('decks').delete().eq('id', deckId);
     if (error) {
       console.error("Supabase Delete Deck Error:", error.message);
       set({ decks: previousDecks });
-      reconcileMasteredWords(previousDecks);
+      reconcileMasteredWords(previousDecks, get().appLanguage);
     }
   },
 
@@ -1974,7 +1975,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       };
     });
     set({ decks: nextDecks });
-    reconcileMasteredWords(nextDecks);
+    reconcileMasteredWords(nextDecks, get().appLanguage);
   },
   
   renameDeck: async (deckId, newName) => {
@@ -2047,16 +2048,21 @@ export const useStore = create<DeckState>()((set, get) => ({
         if (safeLemma && safeLemma.length >= 2) {
           const currentDeck = get().decks.find(d => d.id === deckId);
           const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
           recordMasteredLemma(
             safeLemma,
             currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
-            currentDeck?.bookId
+            currentDeck?.bookId,
+            cardLang
           );
         }
       } else if (wasMasteredBefore && (!isCorrect || isHilfe || !validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel < 4))) {
         // Demotion! Списание при ошибке («Wiederholen / Не знаю»)
         if (safeLemma) {
-          removeMasteredLemma(safeLemma);
+          const currentDeck = get().decks.find(d => d.id === deckId);
+          const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
+          removeMasteredLemma(safeLemma, cardLang);
         }
       }
 
@@ -2145,16 +2151,21 @@ export const useStore = create<DeckState>()((set, get) => ({
         if (safeLemma && safeLemma.length >= 2) {
           const currentDeck = get().decks.find(d => d.id === deckId);
           const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
           recordMasteredLemma(
             safeLemma,
             currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
-            currentDeck?.bookId
+            currentDeck?.bookId,
+            cardLang
           );
         }
       } else if (wasMasteredBefore && score < 4) {
         // Demotion! Списание при ошибке или понижении прогресса
         if (safeLemma) {
-          removeMasteredLemma(safeLemma);
+          const currentDeck = get().decks.find(d => d.id === deckId);
+          const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
+          removeMasteredLemma(safeLemma, cardLang);
         }
       }
 
@@ -9433,8 +9444,9 @@ export default function App() {
         }
         if (idbDecks && idbDecks.length > 0) {
           setDecks(idbDecks);
-          backfillMasteredWordsFromDecks(idbDecks, idbBooks || undefined);
-          reconcileMasteredWords(idbDecks);
+          const currentLang = useStore.getState().appLanguage || 'DE';
+          backfillMasteredWordsFromDecks(idbDecks, idbBooks || undefined, currentLang);
+          reconcileMasteredWords(idbDecks, currentLang);
         }
       } catch (e) {}
 
@@ -9652,8 +9664,9 @@ export default function App() {
             localStorage.setItem('last_library_cloud_sync', String(Date.now()));
           }
           // ОБЯЗАТЕЛЬНЫЙ БЭКФИЛЛ: автоматический перенос всех ранее выученных слов в CEFR матрицу
-          backfillMasteredWordsFromDecks(enhancedDecks, useStore.getState().books);
-          reconcileMasteredWords(enhancedDecks);
+          const currentLang = useStore.getState().appLanguage || 'DE';
+          backfillMasteredWordsFromDecks(enhancedDecks, useStore.getState().books, currentLang);
+          reconcileMasteredWords(enhancedDecks, currentLang);
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
