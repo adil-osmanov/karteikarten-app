@@ -22,6 +22,8 @@ import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
+import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
+import { recordMasteredLemma, backfillMasteredWordsFromDecks } from "@/hooks/useWortschatzMatrix";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
@@ -1997,6 +1999,18 @@ const useStore = create<DeckState>()((set, get) => ({
 
     if (updatedCard) {
       const validCard = updatedCard as Flashcard;
+
+      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация выученного слова
+      if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
+        const currentDeck = get().decks.find(d => d.id === deckId);
+        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+        recordMasteredLemma({
+          rawWord: validCard.targetWord || (validCard as any).front || '',
+          bookId: currentDeck?.bookId,
+          bookLevel: currentBook?.activeLevels?.[0] || currentBook?.title || 'B2'
+        });
+      }
+
       try {
         const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
         localFactors[cardId] = validCard.easeFactor ?? 2.2;
@@ -2072,6 +2086,18 @@ const useStore = create<DeckState>()((set, get) => ({
 
     if (updatedCard) {
       const validCard = updatedCard as Flashcard;
+
+      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация выученного слова
+      if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
+        const currentDeck = get().decks.find(d => d.id === deckId);
+        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+        recordMasteredLemma({
+          rawWord: validCard.targetWord || (validCard as any).front || '',
+          bookId: currentDeck?.bookId,
+          bookLevel: currentBook?.activeLevels?.[0] || currentBook?.title || 'B2'
+        });
+      }
+
       try {
         const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
         localFactors[cardId] = validCard.easeFactor ?? 2.2;
@@ -5927,6 +5953,9 @@ function HeaderWidgets({
 
           {/* 3. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
           <div className="flex items-center justify-end flex-1 gap-2 order-2 sm:order-3">
+            {/* Wortschatz-Matrix (CEFR Умная матрица словарного запаса) */}
+            <WortschatzMatrixPopover />
+
             {/* Капсула счетчика */}
             <button 
               type="button"
@@ -9343,6 +9372,7 @@ export default function App() {
         }
         if (idbDecks && idbDecks.length > 0) {
           setDecks(idbDecks);
+          backfillMasteredWordsFromDecks(idbDecks, idbBooks || undefined);
         }
       } catch (e) {}
 
@@ -9548,6 +9578,8 @@ export default function App() {
           setDecks(enhancedDecks as Deck[]);
           setIDBItem('app_decks', enhancedDecks);
           safeSetStorage('cached_app_decks', JSON.stringify(enhancedDecks));
+          // ОБЯЗАТЕЛЬНЫЙ БЭКФИЛЛ: автоматический перенос всех ранее выученных слов в CEFR матрицу
+          backfillMasteredWordsFromDecks(enhancedDecks, useStore.getState().books);
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
