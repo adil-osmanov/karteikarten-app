@@ -22,9 +22,9 @@ const SUPPORTED_LANGS: AppLang[] = ['de', 'en', 'ru'];
 
 // In-memory reactive state isolated by language
 const globalMatrixStatsByLang: Record<AppLang, CEFRMatrixStats> = {
-  de: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'B2' },
-  en: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'B2' },
-  ru: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'B2' },
+  de: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
+  en: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
+  ru: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
 };
 
 const masteredLemmasSetByLang: Record<AppLang, Set<string>> = {

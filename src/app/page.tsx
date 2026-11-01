@@ -1068,6 +1068,7 @@ export interface Flashcard {
   hint?: string | null;
   grammarHint?: string | null;
   explanation?: string | null;
+  updated_at?: string;
 }
 
 export interface CardSRSUpdate {
@@ -1083,8 +1084,15 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
 
-  // 1. FAST IN-MEMORY RESOLUTION (Zero Egress, 0ms latency)
-  const inMemoryDecks = useStore.getState().decks;
+  // 1. FAST IN-MEMORY / IDB RESOLUTION (Zero Egress, 0ms latency)
+  let inMemoryDecks = useStore.getState().decks;
+  if (!inMemoryDecks || inMemoryDecks.length === 0) {
+    try {
+      const idb = await getIDBItem<Deck[]>('app_decks');
+      if (idb && idb.length > 0) inMemoryDecks = idb;
+    } catch {}
+  }
+
   if (inMemoryDecks && inMemoryDecks.length > 0) {
     let localCount = 0;
     inMemoryDecks.forEach(deck => {
@@ -1094,7 +1102,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       } else {
         if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
       }
-      deck.cards.forEach(card => {
+      deck.cards?.forEach(card => {
         if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
           localCount++;
         }
@@ -2025,12 +2033,18 @@ export const useStore = create<DeckState>()((set, get) => ({
       wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
       const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe);
       Object.assign(card, srsUpdate);
+      card.updated_at = new Date().toISOString();
 
       deck.cards[cardIndex] = card;
       updatedCard = card;
 
       return { decks: newDecks };
     });
+
+    // Атомарное сохранение в IndexedDB и localStorage
+    const nextDecks = get().decks;
+    setIDBItem('app_decks', nextDecks);
+    safeSetStorage('cached_app_decks', JSON.stringify(nextDecks));
 
     if (wasDueBefore || isHilfe || !isCorrect || (updatedCard && (updatedCard as Flashcard).isArchived)) {
       get().decrementDueCardsCount();
@@ -2072,19 +2086,24 @@ export const useStore = create<DeckState>()((set, get) => ({
         localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
       } catch (e) {}
 
-      const fullUpdate = {
+      const nowIso = new Date().toISOString();
+      const fullUpdate: Record<string, any> = {
         masteryLevel: validCard.masteryLevel,
-        isArchived: validCard.isArchived,
-        nextReviewDate: validCard.nextReviewDate,
+        isArchived: Boolean(validCard.isArchived),
         interval: validCard.interval,
-        repetitions: validCard.repetitions
+        repetitions: validCard.repetitions,
+        updated_at: nowIso
       };
+      if (validCard.nextReviewDate !== undefined) {
+        fullUpdate.nextReviewDate = validCard.nextReviewDate;
+      }
 
-      const { error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId);
+      const { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
       
       if (error) {
         console.error("Supabase Update Card Error:", error.message);
-        set({ decks: previousDecks });
+      } else if (!data || data.length === 0) {
+        console.warn("Supabase Update Card: 0 rows affected (RLS or missing row for ID:", cardId, ")");
       }
 
       // Also attempt upsert into user_card_progress for compatibility with multi-user / RPC
@@ -2128,12 +2147,18 @@ export const useStore = create<DeckState>()((set, get) => ({
         card.masteryLevel = Math.max(0, Math.min(3, score));
         card.isArchived = false;
       }
+      card.updated_at = new Date().toISOString();
       updatedCard = card;
       const newCards = deck.cards.map((c, i) => (i === ci ? card : c));
       const newDecks = [...state.decks];
       newDecks[di] = { ...deck, cards: newCards };
       return { decks: newDecks };
     });
+
+    // Атомарное сохранение в IndexedDB и localStorage
+    const nextDecks = get().decks;
+    setIDBItem('app_decks', nextDecks);
+    safeSetStorage('cached_app_decks', JSON.stringify(nextDecks));
 
     if (wasDueBefore || (updatedCard && (updatedCard as Flashcard).isArchived)) {
       get().decrementDueCardsCount();
@@ -2175,19 +2200,24 @@ export const useStore = create<DeckState>()((set, get) => ({
         localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
       } catch (e) {}
 
-      const fullUpdate = {
+      const nowIso = new Date().toISOString();
+      const fullUpdate: Record<string, any> = {
         masteryLevel: validCard.masteryLevel,
-        isArchived: validCard.isArchived,
-        nextReviewDate: validCard.nextReviewDate,
+        isArchived: Boolean(validCard.isArchived),
         interval: validCard.interval,
-        repetitions: validCard.repetitions
+        repetitions: validCard.repetitions,
+        updated_at: nowIso
       };
+      if (validCard.nextReviewDate !== undefined) {
+        fullUpdate.nextReviewDate = validCard.nextReviewDate;
+      }
 
-      const { error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId);
+      const { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
 
       if (error) {
         console.error("Supabase Update Card Error:", error.message);
-        set({ decks: previousDecks });
+      } else if (!data || data.length === 0) {
+        console.warn("Supabase Update Card: 0 rows affected (RLS or missing row for ID:", cardId, ")");
       }
 
       try {
@@ -9484,7 +9514,7 @@ export default function App() {
             : supabase.from('books').select('id, language, title, subtitle, category, training_mode, tintcolor, coverimage, activelevels, covertype, covervalue, accentcolor, cover_url_light').order('created_at', { ascending: true }),
           isLibraryFresh
             ? Promise.resolve({ data: null, error: null })
-            : supabase.from('decks').select('id, name, description, language, book_id, card_count, created_at, category, order_index, story, theory, materials, cards(id, deckId, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, easeFactor, baseWordInfo, forms, hint)').order('created_at', { ascending: true }),
+            : supabase.from('decks').select('id, name, description, language, book_id, card_count, created_at, category, order_index, story, theory, materials, cards(id, deckId, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, easeFactor, baseWordInfo, forms, hint, updated_at)').order('created_at', { ascending: true }),
           supabase.from('user_stats').select('language, daily_activity')
         ]).then(([booksRes, decksRes, statsRes]) => ({ booksRes, decksRes, statsRes }));
 
@@ -9619,6 +9649,17 @@ export default function App() {
           if (!localStorage.getItem('cached_app_decks')) { setDecks([]); }
         } else if (decksRes.data) {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
+          // Сбор локальных карточек для защиты от перезаписи свежих ответов старыми данными из облака (LWW)
+          const localCardMap = new Map<string, any>();
+          const currentLocalDecks = useStore.getState().decks;
+          if (Array.isArray(currentLocalDecks)) {
+            currentLocalDecks.forEach((d) => {
+              d.cards?.forEach((c) => {
+                if (c && c.id) localCardMap.set(c.id, c);
+              });
+            });
+          }
+
           const enhancedDecks = decksRes.data.map((d: any) => {
             let deckTheory = d.theory || null;
             if (!deckTheory && typeof window !== 'undefined') {
@@ -9639,17 +9680,37 @@ export default function App() {
               theory: deckTheory,
               materials: deckMaterials,
               card_count: d.card_count || d.cards?.length || 15,
-              cards: d.cards ? d.cards.map((c: any) => {
-                let ease = typeof c.easeFactor === 'number' ? c.easeFactor : undefined;
+              cards: d.cards ? d.cards.map((cloudCard: any) => {
+                let cardToUse = cloudCard;
+                const localCard = localCardMap.get(cloudCard.id);
+                if (localCard) {
+                  const localTime = localCard.updated_at ? new Date(localCard.updated_at).getTime() : 0;
+                  const cloudTime = cloudCard.updated_at ? new Date(cloudCard.updated_at).getTime() : 0;
+                  // Если локальная карточка обновлена свежее, чем в облаке — сохраняем локальный прогресс
+                  if (localTime > cloudTime) {
+                    cardToUse = {
+                      ...cloudCard,
+                      masteryLevel: localCard.masteryLevel,
+                      isArchived: localCard.isArchived,
+                      nextReviewDate: localCard.nextReviewDate,
+                      interval: localCard.interval,
+                      repetitions: localCard.repetitions,
+                      easeFactor: localCard.easeFactor ?? cloudCard.easeFactor,
+                      updated_at: localCard.updated_at
+                    };
+                  }
+                }
+
+                let ease = typeof cardToUse.easeFactor === 'number' ? cardToUse.easeFactor : undefined;
                 if (ease === undefined && typeof window !== 'undefined') {
                   try {
                     const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
-                    ease = localFactors[c.id];
+                    ease = localFactors[cardToUse.id];
                   } catch (e) {}
                 }
                 return {
-                  ...c,
-                  baseWordInfo: c.baseWordInfo || null,
+                  ...cardToUse,
+                  baseWordInfo: cardToUse.baseWordInfo || null,
                   easeFactor: typeof ease === 'number' ? ease : 2.2
                 };
               }) : [],
@@ -9821,7 +9882,7 @@ export default function App() {
     return list;
   }, [filteredDecksList]);
 
-  const displayDueCount = activeBookId ? dueCards.length : (dueCardsCount > 0 ? dueCardsCount : dueCards.length);
+  const displayDueCount = dueCards.length;
 
   const handleStartReviewDue = useCallback(async () => {
     setIsReviewingMistakes(false);
@@ -10702,9 +10763,6 @@ export default function App() {
                     <span className="text-[13px] sm:text-sm font-semibold tracking-tight leading-snug text-zinc-900 dark:text-zinc-100 truncate">
                       {UI_TRANSLATIONS[appLanguage]?.newBook || 'Neues Buch'}
                     </span>
-                    <p className="text-xs font-normal leading-normal text-zinc-500 dark:text-zinc-450 mt-0.5 truncate">
-                      Buch hinzufügen
-                    </p>
                   </div>
                 </div>
               </div>

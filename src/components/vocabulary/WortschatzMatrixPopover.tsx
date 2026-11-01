@@ -118,7 +118,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
         <span className="text-xs font-semibold tracking-tight">
           {totalMastered.toLocaleString()} {wordLabel}
         </span>
-        <span className="text-xs text-zinc-400 dark:text-zinc-500 font-mono">• {currentLevel || 'A1'}</span>
+        <span className="text-xs text-zinc-400 dark:text-zinc-500 font-mono">• {totalMastered === 0 ? 'A1' : (currentLevel || 'A1')}</span>
       </button>
 
       {/* РЕДИЗАЙН ПОПОВЕРА БЕЗ МЕРЦАНИЯ С АППАРАТНЫМ УСКОРЕНИЕМ */}
@@ -142,7 +142,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                 </span>
               </div>
               <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                {percentTotal.toFixed(1)}% Gesamt
+                {percentTotal.toFixed(1)}%
               </span>
             </div>
 
