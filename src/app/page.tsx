@@ -1082,6 +1082,27 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
 
+  // 1. FAST IN-MEMORY RESOLUTION (Zero Egress, 0ms latency)
+  const inMemoryDecks = useStore.getState().decks;
+  if (inMemoryDecks && inMemoryDecks.length > 0) {
+    let localCount = 0;
+    inMemoryDecks.forEach(deck => {
+      if (bookId) {
+        const dBookId = deck.bookId || (deck as any).book_id;
+        if (dBookId !== bookId) return;
+      } else {
+        if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
+      }
+      deck.cards.forEach(card => {
+        if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+          localCount++;
+        }
+      });
+    });
+    return localCount;
+  }
+
+  // 2. Only if local decks are completely empty, query Supabase
   if (bookId) {
     try {
       const { count, error } = await supabase
@@ -1098,7 +1119,6 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       console.warn('Direct query on cards count for book error:', e);
     }
   } else {
-    // 1. Try Supabase RPC get_due_cards_count if available
     try {
       let uid = userId;
       if (!uid) {
@@ -1114,11 +1134,8 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
           return rpcData;
         }
       }
-    } catch (e) {
-      // fall through to direct query
-    }
+    } catch (e) {}
 
-    // 2. Direct exact query on cards table joined with decks (single source of truth)
     try {
       const { count, error } = await supabase
         .from('cards')
@@ -1130,45 +1147,34 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       if (!error && typeof count === 'number') {
         return count;
       }
-    } catch (e) {
-      console.warn('Direct query on cards count error:', e);
-    }
-
-    // 3. Fallback: query without inner join
-    try {
-      const { count, error } = await supabase
-        .from('cards')
-        .select('id', { count: 'exact', head: true })
-        .eq('isArchived', true)
-        .lte('nextReviewDate', now);
-      if (!error && typeof count === 'number') {
-        return count;
-      }
     } catch (e) {}
   }
 
-  // Fallback to in-memory decks
-  let localCount = 0;
-  useStore.getState().decks.forEach(deck => {
-    if (bookId) {
-      const dBookId = deck.bookId || (deck as any).book_id;
-      if (dBookId !== bookId) return;
-    } else {
-      if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
-    }
-    deck.cards.forEach(card => {
-      if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
-        localCount++;
-      }
-    });
-  });
-  return localCount;
+  return 0;
 }
 
 export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: string): Promise<{ deckId: string, card: Flashcard }[]> {
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
 
+  // 1. FAST IN-MEMORY RESOLUTION (Zero network egress)
+  const inMemoryDecks = useStore.getState().decks;
+  if (inMemoryDecks && inMemoryDecks.length > 0) {
+    const list: { deckId: string, card: Flashcard }[] = [];
+    inMemoryDecks.forEach(deck => {
+      const dBookId = deck.bookId || (deck as any).book_id;
+      if (bookId && dBookId !== bookId) return;
+      if (!bookId && normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
+      deck.cards.forEach(card => {
+        if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+          list.push({ deckId: deck.id, card });
+        }
+      });
+    });
+    if (list.length > 0) return list;
+  }
+
+  // 2. Fallback to narrow remote query
   try {
     let query = supabase
       .from('cards')
@@ -1426,6 +1432,16 @@ export interface Deck {
   theory?: StructuredTheory | string | null;
   materials?: string[];
   card_count?: number;
+}
+
+let cachedUserId: string | null = null;
+export async function getCachedUserId(): Promise<string | null> {
+  if (cachedUserId) return cachedUserId;
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    cachedUserId = authData?.user?.id || null;
+  } catch {}
+  return cachedUserId;
 }
 
 interface DeckState {
@@ -2041,11 +2057,7 @@ const useStore = create<DeckState>()((set, get) => ({
 
       // Also attempt upsert into user_card_progress for compatibility with multi-user / RPC
       try {
-        let currentUserId: string | null = null;
-        try {
-          const { data: authData } = await supabase.auth.getUser();
-          currentUserId = authData?.user?.id || null;
-        } catch {}
+        const currentUserId = await getCachedUserId();
         if (currentUserId) {
           const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
           await supabase.from('user_card_progress').upsert({
@@ -2136,11 +2148,7 @@ const useStore = create<DeckState>()((set, get) => ({
       }
 
       try {
-        let currentUserId: string | null = null;
-        try {
-          const { data: authData } = await supabase.auth.getUser();
-          currentUserId = authData?.user?.id || null;
-        } catch {}
+        const currentUserId = await getCachedUserId();
         if (currentUserId) {
           const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
           await supabase.from('user_card_progress').upsert({
@@ -9172,9 +9180,13 @@ export default function App() {
     checkAndResetDailyProgress();
     refreshDueCardsCount(appLanguage);
 
+    let debounceTimer: any = null;
     const handleSync = () => {
-      checkAndResetDailyProgress();
-      refreshDueCardsCount(appLanguage);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        checkAndResetDailyProgress();
+        refreshDueCardsCount(appLanguage);
+      }, 300);
     };
 
     const handleVisibility = () => {
@@ -9196,11 +9208,12 @@ export default function App() {
         schema: 'public',
         table: 'cards'
       }, () => {
-        refreshDueCardsCount(appLanguage);
+        handleSync();
       })
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(cardsChannel);
       window.removeEventListener('focus', handleSync);
       window.removeEventListener('pageshow', handleSync);
@@ -9410,16 +9423,24 @@ export default function App() {
       } catch (e) {}
       useStore.setState({ isLoaded: true });
       
-      // 3. Background Cloud Fetch with 12s timeout to prevent infinite freezes
+      // 3. Background Cloud Fetch with Cache Guard (Throttles massive multi-megabyte card downloads)
       try {
+        const lastLibrarySync = localStorage.getItem('last_library_cloud_sync');
+        const inMemoryDecks = useStore.getState().decks;
+        const isLibraryFresh = Boolean(inMemoryDecks && inMemoryDecks.length > 0 && lastLibrarySync && (Date.now() - Number(lastLibrarySync) < 15 * 60 * 1000));
+
         const timeoutPromise = new Promise<{ booksRes: any, decksRes: any, statsRes: any }>((_, reject) => 
           setTimeout(() => reject(new Error('Supabase fetch timeout')), 12000)
         );
 
         const fetchPromise = Promise.all([
-          supabase.from('books').select('*').order('created_at', { ascending: true }),
-          supabase.from('decks').select('*, cards(*)').order('created_at', { ascending: true }),
-          supabase.from('user_stats').select('*')
+          isLibraryFresh
+            ? Promise.resolve({ data: null, error: null })
+            : supabase.from('books').select('id, language, title, subtitle, category, training_mode, tintcolor, coverimage, activelevels, covertype, covervalue, accentcolor, cover_url_light').order('created_at', { ascending: true }),
+          isLibraryFresh
+            ? Promise.resolve({ data: null, error: null })
+            : supabase.from('decks').select('id, name, description, language, book_id, card_count, created_at, category, order_index, story, theory, materials, cards(id, deckId, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, easeFactor, baseWordInfo, forms, hint)').order('created_at', { ascending: true }),
+          supabase.from('user_stats').select('language, daily_activity')
         ]).then(([booksRes, decksRes, statsRes]) => ({ booksRes, decksRes, statsRes }));
 
         const { booksRes, decksRes, statsRes } = await Promise.race([fetchPromise, timeoutPromise]);
@@ -9594,6 +9615,9 @@ export default function App() {
           setDecks(enhancedDecks as Deck[]);
           setIDBItem('app_decks', enhancedDecks);
           safeSetStorage('cached_app_decks', JSON.stringify(enhancedDecks));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('last_library_cloud_sync', String(Date.now()));
+          }
           // ОБЯЗАТЕЛЬНЫЙ БЭКФИЛЛ: автоматический перенос всех ранее выученных слов в CEFR матрицу
           backfillMasteredWordsFromDecks(enhancedDecks, useStore.getState().books);
         }
@@ -9755,6 +9779,13 @@ export default function App() {
   const handleStartReviewDue = useCallback(async () => {
     setIsReviewingMistakes(false);
     initAudioCtx();
+
+    // 1. FAST IN-MEMORY PATH: Use local dueCards immediately (0 network requests)
+    if (dueCards.length > 0) {
+      setReviewCards(dueCards);
+      return;
+    }
+
     try {
       const targetLang = activeBook?.language || appLanguage;
       const freshCards = await fetchDueCardsFromCloud(targetLang, activeBookId || undefined);
@@ -9764,9 +9795,6 @@ export default function App() {
       }
     } catch (e) {
       console.warn('Failed to load fresh due cards from cloud, falling back to local:', e);
-    }
-    if (dueCards.length > 0) {
-      setReviewCards(dueCards);
     }
   }, [appLanguage, activeBook, activeBookId, dueCards]);
 

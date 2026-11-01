@@ -173,12 +173,18 @@ export async function removeMasteredLemma(params: {
  * Performs backfill from existing in-memory/cached decks.
  * Scans all cards with masteryLevel >= 4 or isArchived === true,
  * deduplicates them, and writes to database & local storage.
+ * GUARANTEED: Runs strictly ONCE across user sessions.
  */
 export async function backfillMasteredWordsFromDecks(
   decks: Array<{ id: string; bookId?: string; cards?: Array<any> }>,
   books?: Array<{ id: string; activeLevels?: string[]; title?: string }>
 ) {
   if (!Array.isArray(decks) || decks.length === 0) return;
+
+  // STRICT GUARD: Skip if already backfilled previously
+  if (typeof window !== 'undefined' && localStorage.getItem('cefr_backfill_completed') === 'true') {
+    return;
+  }
 
   const bookLevelMap = new Map<string, string>();
   if (books) {
@@ -213,6 +219,11 @@ export async function backfillMasteredWordsFromDecks(
     }
   }
 
+  // Mark backfill as completed immediately to prevent duplicate runs
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('cefr_backfill_completed', 'true');
+  }
+
   // Batch sync newly discovered historical words to Supabase
   if (newLemmasToUpsert.length > 0) {
     try {
@@ -241,6 +252,7 @@ export async function backfillMasteredWordsFromDecks(
 
 /**
  * Initializes the Wortschatz-Matrix state from local storage and Supabase view
+ * with strict caching and egress prevention.
  */
 function initMatrixStore() {
   if (hasInitialized || typeof window === 'undefined') return;
@@ -264,6 +276,13 @@ function initMatrixStore() {
     }
   } catch (e) {}
 
+  // Check TTL: avoid hammering Supabase on every reload if local cache is fresh
+  const MATRIX_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+  const lastSync = typeof window !== 'undefined' ? localStorage.getItem('cefr_last_matrix_sync') : null;
+  if (lastSync && Date.now() - Number(lastSync) < MATRIX_CACHE_TTL && globalMatrixStats.totalWords > 0) {
+    return;
+  }
+
   // Async remote reconciliation from Supabase view_user_cefr_stats
   (async () => {
     try {
@@ -274,7 +293,7 @@ function initMatrixStore() {
       // 1. Check aggregate stats view
       const { data: viewStats, error: viewError } = await supabase
         .from('view_user_cefr_stats')
-        .select('*')
+        .select('cefr_level, mastered_count')
         .eq('user_id', userId);
 
       if (!viewError && Array.isArray(viewStats) && viewStats.length > 0) {
@@ -289,12 +308,11 @@ function initMatrixStore() {
         viewStats.forEach((row: any) => {
           const lvl = row.cefr_level as CEFRLevel;
           if (remoteCounts[lvl] !== undefined) {
-            remoteCounts[lvl] = row.count || 0;
+            remoteCounts[lvl] = row.mastered_count || row.count || 0;
           }
         });
 
         const total = Object.values(remoteCounts).reduce((acc, curr) => acc + curr, 0);
-        // Only override if remote has higher or equal counts
         if (total >= globalMatrixStats.totalWords) {
           globalMatrixStats = {
             counts: remoteCounts,
@@ -306,17 +324,23 @@ function initMatrixStore() {
         }
       }
 
-      // 2. Fetch existing mastered lemmas to guarantee local deduplication
-      const { data: lemmaRows } = await supabase
-        .from('user_mastered_words')
-        .select('lemma, cefr_level')
-        .eq('user_id', userId);
+      // 2. Fetch existing mastered lemmas only if local lemma cache is empty
+      if (masteredLemmasSet.size === 0) {
+        const { data: lemmaRows } = await supabase
+          .from('user_mastered_words')
+          .select('lemma, cefr_level')
+          .eq('user_id', userId);
 
-      if (Array.isArray(lemmaRows)) {
-        lemmaRows.forEach((r: any) => {
-          if (r.lemma) masteredLemmasSet.add(r.lemma);
-        });
-        localStorage.setItem(STORAGE_KEY_LEMMAS, JSON.stringify(Array.from(masteredLemmasSet)));
+        if (Array.isArray(lemmaRows)) {
+          lemmaRows.forEach((r: any) => {
+            if (r.lemma) masteredLemmasSet.add(r.lemma);
+          });
+          localStorage.setItem(STORAGE_KEY_LEMMAS, JSON.stringify(Array.from(masteredLemmasSet)));
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('cefr_last_matrix_sync', String(Date.now()));
       }
     } catch (e) {
       // Offline fallback: keep local data
