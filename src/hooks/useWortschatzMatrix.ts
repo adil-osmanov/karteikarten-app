@@ -111,45 +111,122 @@ function updateLocalState(lemma: string, level: CEFRLevel, lang: AppLang): boole
 
 /**
  * Cloud-First Single Source of Truth (SSOT) synchronization.
- * Pulls all mastered words directly from Supabase user_mastered_words with ZERO TTL.
- * Completely overwrites local mastered set with cloud data.
+ * Pulls all mastered words directly from Supabase user_mastered_words (or directly from mastered cards in Supabase) with ZERO TTL.
  */
 export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<void> {
   try {
-    const { data: authData } = await supabase.auth.getUser();
-    const userId = authData?.user?.id;
-    if (!userId) return;
+    let remoteRows: Array<{ lemma: string; cefr_level?: string | null }> | null = null;
 
-    // Direct lightweight cloud fetch - Single Source of Truth
-    const { data: remoteRows, error } = await supabase
-      .from('user_mastered_words')
-      .select('lemma, cefr_level')
-      .eq('user_id', userId);
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id;
+      if (userId) {
+        const { data, error } = await supabase
+          .from('user_mastered_words')
+          .select('lemma, cefr_level')
+          .eq('user_id', userId);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          remoteRows = data;
+        }
+      }
+    } catch {}
 
-    if (error) {
-      console.warn('[Wortschatz-Matrix] Cloud sync query warning:', error.message);
-      return;
-    }
+    // If user_mastered_words is empty or user is anon, backfill from local decks or directly from Supabase cards!
+    if (!remoteRows || remoteRows.length === 0) {
+      try {
+        const { useStore } = await import('@/app/page');
+        const decks = useStore.getState().decks;
+        const books = useStore.getState().books;
+        if (Array.isArray(decks) && decks.length > 0) {
+          const count = await autoBackfillMasteredWords(decks, books, lang);
+          if (count > 0) return;
+        }
+      } catch {}
 
-    if (Array.isArray(remoteRows)) {
-      if (remoteRows.length === 0) {
-        // Cloud is empty. Attempt auto-backfill from local decks if available!
-        try {
-          const { useStore } = await import('@/app/page');
-          const decks = useStore.getState().decks;
-          const books = useStore.getState().books;
-          if (Array.isArray(decks) && decks.length > 0) {
-            const count = await autoBackfillMasteredWords(decks, books, lang);
-            if (count > 0) return;
-          }
-        } catch {}
+      // Direct fallback query to Supabase cards table (stage 4 / archived) so matrix works even while decks are still loading
+      let allMasteredCards: any[] = [];
+      let from = 0;
+      const PAGE_SIZE = 1000;
+      let hasMore = true;
 
-        // If local decks are not ready yet but we have cached state, do NOT zero out!
-        if (masteredLemmasSetByLang[lang].size > 0 || globalMatrixStatsByLang[lang].totalWords > 0) {
-          return;
+      while (hasMore) {
+        const { data: cardRows, error: cardErr } = await supabase
+          .from('cards')
+          .select('targetWord, masteryLevel, isArchived, decks!inner(language, level, book_id)')
+          .or('isArchived.eq.true,masteryLevel.gte.4')
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (cardErr || !cardRows || cardRows.length === 0) {
+          hasMore = false;
+        } else {
+          allMasteredCards = allMasteredCards.concat(cardRows);
+          from += PAGE_SIZE;
+          hasMore = cardRows.length === PAGE_SIZE;
         }
       }
 
+      if (allMasteredCards.length > 0) {
+        const masteredSet = masteredLemmasSetByLang[lang];
+        const levelMap = lemmaLevelMapByLang[lang];
+        masteredSet.clear();
+        levelMap.clear();
+
+        const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
+
+        for (const c of allMasteredCards) {
+          const deckObj = Array.isArray(c.decks) ? c.decks[0] : c.decks;
+          const dLang = normalizeLanguageCode(deckObj?.language || 'de');
+          if (dLang !== lang) continue;
+
+          const raw = c.targetWord || '';
+          const clean = extractLemma(raw, lang);
+          if (!clean || clean.length < 2 || !isValidLemma(clean, lang)) continue;
+          if (masteredSet.has(clean)) continue;
+
+          masteredSet.add(clean);
+          const defaultBookLevel = deckObj?.level || 'B2';
+          const officialLevel = GLOBAL_LEXICON_CACHE[lang]?.[clean];
+          const resolvedLevel: CEFRLevel =
+            officialLevel || resolveCEFRLevel(clean, defaultBookLevel, lang);
+
+          levelMap.set(clean, resolvedLevel);
+          if (updatedCounts[resolvedLevel] !== undefined) {
+            updatedCounts[resolvedLevel] += 1;
+          }
+        }
+
+        const total = Object.values(updatedCounts).reduce((a, b) => a + b, 0);
+        const activeLevel = calculateActiveLevel(updatedCounts, lang);
+
+        globalMatrixStatsByLang[lang] = {
+          counts: updatedCounts,
+          totalWords: total,
+          activeLevel,
+        };
+
+        if (typeof window !== 'undefined') {
+          try {
+            const { statsKey, lemmasKey, cacheKeyV3 } = getStorageKeys(lang);
+            const cachePayload = {
+              counts: updatedCounts,
+              totalWords: total,
+              activeLevel,
+              lemmas: Array.from(masteredSet),
+              updatedAt: Date.now(),
+            };
+            localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[lang]));
+            localStorage.setItem(lemmasKey, JSON.stringify(Array.from(masteredSet)));
+            localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
+            localStorage.setItem(`cefr_mastered_cache_v3_${lang}`, JSON.stringify(cachePayload));
+          } catch {}
+        }
+
+        notifyListeners(lang);
+      }
+      return;
+    }
+
+    if (Array.isArray(remoteRows) && remoteRows.length > 0) {
       const masteredSet = masteredLemmasSetByLang[lang];
       const levelMap = lemmaLevelMapByLang[lang];
 
@@ -438,6 +515,8 @@ export async function autoBackfillMasteredWords(
   }
 
   if (!Array.isArray(decks) || decks.length === 0) return 0;
+  const totalCardsInDecks = decks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
+  if (totalCardsInDecks === 0) return 0;
 
   const bookMap = new Map<string, any>();
   if (Array.isArray(books)) {
@@ -453,14 +532,17 @@ export async function autoBackfillMasteredWords(
   const recoveredMap = new Map<string, { level: CEFRLevel; bookId?: string }>();
 
   langDecks.forEach((deck) => {
-    const parentBook = deck.bookId ? bookMap.get(deck.bookId) : undefined;
-    const defaultBookLevel = parentBook?.activeLevels?.[0] || parentBook?.title || (deck as any).level || 'B2';
+    const dBookId = deck.bookId || (deck as any).book_id;
+    const parentBook = dBookId ? bookMap.get(dBookId) : undefined;
+    const defaultBookLevel = (deck as any).level || parentBook?.activeLevels?.[0] || parentBook?.title || 'B2';
 
     deck.cards?.forEach((card: any) => {
-      const isMastered = (card.masteryLevel !== undefined && card.masteryLevel >= 4) || card.isArchived === true;
+      const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
+      const archived = card.isArchived ?? card.is_archived ?? false;
+      const isMastered = mastery >= 4 || archived === true;
       if (!isMastered) return;
 
-      const raw = card.targetWord || card.missingWord || card.infinitive || card.front || '';
+      const raw = card.targetWord || card.target_word || card.missingWord || card.infinitive || card.front || '';
       const clean = extractLemma(raw, targetLang);
       if (!clean || clean.length < 2 || !isValidLemma(clean, targetLang)) return;
 
@@ -468,7 +550,7 @@ export async function autoBackfillMasteredWords(
         const officialLevel = GLOBAL_LEXICON_CACHE[targetLang]?.[clean];
         const resolvedLevel: CEFRLevel =
           officialLevel || resolveCEFRLevel(clean, defaultBookLevel, targetLang);
-        recoveredMap.set(clean, { level: resolvedLevel, bookId: deck.bookId });
+        recoveredMap.set(clean, { level: resolvedLevel, bookId: dBookId });
       }
     });
   });
@@ -477,6 +559,9 @@ export async function autoBackfillMasteredWords(
 
   const masteredSet = masteredLemmasSetByLang[targetLang];
   const levelMap = lemmaLevelMapByLang[targetLang];
+
+  masteredSet.clear();
+  levelMap.clear();
 
   recoveredMap.forEach(({ level }, lemma) => {
     masteredSet.add(lemma);
@@ -582,6 +667,8 @@ export async function reconcileMasteredWords(
   }
 
   if (!Array.isArray(currentDecks) || currentDecks.length === 0) return;
+  const totalCardsInDecks = currentDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
+  if (totalCardsInDecks === 0) return;
   initMatrixStore(targetLang);
 
   const masteredSet = masteredLemmasSetByLang[targetLang];

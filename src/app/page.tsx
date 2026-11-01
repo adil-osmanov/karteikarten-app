@@ -1083,35 +1083,123 @@ export interface CardSRSUpdate {
 export function isCardDueForReview(card: any): boolean {
   if (!card) return false;
 
-  // 1. В очередь общего повторения попадают ТОЛЬКО слова 4 этапа / архив!
-  const isMasteredOrArchived = (card.masteryLevel ?? 0) >= 4 || card.isArchived === true;
-  if (!isMasteredOrArchived) {
-    return false; // Карточки этапов 0, 1, 2, 3 исключены из хедера, они учатся внутри колод!
-  }
+  // Учитываем и camelCase, и snake_case
+  const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
+  const archived = card.isArchived ?? card.is_archived ?? false;
 
-  // 2. Проверяем срок ревью (поддерживаем camelCase и snake_case)
-  const rawDate = card.nextReviewDate || card.next_review_date;
-  if (!rawDate) {
-    return false; // Если дата не задана, не спамим
-  }
-
-  const reviewTimestamp = new Date(rawDate).getTime();
-  if (isNaN(reviewTimestamp)) {
+  // 1. В глобальный повтор идут ТОЛЬКО выученные слова 4 этапа (из архива)
+  if (mastery < 4 && !archived) {
     return false;
   }
 
-  // 3. Отдаем на повторение СТРОГО тогда, когда наступил срок
-  // Сравниваем с округлением до минут для строгой синхронизации между браузерами
-  return Math.floor(reviewTimestamp / 60000) <= Math.floor(Date.now() / 60000);
+  // 2. Проверяем дату
+  const rawDate = card.nextReviewDate || card.next_review_date;
+  if (!rawDate) return false;
+
+  const reviewTime = new Date(rawDate).getTime();
+  if (isNaN(reviewTime)) return false;
+
+  // Округляем до минуты во избежание микросекундных расхождений между вкладками
+  return Math.floor(reviewTime / 60000) <= Math.floor(Date.now() / 60000);
 }
 
 export const isCardDue = isCardDueForReview;
+
+let lastSupabaseCardsCount = 0;
+
+export async function fetchAllUserCards(userId?: string): Promise<any[]> {
+  let allCards: any[] = [];
+  let from = 0;
+  const PAGE_SIZE = 1000;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('cards')
+      .select('*')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error('🚨 [SYNC ERROR] Ошибка пагинации cards:', error);
+      break;
+    }
+    if (data && data.length > 0) {
+      allCards = allCards.concat(data);
+      from += PAGE_SIZE;
+      hasMore = data.length === PAGE_SIZE;
+    } else {
+      hasMore = false;
+    }
+  }
+  if (allCards.length > 0) {
+    lastSupabaseCardsCount = allCards.length;
+  }
+  return allCards;
+}
+
+export async function updateCardInSupabase(cardId: string, validCard: any): Promise<boolean> {
+  const nextMastery = validCard.masteryLevel ?? validCard.mastery_level ?? 0;
+  const isArchived = Boolean(validCard.isArchived ?? validCard.is_archived);
+  const nextInterval = validCard.interval ?? 0;
+  const nextRepetitions = validCard.repetitions ?? 0;
+  const rawReviewDate = validCard.nextReviewDate !== undefined ? validCard.nextReviewDate : validCard.next_review_date;
+  const numericReviewDate =
+    rawReviewDate === null || rawReviewDate === undefined
+      ? null
+      : typeof rawReviewDate === 'number'
+      ? Math.round(rawReviewDate)
+      : new Date(rawReviewDate).getTime();
+
+  const primaryPayload: Record<string, any> = {
+    masteryLevel: nextMastery,
+    isArchived: isArchived,
+    interval: nextInterval,
+    repetitions: nextRepetitions,
+    nextReviewDate: numericReviewDate,
+  };
+
+  let { data, error } = await supabase
+    .from('cards')
+    .update(primaryPayload)
+    .eq('id', cardId)
+    .select('id');
+
+  if (error) {
+    const isoReviewDate = numericReviewDate ? new Date(numericReviewDate).toISOString() : null;
+    const snakePayload: Record<string, any> = {
+      mastery_level: nextMastery,
+      is_archived: isArchived,
+      interval: nextInterval,
+      repetitions: nextRepetitions,
+      next_review_date: isoReviewDate,
+    };
+    const retry = await supabase
+      .from('cards')
+      .update(snakePayload)
+      .eq('id', cardId)
+      .select('id');
+    if (!retry.error) {
+      error = null;
+      data = retry.data;
+    }
+  }
+
+  if (error) {
+    console.error('🚨 [SYNC ERROR] Ошибка сохранения карточки в Supabase:', error);
+    return false;
+  }
+  if (!data || data.length === 0) {
+    console.warn('🚨 [SYNC ERROR] Supabase Update Card: 0 rows affected (RLS or missing row for ID:', cardId, ')');
+    return false;
+  }
+  return true;
+}
 
 export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, bookId?: string): Promise<number> {
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
 
-  // 1. FAST IN-MEMORY / IDB RESOLUTION (Zero Egress, 0ms latency)
   let inMemoryDecks = useStore.getState().decks;
   if (!inMemoryDecks || inMemoryDecks.length === 0) {
     try {
@@ -1120,17 +1208,21 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
     } catch {}
   }
 
-  if (inMemoryDecks && inMemoryDecks.length > 0) {
+  const totalCardsInMemory = Array.isArray(inMemoryDecks)
+    ? inMemoryDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0)
+    : 0;
+
+  if (inMemoryDecks && inMemoryDecks.length > 0 && totalCardsInMemory > 0) {
     let localCount = 0;
     inMemoryDecks.forEach(deck => {
       if (bookId) {
         const dBookId = deck.bookId || (deck as any).book_id;
         if (dBookId !== bookId) return;
       } else {
-        if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
+        if ((deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
       }
       deck.cards?.forEach(card => {
-        if (isCardDue(card)) {
+        if (isCardDueForReview(card)) {
           localCount++;
         }
       });
@@ -1157,30 +1249,13 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
     }
   } else {
     try {
-      let uid = userId;
-      if (!uid) {
-        const { data: authData } = await supabase.auth.getUser();
-        uid = authData?.user?.id;
-      }
-      if (uid) {
-        const { data: rpcData, error: rpcError } = await supabase.rpc('get_due_cards_count', {
-          p_user_id: uid,
-          p_lang: cleanLang
-        });
-        if (!rpcError && typeof rpcData === 'number') {
-          return rpcData;
-        }
-      }
-    } catch (e) {}
-
-    try {
       const { count, error } = await supabase
         .from('cards')
         .select('id, decks!inner(language)', { count: 'exact', head: true })
         .or('isArchived.eq.true,masteryLevel.gte.4')
         .not('nextReviewDate', 'is', null)
         .lte('nextReviewDate', now)
-        .eq('decks.language', cleanLang);
+        .ilike('decks.language', cleanLang);
 
       if (!error && typeof count === 'number') {
         return count;
@@ -1195,15 +1270,18 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
 
-  // 1. FAST IN-MEMORY RESOLUTION (Zero network egress)
   const inMemoryDecks = useStore.getState().decks;
-  if (inMemoryDecks && inMemoryDecks.length > 0) {
+  const totalCardsInMemory = Array.isArray(inMemoryDecks)
+    ? inMemoryDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0)
+    : 0;
+
+  if (inMemoryDecks && inMemoryDecks.length > 0 && totalCardsInMemory > 0) {
     const list: { deckId: string, card: Flashcard }[] = [];
     inMemoryDecks.forEach(deck => {
       const dBookId = deck.bookId || (deck as any).book_id;
       if (bookId && dBookId !== bookId) return;
-      if (!bookId && normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
-      deck.cards.forEach(card => {
+      if (!bookId && (deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
+      deck.cards?.forEach(card => {
         if (isCardDueForReview(card)) {
           list.push({ deckId: deck.id, card });
         }
@@ -1212,7 +1290,6 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
     if (list.length > 0) return list;
   }
 
-  // 2. Fallback to narrow remote query
   try {
     let query = supabase
       .from('cards')
@@ -1224,7 +1301,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
     if (bookId) {
       query = query.eq('decks.book_id', bookId);
     } else {
-      query = query.eq('decks.language', cleanLang);
+      query = query.ilike('decks.language', cleanLang);
     }
 
     const { data, error } = await query
@@ -1232,85 +1309,111 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       .limit(1000);
 
     if (!error && Array.isArray(data) && data.length > 0) {
-      return data.map((row: any) => ({
-        deckId: row.deck_id || row.decks?.id || '',
-        card: {
-          id: row.id,
-          targetWord: row.targetWord,
-          sentence: row.sentence,
-          translation: row.translation,
-          options: Array.isArray(row.options) ? row.options : [],
-          masteryLevel: row.masteryLevel ?? 0,
-          isArchived: Boolean(row.isArchived),
-          nextReviewDate: row.nextReviewDate,
-          interval: row.interval ?? 0,
-          repetitions: row.repetitions ?? 0,
-          baseWordInfo: row.baseWordInfo,
-          forms: row.forms
-        } as Flashcard
-      }));
+      return data
+        .filter((row: any) => isCardDueForReview(row))
+        .map((row: any) => ({
+          deckId: row.deck_id || row.decks?.id || '',
+          card: {
+            id: row.id,
+            targetWord: row.targetWord,
+            sentence: row.sentence,
+            translation: row.translation,
+            options: Array.isArray(row.options) ? row.options : [],
+            masteryLevel: row.masteryLevel ?? row.mastery_level ?? 0,
+            isArchived: Boolean(row.isArchived ?? row.is_archived),
+            nextReviewDate: row.nextReviewDate ?? row.next_review_date,
+            interval: row.interval ?? 0,
+            repetitions: row.repetitions ?? 0,
+            baseWordInfo: row.baseWordInfo,
+            forms: row.forms
+          } as Flashcard
+        }));
     }
   } catch (e) {
     console.error('Failed to fetch due cards from cloud:', e);
   }
 
-  // Fallback to in-memory decks if cloud query returns empty or fails
-  const list: { deckId: string, card: Flashcard }[] = [];
-  useStore.getState().decks.forEach(deck => {
-    if (bookId) {
-      const dBookId = deck.bookId || (deck as any).book_id;
-      if (dBookId !== bookId) return;
-    } else {
-      if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
-    }
-    deck.cards.forEach(card => {
-      if (isCardDue(card)) {
-        list.push({ deckId: deck.id, card });
-      }
-    });
-  });
-  return list;
+  return [];
 }
 
 export async function syncCardsFromSupabase(): Promise<void> {
   try {
-    const { data: remoteCards, error } = await supabase
-      .from('cards')
-      .select('id, masteryLevel, repetitions, interval, nextReviewDate, isArchived')
-      .or('repetitions.gt.0,masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
-      .limit(10000);
-
-    if (error) {
-      console.warn("syncCardsFromSupabase error:", error.message);
-      return;
-    }
+    const remoteCards = await fetchAllUserCards();
     if (!remoteCards || remoteCards.length === 0) return;
 
-    const remoteMap = new Map<string, any>(remoteCards.map(c => [c.id, c]));
+    const remoteMap = new Map<string, any>();
+    const remoteByDeck = new Map<string, any[]>();
+    let easeMap: Record<string, number> = {};
+    if (typeof window !== 'undefined') {
+      try {
+        easeMap = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
+      } catch {}
+    }
+
+    for (const c of remoteCards) {
+      const normalizedCard = {
+        ...c,
+        id: c.id,
+        deckId: c.deck_id || c.deckId,
+        deck_id: c.deck_id || c.deckId,
+        targetWord: c.targetWord ?? c.target_word ?? '',
+        sentence: c.sentence ?? '',
+        translation: c.translation ?? '',
+        options: Array.isArray(c.options) ? c.options : [],
+        masteryLevel: c.masteryLevel ?? c.mastery_level ?? 0,
+        isArchived: Boolean(c.isArchived ?? c.is_archived),
+        nextReviewDate: c.nextReviewDate !== undefined ? c.nextReviewDate : (c.next_review_date ?? null),
+        interval: c.interval ?? 0,
+        repetitions: c.repetitions ?? 0,
+        baseWordInfo: c.baseWordInfo || null,
+        forms: c.forms || '',
+        easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : (easeMap[c.id] ?? 2.2),
+      };
+      remoteMap.set(c.id, normalizedCard);
+      const dId = normalizedCard.deck_id;
+      if (dId) {
+        if (!remoteByDeck.has(dId)) remoteByDeck.set(dId, []);
+        remoteByDeck.get(dId)!.push(normalizedCard);
+      }
+    }
+
     const currentDecks = useStore.getState().decks;
     if (!currentDecks || currentDecks.length === 0) return;
 
     let hasChanges = false;
     const nextDecks = currentDecks.map(deck => {
+      const remoteDeckCards = remoteByDeck.get(deck.id) || [];
+      const currentDeckCards = Array.isArray(deck.cards) ? deck.cards : [];
+
+      // If local deck had stripped/missing cards, restore full card list from Supabase
+      if (currentDeckCards.length !== remoteDeckCards.length && remoteDeckCards.length > 0) {
+        hasChanges = true;
+        return {
+          ...deck,
+          card_count: remoteDeckCards.length,
+          cards: remoteDeckCards,
+        };
+      }
+
       let deckChanged = false;
-      const updatedCards = deck.cards.map(card => {
+      const updatedCards = currentDeckCards.map(card => {
         const remote = remoteMap.get(card.id);
         if (!remote) return card;
 
-        const remoteNextReviewDate = remote.nextReviewDate !== undefined ? remote.nextReviewDate : (remote as any).next_review_date;
-        const remoteMastery = remote.masteryLevel !== undefined ? remote.masteryLevel : (remote as any).mastery_level;
-        const remoteRepetitions = remote.repetitions !== undefined ? remote.repetitions : (remote as any).repetitions;
-        const remoteInterval = remote.interval !== undefined ? remote.interval : (remote as any).interval;
-        const remoteIsArchived = remote.isArchived !== undefined ? Boolean(remote.isArchived) : Boolean((remote as any).is_archived);
+        const remoteNextReviewDate = remote.nextReviewDate;
+        const remoteMastery = remote.masteryLevel;
+        const remoteRepetitions = remote.repetitions;
+        const remoteInterval = remote.interval;
+        const remoteIsArchived = Boolean(remote.isArchived);
 
         const localTime = card.nextReviewDate ? new Date(card.nextReviewDate).getTime() : 0;
         const remoteTime = remoteNextReviewDate ? new Date(remoteNextReviewDate).getTime() : 0;
         const datesDifferent = Math.abs(localTime - remoteTime) > 1000;
 
         if (
-          card.masteryLevel !== remoteMastery ||
-          card.repetitions !== remoteRepetitions ||
-          card.interval !== remoteInterval ||
+          (card.masteryLevel ?? 0) !== remoteMastery ||
+          (card.repetitions ?? 0) !== remoteRepetitions ||
+          (card.interval ?? 0) !== remoteInterval ||
           Boolean(card.isArchived) !== remoteIsArchived ||
           datesDifferent
         ) {
@@ -1318,11 +1421,11 @@ export async function syncCardsFromSupabase(): Promise<void> {
           hasChanges = true;
           return {
             ...card,
-            masteryLevel: remoteMastery ?? card.masteryLevel,
-            repetitions: remoteRepetitions ?? card.repetitions,
-            interval: remoteInterval ?? card.interval,
+            masteryLevel: remoteMastery,
+            repetitions: remoteRepetitions,
+            interval: remoteInterval,
             isArchived: remoteIsArchived,
-            nextReviewDate: remoteNextReviewDate ?? card.nextReviewDate
+            nextReviewDate: remoteNextReviewDate
           };
         }
         return card;
@@ -1334,10 +1437,15 @@ export async function syncCardsFromSupabase(): Promise<void> {
     if (hasChanges) {
       useStore.setState({ decks: nextDecks });
       await setIDBItem('app_decks', nextDecks);
-      safeSetStorage('cached_app_decks', JSON.stringify(nextDecks));
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('cached_app_decks');
+          localStorage.removeItem('cache_decks_v2');
+        } catch {}
+      }
       window.dispatchEvent(new Event('storage-update'));
-      autoBackfillMasteredWords(nextDecks, useStore.getState().books, useStore.getState().appLanguage).catch(() => {});
     }
+    await autoBackfillMasteredWords(hasChanges ? nextDecks : currentDecks, useStore.getState().books, useStore.getState().appLanguage);
   } catch (err) {
     console.warn("syncCardsFromSupabase failed:", err);
   }
@@ -1618,12 +1726,9 @@ const getInitialCachedBooks = (): BookMeta[] => {
 const getInitialCachedDecks = (): Deck[] => {
   if (typeof window === 'undefined') return [];
   try {
-    const cached = localStorage.getItem('cached_app_decks') || localStorage.getItem('cache_decks_v2');
-    try { localStorage.removeItem('cache_decks_v2'); } catch {}
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
+    // Purge legacy 5MB-limited localStorage deck caches that caused cross-browser desync
+    localStorage.removeItem('cached_app_decks');
+    localStorage.removeItem('cache_decks_v2');
   } catch (e) {}
   return [];
 };
@@ -2135,221 +2240,181 @@ export const useStore = create<DeckState>()((set, get) => ({
     if (isCorrect && !isHilfe && !skipDailyIncrement) {
       get().incrementDailyProgress(cleanLang);
     }
-    const previousDecks = get().decks;
-    let updatedCard: Flashcard | null = null;
-    let wasDueBefore = false;
-    let wasMasteredBefore = false;
 
+    const currentDecks = get().decks;
+    const targetDeck = currentDecks.find((d) => d.id === deckId);
+    if (!targetDeck) return;
+    const targetCard = targetDeck.cards.find((c) => c.id === cardId);
+    if (!targetCard) return;
+
+    const wasDueBefore = isCardDueForReview(targetCard);
+    const wasMasteredBefore = Boolean(targetCard.isArchived || (targetCard.masteryLevel && targetCard.masteryLevel >= 4));
+    const srsUpdate = calculateNextSRSState(targetCard, isCorrect, isHilfe, isReviewSession);
+    const validCard: Flashcard = {
+      ...targetCard,
+      ...srsUpdate,
+      updated_at: new Date().toISOString(),
+    };
+
+    // 1. ONLINE-FIRST AWAIT: Сначала сохраняем статус карточки в Supabase
+    await updateCardInSupabase(cardId, validCard);
+
+    // 2. Обновляем Zustand-стейт и локальный IndexedDB
     set((state) => {
-      const newDecks = [...state.decks];
-      const deck = newDecks.find((d) => d.id === deckId);
-      if (!deck) return state;
-
-      const cardIndex = deck.cards.findIndex((c) => c.id === cardId);
-      if (cardIndex === -1) return state;
-
-      const card = { ...deck.cards[cardIndex] };
-      wasDueBefore = isCardDue(card);
-      wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
-      const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe, isReviewSession);
-      Object.assign(card, srsUpdate);
-      card.updated_at = new Date().toISOString();
-
-      deck.cards[cardIndex] = card;
-      updatedCard = card;
-
+      const newDecks = state.decks.map((d) => {
+        if (d.id !== deckId) return d;
+        return {
+          ...d,
+          cards: d.cards.map((c) => (c.id === cardId ? validCard : c)),
+        };
+      });
       return { decks: newDecks };
     });
 
-    // Атомарное сохранение в IndexedDB и localStorage
     const nextDecks = get().decks;
-    setIDBItem('app_decks', nextDecks);
-    safeSetStorage('cached_app_decks', JSON.stringify(nextDecks));
+    await setIDBItem('app_decks', nextDecks);
 
-    if (wasDueBefore || isHilfe || !isCorrect || (updatedCard && (updatedCard as Flashcard).isArchived)) {
+    if (wasDueBefore || isHilfe || !isCorrect || validCard.isArchived) {
       get().decrementDueCardsCount();
     }
 
-    if (updatedCard) {
-      const validCard = updatedCard as Flashcard;
+    // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
+    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+    const singleLemma = normalizeGermanLemma(rawWord);
+    const safeLemma = singleLemma.split(' ')[0].trim();
 
-      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова (строго одна изолированная лемма)
-      const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-      const singleLemma = normalizeGermanLemma(rawWord);
-      const safeLemma = singleLemma.split(' ')[0].trim();
-
-      if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
-        if (safeLemma && safeLemma.length >= 2) {
-          const currentDeck = get().decks.find(d => d.id === deckId);
-          const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-          recordMasteredLemma(
-            safeLemma,
-            currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
-            currentDeck?.bookId,
-            cardLang
-          );
-        }
-      } else if (wasMasteredBefore && (!isCorrect || isHilfe || !validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel < 4))) {
-        // Demotion! Списание при ошибке («Wiederholen / Не знаю»)
-        if (safeLemma) {
-          const currentDeck = get().decks.find(d => d.id === deckId);
-          const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-          removeMasteredLemma(safeLemma, cardLang);
-        }
+    if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
+      if (safeLemma && safeLemma.length >= 2) {
+        const currentDeck = get().decks.find(d => d.id === deckId);
+        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+        const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
+        recordMasteredLemma(
+          safeLemma,
+          currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
+          currentDeck?.bookId,
+          cardLang
+        );
       }
-
-      try {
-        const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
-        localFactors[cardId] = validCard.easeFactor ?? 2.2;
-        localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
-      } catch (e) {}
-
-      const fullUpdate: Record<string, any> = {
-        masteryLevel: validCard.masteryLevel,
-        isArchived: Boolean(validCard.isArchived),
-        interval: validCard.interval,
-        repetitions: validCard.repetitions
-      };
-      if (validCard.nextReviewDate !== undefined) {
-        fullUpdate.nextReviewDate = validCard.nextReviewDate;
+    } else if (wasMasteredBefore && (!isCorrect || isHilfe || !validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel < 4))) {
+      // Demotion! Списание при ошибке («Wiederholen / Не знаю»)
+      if (safeLemma) {
+        const currentDeck = get().decks.find(d => d.id === deckId);
+        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+        const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
+        removeMasteredLemma(safeLemma, cardLang);
       }
-
-      let { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
-
-      if (error) {
-        console.error("🚨 ОШИБКА СОХРАНЕНИЯ КАРТОЧКИ В SUPABASE:", error);
-      } else if (!data || data.length === 0) {
-        console.warn("Supabase Update Card: 0 rows affected (RLS or missing row for ID:", cardId, ")");
-      }
-
-      // Also attempt upsert into user_card_progress for compatibility with multi-user / RPC
-      try {
-        const currentUserId = await getCachedUserId();
-        if (currentUserId) {
-          const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
-          await supabase.from('user_card_progress').upsert({
-            user_id: currentUserId,
-            card_id: cardId,
-            next_review_at: nextIso,
-            repetition_level: validCard.repetitions || 0,
-            last_reviewed_at: new Date().toISOString()
-          }, { onConflict: 'user_id,card_id' });
-        }
-      } catch {}
     }
+
+    try {
+      const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
+      localFactors[cardId] = validCard.easeFactor ?? 2.2;
+      localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
+    } catch (e) {}
+
+    // Also attempt upsert into user_card_progress for compatibility with multi-user / RPC
+    try {
+      const currentUserId = await getCachedUserId();
+      if (currentUserId) {
+        const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
+        await supabase.from('user_card_progress').upsert({
+          user_id: currentUserId,
+          card_id: cardId,
+          next_review_at: nextIso,
+          repetition_level: validCard.repetitions || 0,
+          last_reviewed_at: new Date().toISOString()
+        }, { onConflict: 'user_id,card_id' });
+      }
+    } catch {}
   },
 
   // Rapid flashcards: persist the 0-4 round score of a word. 4 => archived (learned).
   setCardProgress: async (deckId, cardId, score, targetLang?: string) => {
-    const previousDecks = get().decks;
-    let updatedCard: Flashcard | null = null;
-    let wasDueBefore = false;
-    let wasMasteredBefore = false;
+    const currentDecks = get().decks;
+    const targetDeck = currentDecks.find((d) => d.id === deckId);
+    if (!targetDeck) return;
+    const targetCard = targetDeck.cards.find((c) => c.id === cardId);
+    if (!targetCard) return;
 
+    const wasDueBefore = isCardDueForReview(targetCard);
+    const wasMasteredBefore = Boolean(targetCard.isArchived || (targetCard.masteryLevel && targetCard.masteryLevel >= 4));
+    const card: Flashcard = { ...targetCard };
+
+    if (score >= 4) {
+      const srsUpdate = calculateNextSRSState({ ...card, masteryLevel: 3, isArchived: false }, true, false);
+      Object.assign(card, srsUpdate);
+    } else {
+      card.masteryLevel = Math.max(0, Math.min(3, score));
+      card.isArchived = false;
+    }
+    card.updated_at = new Date().toISOString();
+
+    // 1. ONLINE-FIRST AWAIT: Сначала сохраняем статус карточки в Supabase
+    await updateCardInSupabase(cardId, card);
+
+    // 2. Обновляем состояние и IndexedDB
     set((state) => {
-      const di = state.decks.findIndex((d) => d.id === deckId);
-      if (di === -1) return state;
-      const deck = state.decks[di];
-      const ci = deck.cards.findIndex((c) => c.id === cardId);
-      if (ci === -1) return state;
-      const card = { ...deck.cards[ci] };
-      wasDueBefore = isCardDue(card);
-      wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
-
-      if (score >= 4) {
-        const srsUpdate = calculateNextSRSState({ ...card, masteryLevel: 3, isArchived: false }, true, false);
-        Object.assign(card, srsUpdate);
-      } else {
-        card.masteryLevel = Math.max(0, Math.min(3, score));
-        card.isArchived = false;
-      }
-      card.updated_at = new Date().toISOString();
-      updatedCard = card;
-      const newCards = deck.cards.map((c, i) => (i === ci ? card : c));
-      const newDecks = [...state.decks];
-      newDecks[di] = { ...deck, cards: newCards };
+      const newDecks = state.decks.map((d) => {
+        if (d.id !== deckId) return d;
+        return {
+          ...d,
+          cards: d.cards.map((c) => (c.id === cardId ? card : c)),
+        };
+      });
       return { decks: newDecks };
     });
 
-    // Атомарное сохранение в IndexedDB и localStorage
     const nextDecks = get().decks;
-    setIDBItem('app_decks', nextDecks);
-    safeSetStorage('cached_app_decks', JSON.stringify(nextDecks));
+    await setIDBItem('app_decks', nextDecks);
 
-    if (wasDueBefore || (updatedCard && (updatedCard as Flashcard).isArchived)) {
+    if (wasDueBefore || card.isArchived) {
       get().decrementDueCardsCount();
     }
 
-    if (updatedCard) {
-      const validCard = updatedCard as Flashcard;
+    const validCard = card;
+    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+    const singleLemma = normalizeGermanLemma(rawWord);
+    const safeLemma = singleLemma.split(' ')[0].trim();
 
-      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова (строго одна изолированная лемма)
-      const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-      const singleLemma = normalizeGermanLemma(rawWord);
-      const safeLemma = singleLemma.split(' ')[0].trim();
-
-      if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
-        if (safeLemma && safeLemma.length >= 2) {
-          const currentDeck = get().decks.find(d => d.id === deckId);
-          const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-          recordMasteredLemma(
-            safeLemma,
-            currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
-            currentDeck?.bookId,
-            cardLang
-          );
-        }
-      } else if (wasMasteredBefore && score < 4) {
-        // Demotion! Списание при ошибке или понижении прогресса
-        if (safeLemma) {
-          const currentDeck = get().decks.find(d => d.id === deckId);
-          const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-          removeMasteredLemma(safeLemma, cardLang);
-        }
+    if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
+      if (safeLemma && safeLemma.length >= 2) {
+        const currentDeck = get().decks.find(d => d.id === deckId);
+        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+        const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
+        recordMasteredLemma(
+          safeLemma,
+          currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
+          currentDeck?.bookId,
+          cardLang
+        );
       }
-
-      try {
-        const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
-        localFactors[cardId] = validCard.easeFactor ?? 2.2;
-        localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
-      } catch (e) {}
-
-      const fullUpdate: Record<string, any> = {
-        masteryLevel: validCard.masteryLevel,
-        isArchived: Boolean(validCard.isArchived),
-        interval: validCard.interval,
-        repetitions: validCard.repetitions
-      };
-      if (validCard.nextReviewDate !== undefined) {
-        fullUpdate.nextReviewDate = validCard.nextReviewDate;
+    } else if (wasMasteredBefore && score < 4) {
+      if (safeLemma) {
+        const currentDeck = get().decks.find(d => d.id === deckId);
+        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
+        const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
+        removeMasteredLemma(safeLemma, cardLang);
       }
-
-      let { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
-
-      if (error) {
-        console.error("🚨 ОШИБКА СОХРАНЕНИЯ КАРТОЧКИ В SUPABASE:", error);
-      } else if (!data || data.length === 0) {
-        console.warn("Supabase Update Card: 0 rows affected (RLS or missing row for ID:", cardId, ")");
-      }
-
-      try {
-        const currentUserId = await getCachedUserId();
-        if (currentUserId) {
-          const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
-          await supabase.from('user_card_progress').upsert({
-            user_id: currentUserId,
-            card_id: cardId,
-            next_review_at: nextIso,
-            repetition_level: validCard.repetitions || 0,
-            last_reviewed_at: new Date().toISOString()
-          }, { onConflict: 'user_id,card_id' });
-        }
-      } catch {}
     }
+
+    try {
+      const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
+      localFactors[cardId] = validCard.easeFactor ?? 2.2;
+      localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
+    } catch (e) {}
+
+    try {
+      const currentUserId = await getCachedUserId();
+      if (currentUserId) {
+        const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
+        await supabase.from('user_card_progress').upsert({
+          user_id: currentUserId,
+          card_id: cardId,
+          next_review_at: nextIso,
+          repetition_level: validCard.repetitions || 0,
+          last_reviewed_at: new Date().toISOString()
+        }, { onConflict: 'user_id,card_id' });
+      }
+    } catch {}
   }
 }));
 
@@ -2361,12 +2426,14 @@ if (typeof window !== 'undefined') {
         if (cacheDecksTimer) clearTimeout(cacheDecksTimer);
         cacheDecksTimer = setTimeout(() => {
           try {
-            localStorage.setItem('cache_decks_v2', JSON.stringify(state.decks));
-          } catch (e) {
-            console.warn('Failed to save decks cache, clearing it to prevent stale data:', e);
-            try { localStorage.removeItem('cache_decks_v2'); } catch(err) {}
-          }
-        }, 800);
+            localStorage.removeItem('cached_app_decks');
+            localStorage.removeItem('cache_decks_v2');
+            if (Array.isArray(state.decks) && state.decks.length > 0) {
+              setIDBItem('app_decks', state.decks);
+              autoBackfillMasteredWords(state.decks, state.books, state.appLanguage).catch(() => {});
+            }
+          } catch (e) {}
+        }, 400);
       }
     } catch (e) {
       console.warn('Failed in Zustand subscriber:', e);
@@ -9627,7 +9694,13 @@ export default function App() {
     } catch (e) {}
     
     const fetchData = async () => {
-      // 1. Instant load from IndexedDB (Unlimited capacity, loads entire 6.7MB library in 10ms)
+      // 1. Purge poisoned 5MB localStorage deck caches immediately
+      try {
+        localStorage.removeItem('cached_app_decks');
+        localStorage.removeItem('cache_decks_v2');
+      } catch (e) {}
+
+      // 2. Instant load from IndexedDB (only if decks actually contain cards)
       try {
         const [idbDecks, idbBooks] = await Promise.all([
           getIDBItem<Deck[]>('app_decks'),
@@ -9637,52 +9710,44 @@ export default function App() {
           setBooks(idbBooks);
           setIsLoadingBooks(false);
         }
-        if (idbDecks && idbDecks.length > 0) {
+        const idbCardCount = Array.isArray(idbDecks)
+          ? idbDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0)
+          : 0;
+        if (idbDecks && idbDecks.length > 0 && idbCardCount > 0) {
           setDecks(idbDecks);
           autoBackfillMasteredWords(idbDecks, idbBooks || undefined, useStore.getState().appLanguage).catch(() => {});
         }
       } catch (e) {}
 
-      // 2. Legacy fallback to localStorage
+      // 3. Fallback to localStorage for books metadata only (never for decks!)
       try {
-        const cachedBooks = localStorage.getItem('cached_app_books') || localStorage.getItem('cache_books_v2');
-        if (cachedBooks) {
-          const pb = JSON.parse(cachedBooks);
-          if (Array.isArray(pb) && pb.length > 0) {
-            setBooks(pb);
-            setIsLoadingBooks(false);
+        if (useStore.getState().books.length === 0) {
+          const cachedBooks = localStorage.getItem('cached_app_books') || localStorage.getItem('cache_books_v2');
+          if (cachedBooks) {
+            const pb = JSON.parse(cachedBooks);
+            if (Array.isArray(pb) && pb.length > 0) {
+              setBooks(pb);
+              setIsLoadingBooks(false);
+            }
           }
-        }
-        const cachedDecks = localStorage.getItem('cached_app_decks') || localStorage.getItem('cache_decks_v2');
-        if (cachedDecks) {
-          const pd = JSON.parse(cachedDecks);
-          if (Array.isArray(pd) && pd.length > 0) setDecks(pd);
         }
       } catch (e) {}
       useStore.setState({ isLoaded: true });
-      syncCardsFromSupabase().then(() => useStore.getState().refreshDueCardsCount()).catch(() => {});
-      
-      // 3. Background Cloud Fetch with Cache Guard (Throttles massive multi-megabyte card downloads)
-      try {
-        const lastLibrarySync = localStorage.getItem('last_library_cloud_sync');
-        const inMemoryDecks = useStore.getState().decks;
-        const isLibraryFresh = Boolean(inMemoryDecks && inMemoryDecks.length > 0 && lastLibrarySync && (Date.now() - Number(lastLibrarySync) < 15 * 60 * 1000));
 
-        const timeoutPromise = new Promise<{ booksRes: any, decksRes: any, statsRes: any }>((_, reject) => 
-          setTimeout(() => reject(new Error('Supabase fetch timeout')), 12000)
+      // 4. Authoritative Cloud Fetch from Supabase (Zero TTL block, Paginated fetchAllUserCards)
+      try {
+        const timeoutPromise = new Promise<{ booksRes: any, decksRes: any, allCards: any[], statsRes: any }>((_, reject) => 
+          setTimeout(() => reject(new Error('Supabase fetch timeout')), 20000)
         );
 
         const fetchPromise = Promise.all([
-          isLibraryFresh
-            ? Promise.resolve({ data: null, error: null })
-            : supabase.from('books').select('id, language, title, subtitle, category, training_mode, tintcolor, coverimage, activelevels, covertype, covervalue, accentcolor, cover_url_light').order('created_at', { ascending: true }),
-          isLibraryFresh
-            ? Promise.resolve({ data: null, error: null })
-            : supabase.from('decks').select('id, name, description, language, book_id, card_count, created_at, category, order_index, story, theory, materials, cards(id, deckId, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, easeFactor, baseWordInfo, forms, hint, updated_at)').order('created_at', { ascending: true }),
+          supabase.from('books').select('*').order('created_at', { ascending: true }),
+          supabase.from('decks').select('*').order('created_at', { ascending: true }),
+          fetchAllUserCards(),
           supabase.from('user_stats').select('language, daily_activity')
-        ]).then(([booksRes, decksRes, statsRes]) => ({ booksRes, decksRes, statsRes }));
+        ]).then(([booksRes, decksRes, allCards, statsRes]) => ({ booksRes, decksRes, allCards, statsRes }));
 
-        const { booksRes, decksRes, statsRes } = await Promise.race([fetchPromise, timeoutPromise]);
+        const { booksRes, decksRes, allCards, statsRes } = await Promise.race([fetchPromise, timeoutPromise]);
 
         if (statsRes && !statsRes.error && statsRes.data) {
           const pushStats = (lang: string) => {
@@ -9809,19 +9874,40 @@ export default function App() {
 
         if (decksRes.error) {
           console.error("Supabase Fetch Decks Error:", decksRes.error.message);
-          // Only clear decks if we are sure it's not a network error, but for offline robustness, do NOT wipe cache.
-          if (!localStorage.getItem('cached_app_decks')) { setDecks([]); }
         } else if (decksRes.data) {
           const langMap = JSON.parse(localStorage.getItem('deck_languages') || '{}');
-          // Сбор локальных карточек для защиты от перезаписи свежих ответов старыми данными из облака (LWW)
-          const localCardMap = new Map<string, any>();
-          const currentLocalDecks = useStore.getState().decks;
-          if (Array.isArray(currentLocalDecks)) {
-            currentLocalDecks.forEach((d) => {
-              d.cards?.forEach((c) => {
-                if (c && c.id) localCardMap.set(c.id, c);
-              });
-            });
+          const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
+
+          // Group all paginated cards from fetchAllUserCards() by deck_id
+          const cardsByDeckId = new Map<string, any[]>();
+          if (Array.isArray(allCards)) {
+            for (const cloudCard of allCards) {
+              const dId = cloudCard.deck_id || cloudCard.deckId;
+              if (!dId) continue;
+              const ease = typeof cloudCard.easeFactor === 'number'
+                ? cloudCard.easeFactor
+                : (localFactors[cloudCard.id] ?? 2.2);
+              const normalizedCard = {
+                ...cloudCard,
+                id: cloudCard.id,
+                deckId: dId,
+                deck_id: dId,
+                targetWord: cloudCard.targetWord ?? cloudCard.target_word ?? '',
+                sentence: cloudCard.sentence ?? '',
+                translation: cloudCard.translation ?? '',
+                options: Array.isArray(cloudCard.options) ? cloudCard.options : [],
+                masteryLevel: cloudCard.masteryLevel ?? cloudCard.mastery_level ?? 0,
+                isArchived: Boolean(cloudCard.isArchived ?? cloudCard.is_archived),
+                nextReviewDate: cloudCard.nextReviewDate !== undefined ? cloudCard.nextReviewDate : (cloudCard.next_review_date ?? null),
+                interval: cloudCard.interval ?? 0,
+                repetitions: cloudCard.repetitions ?? 0,
+                baseWordInfo: cloudCard.baseWordInfo || null,
+                forms: cloudCard.forms || '',
+                easeFactor: typeof ease === 'number' ? ease : 2.2
+              };
+              if (!cardsByDeckId.has(dId)) cardsByDeckId.set(dId, []);
+              cardsByDeckId.get(dId)!.push(normalizedCard);
+            }
           }
 
           const enhancedDecks = decksRes.data.map((d: any) => {
@@ -9839,53 +9925,20 @@ export default function App() {
                 if (storedM) deckMaterials = JSON.parse(storedM);
               } catch (e) {}
             }
+            const deckCards = cardsByDeckId.get(d.id) || [];
             return {
               ...d,
               theory: deckTheory,
               materials: deckMaterials,
-              card_count: d.card_count || d.cards?.length || 15,
-              cards: d.cards ? d.cards.map((cloudCard: any) => {
-                let cardToUse = cloudCard;
-                const localCard = localCardMap.get(cloudCard.id);
-                if (localCard) {
-                  const localTime = localCard.updated_at ? new Date(localCard.updated_at).getTime() : 0;
-                  const cloudTime = cloudCard.updated_at ? new Date(cloudCard.updated_at).getTime() : 0;
-                  // Если локальная карточка обновлена свежее, чем в облаке — сохраняем локальный прогресс
-                  if (cloudTime > 0 && localTime > cloudTime) {
-                    cardToUse = {
-                      ...cloudCard,
-                      masteryLevel: localCard.masteryLevel,
-                      isArchived: localCard.isArchived,
-                      nextReviewDate: localCard.nextReviewDate,
-                      interval: localCard.interval,
-                      repetitions: localCard.repetitions,
-                      easeFactor: localCard.easeFactor ?? cloudCard.easeFactor,
-                      updated_at: localCard.updated_at
-                    };
-                  }
-                }
-
-                let ease = typeof cardToUse.easeFactor === 'number' ? cardToUse.easeFactor : undefined;
-                if (ease === undefined && typeof window !== 'undefined') {
-                  try {
-                    const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
-                    ease = localFactors[cardToUse.id];
-                  } catch (e) {}
-                }
-                return {
-                  ...cardToUse,
-                  baseWordInfo: cardToUse.baseWordInfo || null,
-                  easeFactor: typeof ease === 'number' ? ease : 2.2
-                };
-              }) : [],
+              card_count: deckCards.length || d.card_count || 15,
+              cards: deckCards,
               language: d.language || langMap[d.id] || 'DE',
               bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
             };
           });
           setDecks(enhancedDecks as Deck[]);
-          setIDBItem('app_decks', enhancedDecks);
-          safeSetStorage('cached_app_decks', JSON.stringify(enhancedDecks));
-          autoBackfillMasteredWords(enhancedDecks as Deck[], useStore.getState().books, useStore.getState().appLanguage).catch(() => {});
+          await setIDBItem('app_decks', enhancedDecks);
+          await autoBackfillMasteredWords(enhancedDecks as Deck[], useStore.getState().books, useStore.getState().appLanguage);
           if (typeof window !== 'undefined') {
             localStorage.setItem('last_library_cloud_sync', String(Date.now()));
           }
@@ -9895,7 +9948,7 @@ export default function App() {
       } finally {
         setIsLoadingBooks(false);
         useStore.setState({ isLoaded: true });
-        syncCardsFromSupabase().then(() => useStore.getState().refreshDueCardsCount()).catch(() => {});
+        useStore.getState().refreshDueCardsCount().catch(() => {});
       }
     };
     fetchData();
@@ -9946,7 +9999,7 @@ export default function App() {
     return decks.filter(d => {
       const deckBookId = d.bookId || (d as any).book_id;
       if (activeBookId) return deckBookId === activeBookId;
-      return !d.language || normalizeLanguage(d.language) === normalizeLanguage(appLanguage);
+      return !d.language || d.language.toLowerCase() === appLanguage.toLowerCase();
     });
   }, [decks, activeBookId, appLanguage]);
 
@@ -9991,7 +10044,7 @@ export default function App() {
 
 
   const displayBooks = useMemo(() => {
-    const filtered = books.filter(b => b.language === appLanguage);
+    const filtered = books.filter(b => (b.language || 'DE').toLowerCase() === appLanguage.toLowerCase());
     if (bookOrder && bookOrder.length > 0) {
       const map = new Map(bookOrder.map((id, index) => [id, index]));
       return [...filtered].sort((a, b) => {
@@ -10052,7 +10105,7 @@ export default function App() {
           const dBookId = deck.bookId || (deck as any).book_id;
           return dBookId === activeBookId;
         }
-        return !deck.language || normalizeLanguage(deck.language) === normalizeLanguage(appLanguage);
+        return !deck.language || deck.language.toLowerCase() === appLanguage.toLowerCase();
       })
       .flatMap(deck => deck.cards || [])
       .filter(isCardDueForReview)
@@ -10064,11 +10117,10 @@ export default function App() {
     if (!isLoaded || decks.length === 0) return;
     const allCards = decks.flatMap(d => d.cards || []);
     const masteredLemmas = getMasteredLemmasSet(appLanguage);
-    console.log('📊 [DIAGNOSTICS] Всего колод:', decks.length);
-    console.log('📊 [DIAGNOSTICS] Всего карточек в памяти:', allCards.length);
-    console.log('📊 [DIAGNOSTICS] Карточек готово к повторению (Due):', dueCards.length);
-    console.log('📊 [DIAGNOSTICS] Выучено слов в матрице:', masteredLemmas.size);
-  }, [isLoaded, decks, dueCards.length, appLanguage]);
+    console.log(
+      `📊 [SYNC CHECK] Карточек в Supabase: ${lastSupabaseCardsCount || allCards.length} | Карточек к повтору: ${dueCardsCount} | Слов в матрице: ${masteredLemmas.size}`
+    );
+  }, [isLoaded, decks, dueCardsCount, appLanguage]);
 
   const displayDueCount = dueCardsCount;
 

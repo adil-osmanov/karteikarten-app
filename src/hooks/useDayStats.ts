@@ -293,19 +293,9 @@ export function safeSetStorage(key: string, value: string): boolean {
     try {
       localStorage.removeItem('cache_decks_v2');
       localStorage.removeItem('cache_books_v2');
+      localStorage.removeItem('cached_app_decks');
       localStorage.removeItem('app_daily_stats');
-
-      // Strip cards from cached decks to recover multiple megabytes immediately
-      const rawDecks = localStorage.getItem('cached_app_decks');
-      if (rawDecks) {
-        try {
-          const parsed = JSON.parse(rawDecks);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const lightweight = parsed.map((d: any) => ({ ...d, cards: [] }));
-            localStorage.setItem('cached_app_decks', JSON.stringify(lightweight));
-          }
-        } catch {}
-      }
+      if (key === 'cached_app_decks') return false;
       localStorage.setItem(key, value);
       return true;
     } catch {
