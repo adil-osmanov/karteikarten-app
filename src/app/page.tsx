@@ -23,7 +23,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, backfillMasteredWordsFromDecks, reconcileMasteredWords } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, backfillMasteredWordsFromDecks, reconcileMasteredWords, getMasteredLemmasSet } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -1080,22 +1080,32 @@ export interface CardSRSUpdate {
   nextReviewDate: number | null;
 }
 
-/**
- * Invariant: A card is due for repetition ONLY if:
- * !card.isArchived && (card.masteryLevel ?? 0) < 4 && card.nextReviewDate && new Date(card.nextReviewDate) <= new Date()
- * Mastered cards (masteryLevel >= 4 or isArchived) must NEVER be counted in dueCards.
- */
-export function isCardDueForReview(card: Flashcard | any, now: number = Date.now()): boolean {
+export function isCardDue(card: any): boolean {
   if (!card) return false;
-  if (card.isArchived) return false;
-  if ((card.masteryLevel ?? 0) >= 4) return false;
-  if (!card.nextReviewDate) return false;
-  const reviewTime = typeof card.nextReviewDate === 'number'
-    ? card.nextReviewDate
-    : new Date(card.nextReviewDate).getTime();
-  if (isNaN(reviewTime) || reviewTime <= 0) return false;
-  return reviewTime <= now;
+
+  // 1. Если карточка выучена (Stufe 4+) или в архиве — она НЕ требует повторения
+  if (card.isArchived || (card.masteryLevel ?? 0) >= 4) {
+    return false;
+  }
+
+  // 2. Поддержка camelCase и snake_case из Supabase/IndexedDB
+  const rawDate = card.nextReviewDate || card.next_review_date;
+
+  // 3. Если даты нет вообще — карточка новая/непройденная, она ОБЯЗАТЕЛЬНО должна быть в повторении!
+  if (!rawDate) {
+    return true;
+  }
+
+  const reviewTime = new Date(rawDate).getTime();
+  // Если дата некорректная (NaN) — тоже отдаем в повторение
+  if (isNaN(reviewTime)) {
+    return true;
+  }
+
+  return reviewTime <= Date.now();
 }
+
+export const isCardDueForReview = isCardDue;
 
 export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, bookId?: string): Promise<number> {
   const cleanLang = normalizeLanguage(lang);
@@ -1120,7 +1130,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
       }
       deck.cards?.forEach(card => {
-        if (isCardDueForReview(card, now)) {
+        if (isCardDue(card)) {
           localCount++;
         }
       });
@@ -1136,7 +1146,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         .select('id, decks!inner(book_id)', { count: 'exact', head: true })
         .eq('isArchived', false)
         .lt('masteryLevel', 4)
-        .lte('nextReviewDate', now)
+        .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`)
         .eq('decks.book_id', bookId);
 
       if (!error && typeof count === 'number') {
@@ -1169,7 +1179,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         .select('id, decks!inner(language)', { count: 'exact', head: true })
         .eq('isArchived', false)
         .lt('masteryLevel', 4)
-        .lte('nextReviewDate', now)
+        .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`)
         .eq('decks.language', cleanLang);
 
       if (!error && typeof count === 'number') {
@@ -1194,7 +1204,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       if (bookId && dBookId !== bookId) return;
       if (!bookId && normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
       deck.cards.forEach(card => {
-        if (isCardDueForReview(card, now)) {
+        if (isCardDue(card)) {
           list.push({ deckId: deck.id, card });
         }
       });
@@ -1209,7 +1219,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
       .eq('isArchived', false)
       .lt('masteryLevel', 4)
-      .lte('nextReviewDate', now);
+      .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`);
 
     if (bookId) {
       query = query.eq('decks.book_id', bookId);
@@ -1254,7 +1264,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
     }
     deck.cards.forEach(card => {
-      if (isCardDueForReview(card, now)) {
+      if (isCardDue(card)) {
         list.push({ deckId: deck.id, card });
       }
     });
@@ -2049,7 +2059,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       if (cardIndex === -1) return state;
 
       const card = { ...deck.cards[cardIndex] };
-      wasDueBefore = isCardDueForReview(card);
+      wasDueBefore = isCardDue(card);
       wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
       const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe);
       Object.assign(card, srsUpdate);
@@ -2164,7 +2174,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       const ci = deck.cards.findIndex((c) => c.id === cardId);
       if (ci === -1) return state;
       const card = { ...deck.cards[ci] };
-      wasDueBefore = isCardDueForReview(card);
+      wasDueBefore = isCardDue(card);
       wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
 
       if (score >= 4) {
@@ -6081,17 +6091,27 @@ function HeaderWidgets({
             )}
           </div>
 
-          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
-          {onStartReview && (dueCount > 0 || activeBook) && (
-            <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
-              <DueCardsBadge 
-                count={dueCount} 
-                language={effectiveLang} 
-                onClick={onStartReview} 
-                allowZero={Boolean(activeBook)}
-              />
-            </div>
-          )}
+          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ВСЕГДА В DOM ПО APPLE HIG */}
+          <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
+            <button
+              type="button"
+              onClick={dueCount > 0 ? onStartReview : undefined}
+              disabled={dueCount === 0}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all duration-200 select-none ${
+                dueCount > 0
+                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md active:scale-95 border-blue-500 cursor-pointer'
+                  : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-500 border-black/5 dark:border-white/5 cursor-default opacity-70'
+              }`}
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${dueCount > 0 ? 'text-white' : 'text-zinc-400'}`} />
+              <span className="font-mono text-xs font-bold px-1.5 py-0.5 rounded bg-black/15 dark:bg-white/10">
+                {dueCount}
+              </span>
+              <span className="text-xs font-semibold tracking-wide uppercase">
+                Karten wiederholen
+              </span>
+            </button>
+          </div>
 
           {/* 3. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
           <div className="flex items-center justify-end flex-1 gap-2 order-2 sm:order-3">
@@ -9916,16 +9936,26 @@ export default function App() {
 
   const dueCards = useMemo(() => {
     const list: { deckId: string, card: Flashcard }[] = [];
-    const now = Date.now();
     filteredDecksList.forEach(deck => {
       deck.cards?.forEach(card => {
-        if (isCardDueForReview(card, now)) {
+        if (isCardDue(card)) {
           list.push({ deckId: deck.id, card });
         }
       });
     });
     return list;
   }, [filteredDecksList]);
+
+  // ДИАГНОСТИЧЕСКИЙ ЛОГ В КОНСОЛЬ (ПРОВЕРКА ТОЧНОСТИ)
+  useEffect(() => {
+    if (!isLoaded || decks.length === 0) return;
+    const allCards = decks.flatMap(d => d.cards || []);
+    const masteredLemmas = getMasteredLemmasSet(appLanguage);
+    console.log('📊 [DIAGNOSTICS] Всего колод:', decks.length);
+    console.log('📊 [DIAGNOSTICS] Всего карточек в памяти:', allCards.length);
+    console.log('📊 [DIAGNOSTICS] Карточек готово к повторению (Due):', dueCards.length);
+    console.log('📊 [DIAGNOSTICS] Выучено слов в матрице:', masteredLemmas.size);
+  }, [isLoaded, decks, dueCards.length, appLanguage]);
 
   const displayDueCount = dueCards.length;
 

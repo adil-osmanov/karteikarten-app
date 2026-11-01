@@ -18,13 +18,8 @@ const TEXT_MAP = {
   ru: { action: 'Повторить карточки', title: 'карточек ждут повторения' },
 } as const;
 
-export function DueCardsBadge({ count = 0, language = 'DE', onClick, className, allowZero = false }: DueCardsBadgeProps) {
+export function DueCardsBadge({ count = 0, language = 'DE', onClick, className, allowZero = true }: DueCardsBadgeProps) {
   const hasDue = (count || 0) > 0;
-
-  // If no due cards and allowZero is false, completely hide the badge
-  if (!hasDue && !allowZero) {
-    return null;
-  }
 
   const normalizedLang = (language || 'DE').toLowerCase() as keyof typeof TEXT_MAP;
   const { action, title } = TEXT_MAP[normalizedLang] || TEXT_MAP.de;
