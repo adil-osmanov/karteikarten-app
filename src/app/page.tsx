@@ -1238,7 +1238,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
 
     const { data, error } = await query
       .order('nextReviewDate', { ascending: true })
-      .limit(100);
+      .limit(1000);
 
     if (!error && Array.isArray(data) && data.length > 0) {
       return data.map((row: any) => ({
@@ -1281,10 +1281,77 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
   return list;
 }
 
+export async function syncCardsFromSupabase(): Promise<void> {
+  try {
+    const { data: remoteCards, error } = await supabase
+      .from('cards')
+      .select('id, masteryLevel, repetitions, interval, nextReviewDate, isArchived')
+      .or('repetitions.gt.0,masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
+      .limit(10000);
+
+    if (error) {
+      console.warn("syncCardsFromSupabase error:", error.message);
+      return;
+    }
+    if (!remoteCards || remoteCards.length === 0) return;
+
+    const remoteMap = new Map<string, any>(remoteCards.map(c => [c.id, c]));
+    const currentDecks = useStore.getState().decks;
+    if (!currentDecks || currentDecks.length === 0) return;
+
+    let hasChanges = false;
+    const nextDecks = currentDecks.map(deck => {
+      let deckChanged = false;
+      const updatedCards = deck.cards.map(card => {
+        const remote = remoteMap.get(card.id);
+        if (!remote) return card;
+
+        const remoteNextReviewDate = remote.nextReviewDate !== undefined ? remote.nextReviewDate : (remote as any).next_review_date;
+        const remoteMastery = remote.masteryLevel !== undefined ? remote.masteryLevel : (remote as any).mastery_level;
+        const remoteRepetitions = remote.repetitions !== undefined ? remote.repetitions : (remote as any).repetitions;
+        const remoteInterval = remote.interval !== undefined ? remote.interval : (remote as any).interval;
+        const remoteIsArchived = remote.isArchived !== undefined ? Boolean(remote.isArchived) : Boolean((remote as any).is_archived);
+
+        if (
+          card.masteryLevel !== remoteMastery ||
+          card.repetitions !== remoteRepetitions ||
+          card.interval !== remoteInterval ||
+          Boolean(card.isArchived) !== remoteIsArchived ||
+          card.nextReviewDate !== remoteNextReviewDate
+        ) {
+          deckChanged = true;
+          hasChanges = true;
+          return {
+            ...card,
+            masteryLevel: remoteMastery ?? card.masteryLevel,
+            repetitions: remoteRepetitions ?? card.repetitions,
+            interval: remoteInterval ?? card.interval,
+            isArchived: remoteIsArchived,
+            nextReviewDate: remoteNextReviewDate ?? card.nextReviewDate
+          };
+        }
+        return card;
+      });
+
+      return deckChanged ? { ...deck, cards: updatedCards } : deck;
+    });
+
+    if (hasChanges) {
+      useStore.setState({ decks: nextDecks });
+      await setIDBItem('app_decks', nextDecks);
+      safeSetStorage('cached_app_decks', JSON.stringify(nextDecks));
+      window.dispatchEvent(new Event('storage-update'));
+    }
+  } catch (err) {
+    console.warn("syncCardsFromSupabase failed:", err);
+  }
+}
+
 export function calculateNextSRSState(
   card: any,
   isCorrect: boolean,
-  isHilfe: boolean
+  isHilfe: boolean,
+  isReviewMode: boolean = false
 ): CardSRSUpdate {
   const currentEase = typeof card.easeFactor === 'number' ? card.easeFactor : 2.2;
   const currentReps = card.repetitions || 0;
@@ -1292,88 +1359,93 @@ export function calculateNextSRSState(
   const currentMastery = card.masteryLevel || 0;
   const isArchived = Boolean(card.isArchived);
 
-  // -------------------------------------------------------------
-  // ФАЗА 1: ПЕРВИЧНОЕ ОСВОЕНИЕ (Карточка еще не в архиве SRS)
-  // -------------------------------------------------------------
-  if (!isArchived) {
+  // Режим интервального повторения (SRS Review):
+  // Карточка находится на этапе повторения, если это сессия ревью, или карточка уже заархивирована,
+  // или у нее есть счетчик повторений, или уровень освоения >= 3.
+  const isReview = isReviewMode || isArchived || currentReps > 0 || currentMastery >= 3;
+
+  if (isReview) {
     if (isCorrect && !isHilfe) {
-      const newMastery = currentMastery + 1;
-      
-      // Выпуск в долгосрочную память (порог 4 успешных ответа)
-      if (newMastery >= 4) {
-        return {
-          masteryLevel: 4,
-          isArchived: true,
-          repetitions: 1,
-          interval: 1,
-          easeFactor: currentEase,
-          nextReviewDate: Date.now() + 1 * 86400000 // Завтра (+24ч)
-        };
+      const newReps = currentReps + 1;
+      let nextInterval = 1;
+
+      if (newReps === 1) {
+        nextInterval = 1; // 1 день
+      } else if (newReps === 2) {
+        nextInterval = 3; // 3 дня
+      } else if (newReps === 3) {
+        nextInterval = 7; // 7 дней
+      } else if (newReps === 4) {
+        nextInterval = 16; // 16 дней
+      } else {
+        // 5+ повторов: от 35 дней с учетом easeFactor
+        nextInterval = Math.max(35, Math.round((currentInterval || 16) * currentEase));
       }
 
+      const newEase = Math.min(2.8, currentEase + 0.05);
+      const nextMastery = 4; // Успешное ревью подтверждает Stage 4
+      const nextReviewDate = Date.now() + nextInterval * 86400000;
+
       return {
-        masteryLevel: newMastery,
-        isArchived: false,
-        repetitions: 0,
-        interval: 0,
-        easeFactor: currentEase,
-        nextReviewDate: null
+        masteryLevel: nextMastery,
+        isArchived: true,
+        repetitions: newReps,
+        interval: nextInterval,
+        easeFactor: Number(newEase.toFixed(2)),
+        nextReviewDate
       };
     } else {
-      // Ошибка на первичном этапе: мягкий штраф
+      // ЗАБЫВАНИЕ (Lapse): Сбой при повторении
+      // Ошибка («Не знаю / Wiederholen»):
+      // masteryLevel = 1, repetitions = 0, interval = 1
+      const newEase = Math.max(1.3, currentEase - 0.2);
+
       return {
-        masteryLevel: Math.max(0, currentMastery - 1),
-        isArchived: false,
-        repetitions: 0,
-        interval: 0,
-        easeFactor: Number(Math.max(1.3, currentEase - 0.1).toFixed(2)),
-        nextReviewDate: null
+        masteryLevel: 1, // сброс на 1 раунд
+        isArchived: false, // вывод из архива (Demotion)
+        repetitions: 0,  // сброс серии
+        interval: 1,     // сброс интервала на 1 день
+        easeFactor: Number(newEase.toFixed(2)),
+        nextReviewDate: Date.now() + 10 * 60 * 1000 // +10 минут
       };
     }
   }
 
   // -------------------------------------------------------------
-  // ФАЗА 2: ДОЛГОСРОЧНОЕ ПОВТОРЕНИЕ (SRS для карточек из архива)
+  // ФАЗА 1: ПЕРВИЧНОЕ ОСВОЕНИЕ (Карточка учится внутри колоды с 0 раунда)
   // -------------------------------------------------------------
   if (isCorrect && !isHilfe) {
-    // Успешное извлечение из памяти: 1 день -> 3 дня -> 7 дней -> 14+ дней
-    const newReps = currentReps + 1;
-    let nextInterval = 1;
-
-    if (newReps === 1) {
-      nextInterval = 1; // 1 день
-    } else if (newReps === 2) {
-      nextInterval = 3; // 3 дня
-    } else if (newReps === 3) {
-      nextInterval = 7; // 7 дней
-    } else {
-      // 4+ повтора: от 14 дней с учетом easeFactor
-      nextInterval = Math.max(14, Math.round(currentInterval * currentEase));
+    const newMastery = currentMastery + 1;
+    
+    // Выпуск в долгосрочную память (порог 4 успешных ответа)
+    if (newMastery >= 4) {
+      return {
+        masteryLevel: 4,
+        isArchived: true,
+        repetitions: 1,
+        interval: 1,
+        easeFactor: currentEase,
+        nextReviewDate: Date.now() + 1 * 86400000 // Завтра (+24ч)
+      };
     }
 
-    // Легкость слова слегка повышается (макс 2.8)
-    const newEase = Math.min(2.8, currentEase + 0.05);
-
     return {
-      masteryLevel: 4,
-      isArchived: true,
-      repetitions: newReps,
-      interval: nextInterval,
-      easeFactor: Number(newEase.toFixed(2)),
-      nextReviewDate: Date.now() + nextInterval * 86400000
+      masteryLevel: newMastery,
+      isArchived: false,
+      repetitions: 0,
+      interval: 0,
+      easeFactor: currentEase,
+      nextReviewDate: null
     };
   } else {
-    // ЗАБЫВАНИЕ (Lapse): Сбой при долгосрочном повторении
-    // Ошибка («Не знаю / Wiederholen»): сброс интервала, сброс уровня на 1, вывод из архива
-    const newEase = Math.max(1.3, currentEase - 0.2);
-
+    // Ошибка на первичном этапе: мягкий штраф
     return {
-      masteryLevel: 1, // сброс на 1 раунд
-      isArchived: false, // вывод из архива (Demotion)
-      repetitions: 0,  // сброс серии
-      interval: 0,     // сброс интервала
-      easeFactor: Number(newEase.toFixed(2)),
-      nextReviewDate: Date.now() + 10 * 60 * 1000 // +10 минут
+      masteryLevel: Math.max(0, currentMastery - 1),
+      isArchived: false,
+      repetitions: 0,
+      interval: 0,
+      easeFactor: Number(Math.max(1.3, currentEase - 0.1).toFixed(2)),
+      nextReviewDate: null
     };
   }
 }
@@ -1501,7 +1573,7 @@ interface DeckState {
   deleteDeck: (deckId: string) => void;
   deleteCard?: (deckId: string, cardId: string) => void;
   renameDeck: (deckId: string, newName: string) => void;
-  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string) => Promise<void>;
+  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean) => Promise<void>;
   setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => Promise<void>;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: (targetLang?: string) => void;
@@ -2038,7 +2110,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
   },
 
-  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string) => {
+  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean) => {
     const deck = get().decks.find((d) => d.id === deckId);
     let lang = targetLanguage;
     if (!lang && deck) {
@@ -2070,7 +2142,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       const card = { ...deck.cards[cardIndex] };
       wasDueBefore = isCardDue(card);
       wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
-      const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe);
+      const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe, isReviewSession);
       Object.assign(card, srsUpdate);
       card.updated_at = new Date().toISOString();
 
@@ -2125,26 +2197,17 @@ export const useStore = create<DeckState>()((set, get) => ({
         localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
       } catch (e) {}
 
-      const nowIso = new Date().toISOString();
       const fullUpdate: Record<string, any> = {
         masteryLevel: validCard.masteryLevel,
         isArchived: Boolean(validCard.isArchived),
         interval: validCard.interval,
-        repetitions: validCard.repetitions,
-        updated_at: nowIso
+        repetitions: validCard.repetitions
       };
       if (validCard.nextReviewDate !== undefined) {
         fullUpdate.nextReviewDate = validCard.nextReviewDate;
       }
 
       let { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
-      
-      if (error && error.message?.includes('updated_at')) {
-        delete fullUpdate.updated_at;
-        const retryRes = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
-        error = retryRes.error;
-        data = retryRes.data;
-      }
 
       if (error) {
         console.error("🚨 ОШИБКА СОХРАНЕНИЯ КАРТОЧКИ В SUPABASE:", error);
@@ -3086,6 +3149,7 @@ function RapidFlashcardMode({
   onHintPenalty,
   deckTitle,
   reverse: forcedReverse,
+  isReview = false,
 }: {
   card: Flashcard;
   progress: number;
@@ -3094,13 +3158,14 @@ function RapidFlashcardMode({
   onHintPenalty?: (penalizedScore?: number) => void;
   deckTitle?: string;
   reverse?: boolean;
+  isReview?: boolean;
 }) {
   const currentCard = card;
   const isMobile = useIsMobile();
 
   const [isFlipped, setIsFlipped] = useState(false);
-  const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived ? 4 : (currentCard?.masteryLevel ?? progress ?? 0)));
-  const [isRound1or2, setIsRound1or2] = useState(() => (currentCard?.isArchived ? false : (currentCard?.masteryLevel ?? progress ?? 0) < 2));
+  const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived ? 4 : (isReview ? Math.max(3, currentCard?.masteryLevel ?? progress ?? 3) : (currentCard?.masteryLevel ?? progress ?? 0))));
+  const [isRound1or2, setIsRound1or2] = useState(() => (currentCard?.isArchived || isReview ? false : (currentCard?.masteryLevel ?? progress ?? 0) < 2));
   const [isAnswered, setIsAnswered] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
   const [typedValue, setTypedValue] = useState("");
@@ -3113,9 +3178,9 @@ function RapidFlashcardMode({
 
   // 7. Сброс стейта строго по currentCard?.id (устранение мигания инпута при переходе на раунд 3)
   useEffect(() => {
-    const mastery = currentCard?.isArchived ? 4 : (currentCard?.masteryLevel ?? progress ?? 0);
+    const mastery = currentCard?.isArchived ? 4 : (isReview ? Math.max(3, currentCard?.masteryLevel ?? progress ?? 3) : (currentCard?.masteryLevel ?? progress ?? 0));
     setLocalMastery(mastery);
-    setIsRound1or2(currentCard?.isArchived ? false : mastery < 2);
+    setIsRound1or2(currentCard?.isArchived || isReview ? false : mastery < 2);
     setIsFlipped(false);
     setIsAnswered(false);
     setIsSurrendered(false);
@@ -4377,7 +4442,7 @@ function RapidStudyCard({
     };
   }, []);
 
-  const progress = card.isArchived ? 4 : Math.max(0, Math.min(3, card.masteryLevel || 0));
+  const progress = card.isArchived ? 4 : (isReview ? Math.max(3, card.masteryLevel || 3) : Math.max(0, Math.min(3, card.masteryLevel || 0)));
 
   const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = false, isSurrendered: boolean = false) => {
     if (locked) return;
@@ -4416,6 +4481,7 @@ function RapidStudyCard({
         onHintPenalty={handleHintPenalty}
         deckTitle={deckTitle}
         reverse={isReverse}
+        isReview={isReview}
       />
     </div>
   );
@@ -4607,12 +4673,19 @@ function StudyInterface({
   const handleSessionAnswer = useCallback(async (correct: boolean, isHilfe: boolean) => {
     if (!currentCardSnapshot || !currentDeckId) return;
     const isActualCorrect = correct && !isHilfe;
+    const isReviewSession = Boolean(reviewCards);
 
     // 1. Сразу вычисляй новый уровень раунда
     const currentMastery = liveCard?.masteryLevel ?? currentCardSnapshot?.masteryLevel ?? 0;
-    const nextMastery = isActualCorrect
-      ? Math.min(4, currentMastery + 1)
-      : Math.max(0, currentMastery - 1);
+    let nextMastery: number;
+
+    if (isReviewSession) {
+      nextMastery = isActualCorrect ? 4 : 1;
+    } else {
+      nextMastery = isActualCorrect
+        ? Math.min(4, currentMastery + 1)
+        : Math.max(0, currentMastery - 1);
+    }
 
     // 2. МГНОВЕННО обновляй стейт текущей карточки в массиве сессии
     setActiveCards(prev => prev.map((item, idx) => {
@@ -4649,7 +4722,7 @@ function StudyInterface({
         mistakes: prev?.mistakes?.includes(currentCardSnapshot.id) ? prev.mistakes : [...(prev?.mistakes || []), currentCardSnapshot.id]
       }));
       if (!isDrillMode) {
-        setActiveCards(prev => [...prev, { deckId: currentDeckId, card: { ...currentCardSnapshot, masteryLevel: nextMastery } }]);
+        setActiveCards(prev => [...prev, { deckId: currentDeckId, card: { ...currentCardSnapshot, masteryLevel: 1, repetitions: 0, interval: 1 } }]);
       }
     }
 
@@ -4663,12 +4736,12 @@ function StudyInterface({
 
     // 5. Запись в статистику сессии и базу Supabase через answerCard
     recordCardResult(isActualCorrect, { deckId: currentDeckId, card: { ...liveCard, masteryLevel: nextMastery }, ...liveCard, masteryLevel: nextMastery }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
-    await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage);
+    await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, isReviewSession);
 
     // 6. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: studyLanguage.toLowerCase() } }));
     window.dispatchEvent(new Event('storage-update'));
-  }, [currentCardSnapshot, currentDeckId, liveCard, currentIndex, studyLanguage, isDrillMode, isReviewingMistakesSession, recordCardResult, answerCard, currentDeck?.bookId]);
+  }, [currentCardSnapshot, currentDeckId, liveCard, currentIndex, studyLanguage, isDrillMode, isReviewingMistakesSession, recordCardResult, answerCard, currentDeck?.bookId, reviewCards]);
   
   const handleNext = useCallback(() => {
     if (currentIndex < activeCards.length - 1) {
@@ -4836,6 +4909,7 @@ function StudyInterface({
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
+              isReview={Boolean(reviewCards)}
               onAnswer={(id, correct, isHilfe) => {
                 handleSessionAnswer(correct, isHilfe);
               }}
@@ -4846,6 +4920,7 @@ function StudyInterface({
               key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
+              isReview={Boolean(reviewCards)}
               onAnswer={(correct, isHilfe) => {
                 handleSessionAnswer(correct, isHilfe);
               }}
@@ -4882,6 +4957,7 @@ function StudyInterface({
               deckTitle={currentDeck?.name}
               isGrammar={isGrammarDeck}
               forceInputMode={!!reviewCards && !isDrillMode}
+              isReview={Boolean(reviewCards)}
               onAnswer={(correct, isHilfe) => {
                 handleSessionAnswer(correct, isHilfe);
               }}
@@ -5183,23 +5259,34 @@ function StudyCard({
   onAnswer, 
   onNext,
   forceInputMode = false,
-  isGrammar = false
+  isGrammar = false,
+  isReview = false
 }: { 
   card: Flashcard, 
   deckTitle?: string,
   onAnswer: (correct: boolean, isHilfe: boolean) => void,
   onNext: () => void,
   forceInputMode?: boolean,
-  isGrammar?: boolean
+  isGrammar?: boolean,
+  isReview?: boolean
 }) {
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
-  const [localMastery, setLocalMastery] = useState(() => (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+  const [localMastery, setLocalMastery] = useState(() => {
+    if (isReview || forceInputMode) {
+      return Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3));
+    }
+    return card.masteryLevel ?? (card.isArchived ? 4 : 0);
+  });
 
   useEffect(() => {
-    setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
-  }, [card.id, card.masteryLevel, card.isArchived]);
+    if (isReview || forceInputMode) {
+      setLocalMastery(Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)));
+    } else {
+      setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
+    }
+  }, [card.id, card.masteryLevel, card.isArchived, isReview, forceInputMode]);
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const playbackSpeed = useStore(state => state.playbackSpeed);
@@ -5277,7 +5364,7 @@ function StudyCard({
     return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
   }, [phase, forceInputMode, card.masteryLevel]);
 
-  const isMultipleChoice = !forceInputMode && phase === "Question" && card.masteryLevel < 2 && Boolean(card.options && card.options.length >= 2);
+  const isMultipleChoice = !forceInputMode && !isReview && phase === "Question" && card.masteryLevel < 2 && Boolean(card.options && card.options.length >= 2);
 
   useEffect(() => {
     if (!isMobile && phase === "Question" && !isMultipleChoice && inputRef.current) {
@@ -5339,7 +5426,7 @@ function StudyCard({
   const handleHilfe = () => {
     // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
     setPhase("Answer");
-    const nextMastery = Math.max(0, (localMastery || 0) - 1);
+    const nextMastery = isReview || forceInputMode ? 1 : Math.max(0, (localMastery || 0) - 1);
     setLocalMastery(nextMastery);
     setHasErrored(true);
     hasErroredRef.current = true;
@@ -5371,7 +5458,7 @@ function StudyCard({
       setPhase("Answer");
 
       // 2. Мгновенно вычисляем и зажигаем синюю точку в шапке
-      const nextMastery = Math.min(4, (localMastery || 0) + 1);
+      const nextMastery = isReview || forceInputMode ? 4 : Math.min(4, (localMastery || 0) + 1);
       setLocalMastery(nextMastery);
 
       playSafeAudio(() => playSuccessSound());
@@ -8275,22 +8362,24 @@ function PrepStudyCard({
   card, 
   deckTitle, 
   onAnswer,
-  onNext
+  onNext,
+  isReview = false
 }: {
   card: Flashcard;
   deckTitle?: string;
   onAnswer: (cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
   onNext: () => void;
+  isReview?: boolean;
 }) {
   const [isSuccess, setIsSuccess] = useState(false);
   const [isHilfe, setIsHilfe] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
-  const [localMastery, setLocalMastery] = useState(() => (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+  const [localMastery, setLocalMastery] = useState(() => (isReview ? Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)) : (card.masteryLevel ?? (card.isArchived ? 4 : 0))));
 
   useEffect(() => {
-    setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
-  }, [card.id, card.masteryLevel, card.isArchived]);
+    setLocalMastery(isReview ? Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)) : (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+  }, [card.id, card.masteryLevel, card.isArchived, isReview]);
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
   const originalVerb = card.targetWord;
@@ -8520,12 +8609,14 @@ function VerbStudyCard({
   card, 
   deckTitle, 
   onAnswer,
-  onNext
+  onNext,
+  isReview = false
 }: {
   card: Flashcard;
   deckTitle?: string;
   onAnswer: (correct: boolean, isHilfe: boolean) => void;
   onNext: () => void;
+  isReview?: boolean;
 }) {
   const isMobile = useIsMobile();
   const verbInfo = useMemo(() => {
@@ -8537,11 +8628,11 @@ function VerbStudyCard({
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
   const [isHilfe, setIsHilfe] = useState(false);
-  const [localMastery, setLocalMastery] = useState(() => (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+  const [localMastery, setLocalMastery] = useState(() => (isReview ? Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)) : (card.masteryLevel ?? (card.isArchived ? 4 : 0))));
 
   useEffect(() => {
-    setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
-  }, [card.id, card.masteryLevel, card.isArchived]);
+    setLocalMastery(isReview ? Math.max(3, card.masteryLevel ?? (card.isArchived ? 4 : 3)) : (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+  }, [card.id, card.masteryLevel, card.isArchived, isReview]);
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
   const virtualBackspaceRef = useRef<(() => void) | undefined>(undefined);
@@ -9571,6 +9662,7 @@ export default function App() {
         }
       } catch (e) {}
       useStore.setState({ isLoaded: true });
+      syncCardsFromSupabase().catch(() => {});
       
       // 3. Background Cloud Fetch with Cache Guard (Throttles massive multi-megabyte card downloads)
       try {
@@ -9808,6 +9900,7 @@ export default function App() {
       } finally {
         setIsLoadingBooks(false);
         useStore.setState({ isLoaded: true });
+        syncCardsFromSupabase().catch(() => {});
       }
     };
     fetchData();
@@ -9831,6 +9924,7 @@ export default function App() {
     const handleSyncOnFocus = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         try {
+          await syncCardsFromSupabase();
           const { data } = await supabase
             .from('user_stats')
             .select('daily_activity')
@@ -10041,7 +10135,11 @@ export default function App() {
       <StudyEntry 
         reviewCards={reviewCards} 
         isMistakesReview={isReviewingMistakes}
-        onBack={() => { setReviewCards(null); setIsReviewingMistakes(false); refreshDueCardsCount(appLanguage); }} 
+        onBack={() => {
+          setReviewCards(null);
+          setIsReviewingMistakes(false);
+          syncCardsFromSupabase().then(() => refreshDueCardsCount(appLanguage));
+        }} 
       />
     );
   }
