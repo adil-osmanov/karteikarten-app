@@ -132,6 +132,24 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
     }
 
     if (Array.isArray(remoteRows)) {
+      if (remoteRows.length === 0) {
+        // Cloud is empty. Attempt auto-backfill from local decks if available!
+        try {
+          const { useStore } = await import('@/app/page');
+          const decks = useStore.getState().decks;
+          const books = useStore.getState().books;
+          if (Array.isArray(decks) && decks.length > 0) {
+            const count = await autoBackfillMasteredWords(decks, books, lang);
+            if (count > 0) return;
+          }
+        } catch {}
+
+        // If local decks are not ready yet but we have cached state, do NOT zero out!
+        if (masteredLemmasSetByLang[lang].size > 0 || globalMatrixStatsByLang[lang].totalWords > 0) {
+          return;
+        }
+      }
+
       const masteredSet = masteredLemmasSetByLang[lang];
       const levelMap = lemmaLevelMapByLang[lang];
 
@@ -391,15 +409,163 @@ export function getMasteredLemmasSet(langParam?: string | AppLang): Set<string> 
 }
 
 /**
- * Reconciles mastered words when decks, books, or cards are deleted.
- * When isExplicitDeletion is false, it NEVER allows local indexes to overwrite user_mastered_words!
- * Supabase is the sole authority.
+ * Emergency Auto-Backfill of Mastered Words:
+ * Scans all decks for stage 4 / archived cards ((card.masteryLevel >= 4) || card.isArchived === true),
+ * normalizes lemmas, resolves their CEFR level via GLOBAL_LEXICON_CACHE (or book level),
+ * restores local reactive Wortschatz-Matrix state & caches,
+ * and batch upserts them to Supabase user_mastered_words table.
+ */
+export async function autoBackfillMasteredWords(
+  providedDecks?: Array<{ id: string; bookId?: string; language?: string; cards?: Array<any> }>,
+  providedBooks?: Array<{ id: string; language?: string; activeLevels?: string[]; title?: string }>,
+  targetLangParam?: string | AppLang
+): Promise<number> {
+  let targetLang: AppLang = 'de';
+  let decks = providedDecks;
+  let books = providedBooks;
+
+  try {
+    const { useStore } = await import('@/app/page');
+    if (!decks || decks.length === 0) {
+      decks = useStore.getState().decks;
+    }
+    if (!books || books.length === 0) {
+      books = useStore.getState().books;
+    }
+    targetLang = normalizeLanguageCode(targetLangParam || useStore.getState().appLanguage);
+  } catch {
+    targetLang = normalizeLanguageCode(targetLangParam);
+  }
+
+  if (!Array.isArray(decks) || decks.length === 0) return 0;
+
+  const bookMap = new Map<string, any>();
+  if (Array.isArray(books)) {
+    books.forEach((b) => bookMap.set(b.id, b));
+  }
+
+  // Filter decks for the requested language
+  const langDecks = decks.filter((deck) => {
+    const dLang = normalizeLanguageCode(deck.language || bookMap.get(deck.bookId || '')?.language || 'de');
+    return dLang === targetLang;
+  });
+
+  const recoveredMap = new Map<string, { level: CEFRLevel; bookId?: string }>();
+
+  langDecks.forEach((deck) => {
+    const parentBook = deck.bookId ? bookMap.get(deck.bookId) : undefined;
+    const defaultBookLevel = parentBook?.activeLevels?.[0] || parentBook?.title || (deck as any).level || 'B2';
+
+    deck.cards?.forEach((card: any) => {
+      const isMastered = (card.masteryLevel !== undefined && card.masteryLevel >= 4) || card.isArchived === true;
+      if (!isMastered) return;
+
+      const raw = card.targetWord || card.missingWord || card.infinitive || card.front || '';
+      const clean = extractLemma(raw, targetLang);
+      if (!clean || clean.length < 2 || !isValidLemma(clean, targetLang)) return;
+
+      if (!recoveredMap.has(clean)) {
+        const officialLevel = GLOBAL_LEXICON_CACHE[targetLang]?.[clean];
+        const resolvedLevel: CEFRLevel =
+          officialLevel || resolveCEFRLevel(clean, defaultBookLevel, targetLang);
+        recoveredMap.set(clean, { level: resolvedLevel, bookId: deck.bookId });
+      }
+    });
+  });
+
+  if (recoveredMap.size === 0) return 0;
+
+  const masteredSet = masteredLemmasSetByLang[targetLang];
+  const levelMap = lemmaLevelMapByLang[targetLang];
+
+  recoveredMap.forEach(({ level }, lemma) => {
+    masteredSet.add(lemma);
+    levelMap.set(lemma, level);
+  });
+
+  const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
+  masteredSet.forEach((lemma) => {
+    const lvl = levelMap.get(lemma) || GLOBAL_LEXICON_CACHE[targetLang]?.[lemma] || resolveCEFRLevel(lemma, null, targetLang);
+    if (updatedCounts[lvl] !== undefined) {
+      updatedCounts[lvl] += 1;
+    }
+  });
+
+  const total = Object.values(updatedCounts).reduce((a, b) => a + b, 0);
+  const activeLevel = calculateActiveLevel(updatedCounts, targetLang);
+
+  globalMatrixStatsByLang[targetLang] = {
+    counts: updatedCounts,
+    totalWords: total,
+    activeLevel,
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      const { statsKey, lemmasKey, cacheKeyV3 } = getStorageKeys(targetLang);
+      const cachePayload = {
+        counts: updatedCounts,
+        totalWords: total,
+        activeLevel,
+        lemmas: Array.from(masteredSet),
+        updatedAt: Date.now(),
+      };
+      localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[targetLang]));
+      localStorage.setItem(lemmasKey, JSON.stringify(Array.from(masteredSet)));
+      localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
+      localStorage.setItem(`cefr_mastered_cache_v3_${targetLang}`, JSON.stringify(cachePayload));
+    } catch (e) {
+      console.warn('Wortschatz-Matrix storage quota warning:', e);
+    }
+  }
+
+  notifyListeners(targetLang);
+
+  // Batch upsert to Supabase user_mastered_words
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id;
+    if (userId && recoveredMap.size > 0) {
+      const rows = Array.from(recoveredMap.entries()).map(([lemma, info]) => ({
+        user_id: userId,
+        lemma,
+        cefr_level: info.level,
+        source_book_id: info.bookId || null,
+        first_mastered_at: new Date().toISOString(),
+      }));
+
+      const chunkSize = 100;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        await supabase
+          .from('user_mastered_words')
+          .upsert(rows.slice(i, i + chunkSize), {
+            onConflict: 'user_id,lemma',
+            ignoreDuplicates: true,
+          });
+      }
+    }
+  } catch (err) {
+    console.warn('[Wortschatz-Matrix] autoBackfillMasteredWords upsert notice:', err);
+  }
+
+  return recoveredMap.size;
+}
+
+/**
+ * Reconciles mastered words when decks, books, or cards are explicitly deleted.
+ * When isExplicitDeletion is false or decks are loading/empty, it NEVER modifies user_mastered_words!
  */
 export async function reconcileMasteredWords(
   providedDecks?: Array<{ id: string; bookId?: string; language?: string; cards?: Array<any> }>,
   targetLangParam?: string | AppLang,
   isExplicitDeletion: boolean = false
 ) {
+  // STRICT GUARD CLAUSE:
+  // Categorically forbid deleting words from Supabase or masteredSet if this is not an explicit user action!
+  if (!isExplicitDeletion) {
+    return;
+  }
+
   let targetLang: AppLang = 'de';
   let currentDecks = providedDecks;
 
@@ -408,20 +574,14 @@ export async function reconcileMasteredWords(
     if (!currentDecks) {
       currentDecks = useStore.getState().decks;
     }
+    const isLoaded = useStore.getState().isLoaded;
+    if (!isLoaded) return;
     targetLang = normalizeLanguageCode(targetLangParam || useStore.getState().appLanguage);
   } catch {
     targetLang = normalizeLanguageCode(targetLangParam);
   }
 
-  // PROTECT AGAINST LOCAL INDEX OVERWRITE:
-  // If this is NOT an explicit deletion, do not pollute or overwrite with local IndexedDB cards!
-  // Supabase user_mastered_words is the sole authority for the matrix.
-  if (!isExplicitDeletion) {
-    syncMasteredWordsFromCloud(targetLang).catch(() => {});
-    return;
-  }
-
-  if (!Array.isArray(currentDecks)) return;
+  if (!Array.isArray(currentDecks) || currentDecks.length === 0) return;
   initMatrixStore(targetLang);
 
   const masteredSet = masteredLemmasSetByLang[targetLang];

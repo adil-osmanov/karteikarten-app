@@ -23,7 +23,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, getMasteredLemmasSet } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, getMasteredLemmasSet, autoBackfillMasteredWords } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -1101,7 +1101,8 @@ export function isCardDueForReview(card: any): boolean {
   }
 
   // 3. Отдаем на повторение СТРОГО тогда, когда наступил срок
-  return reviewTimestamp <= Date.now();
+  // Сравниваем с округлением до минут для строгой синхронизации между браузерами
+  return Math.floor(reviewTimestamp / 60000) <= Math.floor(Date.now() / 60000);
 }
 
 export const isCardDue = isCardDueForReview;
@@ -1302,12 +1303,16 @@ export async function syncCardsFromSupabase(): Promise<void> {
         const remoteInterval = remote.interval !== undefined ? remote.interval : (remote as any).interval;
         const remoteIsArchived = remote.isArchived !== undefined ? Boolean(remote.isArchived) : Boolean((remote as any).is_archived);
 
+        const localTime = card.nextReviewDate ? new Date(card.nextReviewDate).getTime() : 0;
+        const remoteTime = remoteNextReviewDate ? new Date(remoteNextReviewDate).getTime() : 0;
+        const datesDifferent = Math.abs(localTime - remoteTime) > 1000;
+
         if (
           card.masteryLevel !== remoteMastery ||
           card.repetitions !== remoteRepetitions ||
           card.interval !== remoteInterval ||
           Boolean(card.isArchived) !== remoteIsArchived ||
-          card.nextReviewDate !== remoteNextReviewDate
+          datesDifferent
         ) {
           deckChanged = true;
           hasChanges = true;
@@ -1331,6 +1336,7 @@ export async function syncCardsFromSupabase(): Promise<void> {
       await setIDBItem('app_decks', nextDecks);
       safeSetStorage('cached_app_decks', JSON.stringify(nextDecks));
       window.dispatchEvent(new Event('storage-update'));
+      autoBackfillMasteredWords(nextDecks, useStore.getState().books, useStore.getState().appLanguage).catch(() => {});
     }
   } catch (err) {
     console.warn("syncCardsFromSupabase failed:", err);
@@ -2312,26 +2318,17 @@ export const useStore = create<DeckState>()((set, get) => ({
         localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
       } catch (e) {}
 
-      const nowIso = new Date().toISOString();
       const fullUpdate: Record<string, any> = {
         masteryLevel: validCard.masteryLevel,
         isArchived: Boolean(validCard.isArchived),
         interval: validCard.interval,
-        repetitions: validCard.repetitions,
-        updated_at: nowIso
+        repetitions: validCard.repetitions
       };
       if (validCard.nextReviewDate !== undefined) {
         fullUpdate.nextReviewDate = validCard.nextReviewDate;
       }
 
       let { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
-
-      if (error && error.message?.includes('updated_at')) {
-        delete fullUpdate.updated_at;
-        const retryRes = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
-        error = retryRes.error;
-        data = retryRes.data;
-      }
 
       if (error) {
         console.error("🚨 ОШИБКА СОХРАНЕНИЯ КАРТОЧКИ В SUPABASE:", error);
@@ -9642,6 +9639,7 @@ export default function App() {
         }
         if (idbDecks && idbDecks.length > 0) {
           setDecks(idbDecks);
+          autoBackfillMasteredWords(idbDecks, idbBooks || undefined, useStore.getState().appLanguage).catch(() => {});
         }
       } catch (e) {}
 
@@ -9853,7 +9851,7 @@ export default function App() {
                   const localTime = localCard.updated_at ? new Date(localCard.updated_at).getTime() : 0;
                   const cloudTime = cloudCard.updated_at ? new Date(cloudCard.updated_at).getTime() : 0;
                   // Если локальная карточка обновлена свежее, чем в облаке — сохраняем локальный прогресс
-                  if (localTime > cloudTime) {
+                  if (cloudTime > 0 && localTime > cloudTime) {
                     cardToUse = {
                       ...cloudCard,
                       masteryLevel: localCard.masteryLevel,
@@ -9887,6 +9885,7 @@ export default function App() {
           setDecks(enhancedDecks as Deck[]);
           setIDBItem('app_decks', enhancedDecks);
           safeSetStorage('cached_app_decks', JSON.stringify(enhancedDecks));
+          autoBackfillMasteredWords(enhancedDecks as Deck[], useStore.getState().books, useStore.getState().appLanguage).catch(() => {});
           if (typeof window !== 'undefined') {
             localStorage.setItem('last_library_cloud_sync', String(Date.now()));
           }
