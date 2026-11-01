@@ -1080,32 +1080,38 @@ export interface CardSRSUpdate {
   nextReviewDate: number | null;
 }
 
-export function isCardDue(card: any): boolean {
+export function isCardDueForReview(card: any): boolean {
   if (!card) return false;
 
-  // 1. Если карточка выучена (Stufe 4+) или в архиве — она НЕ требует повторения
+  // 1. Исключаем выученные и заархивированные
   if (card.isArchived || (card.masteryLevel ?? 0) >= 4) {
     return false;
   }
 
-  // 2. Поддержка camelCase и snake_case из Supabase/IndexedDB
+  // 2. Исключаем НОВЫЕ карточки, которые пользователь еще ни разу не учил:
+  // Если у карточки нет повторений и нулевой уровень — это новая карта, а не повтор!
+  const hasBeenStudied = (card.repetitions ?? 0) > 0 || (card.masteryLevel ?? 0) > 0;
+  if (!hasBeenStudied) {
+    return false;
+  }
+
+  // 3. Проверяем дату (поддержка camelCase и snake_case)
   const rawDate = card.nextReviewDate || card.next_review_date;
-
-  // 3. Если даты нет вообще — карточка новая/непройденная, она ОБЯЗАТЕЛЬНО должна быть в повторении!
   if (!rawDate) {
+    // Если карточку уже начали учить (уровень > 0), но даты нет — даем на повтор
     return true;
   }
 
-  const reviewTime = new Date(rawDate).getTime();
-  // Если дата некорректная (NaN) — тоже отдаем в повторение
-  if (isNaN(reviewTime)) {
+  const reviewTimestamp = new Date(rawDate).getTime();
+  if (isNaN(reviewTimestamp)) {
     return true;
   }
 
-  return reviewTime <= Date.now();
+  // 4. Карточка готова к повторению ТОЛЬКО если срок наступил
+  return reviewTimestamp <= Date.now();
 }
 
-export const isCardDueForReview = isCardDue;
+export const isCardDue = isCardDueForReview;
 
 export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, bookId?: string): Promise<number> {
   const cleanLang = normalizeLanguage(lang);
@@ -1146,6 +1152,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         .select('id, decks!inner(book_id)', { count: 'exact', head: true })
         .eq('isArchived', false)
         .lt('masteryLevel', 4)
+        .or('repetitions.gt.0,masteryLevel.gt.0')
         .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`)
         .eq('decks.book_id', bookId);
 
@@ -1179,6 +1186,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         .select('id, decks!inner(language)', { count: 'exact', head: true })
         .eq('isArchived', false)
         .lt('masteryLevel', 4)
+        .or('repetitions.gt.0,masteryLevel.gt.0')
         .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`)
         .eq('decks.language', cleanLang);
 
@@ -1204,7 +1212,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       if (bookId && dBookId !== bookId) return;
       if (!bookId && normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
       deck.cards.forEach(card => {
-        if (isCardDue(card)) {
+        if (isCardDueForReview(card)) {
           list.push({ deckId: deck.id, card });
         }
       });
@@ -1219,6 +1227,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
       .eq('isArchived', false)
       .lt('masteryLevel', 4)
+      .or('repetitions.gt.0,masteryLevel.gt.0')
       .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`);
 
     if (bookId) {
@@ -9245,7 +9254,7 @@ export function RedemittelStudyCard({
 export default function App() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder, dueCardsCount, refreshDueCardsCount } = useStore();
+  const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder, dueCardsCount: _storeDueCardsCount, refreshDueCardsCount } = useStore();
   const [isMounted, setIsMounted] = useState(false);
   const [isLoadingBooks, setIsLoadingBooks] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
@@ -9848,7 +9857,7 @@ export default function App() {
     return decks.filter(d => {
       const deckBookId = d.bookId || (d as any).book_id;
       if (activeBookId) return deckBookId === activeBookId;
-      return (d.language || 'DE') === appLanguage;
+      return !d.language || normalizeLanguage(d.language) === normalizeLanguage(appLanguage);
     });
   }, [decks, activeBookId, appLanguage]);
 
@@ -9938,13 +9947,28 @@ export default function App() {
     const list: { deckId: string, card: Flashcard }[] = [];
     filteredDecksList.forEach(deck => {
       deck.cards?.forEach(card => {
-        if (isCardDue(card)) {
+        if (isCardDueForReview(card)) {
           list.push({ deckId: deck.id, card });
         }
       });
     });
     return list;
   }, [filteredDecksList]);
+
+  // Хедерный подсчет повторений: строго для текущего активного языка (appLanguage)
+  const dueCardsCount = useMemo(() => {
+    return decks
+      .filter(deck => {
+        if (activeBookId) {
+          const dBookId = deck.bookId || (deck as any).book_id;
+          return dBookId === activeBookId;
+        }
+        return !deck.language || normalizeLanguage(deck.language) === normalizeLanguage(appLanguage);
+      })
+      .flatMap(deck => deck.cards || [])
+      .filter(isCardDueForReview)
+      .length;
+  }, [decks, appLanguage, activeBookId]);
 
   // ДИАГНОСТИЧЕСКИЙ ЛОГ В КОНСОЛЬ (ПРОВЕРКА ТОЧНОСТИ)
   useEffect(() => {
@@ -9957,7 +9981,7 @@ export default function App() {
     console.log('📊 [DIAGNOSTICS] Выучено слов в матрице:', masteredLemmas.size);
   }, [isLoaded, decks, dueCards.length, appLanguage]);
 
-  const displayDueCount = dueCards.length;
+  const displayDueCount = dueCardsCount;
 
   const handleStartReviewDue = useCallback(async () => {
     setIsReviewingMistakes(false);
