@@ -1083,22 +1083,16 @@ export interface CardSRSUpdate {
 export function isCardDueForReview(card: any): boolean {
   if (!card) return false;
 
-  // 1. Исключаем выученные и заархивированные
-  if (card.isArchived || (card.masteryLevel ?? 0) >= 4) {
-    return false;
-  }
-
-  // 2. Исключаем НОВЫЕ карточки, которые пользователь еще ни разу не учил:
-  // Если у карточки нет повторений и нулевой уровень — это новая карта, а не повтор!
+  // 1. Исключаем нетронутые новые карточки, которые пользователь еще ни разу не учил
   const hasBeenStudied = (card.repetitions ?? 0) > 0 || (card.masteryLevel ?? 0) > 0;
   if (!hasBeenStudied) {
     return false;
   }
 
-  // 3. Проверяем дату (поддержка camelCase и snake_case)
+  // 2. Проверяем дату следующего повторения (поддерживаем camelCase и snake_case)
   const rawDate = card.nextReviewDate || card.next_review_date;
   if (!rawDate) {
-    // Если карточку уже начали учить (уровень > 0), но даты нет — даем на повтор
+    // Если карточка начата, но даты нет — отдаем на повторение
     return true;
   }
 
@@ -1107,7 +1101,7 @@ export function isCardDueForReview(card: any): boolean {
     return true;
   }
 
-  // 4. Карточка готова к повторению ТОЛЬКО если срок наступил
+  // 3. Карточка готова к повторению (включая Stage 4 / Архив), если ее срок наступил:
   return reviewTimestamp <= Date.now();
 }
 
@@ -1150,8 +1144,6 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       const { count, error } = await supabase
         .from('cards')
         .select('id, decks!inner(book_id)', { count: 'exact', head: true })
-        .eq('isArchived', false)
-        .lt('masteryLevel', 4)
         .or('repetitions.gt.0,masteryLevel.gt.0')
         .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`)
         .eq('decks.book_id', bookId);
@@ -1184,8 +1176,6 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       const { count, error } = await supabase
         .from('cards')
         .select('id, decks!inner(language)', { count: 'exact', head: true })
-        .eq('isArchived', false)
-        .lt('masteryLevel', 4)
         .or('repetitions.gt.0,masteryLevel.gt.0')
         .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`)
         .eq('decks.language', cleanLang);
@@ -1225,8 +1215,6 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
     let query = supabase
       .from('cards')
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
-      .eq('isArchived', false)
-      .lt('masteryLevel', 4)
       .or('repetitions.gt.0,masteryLevel.gt.0')
       .or(`nextReviewDate.is.null,nextReviewDate.lte.${now}`);
 
@@ -1369,7 +1357,14 @@ export function calculateNextSRSState(
       const newReps = currentReps + 1;
       let nextInterval = 1;
 
-      if (newReps === 1) {
+      if (currentInterval >= 16) {
+        // Долгосрочное интервальное повторение (Long-term Maintenance Reviews):
+        // 30 дней -> 65 дней -> 150 дней (с учетом easeFactor)
+        nextInterval = Math.max(
+          Math.round(currentInterval * Math.max(1.8, currentEase)),
+          currentInterval + 7
+        );
+      } else if (newReps === 1) {
         nextInterval = 1; // 1 день
       } else if (newReps === 2) {
         nextInterval = 3; // 3 дня
@@ -1828,7 +1823,8 @@ export const useStore = create<DeckState>()((set, get) => ({
   deleteBook: async (id) => {
     const previousBooks = get().books;
     set({ books: previousBooks.filter(b => b.id !== id) });
-    reconcileMasteredWords(get().decks, get().appLanguage);
+    const remainingDecks = get().decks.filter(d => (d.bookId || (d as any).book_id) !== id);
+    reconcileMasteredWords(remainingDecks, get().appLanguage, true);
     
     const { error } = await supabase.from('books').delete().eq('id', id);
     
@@ -1836,7 +1832,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       console.error("SUPABASE ERROR:", error);
       if (typeof window !== 'undefined') toast.error("Fehler: Buch konnte nicht gespeichert werden. (RLS oder ID fehlt)");
       set({ books: previousBooks });
-      reconcileMasteredWords(get().decks, get().appLanguage);
+      reconcileMasteredWords(get().decks, get().appLanguage, false);
     }
   },
   incrementDailyProgress: (targetLang?: string) => {
@@ -2074,13 +2070,13 @@ export const useStore = create<DeckState>()((set, get) => ({
     const previousDecks = get().decks;
     const remainingDecks = previousDecks.filter(d => d.id !== deckId);
     set({ decks: remainingDecks });
-    reconcileMasteredWords(remainingDecks, get().appLanguage);
+    reconcileMasteredWords(remainingDecks, get().appLanguage, true);
     
     const { error } = await supabase.from('decks').delete().eq('id', deckId);
     if (error) {
       console.error("Supabase Delete Deck Error:", error.message);
       set({ decks: previousDecks });
-      reconcileMasteredWords(previousDecks, get().appLanguage);
+      reconcileMasteredWords(previousDecks, get().appLanguage, false);
     }
   },
 
@@ -2094,7 +2090,12 @@ export const useStore = create<DeckState>()((set, get) => ({
       };
     });
     set({ decks: nextDecks });
-    reconcileMasteredWords(nextDecks, get().appLanguage);
+    reconcileMasteredWords(nextDecks, get().appLanguage, true);
+    try {
+      await supabase.from('cards').delete().eq('id', cardId);
+    } catch (e) {
+      console.error("Supabase Delete Card Error:", e);
+    }
   },
   
   renameDeck: async (deckId, newName) => {

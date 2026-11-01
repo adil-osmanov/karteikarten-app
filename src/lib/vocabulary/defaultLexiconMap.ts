@@ -25,25 +25,25 @@ export const LANGUAGE_CEFR_CONFIG: Record<AppLang, {
     ]
   },
   en: {
-    totalGoal: 14000,
+    totalGoal: 9000,
     wordLabel: 'Words',
     levels: [
-      { key: 'A1', target: 1000 }, // Oxford 3000 / CEFR English Profile
+      { key: 'A1', target: 1000 }, // Oxford Essential
       { key: 'A2', target: 1500 },
-      { key: 'B1', target: 2500 },
-      { key: 'B2', target: 4500 },
-      { key: 'C1', target: 4500 },
+      { key: 'B1', target: 2000 }, // завершение Oxford 3000
+      { key: 'B2', target: 2000 }, // Oxford 5000
+      { key: 'C1', target: 2500 }, // Academic Word List / C1
     ]
   },
   ru: {
-    totalGoal: 14000,
+    totalGoal: 10500,
     wordLabel: 'Слов',
     levels: [
-      { key: 'A1', target: 1000 }, // Лексический минимум ТРКИ (Элементарный)
-      { key: 'A2', target: 1500 }, // ТРКИ (Базовый)
-      { key: 'B1', target: 2500 }, // ТРКИ-1
-      { key: 'B2', target: 4500 }, // ТРКИ-2
-      { key: 'C1', target: 4500 }, // ТРКИ-3
+      { key: 'A1', target: 800 },  // Элементарный
+      { key: 'A2', target: 1300 }, // Базовый
+      { key: 'B1', target: 2300 }, // ТРКИ-1
+      { key: 'B2', target: 2600 }, // ТРКИ-2
+      { key: 'C1', target: 3500 }, // ТРКИ-3
     ]
   }
 };
