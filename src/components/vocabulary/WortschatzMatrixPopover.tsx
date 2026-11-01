@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Download } from 'lucide-react';
 import { useWortschatzMatrix, getMasteredLemmasSet } from '@/hooks/useWortschatzMatrix';
 import { CEFRLevel, CEFR_TARGETS, TOTAL_WORLD_LEXICON_GOAL, DEFAULT_LEXICON_MAP, resolveCEFRLevel } from '@/lib/vocabulary/defaultLexiconMap';
+import { GOETHE_A1_DICTIONARY } from '@/lib/vocabulary/goetheA1Dictionary';
 import { extractGermanLemma, isValidGermanLemma } from '@/lib/vocabulary/normalizer';
 import { useStore } from '@/app/page';
 
@@ -12,27 +13,12 @@ interface WortschatzMatrixPopoverProps {
   className?: string;
 }
 
-const LEVEL_CONFIG: Record<CEFRLevel, { target: number; badgeClass: string }> = {
-  C1: {
-    target: CEFR_TARGETS.C1.target,
-    badgeClass: 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20',
-  },
-  B2: {
-    target: CEFR_TARGETS.B2.target,
-    badgeClass: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20',
-  },
-  B1: {
-    target: CEFR_TARGETS.B1.target,
-    badgeClass: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/20',
-  },
-  A2: {
-    target: CEFR_TARGETS.A2.target,
-    badgeClass: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20',
-  },
-  A1: {
-    target: CEFR_TARGETS.A1.target,
-    badgeClass: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20',
-  },
+const LEVEL_TARGETS: Record<CEFRLevel, number> = {
+  C1: CEFR_TARGETS.C1.target,
+  B2: CEFR_TARGETS.B2.target,
+  B1: CEFR_TARGETS.B1.target,
+  A2: CEFR_TARGETS.A2.target,
+  A1: CEFR_TARGETS.A1.target,
 };
 
 const CEFR_ORDER: CEFRLevel[] = ['C1', 'B2', 'B1', 'A2', 'A1'];
@@ -79,50 +65,63 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
     const mastered = getMasteredLemmasSet();
     const wordSet = new Set<string>();
 
-    // 1. All lemmas from default dictionary mapped to this level
-    Object.entries(DEFAULT_LEXICON_MAP).forEach(([lemma, lvl]) => {
-      if (lvl === levelKey) {
-        wordSet.add(lemma);
-      }
-    });
-
-    // 2. Also harvest words from user's loaded decks corresponding to this level
-    try {
-      const decks = useStore.getState().decks;
-      const books = useStore.getState().books;
-      const bookLevelMap = new Map<string, string>();
-      books.forEach((b: any) => {
-        const bLevel = b.activeLevels?.[0] || b.title || 'B2';
-        bookLevelMap.set(b.id, bLevel);
-      });
-
-      decks.forEach((d: any) => {
-        const bLevel = d.bookId ? bookLevelMap.get(d.bookId) : (d.level || 'B2');
-        if (d.cards) {
-          d.cards.forEach((c: any) => {
-            const raw = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
-            const lemma = extractGermanLemma(raw);
-            if (lemma && isValidGermanLemma(lemma)) {
-              const resolved = resolveCEFRLevel(lemma, bLevel);
-              if (resolved === levelKey) {
-                wordSet.add(lemma);
-              }
-            }
-          });
+    if (levelKey === 'A1') {
+      // 100% clean canonical Goethe-Institut A1 lemmas
+      Object.values(GOETHE_A1_DICTIONARY).forEach((canonicalLemma) => {
+        if (!mastered.has(canonicalLemma.toLowerCase())) {
+          wordSet.add(canonicalLemma);
         }
       });
-    } catch (e) {}
+    } else {
+      // For other levels (A2, B1, B2, C1):
+      // 1. All lemmas from default dictionary mapped to this level
+      Object.entries(DEFAULT_LEXICON_MAP).forEach(([lemma, lvl]) => {
+        if (lvl === levelKey) {
+          wordSet.add(lemma);
+        }
+      });
 
-    // 3. Exclude already mastered lemmas
+      // 2. Also harvest words from user's loaded decks matching this level
+      try {
+        const decks = useStore.getState().decks;
+        const books = useStore.getState().books;
+        const bookLevelMap = new Map<string, string>();
+        books.forEach((b: any) => {
+          const bLevel = b.activeLevels?.[0] || b.title || 'B2';
+          bookLevelMap.set(b.id, bLevel);
+        });
+
+        decks.forEach((d: any) => {
+          const bLevel = d.bookId ? bookLevelMap.get(d.bookId) : (d.level || 'B2');
+          const upper = (bLevel || '').toUpperCase();
+          if (upper.includes(levelKey)) {
+            if (d.cards) {
+              d.cards.forEach((c: any) => {
+                const raw = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+                const lemma = extractGermanLemma(raw);
+                if (lemma && isValidGermanLemma(lemma)) {
+                  const resolved = resolveCEFRLevel(lemma, bLevel);
+                  if (resolved === levelKey) {
+                    wordSet.add(lemma);
+                  }
+                }
+              });
+            }
+          }
+        });
+      } catch (e) {}
+    }
+
+    // Exclude already mastered lemmas and sort
     const remaining = Array.from(wordSet)
-      .filter((w) => !mastered.has(w))
+      .filter((w) => !mastered.has(w.toLowerCase()))
       .sort((a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' }));
 
-    // 4. Build clean text document
-    const header = `Список невыученных слов немецкого языка уровня ${levelKey} (осталось: ${remaining.length}):\n\n`;
+    // Build clean text document matching prompt specification
+    const header = `Невыученные слова уровня ${levelKey} (осталось: ${remaining.length}):\n\n`;
     const content = header + (remaining.length > 0 ? remaining.map((w) => `- ${w}`).join('\n') : '(Все слова этого уровня выучены!)');
 
-    // 5. Trigger download in browser
+    // Trigger download in browser
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -138,22 +137,20 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
 
   return (
     <div className={`relative inline-block ${className}`}>
-      {/* 5. СИНХРОНИЗИРОВАННАЯ КНОПКА-ТРИГГЕР В ХЕДЕРЕ */}
+      {/* 2. СИНХРОНИЗИРОВАННАЯ КНОПКА-ТРИГГЕР В ХЕДЕРЕ */}
       <button
         ref={buttonRef}
         type="button"
         onClick={() => setIsMatrixOpen(!isMatrixOpen)}
-        className="h-9 px-3.5 rounded-full border transition-all duration-200 select-none shadow-sm active:scale-95 cursor-pointer flex items-center gap-2
-          bg-zinc-100 hover:bg-zinc-200/70 border-zinc-200/80 text-zinc-800
-          dark:bg-zinc-900 dark:hover:bg-zinc-850 dark:border-white/10 dark:text-zinc-200"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-150 select-none bg-zinc-100 hover:bg-zinc-200/80 border-zinc-200/80 text-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-850 dark:border-white/10 dark:text-zinc-200 shadow-sm active:scale-95 cursor-pointer"
         title="Wortschatz-Matrix"
       >
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.6)]" />
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
         <span className="text-xs font-semibold tracking-tight">{totalMastered} Wörter</span>
         <span className="text-xs text-zinc-400 dark:text-zinc-500 font-mono">• {currentLevel || 'A1'}</span>
       </button>
 
-      {/* 1 & 4. РЕДИЗАЙН ПОПОВЕРА БЕЗ МЕРЦАНИЯ С АППАРАТНЫМ УСКОРЕНИЕМ */}
+      {/* РЕДИЗАЙН ПОПОВЕРА БЕЗ МЕРЦАНИЯ С АППАРАТНЫМ УСКОРЕНИЕМ */}
       <AnimatePresence>
         {isMatrixOpen && (
           <motion.div
@@ -165,7 +162,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
             style={{ willChange: 'transform, opacity' }}
             className="fixed inset-x-4 top-20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 w-80 sm:w-96 p-5 rounded-2xl shadow-2xl backdrop-blur-2xl border bg-white/95 border-black/10 text-zinc-900 dark:bg-zinc-900/95 dark:border-white/10 dark:text-zinc-100 z-50 select-none text-left transform-gpu will-change-transform"
           >
-            {/* 1. ОЧИЩЕННАЯ ШАПКА: ТОЛЬКО ЦИФРЫ И СИНИЙ БЕЙДЖ % */}
+            {/* ОЧИЩЕННАЯ ШАПКА: ТОЛЬКО ЦИФРЫ И СИНИЙ БЕЙДЖ % */}
             <div className="flex items-center justify-between mb-5">
               <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
                 {totalMastered.toLocaleString('de-DE')} <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500">/ 15.000</span>
@@ -178,23 +175,30 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
             {/* СПИСОК УРОВНЕЙ C1 -> A1 */}
             <div className="space-y-3">
               {CEFR_ORDER.map((levelKey) => {
-                const config = LEVEL_CONFIG[levelKey];
+                const target = LEVEL_TARGETS[levelKey];
                 const count = stats[levelKey] || 0;
-                const percent = Math.min(Math.round((count / config.target) * 100), 100);
+                const percent = Math.min(Math.round((count / target) * 100), 100);
+                const isActive = currentLevel === levelKey;
 
                 return (
                   <div key={levelKey} className="flex flex-col gap-1.5">
                     {/* Строка заголовка уровня: бейдж слева, цифры и кнопка экспорта справа */}
                     <div className="flex justify-between items-center text-xs">
-                      {/* ТОЛЬКО аккуратный цветной бейдж уровня */}
-                      <span className={`w-8 text-center font-mono font-bold rounded py-0.5 text-[11px] ${config.badgeClass}`}>
+                      {/* Apple HIG monochrome badge: active is Apple blue, inactive is monochrome */}
+                      <span
+                        className={
+                          isActive
+                            ? 'w-7 h-5 flex items-center justify-center rounded font-mono text-[11px] font-bold bg-blue-600 text-white shadow-sm border border-blue-500'
+                            : 'w-7 h-5 flex items-center justify-center rounded font-mono text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-black/5 dark:border-white/5'
+                        }
+                      >
                         {levelKey}
                       </span>
 
                       {/* Числа прогресса и кнопка экспорта оставшихся слов */}
                       <div className="flex items-center gap-1.5">
                         <span className="font-mono text-zinc-500 dark:text-zinc-400">
-                          <strong className="text-zinc-900 dark:text-zinc-100 font-semibold">{count}</strong> / {config.target}
+                          <strong className="text-zinc-900 dark:text-zinc-100 font-semibold">{count}</strong> / {target}
                         </span>
 
                         <button
@@ -215,7 +219,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                     {/* 3. СИНЯЯ ПОЛОСА ПРОГРЕССА У ВСЕХ УРОВНЕЙ */}
                     <div className="w-full h-1.5 rounded-full bg-zinc-200/70 dark:bg-zinc-800 overflow-hidden">
                       <div 
-                        className="h-full rounded-full transition-all duration-500 bg-blue-500 dark:bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]"
+                        className="h-full rounded-full transition-all duration-500 bg-blue-500"
                         style={{ width: `${percent}%` }}
                       />
                     </div>

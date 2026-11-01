@@ -6003,7 +6003,7 @@ function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="h-9 px-3.5 rounded-full bg-white/80 dark:bg-zinc-900/80 hover:bg-white dark:hover:bg-zinc-800/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-md transition-all duration-200 active:scale-95 flex items-center gap-2 shadow-sm dark:shadow-lg text-zinc-800 dark:text-zinc-200 cursor-pointer"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-150 select-none bg-zinc-100 hover:bg-zinc-200/80 border-zinc-200/80 text-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-850 dark:border-white/10 dark:text-zinc-200 shadow-sm active:scale-95 cursor-pointer"
               title="Статистика дня"
             >
               <svg className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
