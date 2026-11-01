@@ -248,7 +248,7 @@ export async function recordMasteredLemma(
           source_book_id: bookId || null,
           first_mastered_at: new Date().toISOString(),
         },
-        { onConflict: 'user_id,language,lemma' }
+        { onConflict: 'user_id,language,lemma', ignoreDuplicates: true }
       );
   } catch (err) {
     console.warn('[Wortschatz-Matrix] Remote upsert notice:', err);

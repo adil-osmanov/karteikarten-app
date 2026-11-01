@@ -1080,6 +1080,23 @@ export interface CardSRSUpdate {
   nextReviewDate: number | null;
 }
 
+/**
+ * Invariant: A card is due for repetition ONLY if:
+ * !card.isArchived && (card.masteryLevel ?? 0) < 4 && card.nextReviewDate && new Date(card.nextReviewDate) <= new Date()
+ * Mastered cards (masteryLevel >= 4 or isArchived) must NEVER be counted in dueCards.
+ */
+export function isCardDueForReview(card: Flashcard | any, now: number = Date.now()): boolean {
+  if (!card) return false;
+  if (card.isArchived) return false;
+  if ((card.masteryLevel ?? 0) >= 4) return false;
+  if (!card.nextReviewDate) return false;
+  const reviewTime = typeof card.nextReviewDate === 'number'
+    ? card.nextReviewDate
+    : new Date(card.nextReviewDate).getTime();
+  if (isNaN(reviewTime) || reviewTime <= 0) return false;
+  return reviewTime <= now;
+}
+
 export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, bookId?: string): Promise<number> {
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
@@ -1103,7 +1120,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
       }
       deck.cards?.forEach(card => {
-        if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+        if (isCardDueForReview(card, now)) {
           localCount++;
         }
       });
@@ -1117,7 +1134,8 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       const { count, error } = await supabase
         .from('cards')
         .select('id, decks!inner(book_id)', { count: 'exact', head: true })
-        .eq('isArchived', true)
+        .eq('isArchived', false)
+        .lt('masteryLevel', 4)
         .lte('nextReviewDate', now)
         .eq('decks.book_id', bookId);
 
@@ -1149,7 +1167,8 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       const { count, error } = await supabase
         .from('cards')
         .select('id, decks!inner(language)', { count: 'exact', head: true })
-        .eq('isArchived', true)
+        .eq('isArchived', false)
+        .lt('masteryLevel', 4)
         .lte('nextReviewDate', now)
         .eq('decks.language', cleanLang);
 
@@ -1175,7 +1194,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       if (bookId && dBookId !== bookId) return;
       if (!bookId && normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
       deck.cards.forEach(card => {
-        if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+        if (isCardDueForReview(card, now)) {
           list.push({ deckId: deck.id, card });
         }
       });
@@ -1188,7 +1207,8 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
     let query = supabase
       .from('cards')
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
-      .eq('isArchived', true)
+      .eq('isArchived', false)
+      .lt('masteryLevel', 4)
       .lte('nextReviewDate', now);
 
     if (bookId) {
@@ -1210,7 +1230,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
           sentence: row.sentence,
           translation: row.translation,
           options: Array.isArray(row.options) ? row.options : [],
-          masteryLevel: row.masteryLevel ?? 4,
+          masteryLevel: row.masteryLevel ?? 0,
           isArchived: Boolean(row.isArchived),
           nextReviewDate: row.nextReviewDate,
           interval: row.interval ?? 0,
@@ -1234,7 +1254,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       if (normalizeLanguage(deck.language || 'DE') !== cleanLang) return;
     }
     deck.cards.forEach(card => {
-      if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+      if (isCardDueForReview(card, now)) {
         list.push({ deckId: deck.id, card });
       }
     });
@@ -1462,8 +1482,8 @@ interface DeckState {
   deleteDeck: (deckId: string) => void;
   deleteCard?: (deckId: string, cardId: string) => void;
   renameDeck: (deckId: string, newName: string) => void;
-  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string) => void;
-  setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => void;
+  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string) => Promise<void>;
+  setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => Promise<void>;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: (targetLang?: string) => void;
   appLanguage: 'DE' | 'EN' | 'RU';
@@ -2029,7 +2049,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       if (cardIndex === -1) return state;
 
       const card = { ...deck.cards[cardIndex] };
-      wasDueBefore = Boolean(card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now());
+      wasDueBefore = isCardDueForReview(card);
       wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
       const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe);
       Object.assign(card, srsUpdate);
@@ -2098,10 +2118,17 @@ export const useStore = create<DeckState>()((set, get) => ({
         fullUpdate.nextReviewDate = validCard.nextReviewDate;
       }
 
-      const { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
+      let { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
       
+      if (error && error.message?.includes('updated_at')) {
+        delete fullUpdate.updated_at;
+        const retryRes = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
+        error = retryRes.error;
+        data = retryRes.data;
+      }
+
       if (error) {
-        console.error("Supabase Update Card Error:", error.message);
+        console.error("🚨 ОШИБКА СОХРАНЕНИЯ КАРТОЧКИ В SUPABASE:", error);
       } else if (!data || data.length === 0) {
         console.warn("Supabase Update Card: 0 rows affected (RLS or missing row for ID:", cardId, ")");
       }
@@ -2137,7 +2164,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       const ci = deck.cards.findIndex((c) => c.id === cardId);
       if (ci === -1) return state;
       const card = { ...deck.cards[ci] };
-      wasDueBefore = Boolean(card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now());
+      wasDueBefore = isCardDueForReview(card);
       wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
 
       if (score >= 4) {
@@ -2212,10 +2239,17 @@ export const useStore = create<DeckState>()((set, get) => ({
         fullUpdate.nextReviewDate = validCard.nextReviewDate;
       }
 
-      const { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
+      let { data, error } = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
+
+      if (error && error.message?.includes('updated_at')) {
+        delete fullUpdate.updated_at;
+        const retryRes = await supabase.from('cards').update(fullUpdate).eq('id', cardId).select('id');
+        error = retryRes.error;
+        data = retryRes.data;
+      }
 
       if (error) {
-        console.error("Supabase Update Card Error:", error.message);
+        console.error("🚨 ОШИБКА СОХРАНЕНИЯ КАРТОЧКИ В SUPABASE:", error);
       } else if (!data || data.length === 0) {
         console.warn("Supabase Update Card: 0 rows affected (RLS or missing row for ID:", cardId, ")");
       }
@@ -2938,6 +2972,19 @@ export function TrennbarDottedBar() {
   );
 }
 
+export const HELPER_TOKENS = ['jemand', 'jemanden', 'jemandem', 'etwas', 'jdn.', 'jdm.', 'etw.', 'jmd.'] as const;
+const HELPER_TOKEN_SET = new Set(HELPER_TOKENS.map(t => t.toLowerCase()));
+
+// Частица 'sich' НЕ ДОЛЖНА входить в HELPER_TOKENS!
+// Если в 3 или 4 раунде слово возвратное (sich freuen, sich irren):
+// всё выражение 'sich irren' является целевым для ввода в инпут.
+export function isHelperToken(token: string): boolean {
+  if (!token) return false;
+  const clean = token.replace(/[().]/g, '').toLowerCase().trim();
+  const cleanWithDot = token.replace(/[()]/g, '').toLowerCase().trim();
+  return HELPER_TOKEN_SET.has(clean) || HELPER_TOKEN_SET.has(cleanWithDot) || /^(jemand(em|en|es|er)?|jdm|jdn|jmd|etwas|etw)$/i.test(clean);
+}
+
 export function parseTargetPhrase(raw: string): ParsedTargetPhrase {
   const trimmed = (raw || '').replace(/\s+/g, ' ').trim();
   if (!trimmed) {
@@ -2952,29 +2999,7 @@ export function parseTargetPhrase(raw: string): ParsedTargetPhrase {
     };
   }
 
-  // 1. Разделяемый глагол с пайпом (напр., "jemandem etwas aus|leihen", "aus|leihen", "sich an|passen")
-  if (trimmed.includes('|')) {
-    const tokens = trimmed.split(' ');
-    const pipeIndex = tokens.findIndex(t => t.includes('|'));
-    if (pipeIndex !== -1) {
-      const coreWordWithPipe = tokens[pipeIndex];
-      const prefix = tokens.slice(0, pipeIndex).join(' ');
-      const suffix = tokens.slice(pipeIndex + 1).join(' ');
-      const cleanCore = coreWordWithPipe.replace(/\|/g, '');
-      const splitIdx = coreWordWithPipe.indexOf('|');
-      return {
-        prefixContext: prefix,
-        coreWord: coreWordWithPipe,
-        suffixContext: suffix,
-        cleanCoreWord: cleanCore,
-        splitIndex: splitIdx,
-        isTrennbar: true,
-        article: null
-      };
-    }
-  }
-
-  // 2. Существительное с артиклем (der/die/das) — артикль и пробел обязательны для изучения и ввода!
+  // 1. Существительное с артиклем (der/die/das) — артикль и пробел обязательны для изучения и ввода!
   const nounMatch = trimmed.match(/^(der|die|das)\s+([A-ZÄÖÜ][a-zA-ZäöüÄÖÜß-]*)$/i);
   if (nounMatch) {
     const art = nounMatch[1].toLowerCase();
@@ -2990,40 +3015,49 @@ export function parseTargetPhrase(raw: string): ParsedTargetPhrase {
     };
   }
 
-  // 3. Фразовый глагол с грамматическим управлением (напр., "an jemandem verzweifeln", "jemanden bezeichnen")
+  // Разбиваем фразу на токены
   const tokens = trimmed.split(' ');
-  if (tokens.length > 1) {
-    const GRAMMAR_WORDS = /^(jemand(em|en|es|er)?|jdm\.?|jdn\.?|etwas|etw\.?|sich|einander|an|auf|aus|bei|für|gegen|in|mit|nach|über|um|unter|von|vor|zu|\+|\(D\)|\(A\)|\(G\)|\(Dat\)|\(Akk\)|\+D|\+A|\+Dat|\+Akk|als|wer|was|wie)$/i;
-    const lastWord = tokens[tokens.length - 1];
-    const prevTokens = tokens.slice(0, -1);
-    
-    const hasGrammarWord = prevTokens.some(t => GRAMMAR_WORDS.test(t));
-    const isGermanVerb = /^[a-zäöüß]+(en|eln|ern|sein|tun)$/i.test(lastWord);
-    
-    if (hasGrammarWord && isGermanVerb) {
-      return {
-        prefixContext: prevTokens.join(' '),
-        coreWord: lastWord,
-        suffixContext: '',
-        cleanCoreWord: lastWord,
-        splitIndex: -1,
-        isTrennbar: false,
-        article: null
-      };
-    }
+
+  // Выделяем начальные токены-подсказки (ТОЛЬКО местоименные маркеры: jemand, jemandem, jdm., etw. и т.д.)
+  // Частица 'sich', предлоги (an, auf, etc.) НЕ входят в HELPER_TOKENS и вводятся пользователем вручную!
+  let helperEndIdx = 0;
+  while (helperEndIdx < tokens.length - 1 && isHelperToken(tokens[helperEndIdx])) {
+    helperEndIdx++;
   }
 
-  // 4. Обычное слово / фраза по умолчанию
+  const helperPrefix = helperEndIdx > 0 ? tokens.slice(0, helperEndIdx).join(' ') : '';
+  const remainingTokens = tokens.slice(helperEndIdx);
+  const remainingPhrase = remainingTokens.join(' ');
+
+  // 2. Разделяемый глагол с пайпом (напр., "aus|leihen", "sich an|passen", "jdm. etwas vor|schlagen")
+  if (remainingPhrase.includes('|')) {
+    const pipeIdx = remainingPhrase.indexOf('|');
+    const cleanRemaining = remainingPhrase.replace(/\|/g, '');
+    return {
+      prefixContext: helperPrefix,
+      coreWord: remainingPhrase,
+      suffixContext: '',
+      cleanCoreWord: cleanRemaining,
+      splitIndex: pipeIdx,
+      isTrennbar: true,
+      article: null
+    };
+  }
+
+  // 3. Возвратные глаголы, фразы с предлогами и обычные слова (напр., "sich irren", "sich freuen", "an jemanden denken")
   return {
-    prefixContext: '',
-    coreWord: trimmed.replace(/\|/g, ''),
+    prefixContext: helperPrefix,
+    coreWord: remainingPhrase,
     suffixContext: '',
-    cleanCoreWord: trimmed.replace(/\|/g, ''),
+    cleanCoreWord: remainingPhrase.replace(/\|/g, ''),
     splitIndex: -1,
     isTrennbar: false,
     article: null
   };
 }
+
+export const parseTargetWord = parseTargetPhrase;
+export const splitPrefix = parseTargetPhrase;
 
 function RapidFlashcardMode({
   card,
@@ -3340,14 +3374,25 @@ function RapidFlashcardMode({
 
     if (parsedTarget.isTrennbar && parsedTarget.splitIndex > 0) {
       const sIdx = parsedTarget.splitIndex;
-      const clean = typedValue.replace(/[|·\u2506\u250A\s]/g, '');
-      if (clean.length >= sIdx) {
-        return {
-          prefix: clean.slice(0, sIdx),
-          hasDivider: true,
-          stem: clean.slice(sIdx),
-          totalLength: clean.length
-        };
+      if (!parsedTarget.cleanCoreWord.includes(' ')) {
+        const clean = typedValue.replace(/[|·\u2506\u250A\s]/g, '');
+        if (clean.length >= sIdx) {
+          return {
+            prefix: clean.slice(0, sIdx),
+            hasDivider: true,
+            stem: clean.slice(sIdx),
+            totalLength: clean.length
+          };
+        }
+      } else {
+        if (typedValue.length >= sIdx) {
+          return {
+            prefix: typedValue.slice(0, sIdx),
+            hasDivider: true,
+            stem: typedValue.slice(sIdx),
+            totalLength: typedValue.length
+          };
+        }
       }
     }
 
@@ -4100,7 +4145,7 @@ function RapidSession({
     });
   }, [queue]);
 
-  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = true, isSurrender: boolean = false) => {
+  const handleAnswer = useCallback(async (correct: boolean, wasFlipped: boolean = true, isSurrender: boolean = false) => {
     if (locked || !queue || queue.length === 0) return;
     const current = queue[0];
     const id = current.card.id;
@@ -4158,10 +4203,10 @@ function RapidSession({
     // 1) Persist immediately (store + Supabase)
     if (liveCard.isArchived) {
       // Spaced-repetition review of an already learned word
-      if (learned) answerCard(current.deckId, id, true, false, true, studyLanguage);
-      else if (!correct) answerCard(current.deckId, id, false, false, true, studyLanguage);
+      if (learned) await answerCard(current.deckId, id, true, false, true, studyLanguage);
+      else if (!correct) await answerCard(current.deckId, id, false, false, true, studyLanguage);
     } else {
-      setCardProgress(current.deckId, id, newScore, studyLanguage);
+      await setCardProgress(current.deckId, id, newScore, studyLanguage);
     }
 
     // 2) Update dots immediately
@@ -4182,7 +4227,7 @@ function RapidSession({
     }, advanceDelay);
   }, [locked, queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
 
-  const handleHintPenalty = useCallback((forcedScore?: number) => {
+  const handleHintPenalty = useCallback(async (forcedScore?: number) => {
     if (!queue || queue.length === 0) return;
     const current = queue[0];
     const id = current.card.id;
@@ -4192,9 +4237,9 @@ function RapidSession({
 
     // 1) Update progress and persist penalty immediately (store + Supabase)
     if (liveCard.isArchived) {
-      answerCard(current.deckId, id, false, true, true, studyLanguage);
+      await answerCard(current.deckId, id, false, true, true, studyLanguage);
     } else {
-      setCardProgress(current.deckId, id, penalizedProgress, studyLanguage);
+      await setCardProgress(current.deckId, id, penalizedProgress, studyLanguage);
     }
     setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
 
@@ -4540,7 +4585,7 @@ function StudyInterface({
     return getCardTrainingMode(currentCardSnapshot, currentDeckId, decks, books, trainingMode);
   }, [currentCardSnapshot, currentDeckId, decks, books, trainingMode]);
 
-  const handleSessionAnswer = useCallback((correct: boolean, isHilfe: boolean) => {
+  const handleSessionAnswer = useCallback(async (correct: boolean, isHilfe: boolean) => {
     if (!currentCardSnapshot || !currentDeckId) return;
     const isActualCorrect = correct && !isHilfe;
 
@@ -4599,7 +4644,7 @@ function StudyInterface({
 
     // 5. Запись в статистику сессии и базу Supabase через answerCard
     recordCardResult(isActualCorrect, { deckId: currentDeckId, card: { ...liveCard, masteryLevel: nextMastery }, ...liveCard, masteryLevel: nextMastery }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
-    answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage);
+    await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage);
 
     // 6. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: studyLanguage.toLowerCase() } }));
@@ -9873,8 +9918,8 @@ export default function App() {
     const list: { deckId: string, card: Flashcard }[] = [];
     const now = Date.now();
     filteredDecksList.forEach(deck => {
-      deck.cards.forEach(card => {
-        if (card.isArchived && card.nextReviewDate && card.nextReviewDate <= now) {
+      deck.cards?.forEach(card => {
+        if (isCardDueForReview(card, now)) {
           list.push({ deckId: deck.id, card });
         }
       });
