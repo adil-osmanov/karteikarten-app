@@ -4,7 +4,9 @@
 @theme inline {
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
   --color-blue-650: #0066cc;
+  --color-zinc-150: #ededf0;
   --color-zinc-450: #8e8e93;
+  --color-zinc-850: #1f1f23;
 }
 
 body {

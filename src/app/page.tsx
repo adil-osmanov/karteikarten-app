@@ -6022,7 +6022,7 @@ function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all select-none active:scale-95 cursor-pointer bg-white hover:bg-zinc-50 border border-black/[0.08] text-zinc-800 shadow-sm dark:bg-zinc-900 dark:hover:bg-zinc-850 dark:border-white/10 dark:text-zinc-200"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all select-none active:scale-95 cursor-pointer bg-white hover:bg-zinc-50 border border-black/[0.08] text-zinc-800 shadow-sm dark:bg-zinc-900 dark:hover:bg-zinc-800 dark:border-white/10 dark:text-zinc-200"
               title="Статистика дня"
             >
               <svg className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -9434,6 +9434,7 @@ export default function App() {
         if (idbDecks && idbDecks.length > 0) {
           setDecks(idbDecks);
           backfillMasteredWordsFromDecks(idbDecks, idbBooks || undefined);
+          reconcileMasteredWords(idbDecks);
         }
       } catch (e) {}
 
@@ -9652,6 +9653,7 @@ export default function App() {
           }
           // ОБЯЗАТЕЛЬНЫЙ БЭКФИЛЛ: автоматический перенос всех ранее выученных слов в CEFR матрицу
           backfillMasteredWordsFromDecks(enhancedDecks, useStore.getState().books);
+          reconcileMasteredWords(enhancedDecks);
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);

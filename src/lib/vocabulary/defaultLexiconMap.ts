@@ -1,4 +1,5 @@
 import { GOETHE_A1_DICTIONARY } from './goetheA1Dictionary';
+import { C1_DICTIONARY } from './c1Dictionary';
 
 export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1';
 
@@ -54,6 +55,12 @@ export const CEFR_LEVEL_COLORS: Record<CEFRLevel, {
 const A1_ENTRIES: Record<string, CEFRLevel> = {};
 for (const key of Object.keys(GOETHE_A1_DICTIONARY)) {
   A1_ENTRIES[key] = 'A1';
+}
+
+// Build canonical C1 entries mapping (~4,895 academic & professional lemmas)
+const C1_ENTRIES: Record<string, CEFRLevel> = {};
+for (const key of Object.keys(C1_DICTIONARY)) {
+  C1_ENTRIES[key] = 'C1';
 }
 
 /**
@@ -239,44 +246,8 @@ export const DEFAULT_LEXICON_MAP: Record<string, CEFRLevel> = {
   relevant: 'B2',
   fachlich: 'B2',
 
-  // --- C1 ---
-  hinterfragen: 'C1',
-  bewaeltigen: 'C1',
-  bewältigen: 'C1',
-  abwaegen: 'C1',
-  abwägen: 'C1',
-  veranschaulichen: 'C1',
-  vorantreiben: 'C1',
-  erlaeutern: 'C1',
-  erläutern: 'C1',
-  darlegen: 'C1',
-  widerspiegeln: 'C1',
-  anregen: 'C1',
-  implizieren: 'C1',
-  konstatieren: 'C1',
-  sachverhalt: 'C1',
-  einwand: 'C1',
-  schlussfolgerung: 'C1',
-  standpunkt: 'C1',
-  perspektive: 'C1',
-  vorgehensweise: 'C1',
-  phaenomen: 'C1',
-  phänomen: 'C1',
-  ambivalenz: 'C1',
-  paradoxon: 'C1',
-  diskrepanz: 'C1',
-  tragfaehigkeit: 'C1',
-  tragfähigkeit: 'C1',
-  plausibel: 'C1',
-  fundiert: 'C1',
-  differenziert: 'C1',
-  facettenreich: 'C1',
-  unumgaenglich: 'C1',
-  unumgänglich: 'C1',
-  kontrovers: 'C1',
-  signifikant: 'C1',
-  praegnant: 'C1',
-  prägnant: 'C1',
+  // --- C1 (Canonical C1 Goethe / telc Hochschule Corpus) ---
+  ...C1_ENTRIES,
 };
 
 /**

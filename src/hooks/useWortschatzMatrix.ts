@@ -180,7 +180,7 @@ export function getMasteredLemmasSet(): Set<string> {
 }
 
 /**
- * Reconciles mastered words when decks, books, or cards are deleted.
+ * Reconciles mastered words when decks, books, or cards are deleted, or during app init.
  * Scans active decks for mastered cards (masteryLevel >= 4 or isArchived).
  * Deletes orphan lemmas from Supabase user_mastered_words and updates local cache.
  */
@@ -196,34 +196,57 @@ export async function reconcileMasteredWords(
   }
   if (!Array.isArray(currentDecks)) return;
 
-  const validMasteredLemmas = new Set<string>();
+  // Ensure masteredLemmasSet is initialized from localStorage if currently empty
+  if (masteredLemmasSet.size === 0 && typeof window !== 'undefined') {
+    try {
+      const cached = localStorage.getItem('cefr_mastered_lemmas_cache') || localStorage.getItem(STORAGE_KEY_LEMMAS);
+      if (cached) {
+        const parsed: string[] = JSON.parse(cached);
+        if (Array.isArray(parsed)) parsed.forEach(l => masteredLemmasSet.add(l));
+      }
+    } catch {}
+  }
+
+  const activeMasteredSet = new Set<string>();
+  const activeLemmaLevelMap = new Map<string, CEFRLevel>();
 
   currentDecks.forEach((deck) => {
+    const bookLevel = (deck as any).level || 'B2';
     deck.cards?.forEach((card: any) => {
       if ((card.masteryLevel !== undefined && card.masteryLevel >= 4) || card.isArchived) {
         const raw = card.targetWord || card.missingWord || card.infinitive || card.front || '';
         const lemma = normalizeGermanLemma(raw);
-        if (lemma && isValidGermanLemma(lemma)) {
-          validMasteredLemmas.add(lemma);
+        const clean = lemma.split(' ')[0].trim().toLowerCase();
+        if (clean && clean.length >= 2 && isValidGermanLemma(clean)) {
+          activeMasteredSet.add(clean);
+          if (!activeLemmaLevelMap.has(clean)) {
+            activeLemmaLevelMap.set(clean, resolveCEFRLevel(clean, bookLevel));
+          }
         }
       }
     });
   });
 
-  const orphanLemmas = Array.from(masteredLemmasSet).filter((l) => !validMasteredLemmas.has(l));
+  // Find orphan lemmas that are currently in masteredLemmasSet but NO LONGER in any existing active card
+  const orphanLemmas = Array.from(masteredLemmasSet).filter((l) => !activeMasteredSet.has(l));
 
-  if (orphanLemmas.length > 0) {
-    // 1. Remove from local in-memory sets and maps
-    orphanLemmas.forEach((lemma) => {
-      masteredLemmasSet.delete(lemma);
-      lemmaLevelMap.delete(lemma);
+  // Reconcile if orphan words exist or if count differs
+  const needsReconciliation = orphanLemmas.length > 0 || globalMatrixStats.totalWords !== activeMasteredSet.size;
+
+  if (needsReconciliation) {
+    // 1. Synchronize in-memory masteredLemmasSet directly to activeMasteredSet
+    masteredLemmasSet.clear();
+    lemmaLevelMap.clear();
+    activeMasteredSet.forEach((l) => {
+      masteredLemmasSet.add(l);
+      const lvl = activeLemmaLevelMap.get(l) || resolveCEFRLevel(l);
+      lemmaLevelMap.set(l, lvl);
     });
 
-    // 2. Recalculate counts based on remaining masteredLemmasSet
+    // 2. Recalculate counts based on activeMasteredSet
     const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
-    masteredLemmasSet.forEach((lemma) => {
+    activeMasteredSet.forEach((lemma) => {
       const lvl = lemmaLevelMap.get(lemma) || resolveCEFRLevel(lemma);
-      lemmaLevelMap.set(lemma, lvl);
       if (updatedCounts[lvl] !== undefined) {
         updatedCounts[lvl] += 1;
       }
@@ -241,7 +264,8 @@ export async function reconcileMasteredWords(
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(globalMatrixStats));
-        localStorage.setItem(STORAGE_KEY_LEMMAS, JSON.stringify(Array.from(masteredLemmasSet)));
+        localStorage.setItem(STORAGE_KEY_LEMMAS, JSON.stringify(Array.from(activeMasteredSet)));
+        localStorage.setItem('cefr_mastered_lemmas_cache', JSON.stringify(Array.from(activeMasteredSet)));
       } catch (e) {
         console.warn('Wortschatz-Matrix storage quota warning:', e);
       }
@@ -250,22 +274,24 @@ export async function reconcileMasteredWords(
     notifyListeners();
 
     // 3. Delete orphan lemmas from Supabase user_mastered_words
-    try {
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData?.user?.id;
-      if (userId && orphanLemmas.length > 0) {
-        const chunkSize = 100;
-        for (let i = 0; i < orphanLemmas.length; i += chunkSize) {
-          const chunk = orphanLemmas.slice(i, i + chunkSize);
-          await supabase
-            .from('user_mastered_words')
-            .delete()
-            .match({ user_id: userId })
-            .in('lemma', chunk);
+    if (orphanLemmas.length > 0) {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id;
+        if (userId) {
+          const chunkSize = 100;
+          for (let i = 0; i < orphanLemmas.length; i += chunkSize) {
+            const chunk = orphanLemmas.slice(i, i + chunkSize);
+            await supabase
+              .from('user_mastered_words')
+              .delete()
+              .match({ user_id: userId })
+              .in('lemma', chunk);
+          }
         }
+      } catch (err) {
+        console.warn('[Wortschatz-Matrix] Remote delete orphans notice:', err);
       }
-    } catch (err) {
-      console.warn('[Wortschatz-Matrix] Remote delete orphans notice:', err);
     }
   }
 }

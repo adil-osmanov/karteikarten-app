@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { useWortschatzMatrix, getMasteredLemmasSet } from '@/hooks/useWortschatzMatrix';
 import { CEFRLevel, CEFR_TARGETS, TOTAL_WORLD_LEXICON_GOAL, DEFAULT_LEXICON_MAP, resolveCEFRLevel } from '@/lib/vocabulary/defaultLexiconMap';
 import { GOETHE_A1_DICTIONARY } from '@/lib/vocabulary/goetheA1Dictionary';
+import { C1_DICTIONARY } from '@/lib/vocabulary/c1Dictionary';
 import { extractGermanLemma, isValidGermanLemma } from '@/lib/vocabulary/normalizer';
 import { useStore } from '@/app/page';
 
@@ -86,6 +87,8 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
     if (candidateLemmas.length === 0) {
       if (levelKey === 'A1') {
         Object.values(GOETHE_A1_DICTIONARY).forEach((w) => candidateLemmas.push(w));
+      } else if (levelKey === 'C1') {
+        Object.values(C1_DICTIONARY).forEach((w) => candidateLemmas.push(w));
       } else {
         // Collect from DEFAULT_LEXICON_MAP
         Object.entries(DEFAULT_LEXICON_MAP).forEach(([lemma, lvl]) => {
@@ -178,8 +181,8 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
       .sort((a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' }));
 
     // 5. Build clean export document matching exact count
-    const header = `Verbleibende Wörter der Stufe ${levelKey} (übrig: ${remainingList.length}):\n\n`;
-    const content = header + (remainingList.length > 0 ? remainingList.map((w) => `- ${w}`).join('\n') : '(Alle Wörter dieser Stufe wurden gemeistert!)');
+    const header = `Невыученные слова уровня ${levelKey} (осталось: ${remainingList.length}):\n\n`;
+    const content = header + (remainingList.length > 0 ? remainingList.map((w) => `- ${w}`).join('\n') : '(Все слова этого уровня выучены!)');
 
     // 6. Trigger download in browser
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -202,7 +205,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
         ref={buttonRef}
         type="button"
         onClick={() => setIsMatrixOpen(!isMatrixOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all select-none active:scale-95 cursor-pointer bg-white hover:bg-zinc-50 border border-black/[0.08] text-zinc-800 shadow-sm dark:bg-zinc-900 dark:hover:bg-zinc-850 dark:border-white/10 dark:text-zinc-200"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all select-none active:scale-95 cursor-pointer bg-white hover:bg-zinc-50 border border-black/[0.08] text-zinc-800 shadow-sm dark:bg-zinc-900 dark:hover:bg-zinc-800 dark:border-white/10 dark:text-zinc-200"
         title="Wortschatz-Matrix"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -244,7 +247,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                     {/* Строка заголовка уровня: бейдж слева, цифры и кнопка экспорта справа */}
                     <div className="flex justify-between items-center text-xs">
                       {/* Все плашки имеют идентичный строгий монохромный Apple-дизайн */}
-                      <span className="w-7 h-5 flex items-center justify-center rounded font-mono text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-black/5 dark:border-white/5">
+                      <span className="w-7 h-5 flex items-center justify-center rounded font-mono text-[11px] font-semibold bg-zinc-150 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-black/5 dark:border-white/5">
                         {levelKey}
                       </span>
 
