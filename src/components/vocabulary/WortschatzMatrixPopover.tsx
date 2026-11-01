@@ -116,7 +116,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
       >
         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
         <span className="text-xs font-semibold tracking-tight">
-          {totalMastered.toLocaleString()} {wordLabel}
+          {totalMastered.toLocaleString(currentLanguage === 'de' ? 'de-DE' : currentLanguage === 'ru' ? 'ru-RU' : 'en-US')} {wordLabel}
         </span>
         <span className="text-xs text-zinc-400 dark:text-zinc-500 font-mono">• {totalMastered === 0 ? 'A1' : (currentLevel || 'A1')}</span>
       </button>
@@ -136,9 +136,9 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
             {/* ШАПКА МАТРИЦЫ: ТОЛЬКО ЧИСЛА И СИНИЙ БЕЙДЖ % */}
             <div className="flex items-center justify-between mb-5">
               <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                {totalMastered.toLocaleString()}{' '}
+                {totalMastered.toLocaleString(currentLanguage === 'de' ? 'de-DE' : currentLanguage === 'ru' ? 'ru-RU' : 'en-US')}{' '}
                 <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500">
-                  / {totalGoal.toLocaleString()}
+                  / {totalGoal.toLocaleString(currentLanguage === 'de' ? 'de-DE' : currentLanguage === 'ru' ? 'ru-RU' : 'en-US')}
                 </span>
               </div>
               <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">

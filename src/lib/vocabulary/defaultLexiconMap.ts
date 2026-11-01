@@ -14,14 +14,14 @@ export const LANGUAGE_CEFR_CONFIG: Record<AppLang, {
   levels: CEFRLevelConfig[];
 }> = {
   de: {
-    totalGoal: 15000,
+    totalGoal: 10000,
     wordLabel: 'Wörter',
     levels: [
       { key: 'A1', target: 1100 },
-      { key: 'A2', target: 1500 },
-      { key: 'B1', target: 2600 },
-      { key: 'B2', target: 4800 },
-      { key: 'C1', target: 5000 },
+      { key: 'A2', target: 1400 },
+      { key: 'B1', target: 2000 },
+      { key: 'B2', target: 2500 },
+      { key: 'C1', target: 3000 },
     ]
   },
   en: {
@@ -50,13 +50,13 @@ export const LANGUAGE_CEFR_CONFIG: Record<AppLang, {
 
 export const CEFR_TARGETS = {
   A1: { target: 1100, cumulative: 1100, label: 'A1 • Grundlagen' },
-  A2: { target: 1500, cumulative: 2600, label: 'A2 • Alltag' },
-  B1: { target: 2600, cumulative: 5200, label: 'B1 • Selbstständig' },
-  B2: { target: 4800, cumulative: 10000, label: 'B2 • Beruf & Fach' },
-  C1: { target: 5000, cumulative: 15000, label: 'C1 • Fließend' },
+  A2: { target: 1400, cumulative: 2500, label: 'A2 • Alltag' },
+  B1: { target: 2000, cumulative: 4500, label: 'B1 • Selbstständig' },
+  B2: { target: 2500, cumulative: 7000, label: 'B2 • Beruf & Fach' },
+  C1: { target: 3000, cumulative: 10000, label: 'C1 • Fließend' },
 } as const;
 
-export const TOTAL_WORLD_LEXICON_GOAL = 15000;
+export const TOTAL_WORLD_LEXICON_GOAL = 10000;
 
 export const CEFR_LEVEL_COLORS: Record<CEFRLevel, {
   badge: string;
