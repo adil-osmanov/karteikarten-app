@@ -23,7 +23,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, backfillMasteredWordsFromDecks, reconcileMasteredWords, getMasteredLemmasSet } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, getMasteredLemmasSet } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -9640,9 +9640,6 @@ export default function App() {
         }
         if (idbDecks && idbDecks.length > 0) {
           setDecks(idbDecks);
-          const currentLang = useStore.getState().appLanguage || 'DE';
-          backfillMasteredWordsFromDecks(idbDecks, idbBooks || undefined, currentLang);
-          reconcileMasteredWords(idbDecks, currentLang);
         }
       } catch (e) {}
 
@@ -9663,7 +9660,7 @@ export default function App() {
         }
       } catch (e) {}
       useStore.setState({ isLoaded: true });
-      syncCardsFromSupabase().catch(() => {});
+      syncCardsFromSupabase().then(() => useStore.getState().refreshDueCardsCount()).catch(() => {});
       
       // 3. Background Cloud Fetch with Cache Guard (Throttles massive multi-megabyte card downloads)
       try {
@@ -9891,17 +9888,13 @@ export default function App() {
           if (typeof window !== 'undefined') {
             localStorage.setItem('last_library_cloud_sync', String(Date.now()));
           }
-          // ОБЯЗАТЕЛЬНЫЙ БЭКФИЛЛ: автоматический перенос всех ранее выученных слов в CEFR матрицу
-          const currentLang = useStore.getState().appLanguage || 'DE';
-          backfillMasteredWordsFromDecks(enhancedDecks, useStore.getState().books, currentLang);
-          reconcileMasteredWords(enhancedDecks, currentLang);
         }
       } catch (err: any) {
         console.error("Network Fetch Error:", err.message);
       } finally {
         setIsLoadingBooks(false);
         useStore.setState({ isLoaded: true });
-        syncCardsFromSupabase().catch(() => {});
+        syncCardsFromSupabase().then(() => useStore.getState().refreshDueCardsCount()).catch(() => {});
       }
     };
     fetchData();
