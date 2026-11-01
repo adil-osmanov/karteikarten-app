@@ -23,7 +23,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, backfillMasteredWordsFromDecks } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, backfillMasteredWordsFromDecks, reconcileMasteredWords } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -1452,6 +1452,7 @@ interface DeckState {
   addDeck: (deck: Deck) => void;
   updateDeck: (deckId: string, updates: Partial<Deck>, replaceCards?: Flashcard[]) => Promise<void>;
   deleteDeck: (deckId: string) => void;
+  deleteCard?: (deckId: string, cardId: string) => void;
   renameDeck: (deckId: string, newName: string) => void;
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string) => void;
   setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => void;
@@ -1707,6 +1708,7 @@ export const useStore = create<DeckState>()((set, get) => ({
   deleteBook: async (id) => {
     const previousBooks = get().books;
     set({ books: previousBooks.filter(b => b.id !== id) });
+    reconcileMasteredWords(get().decks);
     
     const { error } = await supabase.from('books').delete().eq('id', id);
     
@@ -1714,6 +1716,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       console.error("SUPABASE ERROR:", error);
       if (typeof window !== 'undefined') toast.error("Fehler: Buch konnte nicht gespeichert werden. (RLS oder ID fehlt)");
       set({ books: previousBooks });
+      reconcileMasteredWords(get().decks);
     }
   },
   incrementDailyProgress: (targetLang?: string) => {
@@ -1949,13 +1952,29 @@ export const useStore = create<DeckState>()((set, get) => ({
 
   deleteDeck: async (deckId) => {
     const previousDecks = get().decks;
-    set({ decks: previousDecks.filter(d => d.id !== deckId) });
+    const remainingDecks = previousDecks.filter(d => d.id !== deckId);
+    set({ decks: remainingDecks });
+    reconcileMasteredWords(remainingDecks);
     
     const { error } = await supabase.from('decks').delete().eq('id', deckId);
     if (error) {
       console.error("Supabase Delete Deck Error:", error.message);
       set({ decks: previousDecks });
+      reconcileMasteredWords(previousDecks);
     }
+  },
+
+  deleteCard: async (deckId: string, cardId: string) => {
+    const previousDecks = get().decks;
+    const nextDecks = previousDecks.map(deck => {
+      if (deck.id !== deckId) return deck;
+      return {
+        ...deck,
+        cards: deck.cards.filter(c => c.id !== cardId)
+      };
+    });
+    set({ decks: nextDecks });
+    reconcileMasteredWords(nextDecks);
   },
   
   renameDeck: async (deckId, newName) => {
@@ -6003,7 +6022,7 @@ function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-150 select-none bg-zinc-100 hover:bg-zinc-200/80 border-zinc-200/80 text-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-850 dark:border-white/10 dark:text-zinc-200 shadow-sm active:scale-95 cursor-pointer"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all select-none active:scale-95 cursor-pointer bg-white hover:bg-zinc-50 border border-black/[0.08] text-zinc-800 shadow-sm dark:bg-zinc-900 dark:hover:bg-zinc-850 dark:border-white/10 dark:text-zinc-200"
               title="Статистика дня"
             >
               <svg className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
