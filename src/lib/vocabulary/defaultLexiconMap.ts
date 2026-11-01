@@ -1,12 +1,14 @@
 export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1';
 
-export const CEFR_TARGETS: Record<CEFRLevel, number> = {
-  A1: 1000,
-  A2: 1400,
-  B1: 2000,
-  B2: 2200,
-  C1: 1800,
-};
+export const CEFR_TARGETS = {
+  A1: { target: 1100, cumulative: 1100, label: 'A1 • Grundlagen' },
+  A2: { target: 1500, cumulative: 2600, label: 'A2 • Alltag' },
+  B1: { target: 2600, cumulative: 5200, label: 'B1 • Selbstständig' },
+  B2: { target: 4800, cumulative: 10000, label: 'B2 • Beruf & Fach' },
+  C1: { target: 5000, cumulative: 15000, label: 'C1 • Fließend' },
+} as const;
+
+export const TOTAL_WORLD_LEXICON_GOAL = 15000;
 
 export const CEFR_LEVEL_COLORS: Record<CEFRLevel, {
   badge: string;

@@ -22,6 +22,7 @@ let globalMatrixStats: CEFRMatrixStats = {
 };
 
 const masteredLemmasSet = new Set<string>();
+const lemmaLevelMap = new Map<string, CEFRLevel>();
 const listeners = new Set<(stats: CEFRMatrixStats) => void>();
 let hasInitialized = false;
 
@@ -32,7 +33,7 @@ function notifyListeners() {
 function calculateActiveLevel(counts: Record<CEFRLevel, number>): CEFRLevel {
   const levels: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1'];
   for (const lvl of levels) {
-    if ((counts[lvl] || 0) < CEFR_TARGETS[lvl]) {
+    if ((counts[lvl] || 0) < CEFR_TARGETS[lvl].target) {
       return lvl;
     }
   }
@@ -42,6 +43,7 @@ function calculateActiveLevel(counts: Record<CEFRLevel, number>): CEFRLevel {
 function updateLocalState(lemma: string, level: CEFRLevel) {
   if (masteredLemmasSet.has(lemma)) return false;
   masteredLemmasSet.add(lemma);
+  lemmaLevelMap.set(lemma, level);
 
   const updatedCounts = {
     ...globalMatrixStats.counts,
@@ -108,6 +110,62 @@ export async function recordMasteredLemma(params: {
   } catch (err) {
     // Non-blocking: local matrix is already updated
     console.warn('[Wortschatz-Matrix] Remote upsert notice:', err);
+  }
+}
+
+/**
+ * Immediately demotes and removes a word upon mistake during review.
+ * Decrements matrix counts and deletes entry from Supabase user_mastered_words.
+ */
+export async function removeMasteredLemma(params: {
+  rawWord: string;
+}) {
+  const lemma = extractGermanLemma(params.rawWord);
+  if (!isValidGermanLemma(lemma)) return;
+
+  if (!masteredLemmasSet.has(lemma)) return;
+
+  masteredLemmasSet.delete(lemma);
+  const level = lemmaLevelMap.get(lemma) || resolveCEFRLevel(lemma);
+  lemmaLevelMap.delete(lemma);
+
+  const updatedCounts = {
+    ...globalMatrixStats.counts,
+    [level]: Math.max(0, (globalMatrixStats.counts[level] || 0) - 1),
+  };
+
+  const total = Math.max(0, Object.values(updatedCounts).reduce((acc, curr) => acc + curr, 0));
+  const activeLevel = calculateActiveLevel(updatedCounts);
+
+  globalMatrixStats = {
+    counts: updatedCounts,
+    totalWords: total,
+    activeLevel,
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY_STATS, JSON.stringify(globalMatrixStats));
+      localStorage.setItem(STORAGE_KEY_LEMMAS, JSON.stringify(Array.from(masteredLemmasSet)));
+    } catch (e) {
+      console.warn('Wortschatz-Matrix storage quota warning:', e);
+    }
+  }
+
+  notifyListeners();
+
+  // Asynchronously remove from Supabase user_mastered_words
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id;
+    if (!userId) return;
+
+    await supabase
+      .from('user_mastered_words')
+      .delete()
+      .match({ user_id: userId, lemma });
+  } catch (err) {
+    console.warn('[Wortschatz-Matrix] Remote delete notice:', err);
   }
 }
 

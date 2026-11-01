@@ -23,7 +23,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, backfillMasteredWordsFromDecks } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, backfillMasteredWordsFromDecks } from "@/hooks/useWortschatzMatrix";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
@@ -1310,12 +1310,12 @@ export function calculateNextSRSState(
     };
   } else {
     // ЗАБЫВАНИЕ (Lapse): Сбой при долгосрочном повторении
-    // Ошибка («Не знаю»): сброс интервала, next_review_at = NOW() + interval '10 minutes'
+    // Ошибка («Не знаю / Wiederholen»): сброс интервала, сброс уровня на 1, вывод из архива
     const newEase = Math.max(1.3, currentEase - 0.2);
 
     return {
-      masteryLevel: 3, // откат в предвыпускное состояние
-      isArchived: true,
+      masteryLevel: 1, // сброс на 1 раунд
+      isArchived: false, // вывод из архива (Demotion)
       repetitions: 0,  // сброс серии
       interval: 0,     // сброс интервала
       easeFactor: Number(newEase.toFixed(2)),
@@ -1973,6 +1973,7 @@ const useStore = create<DeckState>()((set, get) => ({
     const previousDecks = get().decks;
     let updatedCard: Flashcard | null = null;
     let wasDueBefore = false;
+    let wasMasteredBefore = false;
 
     set((state) => {
       const newDecks = [...state.decks];
@@ -1984,6 +1985,7 @@ const useStore = create<DeckState>()((set, get) => ({
 
       const card = { ...deck.cards[cardIndex] };
       wasDueBefore = Boolean(card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now());
+      wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
       const srsUpdate = calculateNextSRSState(card, isCorrect, isHilfe);
       Object.assign(card, srsUpdate);
 
@@ -2000,7 +2002,7 @@ const useStore = create<DeckState>()((set, get) => ({
     if (updatedCard) {
       const validCard = updatedCard as Flashcard;
 
-      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация выученного слова
+      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
       if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
@@ -2008,6 +2010,11 @@ const useStore = create<DeckState>()((set, get) => ({
           rawWord: validCard.targetWord || (validCard as any).front || '',
           bookId: currentDeck?.bookId,
           bookLevel: currentBook?.activeLevels?.[0] || currentBook?.title || 'B2'
+        });
+      } else if (wasMasteredBefore && (!isCorrect || isHilfe || !validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel < 4))) {
+        // Demotion! Списание при ошибке («Wiederholen / Не знаю»)
+        removeMasteredLemma({
+          rawWord: validCard.targetWord || (validCard as any).front || '',
         });
       }
 
@@ -2058,6 +2065,7 @@ const useStore = create<DeckState>()((set, get) => ({
     const previousDecks = get().decks;
     let updatedCard: Flashcard | null = null;
     let wasDueBefore = false;
+    let wasMasteredBefore = false;
 
     set((state) => {
       const di = state.decks.findIndex((d) => d.id === deckId);
@@ -2067,11 +2075,14 @@ const useStore = create<DeckState>()((set, get) => ({
       if (ci === -1) return state;
       const card = { ...deck.cards[ci] };
       wasDueBefore = Boolean(card.isArchived && card.nextReviewDate && card.nextReviewDate <= Date.now());
+      wasMasteredBefore = Boolean(card.isArchived || (card.masteryLevel && card.masteryLevel >= 4));
+
       if (score >= 4) {
         const srsUpdate = calculateNextSRSState({ ...card, masteryLevel: 3, isArchived: false }, true, false);
         Object.assign(card, srsUpdate);
       } else {
         card.masteryLevel = Math.max(0, Math.min(3, score));
+        card.isArchived = false;
       }
       updatedCard = card;
       const newCards = deck.cards.map((c, i) => (i === ci ? card : c));
@@ -2087,7 +2098,7 @@ const useStore = create<DeckState>()((set, get) => ({
     if (updatedCard) {
       const validCard = updatedCard as Flashcard;
 
-      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация выученного слова
+      // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
       if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
@@ -2095,6 +2106,11 @@ const useStore = create<DeckState>()((set, get) => ({
           rawWord: validCard.targetWord || (validCard as any).front || '',
           bookId: currentDeck?.bookId,
           bookLevel: currentBook?.activeLevels?.[0] || currentBook?.title || 'B2'
+        });
+      } else if (wasMasteredBefore && score < 4) {
+        // Demotion! Списание при ошибке или понижении прогресса
+        removeMasteredLemma({
+          rawWord: validCard.targetWord || (validCard as any).front || '',
         });
       }
 

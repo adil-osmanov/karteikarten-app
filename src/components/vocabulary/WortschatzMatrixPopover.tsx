@@ -2,27 +2,32 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, CheckCircle2, X } from 'lucide-react';
 import { useWortschatzMatrix } from '@/hooks/useWortschatzMatrix';
-import { CEFRLevel, CEFR_TARGETS, CEFR_LEVEL_COLORS } from '@/lib/vocabulary/defaultLexiconMap';
+import { CEFRLevel, CEFR_TARGETS, TOTAL_WORLD_LEXICON_GOAL } from '@/lib/vocabulary/defaultLexiconMap';
 
 interface WortschatzMatrixPopoverProps {
   className?: string;
 }
 
-const CEFR_ORDER: CEFRLevel[] = ['C1', 'B2', 'B1', 'A2', 'A1'];
+const levels: Array<{ key: CEFRLevel; target: number; label: string }> = [
+  { key: 'C1', target: CEFR_TARGETS.C1.target, label: CEFR_TARGETS.C1.label },
+  { key: 'B2', target: CEFR_TARGETS.B2.target, label: CEFR_TARGETS.B2.label },
+  { key: 'B1', target: CEFR_TARGETS.B1.target, label: CEFR_TARGETS.B1.label },
+  { key: 'A2', target: CEFR_TARGETS.A2.target, label: CEFR_TARGETS.A2.label },
+  { key: 'A1', target: CEFR_TARGETS.A1.target, label: CEFR_TARGETS.A1.label },
+];
 
 export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = ({
   className = '',
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const { counts, totalWords, activeLevel } = useWortschatzMatrix();
+  const [isMatrixOpen, setIsMatrixOpen] = useState(false);
+  const { counts: stats, totalWords: totalMastered, activeLevel: currentLevel } = useWortschatzMatrix();
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Close on outside click
+  // Close on outside click or Escape
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isMatrixOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -31,13 +36,13 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
         buttonRef.current &&
         !buttonRef.current.contains(e.target as Node)
       ) {
-        setIsOpen(false);
+        setIsMatrixOpen(false);
       }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setIsOpen(false);
+        setIsMatrixOpen(false);
       }
     };
 
@@ -47,130 +52,92 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen]);
+  }, [isMatrixOpen]);
+
+  const percentTotal = Math.min(100, (totalMastered / TOTAL_WORLD_LEXICON_GOAL) * 100);
 
   return (
     <div className={`relative inline-block ${className}`}>
-      {/* Кнопка-капсула в шапке */}
+      {/* 3. КНОПКА-ТРИГГЕР В ВЕРХНЕМ ХЕДЕРЕ */}
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 h-9 px-3.5 rounded-full bg-zinc-100/90 dark:bg-zinc-850/90 hover:bg-zinc-200/90 dark:hover:bg-zinc-800 border border-black/5 dark:border-white/5 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200 text-xs font-medium cursor-pointer shadow-sm select-none active:scale-95"
-        title="Wortschatz-Matrix (CEFR)"
+        onClick={() => setIsMatrixOpen(!isMatrixOpen)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-200 select-none
+          bg-zinc-100 hover:bg-zinc-200/80 border-black/5 text-zinc-800
+          dark:bg-zinc-900/90 dark:hover:bg-zinc-800 dark:border-white/10 dark:text-zinc-200 shadow-sm active:scale-95 cursor-pointer"
+        title="Wortschatz-Matrix"
       >
-        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
-        <span className="font-semibold text-zinc-900 dark:text-zinc-100 whitespace-nowrap tabular-nums">
-          {totalWords.toLocaleString()} Wörter
-        </span>
-        <span className="text-zinc-400 dark:text-zinc-500 font-semibold shrink-0">
-          • {activeLevel}
-        </span>
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.6)]" />
+        <span className="text-xs font-semibold tracking-tight">{totalMastered} Wörter</span>
+        <span className="text-xs text-zinc-400 dark:text-zinc-500 font-mono">• {currentLevel || 'A1'}</span>
       </button>
 
-      {/* Матовый поповер (стиль macOS / Apple Health) */}
+      {/* 4. РЕДИЗАЙН ОКНА СТАТИСТИКИ (APPLE CONTROL CENTER LOOK) */}
       <AnimatePresence>
-        {isOpen && (
+        {isMatrixOpen && (
           <motion.div
             ref={popoverRef}
-            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+            initial={{ opacity: 0, y: 8, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.96 }}
+            exit={{ opacity: 0, y: 6, scale: 0.97 }}
             transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed inset-x-4 top-20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 w-auto sm:w-[360px] p-5 rounded-2xl bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-2xl border border-black/[0.08] dark:border-white/[0.1] shadow-2xl z-50 select-none text-left"
+            className="fixed inset-x-4 top-20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 w-80 sm:w-96 p-5 rounded-2xl shadow-2xl backdrop-blur-2xl transition-all border bg-white/85 border-black/10 text-zinc-900 dark:bg-zinc-900/85 dark:border-white/10 dark:text-zinc-100 z-50 select-none text-left"
           >
-            {/* Шапка поповера */}
-            <div className="flex items-start justify-between pb-3.5 mb-4 border-b border-black/[0.06] dark:border-white/[0.08]">
+            {/* ШАПКА ПОПОВЕРА */}
+            <div className="flex items-baseline justify-between mb-4">
               <div>
-                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                  <Sparkles className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Wortschatz-Matrix</span>
+                <h3 className="text-xs font-semibold tracking-wider uppercase text-zinc-400 dark:text-zinc-500">
+                  Wortschatz-Matrix
+                </h3>
+                <div className="text-2xl font-bold tracking-tight mt-0.5">
+                  {totalMastered.toLocaleString('de-DE')} <span className="text-sm font-normal text-zinc-500">/ 15.000</span>
                 </div>
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
-                    {totalWords.toLocaleString()}
-                  </span>
-                  <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                    gemeisterte Wörter
-                  </span>
-                </div>
-                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                  Aktiver Wortschatz nach CEFR-Referenzrahmen
-                </p>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] flex items-center justify-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors cursor-pointer"
-                aria-label="Schließen"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                {percentTotal.toFixed(1)}% Gesamt
+              </span>
             </div>
 
-            {/* Полосы уровней CEFR (C1 -> A1) */}
-            <div className="space-y-3">
-              {CEFR_ORDER.map((level) => {
-                const count = counts[level] || 0;
-                const target = CEFR_TARGETS[level];
-                const percentage = Math.min(100, Math.round((count / target) * 100));
-                const isActive = level === activeLevel;
-                const colorConfig = CEFR_LEVEL_COLORS[level];
+            {/* СПИСОК УРОВНЕЙ (ЧИСТАЯ АРХИТЕКТУРА СТРОК) */}
+            <div className="space-y-1">
+              {levels.map((lvl) => {
+                const count = stats[lvl.key] || 0;
+                const percent = Math.min(Math.round((count / lvl.target) * 100), 100);
+                const isCurrent = currentLevel === lvl.key;
 
                 return (
-                  <div key={level} className="flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[11px] font-bold border ${colorConfig.badge}`}
-                        >
-                          {level}
+                  <div key={lvl.key} className="py-2 first:pt-0 last:pb-0">
+                    <div className="flex justify-between items-center text-xs mb-1.5">
+                      <span className="flex items-center gap-1.5 font-medium">
+                        <span className={`w-6 text-center font-mono font-semibold rounded py-0.5 ${
+                          isCurrent 
+                            ? 'bg-blue-600 text-white' 
+                            : 'bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                        }`}>
+                          {lvl.key}
                         </span>
-                        {isActive && (
-                          <span className="text-[10px] uppercase font-semibold tracking-wide text-blue-600 dark:text-blue-400">
-                            Aktuelles Niveau
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-1.5 text-xs tabular-nums">
-                        <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                          {count}
-                        </span>
-                        <span className="text-zinc-400 dark:text-zinc-500">/ {target}</span>
-                        <span className="text-[11px] text-zinc-400 dark:text-zinc-500 w-9 text-right font-medium">
-                          {percentage}%
-                        </span>
-                      </div>
+                        <span className="text-zinc-500 dark:text-zinc-400">{lvl.label}</span>
+                      </span>
+                      <span className="font-mono text-zinc-500 dark:text-zinc-400">
+                        <strong className="text-zinc-900 dark:text-zinc-100 font-semibold">{count}</strong> / {lvl.target}
+                      </span>
                     </div>
 
-                    {/* Полоса прогресса */}
-                    <div
-                      className={`relative w-full h-2 rounded-full overflow-hidden ${
-                        isActive
-                          ? 'bg-blue-950/10 dark:bg-blue-950/40 ring-1 ring-blue-500/20'
-                          : 'bg-zinc-100 dark:bg-white/[0.06]'
-                      }`}
-                    >
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${percentage}%` }}
-                        transition={{ duration: 0.6, ease: 'easeOut' }}
-                        className={`h-full rounded-full bg-gradient-to-r ${colorConfig.bar} ${
-                          isActive ? 'shadow-[0_0_10px_rgba(37,99,235,0.4)]' : ''
+                    {/* Тонкий прогресс-бар */}
+                    <div className="w-full h-1.5 rounded-full bg-zinc-200/80 dark:bg-zinc-800 overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          isCurrent 
+                            ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]' 
+                            : 'bg-zinc-400 dark:bg-zinc-600'
                         }`}
+                        style={{ width: `${percent}%` }}
                       />
                     </div>
                   </div>
                 );
               })}
-            </div>
-
-            {/* Подвал с деликатной надписью */}
-            <div className="mt-4 pt-3 border-t border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-              <span>Keine Duplikate • Nur gemeisterte Wörter (Stufe 4)</span>
             </div>
           </motion.div>
         )}
