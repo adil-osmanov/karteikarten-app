@@ -6,7 +6,7 @@ import {
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, AlertTriangle,
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers,
-  ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders, Camera
+  ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders, Camera, Pencil
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from 'sonner';
@@ -31,6 +31,7 @@ import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
 import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
+import { CardEditorModal } from "@/components/CardEditorModal";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -1159,6 +1160,12 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
     nextReviewDate: numericReviewDate,
   };
 
+  if (validCard.sentence !== undefined) primaryPayload.sentence = validCard.sentence;
+  if (validCard.targetWord !== undefined) primaryPayload.targetWord = validCard.targetWord;
+  if (validCard.translation !== undefined) primaryPayload.translation = validCard.translation;
+  if (validCard.baseWordInfo !== undefined) primaryPayload.baseWordInfo = validCard.baseWordInfo;
+  if (validCard.forms !== undefined) primaryPayload.forms = validCard.forms;
+
   let { data, error } = await supabase
     .from('cards')
     .update(primaryPayload)
@@ -1683,6 +1690,7 @@ interface DeckState {
   updateDeck: (deckId: string, updates: Partial<Deck>, replaceCards?: Flashcard[]) => Promise<void>;
   deleteDeck: (deckId: string) => void;
   deleteCard?: (deckId: string, cardId: string) => void;
+  updateCardContent: (cardId: string, updates: Partial<Flashcard>) => Promise<boolean>;
   renameDeck: (deckId: string, newName: string) => void;
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean) => Promise<void>;
   setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => Promise<void>;
@@ -2211,6 +2219,56 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
   },
   
+  updateCardContent: async (cardId: string, updates: Partial<Flashcard>) => {
+    // 1. Optimistic local state update in Zustand
+    set((state) => {
+      const newDecks = state.decks.map((deck) => {
+        const hasCard = deck.cards?.some((c) => c.id === cardId);
+        if (!hasCard) return deck;
+        return {
+          ...deck,
+          cards: deck.cards.map((c) => {
+            if (c.id !== cardId) return c;
+            return {
+              ...c,
+              ...updates,
+              updated_at: new Date().toISOString(),
+            };
+          }),
+        };
+      });
+      return { decks: newDecks };
+    });
+
+    // 2. Persist to local IndexedDB
+    const nextDecks = get().decks;
+    await setIDBItem('app_decks', nextDecks);
+
+    // 3. Persist to Supabase cards table
+    try {
+      const payload: Record<string, any> = {};
+      if (updates.sentence !== undefined) payload.sentence = updates.sentence;
+      if (updates.targetWord !== undefined) payload.targetWord = updates.targetWord;
+      if (updates.translation !== undefined) payload.translation = updates.translation;
+      if (updates.baseWordInfo !== undefined) payload.baseWordInfo = updates.baseWordInfo;
+      if (updates.forms !== undefined) payload.forms = updates.forms;
+
+      const { error } = await supabase
+        .from('cards')
+        .update(payload)
+        .eq('id', cardId);
+
+      if (error) {
+        console.error('🚨 [CARD EDIT ERROR] Supabase update error:', error);
+        return false;
+      }
+    } catch (err) {
+      console.error('🚨 [CARD EDIT ERROR] Cloud sync failure:', err);
+      return false;
+    }
+    return true;
+  },
+
   renameDeck: async (deckId, newName) => {
     const previousDecks = get().decks;
     set({
@@ -3209,7 +3267,7 @@ export const parseTargetWord = parseTargetPhrase;
 export const splitPrefix = parseTargetPhrase;
 
 function RapidFlashcardMode({
-  card,
+  card: initialCard,
   progress,
   locked,
   onAnswer,
@@ -3227,7 +3285,20 @@ function RapidFlashcardMode({
   reverse?: boolean;
   isReview?: boolean;
 }) {
-  const currentCard = card;
+  const [currentCard, setCurrentCard] = useState<Flashcard>(initialCard);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  useEffect(() => {
+    setCurrentCard(initialCard);
+  }, [initialCard]);
+
+  const handleSaveEditedCard = async (updatedCard: Flashcard) => {
+    setCurrentCard(updatedCard);
+    await useStore.getState().updateCardContent(updatedCard.id, updatedCard);
+    triggerHaptic('success');
+    toast.success('Gespeichert');
+  };
+
   const isMobile = useIsMobile();
 
   const [isFlipped, setIsFlipped] = useState(false);
@@ -3696,7 +3767,20 @@ function RapidFlashcardMode({
                 >
                   <Volume2 className="w-4 h-4"/>
                 </button>
-                <ProgressDots level={localMastery || 0} />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEditModalOpen(true);
+                    }}
+                    className="opacity-30 hover:opacity-100 transition-opacity p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                    title="Karte bearbeiten"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <ProgressDots level={localMastery || 0} />
+                </div>
               </div>
 
               {/* Центр: Слово + Множественное число */}
@@ -3739,7 +3823,20 @@ function RapidFlashcardMode({
                 >
                   <Volume2 className="w-4 h-4"/>
                 </button>
-                <ProgressDots level={localMastery || 0} />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEditModalOpen(true);
+                    }}
+                    className="opacity-30 hover:opacity-100 transition-opacity p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                    title="Karte bearbeiten"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <ProgressDots level={localMastery || 0} />
+                </div>
               </div>
 
               {/* Центр: Слово, перевод, чистый пример без серой плашки */}
@@ -3808,6 +3905,17 @@ function RapidFlashcardMode({
               <Volume2 className="w-4 h-4"/>
             </button>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditModalOpen(true);
+                }}
+                className="opacity-30 hover:opacity-100 transition-opacity p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                title="Karte bearbeiten"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
               <ProgressDots level={localMastery || 0} />
 
               <button
@@ -3983,6 +4091,13 @@ function RapidFlashcardMode({
           }}
         />
       )}
+
+      <CardEditorModal
+        card={currentCard}
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onSave={handleSaveEditedCard}
+      />
     </div>
   );
 }
@@ -5321,7 +5436,7 @@ export function renderFormattedGrammarRule(rawText?: string | null) {
 // --- STUDY CARD ---
 
 function StudyCard({ 
-  card, 
+  card: initialCard, 
   deckTitle,
   onAnswer, 
   onNext,
@@ -5337,6 +5452,20 @@ function StudyCard({
   isGrammar?: boolean,
   isReview?: boolean
 }) {
+  const [card, setCard] = useState<Flashcard>(initialCard);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+  useEffect(() => {
+    setCard(initialCard);
+  }, [initialCard]);
+
+  const handleSaveEditedCard = async (updatedCard: Flashcard) => {
+    setCard(updatedCard);
+    await useStore.getState().updateCardContent(updatedCard.id, updatedCard);
+    triggerHaptic('success');
+    toast.success('Gespeichert');
+  };
+
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
@@ -5721,8 +5850,19 @@ function StudyCard({
             </div>
           )}
 
-          {/* Правая часть: точки прогресса и помощь */}
-          <div className="flex items-center gap-3 shrink-0">
+          {/* Правая часть: редактирование, точки прогресса и помощь */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsEditModalOpen(true);
+              }}
+              className="opacity-30 hover:opacity-100 transition-opacity p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+              title="Karte bearbeiten"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
             <ProgressDots level={localMastery || 0} />
             <button 
               type="button"
@@ -5872,6 +6012,13 @@ function StudyCard({
           onSpace={() => handleVirtualKeyPress(' ')}
         />
       )}
+
+      <CardEditorModal
+        card={card}
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onSave={handleSaveEditedCard}
+      />
     </>
   );
 }

@@ -28,6 +28,9 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
     wordLabel,
     totalGoal,
     levels,
+    wordsLearnedToday,
+    percentLearnedToday,
+    todayCounts,
   } = useWortschatzMatrix(appLanguage);
 
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -133,13 +136,22 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
             style={{ willChange: 'transform, opacity' }}
             className="fixed inset-x-4 top-20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 w-80 sm:w-96 p-5 rounded-2xl shadow-2xl backdrop-blur-2xl border bg-white/95 border-black/10 text-zinc-900 dark:bg-zinc-900/95 dark:border-white/10 dark:text-zinc-100 z-50 select-none text-left transform-gpu will-change-transform"
           >
-            {/* ШАПКА МАТРИЦЫ: ТОЛЬКО ЧИСЛА И СИНИЙ БЕЙДЖ % */}
+            {/* ШАПКА МАТРИЦЫ: ТОЛЬКО ЧИСЛА, СУТОЧНЫЙ ПРОГРЕСС И СИНИЙ БЕЙДЖ % */}
             <div className="flex items-center justify-between mb-5">
-              <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                {totalMastered.toLocaleString(currentLanguage === 'de' ? 'de-DE' : currentLanguage === 'ru' ? 'ru-RU' : 'en-US')}{' '}
-                <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500">
-                  / {totalGoal.toLocaleString(currentLanguage === 'de' ? 'de-DE' : currentLanguage === 'ru' ? 'ru-RU' : 'en-US')}
-                </span>
+              <div className="flex flex-col gap-1.5">
+                <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-baseline gap-2">
+                  <span>
+                    {totalMastered.toLocaleString(currentLanguage === 'de' ? 'de-DE' : currentLanguage === 'ru' ? 'ru-RU' : 'en-US')}
+                  </span>
+                  <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500">
+                    / {totalGoal.toLocaleString(currentLanguage === 'de' ? 'de-DE' : currentLanguage === 'ru' ? 'ru-RU' : 'en-US')}
+                  </span>
+                </div>
+                {wordsLearnedToday > 0 && (
+                  <div className="text-emerald-500 dark:text-emerald-400 font-medium text-xs tracking-tight flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded-full w-fit animate-in fade-in duration-300">
+                    +{wordsLearnedToday} heute (+{percentLearnedToday}%)
+                  </div>
+                )}
               </div>
               <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                 {percentTotal.toFixed(1)}%
@@ -151,6 +163,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
               {reversedLevels.map((lvl) => {
                 const target = lvl.target;
                 const count = stats[lvl.key] || 0;
+                const todayCount = todayCounts?.[lvl.key] || 0;
                 const percent = Math.min(Math.round((count / target) * 100), 100);
 
                 return (
@@ -162,8 +175,14 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                       </span>
 
                       <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-zinc-500 dark:text-zinc-400">
-                          <strong className="text-zinc-900 dark:text-zinc-100 font-semibold">{count}</strong> / {target}
+                        <span className="font-mono text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                          <strong className="text-zinc-900 dark:text-zinc-100 font-semibold">{count}</strong>
+                          {todayCount > 0 && (
+                            <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-mono animate-in fade-in">
+                              +{todayCount}
+                            </span>
+                          )}
+                          {' '}/ {target}
                         </span>
 
                         {/* Кнопка скачивания: ПОЛНОСТЬЮ БЕЗ ТУЛТИПА / TITLE */}
