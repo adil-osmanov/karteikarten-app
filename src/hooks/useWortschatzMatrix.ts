@@ -125,11 +125,26 @@ function updateLocalState(lemma: string, level: CEFRLevel, lang: AppLang, timest
   return true;
 }
 
+const isSyncingByLang: Record<AppLang, boolean> = {
+  de: false,
+  en: false,
+  ru: false,
+};
+
+const isInitializedByLang: Record<AppLang, boolean> = {
+  de: false,
+  en: false,
+  ru: false,
+};
+
 /**
  * Cloud-First Single Source of Truth (SSOT) synchronization.
  * Pulls all mastered words directly from Supabase user_mastered_words (or directly from mastered cards in Supabase) with ZERO TTL.
  */
 export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<void> {
+  if (isSyncingByLang[lang]) return;
+  isSyncingByLang[lang] = true;
+
   try {
     let remoteRows: Array<{ lemma: string; cefr_level?: string | null; first_mastered_at?: string | null }> | null = null;
 
@@ -147,18 +162,8 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
       }
     } catch {}
 
-    // If user_mastered_words is empty or user is anon, backfill from local decks or directly from Supabase cards!
+    // If user_mastered_words is empty or user is anon, fallback to querying Supabase cards table directly
     if (!remoteRows || remoteRows.length === 0) {
-      try {
-        const { useStore } = await import('@/app/page');
-        const decks = useStore.getState().decks;
-        const books = useStore.getState().books;
-        if (Array.isArray(decks) && decks.length > 0) {
-          const count = await autoBackfillMasteredWords(decks, books, lang);
-          if (count > 0) return;
-        }
-      } catch {}
-
       // Direct fallback query to Supabase cards table (stage 4 / archived) so matrix works even while decks are still loading
       let allMasteredCards: any[] = [];
       let from = 0;
@@ -323,14 +328,18 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
     }
   } catch (err) {
     console.warn('[Wortschatz-Matrix] syncMasteredWordsFromCloud notice:', err);
+  } finally {
+    isSyncingByLang[lang] = false;
   }
 }
 
 /**
- * Initializes matrix store from localStorage v3 cache & immediately triggers cloud fetch.
+ * Initializes matrix store from localStorage v3 cache (instant local hydration).
  */
 function initMatrixStore(lang: AppLang) {
   if (typeof window === 'undefined') return;
+  if (isInitializedByLang[lang]) return;
+  isInitializedByLang[lang] = true;
 
   const { statsKey, lemmasKey, timestampsKey, cacheKeyV3 } = getStorageKeys(lang);
 
@@ -378,9 +387,6 @@ function initMatrixStore(lang: AppLang) {
       });
     }
   } catch (e) {}
-
-  // 2. Fetch Single Source of Truth from Cloud - ALWAYS, with ZERO TTL!
-  syncMasteredWordsFromCloud(lang).catch(() => {});
 }
 
 /**
@@ -404,10 +410,10 @@ export async function recordMasteredLemma(
   let currentLanguage: AppLang = 'de';
   if (rawLang) {
     currentLanguage = normalizeLanguageCode(rawLang);
-  } else {
+  } else if (typeof window !== 'undefined') {
     try {
-      const { useStore } = await import('@/app/page');
-      currentLanguage = normalizeLanguageCode(useStore.getState().appLanguage);
+      const savedLang = localStorage.getItem('selected_language');
+      if (savedLang) currentLanguage = normalizeLanguageCode(savedLang);
     } catch {}
   }
 
@@ -460,10 +466,10 @@ export async function removeMasteredLemma(
   let currentLanguage: AppLang = 'de';
   if (rawLang) {
     currentLanguage = normalizeLanguageCode(rawLang);
-  } else {
+  } else if (typeof window !== 'undefined') {
     try {
-      const { useStore } = await import('@/app/page');
-      currentLanguage = normalizeLanguageCode(useStore.getState().appLanguage);
+      const savedLang = localStorage.getItem('selected_language');
+      if (savedLang) currentLanguage = normalizeLanguageCode(savedLang);
     } catch {}
   }
 
@@ -571,21 +577,16 @@ export async function autoBackfillMasteredWords(
   providedBooks?: Array<{ id: string; language?: string; activeLevels?: string[]; title?: string }>,
   targetLangParam?: string | AppLang
 ): Promise<number> {
+  const decks = providedDecks;
+  const books = providedBooks;
   let targetLang: AppLang = 'de';
-  let decks = providedDecks;
-  let books = providedBooks;
-
-  try {
-    const { useStore } = await import('@/app/page');
-    if (!decks || decks.length === 0) {
-      decks = useStore.getState().decks;
-    }
-    if (!books || books.length === 0) {
-      books = useStore.getState().books;
-    }
-    targetLang = normalizeLanguageCode(targetLangParam || useStore.getState().appLanguage);
-  } catch {
+  if (targetLangParam) {
     targetLang = normalizeLanguageCode(targetLangParam);
+  } else if (typeof window !== 'undefined') {
+    try {
+      const savedLang = localStorage.getItem('selected_language');
+      if (savedLang) targetLang = normalizeLanguageCode(savedLang);
+    } catch {}
   }
 
   if (!Array.isArray(decks) || decks.length === 0) return 0;
@@ -734,19 +735,15 @@ export async function reconcileMasteredWords(
     return;
   }
 
+  const currentDecks = providedDecks;
   let targetLang: AppLang = 'de';
-  let currentDecks = providedDecks;
-
-  try {
-    const { useStore } = await import('@/app/page');
-    if (!currentDecks) {
-      currentDecks = useStore.getState().decks;
-    }
-    const isLoaded = useStore.getState().isLoaded;
-    if (!isLoaded) return;
-    targetLang = normalizeLanguageCode(targetLangParam || useStore.getState().appLanguage);
-  } catch {
+  if (targetLangParam) {
     targetLang = normalizeLanguageCode(targetLangParam);
+  } else if (typeof window !== 'undefined') {
+    try {
+      const savedLang = localStorage.getItem('selected_language');
+      if (savedLang) targetLang = normalizeLanguageCode(savedLang);
+    } catch {}
   }
 
   if (!Array.isArray(currentDecks) || currentDecks.length === 0) return;

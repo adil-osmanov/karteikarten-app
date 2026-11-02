@@ -4092,12 +4092,14 @@ function RapidFlashcardMode({
         />
       )}
 
-      <CardEditorModal
-        card={currentCard}
-        isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
-        onSave={handleSaveEditedCard}
-      />
+      {currentCard && (
+        <CardEditorModal
+          card={currentCard}
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          onSave={handleSaveEditedCard}
+        />
+      )}
     </div>
   );
 }
@@ -6013,12 +6015,14 @@ function StudyCard({
         />
       )}
 
-      <CardEditorModal
-        card={card}
-        isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
-        onSave={handleSaveEditedCard}
-      />
+      {card && (
+        <CardEditorModal
+          card={card}
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          onSave={handleSaveEditedCard}
+        />
+      )}
     </>
   );
 }
@@ -6426,7 +6430,7 @@ function HeaderWidgets({
           {/* 3. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
           <div className="flex items-center justify-end flex-1 gap-2 order-2 sm:order-3">
             {/* Wortschatz-Matrix (CEFR Умная матрица словарного запаса) */}
-            <WortschatzMatrixPopover />
+            <WortschatzMatrixPopover language={appLanguage} />
 
             {/* Капсула счетчика */}
             <button 

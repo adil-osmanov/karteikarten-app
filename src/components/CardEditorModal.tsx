@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Check, Pencil } from 'lucide-react';
-import { Flashcard } from '@/app/page';
+import type { Flashcard } from '@/app/page';
 
 export interface CardEditorModalProps {
-  card: Flashcard;
+  card?: Flashcard | null;
   isOpen: boolean;
   onClose: () => void;
   onSave: (updatedCard: Flashcard) => Promise<void> | void;
@@ -17,18 +17,18 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   onClose,
   onSave,
 }) => {
-  const [sentence, setSentence] = useState(card.sentence || '');
-  const [targetWord, setTargetWord] = useState(card.targetWord || '');
-  const [translation, setTranslation] = useState(card.translation || '');
-  const [baseWordInfo, setBaseWordInfo] = useState(card.baseWordInfo || '');
-  const [forms, setForms] = useState(card.forms || card.hint || '');
+  const [sentence, setSentence] = useState(card?.sentence || '');
+  const [targetWord, setTargetWord] = useState(card?.targetWord || '');
+  const [translation, setTranslation] = useState(card?.translation || '');
+  const [baseWordInfo, setBaseWordInfo] = useState(card?.baseWordInfo || '');
+  const [forms, setForms] = useState(card?.forms || card?.hint || '');
   const [isSaving, setIsSaving] = useState(false);
 
   const sentenceTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync internal form state whenever card or isOpen changes
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && card) {
       setSentence(card.sentence || '');
       setTargetWord(card.targetWord || '');
       setTranslation(card.translation || '');
@@ -45,7 +45,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
 
   // Handle ESC and Cmd+Enter shortcuts
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !card) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -61,13 +61,13 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, sentence, targetWord, translation, baseWordInfo, forms]);
+  }, [isOpen, card, sentence, targetWord, translation, baseWordInfo, forms]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !card) return null;
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (isSaving) return;
+    if (isSaving || !card) return;
 
     const trimmedSentence = sentence.trim();
     const trimmedTargetWord = targetWord.trim();

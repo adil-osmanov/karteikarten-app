@@ -9,17 +9,42 @@ import {
   getCanonicalLevelWords,
   normalizeLanguageCode,
 } from '@/lib/vocabulary/defaultLexiconMap';
-import { useStore } from '@/app/page';
 
 interface WortschatzMatrixPopoverProps {
   className?: string;
+  language?: string;
 }
 
 export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = ({
   className = '',
+  language,
 }) => {
   const [isMatrixOpen, setIsMatrixOpen] = useState(false);
-  const appLanguage = useStore((state) => state.appLanguage);
+  const [fallbackLang, setFallbackLang] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('selected_language') || 'DE';
+      } catch {}
+    }
+    return 'DE';
+  });
+
+  useEffect(() => {
+    const syncLang = () => {
+      try {
+        const saved = localStorage.getItem('selected_language');
+        if (saved) setFallbackLang(saved);
+      } catch {}
+    };
+    window.addEventListener('storage', syncLang);
+    window.addEventListener('stats-update', syncLang);
+    return () => {
+      window.removeEventListener('storage', syncLang);
+      window.removeEventListener('stats-update', syncLang);
+    };
+  }, []);
+
+  const appLanguage = language || fallbackLang;
   const {
     counts: stats,
     totalWords: totalMastered,
