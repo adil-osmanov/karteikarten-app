@@ -2601,7 +2601,12 @@ if (typeof window !== 'undefined') {
 }
 
 export function getCardSpeechText(card: Flashcard): string {
-  const rawTarget = (card.targetWord || '').replace(/\|/g, '').trim();
+  if (!card) return '';
+  const rawWord = card.targetWord || (card as any).front || (card as any).lemma || '';
+  const rawTarget = rawWord.replace(/[|·\u2506\u250A]/g, '').trim();
+  if (!rawTarget || /[\u0400-\u04FF]/.test(rawTarget)) {
+    return '';
+  }
   if (/^(der|die|das)\s+/i.test(rawTarget)) {
     return rawTarget;
   }
@@ -2684,7 +2689,7 @@ export function speakNative(
   }
 
   const clean = text.replace(/\|/g, '').replace(/___+/g, '').trim();
-  if (!clean) {
+  if (!clean || /[\u0400-\u04FF]/.test(clean)) {
     if (onEnded) onEnded();
     return false;
   }
@@ -2772,13 +2777,45 @@ export interface PlaySpeechOptions {
 let activeSpeechRequestId = 0;
 let activeSpeechAbortCtrl: AbortController | null = null;
 
+export function stopAllGermanSpeech() {
+  if (typeof window === 'undefined') return;
+  ++activeSpeechRequestId;
+  if (activeSpeechAbortCtrl) {
+    try { activeSpeechAbortCtrl.abort(); } catch(e) {}
+    activeSpeechAbortCtrl = null;
+  }
+  if ('speechSynthesis' in window) {
+    try { window.speechSynthesis.cancel(); } catch(e) {}
+  }
+  const audio = getSharedSpeechAudio();
+  if (audio) {
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.src = '';
+    } catch(e) {}
+  }
+}
+
 export async function playGermanSpeech(text: string, options?: PlaySpeechOptions) {
   if (typeof window === 'undefined') return;
 
   const cleanText = text.replace(/\|/g, '').replace(/___+/g, '').trim();
-  if (!cleanText) {
+  if (!cleanText || /[\u0400-\u04FF]/.test(cleanText)) {
     if (options?.onEnd) options.onEnd();
     return;
+  }
+
+  // Pre-stop any ongoing synthesis or shared audio element
+  if ('speechSynthesis' in window && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+  }
+  const currentShared = options?.forceAudioEl || getSharedSpeechAudio();
+  if (currentShared && !currentShared.paused) {
+    try {
+      currentShared.pause();
+      currentShared.currentTime = 0;
+    } catch (e) {}
   }
 
   const rate = options?.rate ?? 1.0;
@@ -3302,7 +3339,8 @@ function RapidFlashcardMode({
 
   const [isFlipped, setIsFlipped] = useState(false);
   const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived || isReview ? 4 : (currentCard?.masteryLevel ?? progress ?? 0)));
-  const [isRound1or2, setIsRound1or2] = useState(() => (currentCard?.isArchived || isReview ? false : (currentCard?.masteryLevel ?? progress ?? 0) < 2));
+  const isTypingRecall = Boolean(forcedReverse || isReview || (currentCard?.masteryLevel ?? progress ?? 0) >= 2 || currentCard?.isArchived);
+  const [isRound1or2, setIsRound1or2] = useState(() => !isTypingRecall);
   const [isAnswered, setIsAnswered] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
   const [typedValue, setTypedValue] = useState("");
@@ -3315,9 +3353,11 @@ function RapidFlashcardMode({
 
   // 7. Сброс стейта строго по currentCard?.id (устранение мигания инпута при переходе на раунд 3)
   useEffect(() => {
+    stopAllGermanSpeech();
     const mastery = currentCard?.isArchived ? 4 : (isReview ? Math.max(3, currentCard?.masteryLevel ?? progress ?? 3) : (currentCard?.masteryLevel ?? progress ?? 0));
     setLocalMastery(mastery);
-    setIsRound1or2(currentCard?.isArchived || isReview ? false : mastery < 2);
+    const typingMode = Boolean(forcedReverse || isReview || currentCard?.isArchived || mastery >= 2);
+    setIsRound1or2(!typingMode);
     setIsFlipped(false);
     setIsAnswered(false);
     setIsSurrendered(false);
@@ -3327,7 +3367,7 @@ function RapidFlashcardMode({
     setCardAnimClass('opacity-100 scale-100');
     setIsTransitioning(false);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-  }, [currentCard?.id]);
+  }, [currentCard?.id, forcedReverse, isReview]);
 
   // Парсинг целевой конструкции (управление, отделяемая приставка, артикль)
   const parsedTarget = useMemo(() => {
@@ -3414,9 +3454,9 @@ function RapidFlashcardMode({
   }, []);
 
   const speechText = useMemo(() => {
-    const raw = currentCard?.targetWord || '';
-    return raw.replace(/[|·\u2506\u250A]/g, '').trim();
-  }, [currentCard?.targetWord]);
+    if (!currentCard) return '';
+    return getCardSpeechText(currentCard);
+  }, [currentCard]);
 
   const displaySentence = useMemo(() => {
     const s = currentCard?.sentence;
@@ -3436,14 +3476,18 @@ function RapidFlashcardMode({
     });
   }, [speechText]);
 
-  // 1. Автоматическая озвучка ТОЛЬКО у лицевой стороны на 1-2 раунде (на обратной и до ответа на 3-4 раунде — нет)
+  // 1. Автоматическая озвучка ТОЛЬКО у лицевой стороны на 1-2 раунде (когда немецкое слово показано на экране)
+  // В режиме ввода (раунды 3-4, повторение ошибок, ревью, или реверс) автоозвучка немецкого скрытого ответа СТРОГО ЗАПРЕЩЕНА!
   useEffect(() => {
+    if (!isRound1or2 || forcedReverse || isReview) {
+      return;
+    }
     const mastery = currentCard?.isArchived ? 4 : (currentCard?.masteryLevel ?? progress ?? 0);
     const round1or2 = currentCard?.isArchived ? false : mastery < 2;
     if (round1or2 && currentCard?.targetWord) {
       playSafeAudio(() => playCardAudio(currentCard.targetWord));
     }
-  }, [currentCard?.id]);
+  }, [currentCard?.id, isRound1or2, forcedReverse, isReview]);
 
   // Автофокус инпута в режиме ввода на ПК
   useEffect(() => {
@@ -3708,9 +3752,9 @@ function RapidFlashcardMode({
         }
       }
 
-      // Озвучка по клавише R (в раундах 1-2 с обеих сторон карточки, или в раундах 3-4 если фокус не в инпуте)
+      // Озвучка по клавише R (в раундах 1-2 с обеих сторон карточки, или в раундах 3-4 ТОЛЬКО ПОСЛЕ ответа)
       if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
-        if (!isRound1or2 && document.activeElement === inputRef.current) return;
+        if (!isRound1or2 && !isAnswered) return;
         playSafeAudio(() => playCardAudio(currentCard?.targetWord));
       }
     };
@@ -3897,9 +3941,15 @@ function RapidFlashcardMode({
           <div className="flex items-center justify-between w-full shrink-0">
             <button
               type="button"
-              onClick={() => playSafeAudio(() => playCardAudio(currentCard?.targetWord))}
-              className={AUDIO_BUTTON_CLASSES}
-              title="Aussprache anhören (R)"
+              onClick={() => {
+                if (!isAnswered) {
+                  toast('Erst antworten, dann anhören!', { icon: '⌨️' });
+                  return;
+                }
+                playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+              }}
+              className={cn(AUDIO_BUTTON_CLASSES, !isAnswered && "opacity-30 cursor-not-allowed")}
+              title={isAnswered ? "Aussprache anhören (R)" : "Erst antworten, dann anhören"}
             >
               <Volume2 className="w-4 h-4"/>
             </button>
@@ -4336,11 +4386,20 @@ function RapidSession({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleReviewMistakes = () => {
+    stopAllGermanSpeech();
     if (!stats.mistakesPool || stats.mistakesPool.length === 0) return;
-    const list = stats.mistakesPool.map((item: any) => ({
-      deckId: item.deckId || deckId || '',
-      card: item.card || item
-    }));
+    const list = stats.mistakesPool.map((item: any) => {
+      const cardObj = item.card || item;
+      return {
+        deckId: item.deckId || cardObj.deckId || deckId || '',
+        card: {
+          ...cardObj,
+          targetWord: cardObj.targetWord || cardObj.front || cardObj.lemma || '',
+          sentence: cardObj.sentence || '',
+          translation: cardObj.translation || cardObj.hint || ''
+        }
+      };
+    });
     setQueue([...list].sort(() => Math.random() - 0.5));
     setTotal(list.length);
     setSessionTotal(list.length);
@@ -4352,10 +4411,16 @@ function RapidSession({
   };
 
   const handleReviewOnlyMistakes = () => {
+    stopAllGermanSpeech();
     if (sessionMistakes.length === 0) return;
     const list = sessionMistakes.map(c => ({
       deckId: deckId || '',
-      card: c
+      card: {
+        ...c,
+        targetWord: c.targetWord || (c as any).front || (c as any).lemma || '',
+        sentence: c.sentence || '',
+        translation: c.translation || c.hint || ''
+      }
     }));
     setQueue([...list].sort(() => Math.random() - 0.5));
     setTotal(list.length);
@@ -4365,6 +4430,13 @@ function RapidSession({
     setSessionMistakes([]);
     setIsMistakesReviewMode(true);
   };
+
+  useEffect(() => {
+    stopAllGermanSpeech();
+    return () => {
+      stopAllGermanSpeech();
+    };
+  }, [queue?.[0]?.card?.id]);
 
   useEffect(() => {
     getRapidSounds(); // preload so Safari has decoded buffers before the first answer
@@ -4785,6 +4857,13 @@ function StudyInterface({
   const currentDeckId = currentItem?.deckId;
   const currentCardSnapshot = currentItem?.card;
 
+  useEffect(() => {
+    stopAllGermanSpeech();
+    return () => {
+      stopAllGermanSpeech();
+    };
+  }, [currentIndex, currentCardSnapshot?.id]);
+
   // Get live card to instantly reflect masteryLevel updates (blue dots)
   const liveCard = useMemo(() => {
     if (!currentDeckId || !currentCardSnapshot) return currentCardSnapshot;
@@ -4966,11 +5045,20 @@ function StudyInterface({
   }, [currentIndex, activeCards.length, reviewCards, isDrillMode, isReviewSession, deckId, isInitialArchivedDeck, roundCounter]);
 
   const handleReviewMistakes = () => {
+    stopAllGermanSpeech();
     if (!stats.mistakesPool || stats.mistakesPool.length === 0) return;
-    const list = stats.mistakesPool.map((item: any) => ({
-      deckId: item.deckId || currentDeckId || deckId || '',
-      card: item.card || item
-    }));
+    const list = stats.mistakesPool.map((item: any) => {
+      const cardObj = item.card || item;
+      return {
+        deckId: item.deckId || cardObj.deckId || currentDeckId || deckId || '',
+        card: {
+          ...cardObj,
+          targetWord: cardObj.targetWord || cardObj.front || cardObj.lemma || '',
+          sentence: cardObj.sentence || '',
+          translation: cardObj.translation || cardObj.hint || ''
+        }
+      };
+    });
     setActiveCards([...list].sort(() => Math.random() - 0.5));
     setCurrentIndex(0);
     setInitialTotal(list.length);
@@ -4981,10 +5069,16 @@ function StudyInterface({
   };
 
   const handleReviewOnlyMistakes = () => {
+    stopAllGermanSpeech();
     if (sessionMistakes.length === 0) return;
     const cardsToReview = sessionMistakes.map(c => ({
       deckId: currentDeckId || deckId || '',
-      card: c
+      card: {
+        ...c,
+        targetWord: c.targetWord || (c as any).front || (c as any).lemma || '',
+        sentence: c.sentence || '',
+        translation: c.translation || c.hint || ''
+      }
     }));
     setActiveCards(cardsToReview.sort(() => Math.random() - 0.5));
     setCurrentIndex(0);
@@ -5129,7 +5223,7 @@ function StudyInterface({
               card={liveCard}
               deckTitle={currentDeck?.name}
               isReview={Boolean(isReviewSession || isInitialArchivedDeck || liveCard.isArchived)}
-              reverse={isReviewSession ? true : undefined}
+              reverse={isReviewSession || isReviewingMistakesSession ? true : undefined}
               onAnswer={(correct, isHilfe) => {
                 handleSessionAnswer(correct, isHilfe);
               }}
@@ -5141,7 +5235,7 @@ function StudyInterface({
               card={liveCard}
               deckTitle={currentDeck?.name}
               isGrammar={isGrammarDeck}
-              forceInputMode={isReviewSession}
+              forceInputMode={isReviewSession || isReviewingMistakesSession}
               isReview={isReviewSession}
               onAnswer={(correct, isHilfe) => {
                 handleSessionAnswer(correct, isHilfe);
@@ -5478,6 +5572,17 @@ function StudyCard({
     }
     return card.masteryLevel ?? (card.isArchived ? 4 : 0);
   });
+
+  useEffect(() => {
+    stopAllGermanSpeech();
+    setPhase("Question");
+    setInputText("");
+    setHasErrored(false);
+    hasErroredRef.current = false;
+    return () => {
+      stopAllGermanSpeech();
+    };
+  }, [card.id]);
 
   useEffect(() => {
     if (isReview || forceInputMode) {
@@ -10909,13 +11014,22 @@ export default function App() {
           onStartReview={handleStartReviewDue}
           onReviewMistakes={() => {
             try {
+              stopAllGermanSpeech();
               const lang = normalizeLanguage(activeBook?.language || appLanguage || 'DE');
               const pool = getMistakesPool(lang);
               if (Array.isArray(pool) && pool.length > 0) {
-                const list = pool.map((item: any) => ({
-                  deckId: item.deckId || (decks[0]?.id || ''),
-                  card: item.card || item
-                }));
+                const list = pool.map((item: any) => {
+                  const cardObj = item.card || item;
+                  return {
+                    deckId: item.deckId || cardObj.deckId || (decks[0]?.id || ''),
+                    card: {
+                      ...cardObj,
+                      targetWord: cardObj.targetWord || cardObj.front || cardObj.lemma || '',
+                      sentence: cardObj.sentence || '',
+                      translation: cardObj.translation || cardObj.hint || ''
+                    }
+                  };
+                });
                 initAudioCtx();
                 setIsReviewingMistakes(true);
                 setReviewCards(list);
