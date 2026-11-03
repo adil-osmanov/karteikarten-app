@@ -3207,11 +3207,10 @@ export interface ParsedTargetPhrase {
 export function TrennbarDottedBar() {
   return (
     <span 
-      className="inline-flex items-center justify-center mx-[1px] align-baseline select-none pointer-events-none"
+      className="inline-block w-[2.5px] h-[0.85em] mx-1.5 bg-blue-500/80 dark:bg-blue-400 rounded-full align-middle transition-opacity select-none" 
+      title="Trennbare Vorsilbe"
       aria-hidden="true"
-    >
-      <span className="inline-block w-[1.5px] h-[0.72em] border-l-[1.5px] border-dotted border-current opacity-40 translate-y-[-0.05em]" />
-    </span>
+    />
   );
 }
 
@@ -4802,8 +4801,7 @@ function StudyInterface({
     }
     return [];
   });
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [roundCounter, setRoundCounter] = useState(0);
+  const [turn, setTurn] = useState(0);
   const [initialTotal, setInitialTotal] = useState(() => {
     if (reviewCards && reviewCards.length > 0) return reviewCards.length;
     if (deckId) {
@@ -4818,6 +4816,7 @@ function StudyInterface({
   const [masteredInSession, setMasteredInSession] = useState(0);
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
+  const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number } | null>(null);
 
   useEffect(() => {
     if (reviewCards) {
@@ -4826,7 +4825,7 @@ function StudyInterface({
       setMasteredInSession(0);
       setSessionCorrect(0);
       setSessionMistakes([]);
-      setCurrentIndex(0);
+      setTurn(t => t + 1);
     } else if (deckId) {
       const deck = useStore.getState().decks.find((d) => d.id === deckId);
       if (deck) {
@@ -4837,7 +4836,7 @@ function StudyInterface({
         setMasteredInSession(0);
         setSessionCorrect(0);
         setSessionMistakes([]);
-        setCurrentIndex(0);
+        setTurn(t => t + 1);
       }
     }
   }, [deckId, reviewCards]);
@@ -4853,7 +4852,7 @@ function StudyInterface({
   }
   const isInitialArchivedDeck = isInitialArchivedDeckRef.current;
 
-  const currentItem = activeCards[currentIndex];
+  const currentItem = activeCards[0];
   const currentDeckId = currentItem?.deckId;
   const currentCardSnapshot = currentItem?.card;
 
@@ -4862,7 +4861,7 @@ function StudyInterface({
     return () => {
       stopAllGermanSpeech();
     };
-  }, [currentIndex, currentCardSnapshot?.id]);
+  }, [turn, currentCardSnapshot?.id]);
 
   // Get live card to instantly reflect masteryLevel updates (blue dots)
   const liveCard = useMemo(() => {
@@ -4937,35 +4936,39 @@ function StudyInterface({
     if (!currentCardSnapshot || !currentDeckId) return;
     const isActualCorrect = correct && !isHilfe;
 
-    // 1. Сразу вычисляй новый уровень раунда
+    // 1. Вычисляем новый уровень раунда и условие выпуска
     const currentMastery = liveCard?.masteryLevel ?? currentCardSnapshot?.masteryLevel ?? 0;
     let nextMastery: number;
+    let isGraduated: boolean;
 
-    if (isReviewSession) {
+    if (isReviewSession || isReviewingMistakesSession || isInitialArchivedDeck) {
       nextMastery = isActualCorrect ? 4 : 1;
+      isGraduated = isActualCorrect;
     } else {
       nextMastery = isActualCorrect
         ? Math.min(4, currentMastery + 1)
         : Math.max(0, currentMastery - 1);
+      isGraduated = isActualCorrect && (nextMastery >= 4 || liveCard.isArchived);
     }
 
-    // 2. МГНОВЕННО обновляй стейт текущей карточки в массиве сессии
-    setActiveCards(prev => prev.map((item, idx) => {
-      if (idx === currentIndex || item.card.id === currentCardSnapshot.id) {
-        return {
-          ...item,
-          card: {
-            ...item.card,
-            masteryLevel: nextMastery
-          }
-        };
-      }
-      return item;
-    }));
+    pendingAnswerRef.current = {
+      cardId: currentCardSnapshot.id,
+      isGraduated,
+      nextMastery
+    };
+
+    // 2. Мгновенно обновляем стейт текущей карточки в голове очереди
+    setActiveCards(prev => {
+      if (prev.length === 0) return prev;
+      const head = prev[0];
+      return [
+        { ...head, card: { ...head.card, masteryLevel: nextMastery } },
+        ...prev.slice(1)
+      ];
+    });
 
     // 3. Запись в статистику сессии и дневной счетчик
     if (isActualCorrect) {
-      setMasteredInSession(prev => prev + 1);
       setSessionCorrect(prev => prev + 1);
       updateLanguageDailyStats(studyLanguage, 1, true, currentCardSnapshot.id);
       setLangStats(prev => ({
@@ -4983,9 +4986,6 @@ function StudyInterface({
         mistakesCount: (prev?.mistakesCount || 0) + 1,
         mistakes: prev?.mistakes?.includes(currentCardSnapshot.id) ? prev.mistakes : [...(prev?.mistakes || []), currentCardSnapshot.id]
       }));
-      if (!isReviewSession) {
-        setActiveCards(prev => [...prev, { deckId: currentDeckId, card: { ...currentCardSnapshot, masteryLevel: nextMastery } }]);
-      }
     }
 
     // 4. Запись в статистику карточки в Supabase
@@ -5003,46 +5003,38 @@ function StudyInterface({
     // 6. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: studyLanguage.toLowerCase() } }));
     window.dispatchEvent(new Event('storage-update'));
-  }, [currentCardSnapshot, currentDeckId, liveCard, currentIndex, studyLanguage, isDrillMode, isReviewSession, isReviewingMistakesSession, recordCardResult, answerCard, currentDeck?.bookId, reviewCards]);
+  }, [currentCardSnapshot, currentDeckId, liveCard, studyLanguage, isReviewSession, isReviewingMistakesSession, isInitialArchivedDeck, recordCardResult, answerCard, currentDeck?.bookId]);
   
   const handleNext = useCallback(() => {
-    if (currentIndex < activeCards.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    } else {
-      if (isReviewSession || isDrillMode) {
-        setActiveCards([]); // End of review or drill session - triggers SessionResultScreen!
+    const pending = pendingAnswerRef.current;
+    pendingAnswerRef.current = null;
+
+    setActiveCards(prev => {
+      if (prev.length === 0) return prev;
+      const current = prev[0];
+      const rest = prev.slice(1);
+
+      const isGraduated = pending && pending.cardId === current.card.id
+        ? pending.isGraduated
+        : false;
+
+      if (isGraduated) {
+        setMasteredInSession(m => m + 1);
+        return rest;
       } else {
-        const deck = useStore.getState().decks.find((d) => d.id === deckId);
-        if (deck) {
-          if (isInitialArchivedDeck) {
-            // Already mastered deck: complete exactly 4 review rounds (round 0, 1, 2, 3)
-            if (roundCounter >= 3) {
-              setActiveCards([]); // Ends session and displays completion screen!
-            } else {
-              const list = deck.cards.map(c => ({ deckId: deck.id, card: c }));
-              setActiveCards(list.sort(() => Math.random() - 0.5));
-              setCurrentIndex(0);
-              setRoundCounter(prev => prev + 1);
-              setInitialTotal(list.length);
-              setMasteredInSession(0);
-            }
-          } else {
-            // Normal deck learning: check if unarchived cards remain
-            const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId: deck.id, card: c }));
-            if (active.length === 0 || roundCounter >= 3) {
-              setActiveCards([]); // Ends session and displays completion screen!
-            } else {
-              setActiveCards(active.sort(() => Math.random() - 0.5));
-              setCurrentIndex(0);
-              setRoundCounter(prev => prev + 1);
-              setInitialTotal(active.length);
-              setMasteredInSession(0);
-            }
+        const updatedCard = {
+          ...current,
+          card: {
+            ...current.card,
+            masteryLevel: pending ? pending.nextMastery : current.card.masteryLevel
           }
-        }
+        };
+        return [...rest, updatedCard];
       }
-    }
-  }, [currentIndex, activeCards.length, reviewCards, isDrillMode, isReviewSession, deckId, isInitialArchivedDeck, roundCounter]);
+    });
+
+    setTurn(t => t + 1);
+  }, []);
 
   const handleReviewMistakes = () => {
     stopAllGermanSpeech();
@@ -5060,10 +5052,9 @@ function StudyInterface({
       };
     });
     setActiveCards([...list].sort(() => Math.random() - 0.5));
-    setCurrentIndex(0);
     setInitialTotal(list.length);
     setMasteredInSession(0);
-    setRoundCounter(0);
+    setTurn(t => t + 1);
     setIsMistakesReviewMode(true);
     setIsStatsOpen(false);
   };
@@ -5081,19 +5072,18 @@ function StudyInterface({
       }
     }));
     setActiveCards(cardsToReview.sort(() => Math.random() - 0.5));
-    setCurrentIndex(0);
     setInitialTotal(cardsToReview.length);
     setMasteredInSession(0);
     setSessionCorrect(0);
     setSessionMistakes([]);
-    setRoundCounter(0);
+    setTurn(t => t + 1);
     setIsMistakesReviewMode(true);
   };
 
   // PRELOAD NEXT AUDIO
   useEffect(() => {
-    if (activeCards.length > currentIndex + 1) {
-      const nextItem = activeCards[currentIndex + 1];
+    if (activeCards.length > 1) {
+      const nextItem = activeCards[1];
       const nextCard = nextItem.card;
       const mode = getCardTrainingMode(nextCard, nextItem.deckId, decks, books, trainingMode);
 
@@ -5127,7 +5117,7 @@ function StudyInterface({
         prefetchGermanSpeech(textToPreload);
       }
     }
-  }, [currentIndex, activeCards, decks, books, trainingMode]);
+  }, [activeCards, decks, books, trainingMode]);
 
   if (activeCards.length === 0 || !currentCardSnapshot || !liveCard) {
     return (
@@ -5160,20 +5150,20 @@ function StudyInterface({
           <div className="flex items-center gap-2.5">
             {isInitialArchivedDeck && (
               <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                Runde {Math.min(4, roundCounter + 1)} / 4
+                Wiederholung
               </span>
             )}
             <span
               className="text-xs font-mono font-medium text-zinc-500 dark:text-zinc-400 select-none cursor-default py-1 px-2"
             >
-              {currentIndex + 1} / {activeCards.length}
+              {masteredInSession} / {initialTotal}
             </span>
           </div>
         </div>
         <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div 
             className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
-            style={{ width: `${Math.max(5, initialTotal > 0 ? (masteredInSession / initialTotal) * 100 : 0)}%` }}
+            style={{ width: `${initialTotal > 0 ? Math.min(100, (masteredInSession / initialTotal) * 100) : 0}%` }}
           />
         </div>
       </div>
@@ -5185,7 +5175,7 @@ function StudyInterface({
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
             <PrepStudyCard
-              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
               isReview={isReviewSession}
@@ -5196,7 +5186,7 @@ function StudyInterface({
             />
           ) : currentCardTrainingMode === 'starke_verben' ? (
             <VerbStudyCard
-              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
               isReview={isReviewSession}
@@ -5207,11 +5197,11 @@ function StudyInterface({
             />
           ) : currentCardTrainingMode === 'redemittel' ? (
             <RedemittelStudyCard
-              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={decks.find(d => d.id === currentDeckId)?.name || currentDeck?.name}
-              cardIndex={currentIndex + 1}
-              totalCards={activeCards.length}
+              cardIndex={masteredInSession + 1}
+              totalCards={initialTotal}
               onAnswer={(correct, isHilfe) => {
                 handleSessionAnswer(correct, isHilfe);
               }}
@@ -5219,7 +5209,7 @@ function StudyInterface({
             />
           ) : currentCardTrainingMode === 'rapid_flashcards' ? (
             <RapidStudyCard
-              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
               isReview={Boolean(isReviewSession || isInitialArchivedDeck || liveCard.isArchived)}
@@ -5231,7 +5221,7 @@ function StudyInterface({
             />
           ) : (
             <StudyCard
-              key={`${currentCardSnapshot.id}-${currentIndex}-${roundCounter}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
               isGrammar={isGrammarDeck}

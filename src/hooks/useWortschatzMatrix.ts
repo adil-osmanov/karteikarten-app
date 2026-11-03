@@ -67,6 +67,40 @@ function notifyListeners(lang: AppLang) {
   listeners.forEach((listener) => listener(lang, currentStats));
 }
 
+export function isMasteredToday(timestamp: number | string | null | undefined): boolean {
+  if (!timestamp) return false;
+  const date = new Date(timestamp);
+  const time = date.getTime();
+  if (isNaN(time) || time <= 0) return false;
+  const today = new Date();
+  return (
+    date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear()
+  );
+}
+
+export function sanitizeTimestamps(timestampMap: Map<string, number>): void {
+  const entries = Array.from(timestampMap.entries()).filter(([_, ts]) => ts > 0);
+  if (entries.length <= 5) return;
+
+  const bucketMap = new Map<number, string[]>();
+  for (const [lemma, ts] of entries) {
+    const bucket = Math.floor(ts / (5 * 60 * 1000));
+    const list = bucketMap.get(bucket) || [];
+    list.push(lemma);
+    bucketMap.set(bucket, list);
+  }
+
+  for (const [_, lemmas] of bucketMap) {
+    if (lemmas.length > 5) {
+      for (const lemma of lemmas) {
+        timestampMap.set(lemma, 0);
+      }
+    }
+  }
+}
+
 function calculateActiveLevel(counts: Record<CEFRLevel, number>, lang: AppLang): CEFRLevel {
   const config = LANGUAGE_CEFR_CONFIG[lang] || LANGUAGE_CEFR_CONFIG.de;
   for (const lvl of config.levels) {
@@ -77,7 +111,7 @@ function calculateActiveLevel(counts: Record<CEFRLevel, number>, lang: AppLang):
   return 'C1';
 }
 
-function updateLocalState(lemma: string, level: CEFRLevel, lang: AppLang, timestamp: number = Date.now()): boolean {
+function updateLocalState(lemma: string, level: CEFRLevel, lang: AppLang, timestamp: number = 0): boolean {
   const masteredSet = masteredLemmasSetByLang[lang];
   if (masteredSet.has(lemma)) return false;
 
@@ -189,8 +223,10 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
       if (allMasteredCards.length > 0) {
         const masteredSet = masteredLemmasSetByLang[lang];
         const levelMap = lemmaLevelMapByLang[lang];
+        const timestampMap = lemmaMasteredTimestampByLang[lang];
         masteredSet.clear();
         levelMap.clear();
+        timestampMap.clear();
 
         const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
 
@@ -205,6 +241,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
           if (masteredSet.has(clean)) continue;
 
           masteredSet.add(clean);
+          timestampMap.set(clean, 0);
           const defaultBookLevel = deckObj?.level || 'B2';
           const officialLevel = GLOBAL_LEXICON_CACHE[lang]?.[clean];
           const resolvedLevel: CEFRLevel =
@@ -267,9 +304,13 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
 
         if (r.first_mastered_at) {
           const ts = new Date(r.first_mastered_at).getTime();
-          if (!isNaN(ts)) {
+          if (!isNaN(ts) && ts > 0) {
             timestampMap.set(clean, ts);
+          } else {
+            timestampMap.set(clean, 0);
           }
+        } else {
+          timestampMap.set(clean, 0);
         }
 
         // Priority: Global Lexicon first, then stored level, then fallback resolver
@@ -282,6 +323,8 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
           updatedCounts[resolvedLevel] += 1;
         }
       }
+
+      sanitizeTimestamps(timestampMap);
 
       // 2. Recalculate level counts and active level
       const total = Object.values(updatedCounts).reduce((a, b) => a + b, 0);
@@ -386,6 +429,8 @@ function initMatrixStore(lang: AppLang) {
         }
       });
     }
+
+    sanitizeTimestamps(lemmaMasteredTimestampByLang[lang]);
   } catch (e) {}
 }
 
@@ -621,7 +666,9 @@ export async function autoBackfillMasteredWords(
       const clean = extractLemma(raw, targetLang);
       if (!clean || clean.length < 2 || !isValidLemma(clean, targetLang)) return;
 
-      const cardTs = card.updated_at ? new Date(card.updated_at).getTime() : (card.created_at ? new Date(card.created_at).getTime() : Date.now());
+      const cardTs = card.first_mastered_at
+        ? new Date(card.first_mastered_at).getTime()
+        : (card.firstMasteredAt ? new Date(card.firstMasteredAt).getTime() : 0);
 
       if (!recoveredMap.has(clean)) {
         const officialLevel = GLOBAL_LEXICON_CACHE[targetLang]?.[clean];
@@ -645,10 +692,10 @@ export async function autoBackfillMasteredWords(
   recoveredMap.forEach(({ level, timestamp }, lemma) => {
     masteredSet.add(lemma);
     levelMap.set(lemma, level);
-    if (timestamp) {
-      timestampMap.set(lemma, timestamp);
-    }
+    timestampMap.set(lemma, timestamp || 0);
   });
+
+  sanitizeTimestamps(timestampMap);
 
   const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
   masteredSet.forEach((lemma) => {
@@ -857,10 +904,6 @@ export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgres
   const lang = normalizeLanguageCode(langParam);
   initMatrixStore(lang);
 
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const startTimestamp = startOfToday.getTime();
-
   const todayCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
   let wordsLearnedToday = 0;
 
@@ -870,7 +913,7 @@ export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgres
 
   masteredSet.forEach((lemma) => {
     const ts = timestamps.get(lemma);
-    if (ts && ts >= startTimestamp) {
+    if (ts && isMasteredToday(ts)) {
       wordsLearnedToday++;
       const lvl = levelMap.get(lemma) || GLOBAL_LEXICON_CACHE[lang]?.[lemma] || resolveCEFRLevel(lemma, null, lang);
       if (todayCounts[lvl] !== undefined) {
