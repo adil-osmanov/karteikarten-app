@@ -2377,12 +2377,19 @@ export const useStore = create<DeckState>()((set, get) => ({
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
         const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-        recordMasteredLemma(
-          safeLemma,
-          currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
-          currentDeck?.bookId,
-          cardLang
-        );
+        const deckOrBookLevel =
+          currentDeck?.level ||
+          (currentBook?.activeLevels?.length === 1 ? currentBook.activeLevels[0] : null) ||
+          currentBook?.title ||
+          null;
+        recordMasteredLemma({
+          rawWord,
+          bookLevel: deckOrBookLevel,
+          cardLevel: (validCard as any).level || (validCard as any).cefrLevel || null,
+          bookId: currentDeck?.bookId,
+          language: cardLang,
+          timestamp: Date.now(),
+        });
       }
     } else if (wasMasteredBefore && (!isCorrect || isHilfe || !validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel < 4))) {
       // Demotion! Списание при ошибке («Wiederholen / Не знаю»)
@@ -2503,12 +2510,19 @@ export const useStore = create<DeckState>()((set, get) => ({
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
         const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-        recordMasteredLemma(
-          safeLemma,
-          currentBook?.activeLevels?.[0] || currentBook?.title || currentDeck?.level || 'B2',
-          currentDeck?.bookId,
-          cardLang
-        );
+        const deckOrBookLevel =
+          currentDeck?.level ||
+          (currentBook?.activeLevels?.length === 1 ? currentBook.activeLevels[0] : null) ||
+          currentBook?.title ||
+          null;
+        recordMasteredLemma({
+          rawWord,
+          bookLevel: deckOrBookLevel,
+          cardLevel: (validCard as any).level || (validCard as any).cefrLevel || null,
+          bookId: currentDeck?.bookId,
+          language: cardLang,
+          timestamp: Date.now(),
+        });
       }
     } else if (wasMasteredBefore && score < 4) {
       if (safeLemma) {

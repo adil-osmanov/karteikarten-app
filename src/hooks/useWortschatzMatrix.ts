@@ -2,15 +2,34 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { extractLemma, isValidLemma } from '@/lib/vocabulary/normalizer';
-import {
-  AppLang,
-  CEFRLevel,
-  resolveCEFRLevel,
-  normalizeLanguageCode,
-  LANGUAGE_CEFR_CONFIG,
-  GLOBAL_LEXICON_CACHE,
-} from '@/lib/vocabulary/defaultLexiconMap';
+import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
+import { CEFRLevel, detectWordLevel } from '@/lib/vocabulary/cefrLevelDetector';
+
+export type AppLang = 'de' | 'en' | 'ru' | 'es';
+export type { CEFRLevel };
+
+export const C1_TARGET_WORDS: Record<string, number> = {
+  de: 10000,
+  en: 8000,
+  ru: 8000,
+  es: 8000,
+};
+
+export const WORD_LABELS_BY_LANG: Record<string, string> = {
+  de: 'Wörter',
+  en: 'Words',
+  ru: 'Слов',
+  es: 'Palabras',
+};
+
+export const CEFR_LEVEL_KEYS: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1'];
+
+export interface MasteredWordEntry {
+  originalWord: string;
+  level: CEFRLevel;
+  masteredAt: number;
+  bookId?: string;
+}
 
 export interface CEFRMatrixStats {
   counts: Record<CEFRLevel, number>;
@@ -18,355 +37,342 @@ export interface CEFRMatrixStats {
   activeLevel: CEFRLevel;
 }
 
-const SUPPORTED_LANGS: AppLang[] = ['de', 'en', 'ru'];
-
-// In-memory reactive state isolated by language
-const globalMatrixStatsByLang: Record<AppLang, CEFRMatrixStats> = {
-  de: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
-  en: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
-  ru: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
-};
-
-const masteredLemmasSetByLang: Record<AppLang, Set<string>> = {
-  de: new Set<string>(),
-  en: new Set<string>(),
-  ru: new Set<string>(),
-};
-
-const lemmaLevelMapByLang: Record<AppLang, Map<string, CEFRLevel>> = {
-  de: new Map<string, CEFRLevel>(),
-  en: new Map<string, CEFRLevel>(),
-  ru: new Map<string, CEFRLevel>(),
-};
-
-const lemmaMasteredTimestampByLang: Record<AppLang, Map<string, number>> = {
-  de: new Map<string, number>(),
-  en: new Map<string, number>(),
-  ru: new Map<string, number>(),
-};
-
 export interface TodayProgress {
   wordsLearnedToday: number;
   percentLearnedToday: string;
   todayCounts: Record<CEFRLevel, number>;
 }
 
+const SUPPORTED_LANGS: AppLang[] = ['de', 'en', 'ru', 'es'];
+
+export function normalizeLanguageCode(lang?: string | null): AppLang {
+  const clean = (lang || 'de').toLowerCase().trim();
+  if (clean.startsWith('en')) return 'en';
+  if (clean.startsWith('ru')) return 'ru';
+  if (clean.startsWith('es')) return 'es';
+  return 'de';
+}
+
+// Единственный источник правды в памяти: Map<normalizedKey, { originalWord, level, masteredAt, bookId }>
+const uniqueMasteredWordsByLang: Record<AppLang, Map<string, MasteredWordEntry>> = {
+  de: new Map<string, MasteredWordEntry>(),
+  en: new Map<string, MasteredWordEntry>(),
+  ru: new Map<string, MasteredWordEntry>(),
+  es: new Map<string, MasteredWordEntry>(),
+};
+
+const globalMatrixStatsByLang: Record<AppLang, CEFRMatrixStats> = {
+  de: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
+  en: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
+  ru: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
+  es: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
+};
+
 const listeners = new Set<(lang: AppLang, stats: CEFRMatrixStats) => void>();
 
 function getStorageKeys(lang: AppLang) {
   return {
-    statsKey: `cefr_matrix_stats_${lang}_v3`,
-    lemmasKey: `cefr_mastered_lemmas_${lang}_v3`,
-    timestampsKey: `cefr_mastered_timestamps_${lang}_v3`,
-    cacheKeyV3: `cefr_mastered_cache_v3`,
+    cacheKeyV4: `wortschatz_matrix_v4_${lang}`,
+    legacyCacheKeyV3: `cefr_mastered_cache_v3_${lang}`,
+    legacyTimestampsKey: `cefr_mastered_timestamps_${lang}_v3`,
   };
 }
 
 function notifyListeners(lang: AppLang) {
-  const currentStats = { ...globalMatrixStatsByLang[lang] };
+  const currentStats = {
+    counts: { ...globalMatrixStatsByLang[lang].counts },
+    totalWords: globalMatrixStatsByLang[lang].totalWords,
+    activeLevel: globalMatrixStatsByLang[lang].activeLevel,
+  };
   listeners.forEach((listener) => listener(lang, currentStats));
 }
 
-export function isMasteredToday(timestamp: number | string | null | undefined): boolean {
-  if (!timestamp) return false;
-  const date = new Date(timestamp);
-  const time = date.getTime();
-  if (isNaN(time) || time <= 0) return false;
-  const today = new Date();
-  return (
-    date.getDate() === today.getDate() &&
-    date.getMonth() === today.getMonth() &&
-    date.getFullYear() === today.getFullYear()
-  );
-}
+function calculateActiveLevel(counts: Record<CEFRLevel, number>): CEFRLevel {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (total === 0) return 'A1';
 
-export function sanitizeTimestamps(timestampMap: Map<string, number>): void {
-  const entries = Array.from(timestampMap.entries()).filter(([_, ts]) => ts > 0);
-  if (entries.length <= 5) return;
-
-  const bucketMap = new Map<number, string[]>();
-  for (const [lemma, ts] of entries) {
-    const bucket = Math.floor(ts / (5 * 60 * 1000));
-    const list = bucketMap.get(bucket) || [];
-    list.push(lemma);
-    bucketMap.set(bucket, list);
-  }
-
-  for (const [_, lemmas] of bucketMap) {
-    if (lemmas.length > 5) {
-      for (const lemma of lemmas) {
-        timestampMap.set(lemma, 0);
-      }
+  // Выбираем уровень с наибольшим числом освоенных слов (при равенстве — более высокий уровень)
+  let bestLevel: CEFRLevel = 'A1';
+  let maxCount = -1;
+  for (const lvl of CEFR_LEVEL_KEYS) {
+    const c = counts[lvl] || 0;
+    if (c >= maxCount && c > 0) {
+      maxCount = c;
+      bestLevel = lvl;
     }
   }
+  return bestLevel;
 }
 
-function calculateActiveLevel(counts: Record<CEFRLevel, number>, lang: AppLang): CEFRLevel {
-  const config = LANGUAGE_CEFR_CONFIG[lang] || LANGUAGE_CEFR_CONFIG.de;
-  for (const lvl of config.levels) {
-    if ((counts[lvl.key] || 0) < lvl.target) {
-      return lvl.key;
-    }
-  }
-  return 'C1';
-}
+function recomputeStatsFromMap(lang: AppLang): CEFRMatrixStats {
+  const map = uniqueMasteredWordsByLang[lang];
+  const counts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
 
-function updateLocalState(lemma: string, level: CEFRLevel, lang: AppLang, timestamp: number = 0): boolean {
-  const masteredSet = masteredLemmasSetByLang[lang];
-  if (masteredSet.has(lemma)) return false;
+  map.forEach((entry) => {
+    const lvl = CEFR_LEVEL_KEYS.includes(entry.level) ? entry.level : 'B1';
+    counts[lvl] = (counts[lvl] || 0) + 1;
+  });
 
-  masteredSet.add(lemma);
-  lemmaLevelMapByLang[lang].set(lemma, level);
-  lemmaMasteredTimestampByLang[lang].set(lemma, timestamp);
-
-  const prevCounts = globalMatrixStatsByLang[lang].counts;
-  const updatedCounts = {
-    ...prevCounts,
-    [level]: (prevCounts[level] || 0) + 1,
-  };
-
-  const total = Object.values(updatedCounts).reduce((acc, curr) => acc + curr, 0);
-  const activeLevel = calculateActiveLevel(updatedCounts, lang);
+  const totalWords = map.size;
+  const activeLevel = calculateActiveLevel(counts);
 
   globalMatrixStatsByLang[lang] = {
-    counts: updatedCounts,
-    totalWords: total,
+    counts,
+    totalWords,
     activeLevel,
   };
 
-  if (typeof window !== 'undefined') {
-    try {
-      const { statsKey, lemmasKey, timestampsKey, cacheKeyV3 } = getStorageKeys(lang);
-      const cachePayload = {
-        counts: updatedCounts,
-        totalWords: total,
-        activeLevel,
-        lemmas: Array.from(masteredSet),
-        timestamps: Object.fromEntries(lemmaMasteredTimestampByLang[lang]),
-        updatedAt: Date.now(),
-      };
-      localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[lang]));
-      localStorage.setItem(lemmasKey, JSON.stringify(Array.from(masteredSet)));
-      localStorage.setItem(timestampsKey, JSON.stringify(Object.fromEntries(lemmaMasteredTimestampByLang[lang])));
-      localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
-      localStorage.setItem(`cefr_mastered_cache_v3_${lang}`, JSON.stringify(cachePayload));
-    } catch (e) {
-      console.warn('Wortschatz-Matrix storage quota warning:', e);
+  return globalMatrixStatsByLang[lang];
+}
+
+function persistMatrixToStorage(lang: AppLang) {
+  if (typeof window === 'undefined') return;
+  try {
+    const { cacheKeyV4 } = getStorageKeys(lang);
+    const entriesObj: Record<string, MasteredWordEntry> = {};
+    uniqueMasteredWordsByLang[lang].forEach((val, key) => {
+      entriesObj[key] = val;
+    });
+    const payload = {
+      stats: globalMatrixStatsByLang[lang],
+      entries: entriesObj,
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem(cacheKeyV4, JSON.stringify(payload));
+  } catch (e) {
+    console.warn('[Wortschatz-Matrix] Storage persist warning:', e);
+  }
+}
+
+/**
+ * Извлекает точный таймстемп освоения карточки (masteredAt).
+ * Учитывает:
+ * 1) явные поля updated_at / first_mastered_at,
+ * 2) дату следующего повторения SRS (nextReviewDate - interval * 86400000),
+ *    которая записывается в таблицу cards в момент перехода карточки на 4 этап.
+ */
+export function extractCardMasteredAt(card: any, existingTs: number = 0): number {
+  const candidates: number[] = [];
+  if (existingTs && existingTs > 0) {
+    candidates.push(existingTs);
+  }
+
+  const rawExplicit =
+    card?.first_mastered_at ||
+    card?.firstMasteredAt ||
+    card?.updated_at ||
+    card?.updatedAt ||
+    card?.last_reviewed_at;
+
+  if (rawExplicit) {
+    const parsed = new Date(rawExplicit).getTime();
+    if (!isNaN(parsed) && parsed > 0) {
+      candidates.push(parsed);
     }
   }
 
-  notifyListeners(lang);
-  return true;
-}
+  const rawNextReview = card?.nextReviewDate ?? card?.next_review_date;
+  if (rawNextReview !== null && rawNextReview !== undefined) {
+    const nextReviewMs =
+      typeof rawNextReview === 'number' ? rawNextReview : new Date(rawNextReview).getTime();
+    const intervalDays = Number(card?.interval ?? 1) || 1;
+    if (!isNaN(nextReviewMs) && nextReviewMs > 0) {
+      const inferredMasteredAt = nextReviewMs - intervalDays * 86400000;
+      // Проверяем, что вычисленная дата разумна (не в будущем и после 2020 года)
+      if (inferredMasteredAt > 1577836800000 && inferredMasteredAt <= Date.now() + 60000) {
+        candidates.push(inferredMasteredAt);
+      }
+    }
+  }
 
-const isSyncingByLang: Record<AppLang, boolean> = {
-  de: false,
-  en: false,
-  ru: false,
-};
+  if (candidates.length === 0) return 0;
+
+  // Если среди кандидатов есть сегодняшний таймстемп — приоритет ему, иначе максимальный валидный
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const todayEnd = todayStart + 24 * 60 * 60 * 1000;
+
+  const todayCandidate = candidates.find((ts) => ts >= todayStart && ts < todayEnd);
+  if (todayCandidate !== undefined) return todayCandidate;
+
+  return Math.max(...candidates);
+}
 
 const isInitializedByLang: Record<AppLang, boolean> = {
   de: false,
   en: false,
   ru: false,
+  es: false,
 };
 
-/**
- * Cloud-First Single Source of Truth (SSOT) synchronization.
- * Pulls all mastered words directly from Supabase user_mastered_words (or directly from mastered cards in Supabase) with ZERO TTL.
- */
-export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<void> {
-  if (isSyncingByLang[lang]) return;
-  isSyncingByLang[lang] = true;
+const isSyncingByLang: Record<AppLang, boolean> = {
+  de: false,
+  en: false,
+  ru: false,
+  es: false,
+};
+
+function initMatrixStore(lang: AppLang) {
+  if (typeof window === 'undefined') return;
+  if (isInitializedByLang[lang]) return;
+  isInitializedByLang[lang] = true;
+
+  const { cacheKeyV4, legacyTimestampsKey } = getStorageKeys(lang);
 
   try {
-    let remoteRows: Array<{ lemma: string; cefr_level?: string | null; first_mastered_at?: string | null }> | null = null;
-
+    // Читаем legacy-таймстемпы, чтобы не потерять прогресс за сегодня при миграции на v4
+    const legacyTimestamps: Record<string, number> = {};
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData?.user?.id;
-      if (userId) {
-        const { data, error } = await supabase
-          .from('user_mastered_words')
-          .select('lemma, cefr_level, first_mastered_at')
-          .eq('user_id', userId);
-        if (!error && Array.isArray(data) && data.length > 0) {
-          remoteRows = data;
+      const rawLegacyTs = localStorage.getItem(legacyTimestampsKey);
+      if (rawLegacyTs) {
+        const parsedTs = JSON.parse(rawLegacyTs);
+        if (parsedTs && typeof parsedTs === 'object') {
+          Object.entries(parsedTs).forEach(([k, v]) => {
+            const normKey = normalizeLemmaKey(k);
+            if (normKey && typeof v === 'number' && v > 0) {
+              legacyTimestamps[normKey] = v;
+            }
+          });
         }
       }
     } catch {}
 
-    // If user_mastered_words is empty or user is anon, fallback to querying Supabase cards table directly
-    if (!remoteRows || remoteRows.length === 0) {
-      // Direct fallback query to Supabase cards table (stage 4 / archived) so matrix works even while decks are still loading
-      let allMasteredCards: any[] = [];
-      let from = 0;
-      const PAGE_SIZE = 1000;
-      let hasMore = true;
-
-      while (hasMore) {
-        const { data: cardRows, error: cardErr } = await supabase
-          .from('cards')
-          .select('targetWord, masteryLevel, isArchived, decks!inner(language, level, book_id)')
-          .or('isArchived.eq.true,masteryLevel.gte.4')
-          .range(from, from + PAGE_SIZE - 1);
-
-        if (cardErr || !cardRows || cardRows.length === 0) {
-          hasMore = false;
-        } else {
-          allMasteredCards = allMasteredCards.concat(cardRows);
-          from += PAGE_SIZE;
-          hasMore = cardRows.length === PAGE_SIZE;
-        }
+    const rawV4 = localStorage.getItem(cacheKeyV4);
+    if (rawV4) {
+      const parsed = JSON.parse(rawV4);
+      if (parsed?.entries && typeof parsed.entries === 'object') {
+        const map = uniqueMasteredWordsByLang[lang];
+        map.clear();
+        Object.entries(parsed.entries).forEach(([key, val]: [string, any]) => {
+          const normKey = normalizeLemmaKey(key || val?.originalWord || '');
+          if (!normKey || normKey.length < 2) return;
+          const level: CEFRLevel = detectWordLevel(
+            val?.originalWord || normKey,
+            null,
+            val?.level,
+            lang
+          );
+          const masteredAt = Number(val?.masteredAt || legacyTimestamps[normKey] || 0);
+          const existing = map.get(normKey);
+          if (!existing || masteredAt > existing.masteredAt) {
+            map.set(normKey, {
+              originalWord: val?.originalWord || normKey,
+              level,
+              masteredAt,
+              bookId: val?.bookId,
+            });
+          }
+        });
+        recomputeStatsFromMap(lang);
       }
+    }
+  } catch (e) {
+    console.warn('[Wortschatz-Matrix] Hydration notice:', e);
+  }
+}
 
-      if (allMasteredCards.length > 0) {
-        const masteredSet = masteredLemmasSetByLang[lang];
-        const levelMap = lemmaLevelMapByLang[lang];
-        const timestampMap = lemmaMasteredTimestampByLang[lang];
-        masteredSet.clear();
-        levelMap.clear();
-        timestampMap.clear();
+/**
+ * Синхронизация выученных слов из Supabase:
+ * Собирает реально выученные карточки пользователя (masteryLevel >= 4 || isArchived === true)
+ * и записи user_mastered_words, строго дедуплицируя по normalizeLemmaKey.
+ */
+export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<void> {
+  initMatrixStore(lang);
+  if (isSyncingByLang[lang]) return;
+  isSyncingByLang[lang] = true;
 
-        const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
+  try {
+    const existingMap = uniqueMasteredWordsByLang[lang];
 
-        for (const c of allMasteredCards) {
-          const deckObj = Array.isArray(c.decks) ? c.decks[0] : c.decks;
-          const dLang = normalizeLanguageCode(deckObj?.language || 'de');
-          if (dLang !== lang) continue;
-
-          const raw = c.targetWord || '';
-          const clean = extractLemma(raw, lang);
-          if (!clean || clean.length < 2 || !isValidLemma(clean, lang)) continue;
-          if (masteredSet.has(clean)) continue;
-
-          masteredSet.add(clean);
-          timestampMap.set(clean, 0);
-          const defaultBookLevel = deckObj?.level || 'B2';
-          const officialLevel = GLOBAL_LEXICON_CACHE[lang]?.[clean];
-          const resolvedLevel: CEFRLevel =
-            officialLevel || resolveCEFRLevel(clean, defaultBookLevel, lang);
-
-          levelMap.set(clean, resolvedLevel);
-          if (updatedCounts[resolvedLevel] !== undefined) {
-            updatedCounts[resolvedLevel] += 1;
+    // 1. Загружаем timestamps и уровни из user_mastered_words (если пользователь авторизован)
+    const remoteMetaByKey = new Map<string, { level?: string | null; masteredAt: number }>();
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id;
+      if (userId) {
+        const { data } = await supabase
+          .from('user_mastered_words')
+          .select('lemma, cefr_level, first_mastered_at')
+          .eq('user_id', userId);
+        if (Array.isArray(data)) {
+          for (const row of data) {
+            const key = normalizeLemmaKey(row.lemma || '');
+            if (!key || key.length < 2) continue;
+            const ts = row.first_mastered_at ? new Date(row.first_mastered_at).getTime() : 0;
+            const prev = remoteMetaByKey.get(key);
+            if (!prev || ts > prev.masteredAt) {
+              remoteMetaByKey.set(key, {
+                level: row.cefr_level,
+                masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
+              });
+            }
           }
         }
-
-        const total = Object.values(updatedCounts).reduce((a, b) => a + b, 0);
-        const activeLevel = calculateActiveLevel(updatedCounts, lang);
-
-        globalMatrixStatsByLang[lang] = {
-          counts: updatedCounts,
-          totalWords: total,
-          activeLevel,
-        };
-
-        if (typeof window !== 'undefined') {
-          try {
-            const { statsKey, lemmasKey, cacheKeyV3 } = getStorageKeys(lang);
-            const cachePayload = {
-              counts: updatedCounts,
-              totalWords: total,
-              activeLevel,
-              lemmas: Array.from(masteredSet),
-              updatedAt: Date.now(),
-            };
-            localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[lang]));
-            localStorage.setItem(lemmasKey, JSON.stringify(Array.from(masteredSet)));
-            localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
-            localStorage.setItem(`cefr_mastered_cache_v3_${lang}`, JSON.stringify(cachePayload));
-          } catch {}
-        }
-
-        notifyListeners(lang);
       }
-      return;
+    } catch {}
+
+    // 2. Запрашиваем реально выученные карточки из таблицы cards в Supabase
+    let allMasteredCards: any[] = [];
+    let from = 0;
+    const PAGE_SIZE = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: cardRows, error: cardErr } = await supabase
+        .from('cards')
+        .select('targetWord, masteryLevel, isArchived, nextReviewDate, interval, repetitions, decks!inner(language, level, book_id)')
+        .or('isArchived.eq.true,masteryLevel.gte.4')
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (cardErr || !cardRows || cardRows.length === 0) {
+        hasMore = false;
+      } else {
+        allMasteredCards = allMasteredCards.concat(cardRows);
+        from += PAGE_SIZE;
+        hasMore = cardRows.length === PAGE_SIZE;
+      }
     }
 
-    if (Array.isArray(remoteRows) && remoteRows.length > 0) {
-      const masteredSet = masteredLemmasSetByLang[lang];
-      const levelMap = lemmaLevelMapByLang[lang];
-      const timestampMap = lemmaMasteredTimestampByLang[lang];
+    if (allMasteredCards.length > 0) {
+      const nextMap = new Map<string, MasteredWordEntry>();
 
-      // 1. COMPLETELY OVERWRITE local state from cloud SSOT (NO merging with stale local duplicates)
-      masteredSet.clear();
-      levelMap.clear();
-      timestampMap.clear();
+      for (const c of allMasteredCards) {
+        const deckObj = Array.isArray(c.decks) ? c.decks[0] : c.decks;
+        const dLang = normalizeLanguageCode(deckObj?.language || 'de');
+        if (dLang !== lang) continue;
 
-      const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
+        const rawWord = c.targetWord || '';
+        const normalizedKey = normalizeLemmaKey(rawWord);
+        if (!normalizedKey || normalizedKey.length < 2) continue;
 
-      for (const r of remoteRows) {
-        const clean = extractLemma(r.lemma, lang);
-        if (!clean || !isValidLemma(clean, lang)) continue;
+        const prevEntry = existingMap.get(normalizedKey);
+        const remoteMeta = remoteMetaByKey.get(normalizedKey);
+        const priorTs = Math.max(prevEntry?.masteredAt || 0, remoteMeta?.masteredAt || 0);
+        const masteredAt = extractCardMasteredAt(c, priorTs);
 
-        masteredSet.add(clean);
+        const deckLevel = deckObj?.level || null;
+        const cardLevel = (c as any).level || remoteMeta?.level || null;
+        const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, lang);
 
-        if (r.first_mastered_at) {
-          const ts = new Date(r.first_mastered_at).getTime();
-          if (!isNaN(ts) && ts > 0) {
-            timestampMap.set(clean, ts);
-          } else {
-            timestampMap.set(clean, 0);
-          }
-        } else {
-          timestampMap.set(clean, 0);
-        }
-
-        // Priority: Global Lexicon first, then stored level, then fallback resolver
-        const officialLevel = GLOBAL_LEXICON_CACHE[lang]?.[clean];
-        const resolvedLevel: CEFRLevel =
-          officialLevel || (r.cefr_level as CEFRLevel) || resolveCEFRLevel(clean, null, lang);
-
-        levelMap.set(clean, resolvedLevel);
-        if (updatedCounts[resolvedLevel] !== undefined) {
-          updatedCounts[resolvedLevel] += 1;
+        const alreadyInNext = nextMap.get(normalizedKey);
+        if (!alreadyInNext) {
+          nextMap.set(normalizedKey, {
+            originalWord: rawWord,
+            level,
+            masteredAt,
+            bookId: deckObj?.book_id || prevEntry?.bookId,
+          });
+        } else if (masteredAt > alreadyInNext.masteredAt) {
+          nextMap.set(normalizedKey, {
+            ...alreadyInNext,
+            masteredAt,
+          });
         }
       }
 
-      sanitizeTimestamps(timestampMap);
-
-      // 2. Recalculate level counts and active level
-      const total = Object.values(updatedCounts).reduce((a, b) => a + b, 0);
-      const activeLevel = calculateActiveLevel(updatedCounts, lang);
-
-      globalMatrixStatsByLang[lang] = {
-        counts: updatedCounts,
-        totalWords: total,
-        activeLevel,
-      };
-
-      // 3. Save fresh result to localStorage with version key cefr_mastered_cache_v3
-      if (typeof window !== 'undefined') {
-        try {
-          const { statsKey, lemmasKey, timestampsKey, cacheKeyV3 } = getStorageKeys(lang);
-          const cachePayload = {
-            counts: updatedCounts,
-            totalWords: total,
-            activeLevel,
-            lemmas: Array.from(masteredSet),
-            timestamps: Object.fromEntries(timestampMap),
-            updatedAt: Date.now(),
-          };
-          localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[lang]));
-          localStorage.setItem(lemmasKey, JSON.stringify(Array.from(masteredSet)));
-          localStorage.setItem(timestampsKey, JSON.stringify(Object.fromEntries(timestampMap)));
-          localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
-          localStorage.setItem(`cefr_mastered_cache_v3_${lang}`, JSON.stringify(cachePayload));
-
-          // Invalidate and delete stale legacy v2/v1 keys and old TTL timers
-          localStorage.removeItem(`cefr_matrix_stats_${lang}_v2`);
-          localStorage.removeItem(`cefr_mastered_lemmas_${lang}_v2`);
-          localStorage.removeItem(`cefr_matrix_stats_${lang}`);
-          localStorage.removeItem(`cefr_mastered_lemmas_${lang}`);
-          localStorage.removeItem(`cefr_last_matrix_sync_${lang}`);
-          localStorage.removeItem('cefr_matrix_stats_v1');
-          localStorage.removeItem('cefr_mastered_lemmas_v1');
-        } catch (e) {
-          console.warn('Wortschatz-Matrix storage quota warning:', e);
-        }
-      }
-
+      uniqueMasteredWordsByLang[lang] = nextMap;
+      recomputeStatsFromMap(lang);
+      persistMatrixToStorage(lang);
       notifyListeners(lang);
     }
   } catch (err) {
@@ -377,81 +383,34 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
 }
 
 /**
- * Initializes matrix store from localStorage v3 cache (instant local hydration).
- */
-function initMatrixStore(lang: AppLang) {
-  if (typeof window === 'undefined') return;
-  if (isInitializedByLang[lang]) return;
-  isInitializedByLang[lang] = true;
-
-  const { statsKey, lemmasKey, timestampsKey, cacheKeyV3 } = getStorageKeys(lang);
-
-  // 1. Instant load from localStorage v3 cache to avoid layout shift while network request is in flight
-  try {
-    const cachedV3 = localStorage.getItem(cacheKeyV3) || localStorage.getItem(statsKey);
-    let parsedV3: any = null;
-    if (cachedV3) {
-      parsedV3 = JSON.parse(cachedV3);
-      if (parsedV3?.counts) {
-        globalMatrixStatsByLang[lang] = {
-          counts: parsedV3.counts,
-          totalWords: parsedV3.totalWords || Object.values(parsedV3.counts).reduce((a: any, b: any) => a + b, 0),
-          activeLevel: parsedV3.activeLevel || calculateActiveLevel(parsedV3.counts, lang),
-        };
-      }
-    }
-
-    const cachedLemmas = localStorage.getItem(lemmasKey);
-    if (cachedLemmas) {
-      const parsed: string[] = JSON.parse(cachedLemmas);
-      if (Array.isArray(parsed)) {
-        masteredLemmasSetByLang[lang].clear();
-        parsed.forEach((l) => masteredLemmasSetByLang[lang].add(l));
-      }
-    }
-
-    const cachedTimestamps = localStorage.getItem(timestampsKey);
-    if (cachedTimestamps) {
-      try {
-        const parsed = JSON.parse(cachedTimestamps);
-        if (parsed && typeof parsed === 'object') {
-          Object.entries(parsed).forEach(([lemma, ts]) => {
-            if (typeof ts === 'number') {
-              lemmaMasteredTimestampByLang[lang].set(lemma, ts);
-            }
-          });
-        }
-      } catch {}
-    } else if (parsedV3?.timestamps && typeof parsedV3.timestamps === 'object') {
-      Object.entries(parsedV3.timestamps).forEach(([lemma, ts]) => {
-        if (typeof ts === 'number') {
-          lemmaMasteredTimestampByLang[lang].set(lemma, ts);
-        }
-      });
-    }
-
-    sanitizeTimestamps(lemmaMasteredTimestampByLang[lang]);
-  } catch (e) {}
-}
-
-/**
- * Records a single mastered word into the deduplicated matrix.
- * Priority: checks official global_lexicon for the active language first!
+ * Регистрирует одно выученное слово в матрице (строго без дубликатов по normalizeLemmaKey).
  */
 export async function recordMasteredLemma(
-  paramsOrWord: { rawWord: string; bookId?: string; bookLevel?: string | null; language?: string; timestamp?: number } | string,
+  paramsOrWord:
+    | {
+        rawWord: string;
+        bookId?: string;
+        bookLevel?: string | null;
+        cardLevel?: string | null;
+        language?: string;
+        timestamp?: number;
+      }
+    | string,
   levelOrNull?: string | null,
   bookIdOrNull?: string,
   langOrNull?: string,
   timestampOrNull?: number
 ) {
   const rawWord = typeof paramsOrWord === 'string' ? paramsOrWord : paramsOrWord.rawWord;
-  const bookLevel = typeof paramsOrWord === 'string' ? levelOrNull : paramsOrWord.bookLevel;
+  const deckLevel = typeof paramsOrWord === 'string' ? levelOrNull : paramsOrWord.bookLevel;
+  const cardLevel = typeof paramsOrWord === 'object' ? paramsOrWord.cardLevel : null;
   const bookId = typeof paramsOrWord === 'string' ? bookIdOrNull : paramsOrWord.bookId;
   const rawLang = typeof paramsOrWord === 'string' ? langOrNull : paramsOrWord.language;
-  const timestamp = typeof paramsOrWord === 'object' && paramsOrWord.timestamp ? paramsOrWord.timestamp : (timestampOrNull || Date.now());
+  const timestamp =
+    typeof paramsOrWord === 'object' && paramsOrWord.timestamp
+      ? paramsOrWord.timestamp
+      : timestampOrNull || Date.now();
 
-  // Resolve target language
   let currentLanguage: AppLang = 'de';
   if (rawLang) {
     currentLanguage = normalizeLanguageCode(rawLang);
@@ -462,44 +421,66 @@ export async function recordMasteredLemma(
     } catch {}
   }
 
-  const cleanLemma = extractLemma(rawWord, currentLanguage);
-  if (!isValidLemma(cleanLemma, currentLanguage)) return;
+  initMatrixStore(currentLanguage);
 
-  // 1. Сначала ищем в памяти / кэше global_lexicon для активного языка:
-  const officialLevel = GLOBAL_LEXICON_CACHE[currentLanguage]?.[cleanLemma];
+  const normalizedKey = normalizeLemmaKey(rawWord);
+  if (!normalizedKey || normalizedKey.length < 2) return;
 
-  // 2. Истинный уровень: если есть в мировой базе — берем его, иначе fallback на уровень книги
-  const resolvedLevel: CEFRLevel = officialLevel || resolveCEFRLevel(cleanLemma, bookLevel, currentLanguage);
+  const resolvedLevel = detectWordLevel(normalizedKey, deckLevel, cardLevel, currentLanguage);
+  const map = uniqueMasteredWordsByLang[currentLanguage];
+  const existing = map.get(normalizedKey);
 
-  // 3. Обновляем локальное состояние
-  const isNew = updateLocalState(cleanLemma, resolvedLevel, currentLanguage, timestamp);
-  if (!isNew) return; // Слово уже выучено
+  // Если слово уже зарегистрировано и имеет валидный таймстемп — дубликат не создаем
+  if (existing) {
+    if (!existing.masteredAt || existing.masteredAt <= 0) {
+      map.set(normalizedKey, {
+        ...existing,
+        masteredAt: timestamp,
+      });
+      persistMatrixToStorage(currentLanguage);
+      notifyListeners(currentLanguage);
+    }
+    return;
+  }
 
-  // 4. Записываем в Supabase:
+  map.set(normalizedKey, {
+    originalWord: rawWord,
+    level: resolvedLevel,
+    masteredAt: timestamp,
+    bookId,
+  });
+
+  recomputeStatsFromMap(currentLanguage);
+  persistMatrixToStorage(currentLanguage);
+  notifyListeners(currentLanguage);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: currentLanguage } }));
+  }
+
+  // Сохраняем в Supabase user_mastered_words (при наличии авторизованного пользователя)
   try {
     const { data: authData } = await supabase.auth.getUser();
     const userId = authData?.user?.id;
     if (!userId) return;
 
-    await supabase
-      .from('user_mastered_words')
-      .upsert(
-        {
-          user_id: userId,
-          lemma: cleanLemma,
-          cefr_level: resolvedLevel,
-          source_book_id: bookId || null,
-          first_mastered_at: new Date(timestamp).toISOString(),
-        },
-        { onConflict: 'user_id,lemma', ignoreDuplicates: true }
-      );
+    await supabase.from('user_mastered_words').upsert(
+      {
+        user_id: userId,
+        lemma: normalizedKey,
+        cefr_level: resolvedLevel,
+        source_book_id: bookId || null,
+        first_mastered_at: new Date(timestamp).toISOString(),
+      },
+      { onConflict: 'user_id,lemma', ignoreDuplicates: true }
+    );
   } catch (err) {
     console.warn('[Wortschatz-Matrix] Remote upsert notice:', err);
   }
 }
 
 /**
- * Immediately demotes and removes a word upon mistake during review.
+ * Удаляет слово из матрицы при сбросе прогресса карточки (ошибке на повторении).
  */
 export async function removeMasteredLemma(
   paramsOrWord: { rawWord: string; language?: string } | string,
@@ -518,78 +499,23 @@ export async function removeMasteredLemma(
     } catch {}
   }
 
-  const cleanLemma = extractLemma(rawWord, currentLanguage);
-  if (!isValidLemma(cleanLemma, currentLanguage)) return;
+  initMatrixStore(currentLanguage);
 
-  const masteredSet = masteredLemmasSetByLang[currentLanguage];
-  if (!masteredSet.has(cleanLemma)) return;
+  const normalizedKey = normalizeLemmaKey(rawWord);
+  if (!normalizedKey || normalizedKey.length < 2) return;
 
-  masteredSet.delete(cleanLemma);
-  const level =
-    lemmaLevelMapByLang[currentLanguage].get(cleanLemma) || resolveCEFRLevel(cleanLemma, null, currentLanguage);
-  lemmaLevelMapByLang[currentLanguage].delete(cleanLemma);
-  lemmaMasteredTimestampByLang[currentLanguage].delete(cleanLemma);
+  const map = uniqueMasteredWordsByLang[currentLanguage];
+  if (!map.has(normalizedKey)) return;
 
-  const prevCounts = globalMatrixStatsByLang[currentLanguage].counts;
-  const updatedCounts = {
-    ...prevCounts,
-    [level]: Math.max(0, (prevCounts[level] || 0) - 1),
-  };
-
-  const total = Math.max(0, Object.values(updatedCounts).reduce((acc, curr) => acc + curr, 0));
-  const activeLevel = calculateActiveLevel(updatedCounts, currentLanguage);
-
-  globalMatrixStatsByLang[currentLanguage] = {
-    counts: updatedCounts,
-    totalWords: total,
-    activeLevel,
-  };
-
-  if (typeof window !== 'undefined') {
-    try {
-      const { statsKey, lemmasKey, timestampsKey, cacheKeyV3 } = getStorageKeys(currentLanguage);
-      const cachePayload = {
-        counts: updatedCounts,
-        totalWords: total,
-        activeLevel,
-        lemmas: Array.from(masteredSet),
-        timestamps: Object.fromEntries(lemmaMasteredTimestampByLang[currentLanguage]),
-        updatedAt: Date.now(),
-      };
-      localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[currentLanguage]));
-      localStorage.setItem(lemmasKey, JSON.stringify(Array.from(masteredSet)));
-      localStorage.setItem(timestampsKey, JSON.stringify(Object.fromEntries(lemmaMasteredTimestampByLang[currentLanguage])));
-      localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
-      localStorage.setItem(`cefr_mastered_cache_v3_${currentLanguage}`, JSON.stringify(cachePayload));
-    } catch (e) {
-      console.warn('Wortschatz-Matrix storage quota warning:', e);
-    }
-  }
-
+  map.delete(normalizedKey);
+  recomputeStatsFromMap(currentLanguage);
+  persistMatrixToStorage(currentLanguage);
   notifyListeners(currentLanguage);
 
   if (typeof window !== 'undefined') {
-    try {
-      const { statsKey, lemmasKey, cacheKeyV3 } = getStorageKeys(currentLanguage);
-      const cachePayload = {
-        counts: updatedCounts,
-        totalWords: total,
-        activeLevel,
-        lemmas: Array.from(masteredSet),
-        updatedAt: Date.now(),
-      };
-      localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[currentLanguage]));
-      localStorage.setItem(lemmasKey, JSON.stringify(Array.from(masteredSet)));
-      localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
-      localStorage.setItem(`cefr_mastered_cache_v3_${currentLanguage}`, JSON.stringify(cachePayload));
-    } catch (e) {
-      console.warn('Wortschatz-Matrix storage quota warning:', e);
-    }
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: currentLanguage } }));
   }
 
-  notifyListeners(currentLanguage);
-
-  // Asynchronously remove from Supabase user_mastered_words
   try {
     const { data: authData } = await supabase.auth.getUser();
     const userId = authData?.user?.id;
@@ -598,7 +524,7 @@ export async function removeMasteredLemma(
     await supabase
       .from('user_mastered_words')
       .delete()
-      .match({ user_id: userId, lemma: cleanLemma });
+      .match({ user_id: userId, lemma: normalizedKey });
   } catch (err) {
     console.warn('[Wortschatz-Matrix] Remote delete notice:', err);
   }
@@ -607,32 +533,20 @@ export async function removeMasteredLemma(
 export function getMasteredLemmasSet(langParam?: string | AppLang): Set<string> {
   const normLang = normalizeLanguageCode(langParam);
   initMatrixStore(normLang);
-  return new Set(masteredLemmasSetByLang[normLang]);
+  return new Set(uniqueMasteredWordsByLang[normLang].keys());
 }
 
 /**
- * Emergency Auto-Backfill of Mastered Words:
- * Scans all decks for stage 4 / archived cards ((card.masteryLevel >= 4) || card.isArchived === true),
- * normalizes lemmas, resolves their CEFR level via GLOBAL_LEXICON_CACHE (or book level),
- * restores local reactive Wortschatz-Matrix state & caches,
- * and batch upserts them to Supabase user_mastered_words table.
+ * Пересчитывает матрицу строго по выученным карточкам пользователя (masteryLevel >= 4 || isArchived === true)
+ * с дедупликацией через normalizeLemmaKey и определением уровня через detectWordLevel.
  */
 export async function autoBackfillMasteredWords(
-  providedDecks?: Array<{ id: string; bookId?: string; language?: string; cards?: Array<any> }>,
+  providedDecks?: Array<{ id: string; bookId?: string; level?: string; language?: string; cards?: Array<any> }>,
   providedBooks?: Array<{ id: string; language?: string; activeLevels?: string[]; title?: string }>,
   targetLangParam?: string | AppLang
 ): Promise<number> {
   const decks = providedDecks;
   const books = providedBooks;
-  let targetLang: AppLang = 'de';
-  if (targetLangParam) {
-    targetLang = normalizeLanguageCode(targetLangParam);
-  } else if (typeof window !== 'undefined') {
-    try {
-      const savedLang = localStorage.getItem('selected_language');
-      if (savedLang) targetLang = normalizeLanguageCode(savedLang);
-    } catch {}
-  }
 
   if (!Array.isArray(decks) || decks.length === 0) return 0;
   const totalCardsInDecks = decks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
@@ -643,288 +557,127 @@ export async function autoBackfillMasteredWords(
     books.forEach((b) => bookMap.set(b.id, b));
   }
 
-  // Filter decks for the requested language
-  const langDecks = decks.filter((deck) => {
-    const dLang = normalizeLanguageCode(deck.language || bookMap.get(deck.bookId || '')?.language || 'de');
-    return dLang === targetLang;
-  });
+  // Пересчитываем для всех поддерживаемых языков, присутствующих в колодах
+  const langsToProcess: AppLang[] = SUPPORTED_LANGS;
 
-  const recoveredMap = new Map<string, { level: CEFRLevel; bookId?: string; timestamp?: number }>();
+  let primaryCount = 0;
 
-  langDecks.forEach((deck) => {
-    const dBookId = deck.bookId || (deck as any).book_id;
-    const parentBook = dBookId ? bookMap.get(dBookId) : undefined;
-    const defaultBookLevel = (deck as any).level || parentBook?.activeLevels?.[0] || parentBook?.title || 'B2';
+  for (const targetLang of langsToProcess) {
+    initMatrixStore(targetLang);
+    const existingMap = uniqueMasteredWordsByLang[targetLang];
 
-    deck.cards?.forEach((card: any) => {
-      const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
-      const archived = card.isArchived ?? card.is_archived ?? false;
-      const isMastered = mastery >= 4 || archived === true;
-      if (!isMastered) return;
-
-      const raw = card.targetWord || card.target_word || card.missingWord || card.infinitive || card.front || '';
-      const clean = extractLemma(raw, targetLang);
-      if (!clean || clean.length < 2 || !isValidLemma(clean, targetLang)) return;
-
-      const cardTs = card.first_mastered_at
-        ? new Date(card.first_mastered_at).getTime()
-        : (card.firstMasteredAt ? new Date(card.firstMasteredAt).getTime() : 0);
-
-      if (!recoveredMap.has(clean)) {
-        const officialLevel = GLOBAL_LEXICON_CACHE[targetLang]?.[clean];
-        const resolvedLevel: CEFRLevel =
-          officialLevel || resolveCEFRLevel(clean, defaultBookLevel, targetLang);
-        recoveredMap.set(clean, { level: resolvedLevel, bookId: dBookId, timestamp: cardTs });
-      }
+    const langDecks = decks.filter((deck) => {
+      const dBookId = deck.bookId || (deck as any).book_id;
+      const dLang = normalizeLanguageCode(deck.language || bookMap.get(dBookId || '')?.language || 'de');
+      return dLang === targetLang;
     });
-  });
 
-  if (recoveredMap.size === 0) return 0;
+    if (langDecks.length === 0) continue;
 
-  const masteredSet = masteredLemmasSetByLang[targetLang];
-  const levelMap = lemmaLevelMapByLang[targetLang];
-  const timestampMap = lemmaMasteredTimestampByLang[targetLang];
+    const deduplicatedMap = new Map<string, MasteredWordEntry>();
 
-  masteredSet.clear();
-  levelMap.clear();
-  timestampMap.clear();
+    langDecks.forEach((deck) => {
+      const dBookId = deck.bookId || (deck as any).book_id;
+      const parentBook = dBookId ? bookMap.get(dBookId) : undefined;
+      const deckLevel =
+        (deck as any).level ||
+        (parentBook?.activeLevels?.length === 1 ? parentBook.activeLevels[0] : null) ||
+        parentBook?.title ||
+        null;
 
-  recoveredMap.forEach(({ level, timestamp }, lemma) => {
-    masteredSet.add(lemma);
-    levelMap.set(lemma, level);
-    timestampMap.set(lemma, timestamp || 0);
-  });
+      deck.cards?.forEach((card: any) => {
+        const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
+        const archived = Boolean(card.isArchived ?? card.is_archived);
+        const isMastered = mastery >= 4 || archived === true;
+        if (!isMastered) return;
 
-  sanitizeTimestamps(timestampMap);
+        const rawWord =
+          card.targetWord ||
+          card.target_word ||
+          card.missingWord ||
+          card.infinitive ||
+          card.front ||
+          '';
+        const normalizedKey = normalizeLemmaKey(rawWord);
+        if (!normalizedKey || normalizedKey.length < 2) return;
 
-  const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
-  masteredSet.forEach((lemma) => {
-    const lvl = levelMap.get(lemma) || GLOBAL_LEXICON_CACHE[targetLang]?.[lemma] || resolveCEFRLevel(lemma, null, targetLang);
-    if (updatedCounts[lvl] !== undefined) {
-      updatedCounts[lvl] += 1;
-    }
-  });
+        const prevTs = existingMap.get(normalizedKey)?.masteredAt || 0;
+        const masteredAt = extractCardMasteredAt(card, prevTs);
+        const cardLevel = card.level || card.cefrLevel || card.cefr_level || null;
+        const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, targetLang);
 
-  const total = Object.values(updatedCounts).reduce((a, b) => a + b, 0);
-  const activeLevel = calculateActiveLevel(updatedCounts, targetLang);
-
-  globalMatrixStatsByLang[targetLang] = {
-    counts: updatedCounts,
-    totalWords: total,
-    activeLevel,
-  };
-
-  if (typeof window !== 'undefined') {
-    try {
-      const { statsKey, lemmasKey, timestampsKey, cacheKeyV3 } = getStorageKeys(targetLang);
-      const cachePayload = {
-        counts: updatedCounts,
-        totalWords: total,
-        activeLevel,
-        lemmas: Array.from(masteredSet),
-        timestamps: Object.fromEntries(timestampMap),
-        updatedAt: Date.now(),
-      };
-      localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[targetLang]));
-      localStorage.setItem(lemmasKey, JSON.stringify(Array.from(masteredSet)));
-      localStorage.setItem(timestampsKey, JSON.stringify(Object.fromEntries(timestampMap)));
-      localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
-      localStorage.setItem(`cefr_mastered_cache_v3_${targetLang}`, JSON.stringify(cachePayload));
-    } catch (e) {
-      console.warn('Wortschatz-Matrix storage quota warning:', e);
-    }
-  }
-
-  notifyListeners(targetLang);
-
-  // Batch upsert to Supabase user_mastered_words
-  try {
-    const { data: authData } = await supabase.auth.getUser();
-    const userId = authData?.user?.id;
-    if (userId && recoveredMap.size > 0) {
-      const rows = Array.from(recoveredMap.entries()).map(([lemma, info]) => ({
-        user_id: userId,
-        lemma,
-        cefr_level: info.level,
-        source_book_id: info.bookId || null,
-        first_mastered_at: new Date().toISOString(),
-      }));
-
-      const chunkSize = 100;
-      for (let i = 0; i < rows.length; i += chunkSize) {
-        await supabase
-          .from('user_mastered_words')
-          .upsert(rows.slice(i, i + chunkSize), {
-            onConflict: 'user_id,lemma',
-            ignoreDuplicates: true,
+        const existingEntry = deduplicatedMap.get(normalizedKey);
+        if (!existingEntry) {
+          deduplicatedMap.set(normalizedKey, {
+            originalWord: rawWord,
+            level,
+            masteredAt,
+            bookId: dBookId,
           });
-      }
+        } else if (masteredAt > existingEntry.masteredAt) {
+          deduplicatedMap.set(normalizedKey, {
+            ...existingEntry,
+            masteredAt,
+          });
+        }
+      });
+    });
+
+    uniqueMasteredWordsByLang[targetLang] = deduplicatedMap;
+    recomputeStatsFromMap(targetLang);
+    persistMatrixToStorage(targetLang);
+    notifyListeners(targetLang);
+
+    if (targetLang === normalizeLanguageCode(targetLangParam)) {
+      primaryCount = deduplicatedMap.size;
     }
-  } catch (err) {
-    console.warn('[Wortschatz-Matrix] autoBackfillMasteredWords upsert notice:', err);
   }
 
-  return recoveredMap.size;
+  return primaryCount;
 }
 
 /**
- * Reconciles mastered words when decks, books, or cards are explicitly deleted.
- * When isExplicitDeletion is false or decks are loading/empty, it NEVER modifies user_mastered_words!
+ * Синхронизирует матрицу при явном удалении колоды, книги или карточки.
  */
 export async function reconcileMasteredWords(
-  providedDecks?: Array<{ id: string; bookId?: string; language?: string; cards?: Array<any> }>,
+  providedDecks?: Array<{ id: string; bookId?: string; level?: string; language?: string; cards?: Array<any> }>,
   targetLangParam?: string | AppLang,
   isExplicitDeletion: boolean = false
 ) {
-  // STRICT GUARD CLAUSE:
-  // Categorically forbid deleting words from Supabase or masteredSet if this is not an explicit user action!
   if (!isExplicitDeletion) {
     return;
   }
-
-  const currentDecks = providedDecks;
-  let targetLang: AppLang = 'de';
-  if (targetLangParam) {
-    targetLang = normalizeLanguageCode(targetLangParam);
-  } else if (typeof window !== 'undefined') {
-    try {
-      const savedLang = localStorage.getItem('selected_language');
-      if (savedLang) targetLang = normalizeLanguageCode(savedLang);
-    } catch {}
-  }
-
-  if (!Array.isArray(currentDecks) || currentDecks.length === 0) return;
-  const totalCardsInDecks = currentDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
-  if (totalCardsInDecks === 0) return;
-  initMatrixStore(targetLang);
-
-  const masteredSet = masteredLemmasSetByLang[targetLang];
-  const { statsKey, lemmasKey, cacheKeyV3 } = getStorageKeys(targetLang);
-
-  // Filter decks matching targetLang
-  const langDecks = currentDecks.filter((deck) => {
-    const dLang = normalizeLanguageCode(deck.language || 'de');
-    return dLang === targetLang;
-  });
-
-  const activeMasteredSet = new Set<string>();
-  const activeLemmaLevelMap = new Map<string, CEFRLevel>();
-
-  langDecks.forEach((deck) => {
-    const bookLevel = (deck as any).level || 'B2';
-    deck.cards?.forEach((card: any) => {
-      if ((card.masteryLevel !== undefined && card.masteryLevel >= 4) || card.isArchived) {
-        const raw = card.targetWord || card.missingWord || card.infinitive || card.front || '';
-        const clean = extractLemma(raw, targetLang);
-        if (clean && clean.length >= 2 && isValidLemma(clean, targetLang)) {
-          activeMasteredSet.add(clean);
-          if (!activeLemmaLevelMap.has(clean)) {
-            const official = GLOBAL_LEXICON_CACHE[targetLang]?.[clean];
-            activeLemmaLevelMap.set(clean, official || resolveCEFRLevel(clean, bookLevel, targetLang));
-          }
-        }
-      }
-    });
-  });
-
-  // EXPLICIT DELETION: The user intentionally deleted a deck, book, or card
-  const orphanLemmas = Array.from(masteredSet).filter((l) => !activeMasteredSet.has(l));
-  if (orphanLemmas.length === 0) return;
-
-  masteredSet.clear();
-  lemmaLevelMapByLang[targetLang].clear();
-
-  activeMasteredSet.forEach((l) => {
-    masteredSet.add(l);
-    const lvl = activeLemmaLevelMap.get(l) || resolveCEFRLevel(l, null, targetLang);
-    lemmaLevelMapByLang[targetLang].set(l, lvl);
-  });
-
-  const updatedCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
-  activeMasteredSet.forEach((lemma) => {
-    const lvl = lemmaLevelMapByLang[targetLang].get(lemma) || resolveCEFRLevel(lemma, null, targetLang);
-    if (updatedCounts[lvl] !== undefined) {
-      updatedCounts[lvl] += 1;
-    }
-  });
-
-  const total = Object.values(updatedCounts).reduce((acc, curr) => acc + curr, 0);
-  const activeLevel = calculateActiveLevel(updatedCounts, targetLang);
-
-  globalMatrixStatsByLang[targetLang] = {
-    counts: updatedCounts,
-    totalWords: total,
-    activeLevel,
-  };
-
-  if (typeof window !== 'undefined') {
-    try {
-      const cachePayload = {
-        counts: updatedCounts,
-        totalWords: total,
-        activeLevel,
-        lemmas: Array.from(activeMasteredSet),
-        updatedAt: Date.now(),
-      };
-      localStorage.setItem(statsKey, JSON.stringify(globalMatrixStatsByLang[targetLang]));
-      localStorage.setItem(lemmasKey, JSON.stringify(Array.from(activeMasteredSet)));
-      localStorage.setItem(cacheKeyV3, JSON.stringify(cachePayload));
-      localStorage.setItem(`cefr_mastered_cache_v3_${targetLang}`, JSON.stringify(cachePayload));
-    } catch (e) {
-      console.warn('Wortschatz-Matrix storage quota warning:', e);
-    }
-  }
-
-  notifyListeners(targetLang);
-
-  // Delete orphan lemmas from Supabase
-  try {
-    const { data: authData } = await supabase.auth.getUser();
-    const userId = authData?.user?.id;
-    if (userId) {
-      const chunkSize = 100;
-      for (let i = 0; i < orphanLemmas.length; i += chunkSize) {
-        const chunk = orphanLemmas.slice(i, i + chunkSize);
-        await supabase
-          .from('user_mastered_words')
-          .delete()
-          .eq('user_id', userId)
-          .in('lemma', chunk);
-      }
-    }
-  } catch (err) {
-    console.warn('[Wortschatz-Matrix] Remote delete orphans notice:', err);
-  }
+  await autoBackfillMasteredWords(providedDecks, undefined, targetLangParam);
 }
 
 /**
- * Computes words mastered today in the user's local timezone.
+ * Подсчет слов, выученных сегодня в локальном часовом поясе пользователя:
+ * todayStart <= masteredAt < todayEnd
  */
 export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgress {
   const lang = normalizeLanguageCode(langParam);
   initMatrixStore(lang);
 
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const todayEnd = todayStart + 24 * 60 * 60 * 1000;
+
   const todayCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
   let wordsLearnedToday = 0;
 
-  const timestamps = lemmaMasteredTimestampByLang[lang];
-  const levelMap = lemmaLevelMapByLang[lang];
-  const masteredSet = masteredLemmasSetByLang[lang];
-
-  masteredSet.forEach((lemma) => {
-    const ts = timestamps.get(lemma);
-    if (ts && isMasteredToday(ts)) {
+  const map = uniqueMasteredWordsByLang[lang];
+  map.forEach((entry) => {
+    const ts = entry.masteredAt;
+    if (ts >= todayStart && ts < todayEnd) {
       wordsLearnedToday++;
-      const lvl = levelMap.get(lemma) || GLOBAL_LEXICON_CACHE[lang]?.[lemma] || resolveCEFRLevel(lemma, null, lang);
-      if (todayCounts[lvl] !== undefined) {
-        todayCounts[lvl]++;
-      }
+      const lvl = CEFR_LEVEL_KEYS.includes(entry.level) ? entry.level : 'B1';
+      todayCounts[lvl] = (todayCounts[lvl] || 0) + 1;
     }
   });
 
-  const config = LANGUAGE_CEFR_CONFIG[lang] || LANGUAGE_CEFR_CONFIG.de;
-  const totalGoal = config.totalGoal || 10000;
-  const percentLearnedToday = totalGoal > 0 ? ((wordsLearnedToday / totalGoal) * 100).toFixed(2) : '0.00';
+  const totalGoal = C1_TARGET_WORDS[lang] || 10000;
+  const percentLearnedToday =
+    totalGoal > 0 ? ((wordsLearnedToday / totalGoal) * 100).toFixed(2) : '0.00';
 
   return {
     wordsLearnedToday,
@@ -934,7 +687,7 @@ export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgres
 }
 
 /**
- * React hook for consuming the Wortschatz-Matrix in UI components for the active language.
+ * React-хук для отображения матрицы Wortschatz-Matrix и суточного прогресса.
  */
 export function useWortschatzMatrix(langParam?: string | AppLang) {
   const normLang = normalizeLanguageCode(langParam);
@@ -950,9 +703,13 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
 
   useEffect(() => {
     initMatrixStore(normLang);
-    syncMasteredWordsFromCloud(normLang);
     setStats({ ...globalMatrixStatsByLang[normLang] });
     setTodayProgress(getWordsLearnedToday(normLang));
+
+    // Если локальный стор еще пуст, подтягиваем из облака
+    if (uniqueMasteredWordsByLang[normLang].size === 0) {
+      syncMasteredWordsFromCloud(normLang);
+    }
 
     const handleUpdate = (changedLang: AppLang, updated: CEFRMatrixStats) => {
       if (changedLang === normLang) {
@@ -964,22 +721,21 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     listeners.add(handleUpdate);
 
     const handleRefreshDaily = () => {
+      setStats({ ...globalMatrixStatsByLang[normLang] });
       setTodayProgress(getWordsLearnedToday(normLang));
     };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('stats-update', handleRefreshDaily);
       window.addEventListener('storage', handleRefreshDaily);
+      window.addEventListener('storage-update', handleRefreshDaily);
     }
 
-    // Cross-browser & Cross-tab sync: trigger cloud pull when user switches to tab
     const handleFocus = () => {
-      syncMasteredWordsFromCloud(normLang);
       setTodayProgress(getWordsLearnedToday(normLang));
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        syncMasteredWordsFromCloud(normLang);
         setTodayProgress(getWordsLearnedToday(normLang));
       }
     };
@@ -989,28 +745,20 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       document.addEventListener('visibilitychange', handleVisibilityChange);
     }
 
-    // Realtime channel for instant cross-device updates
-    const channel = supabase
-      .channel(`realtime:user_mastered_words:${normLang}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_mastered_words' }, () => {
-        syncMasteredWordsFromCloud(normLang);
-        setTodayProgress(getWordsLearnedToday(normLang));
-      })
-      .subscribe();
-
     return () => {
       listeners.delete(handleUpdate);
       if (typeof window !== 'undefined') {
         window.removeEventListener('focus', handleFocus);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('visibilitychange', handleVisibilityChange);
         window.removeEventListener('stats-update', handleRefreshDaily);
         window.removeEventListener('storage', handleRefreshDaily);
+        window.removeEventListener('storage-update', handleRefreshDaily);
       }
-      supabase.removeChannel(channel);
     };
   }, [normLang]);
 
-  const langConfig = LANGUAGE_CEFR_CONFIG[normLang] || LANGUAGE_CEFR_CONFIG.de;
+  const totalGoal = C1_TARGET_WORDS[normLang] || 10000;
+  const wordLabel = WORD_LABELS_BY_LANG[normLang] || 'Wörter';
 
   const refreshMatrix = useCallback(async () => {
     await syncMasteredWordsFromCloud(normLang);
@@ -1022,10 +770,10 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     totalWords: stats.totalWords,
     activeLevel: stats.activeLevel,
     currentLanguage: normLang,
-    wordLabel: langConfig.wordLabel,
-    totalGoal: langConfig.totalGoal,
-    levels: langConfig.levels,
-    masteredLemmas: masteredLemmasSetByLang[normLang],
+    wordLabel,
+    totalGoal,
+    levels: CEFR_LEVEL_KEYS,
+    masteredLemmas: getMasteredLemmasSet(normLang),
     refreshMatrix,
     wordsLearnedToday: todayProgress.wordsLearnedToday,
     percentLearnedToday: todayProgress.percentLearnedToday,
