@@ -8,12 +8,13 @@ export function formatSeparableWord(word: string): React.ReactNode {
   if (!word || typeof word !== 'string' || !word.includes('|')) {
     return word;
   }
-  const parts = word.split('|');
+  const cleanWord = word.replace(/\s*\|\s*/g, '|');
+  const parts = cleanWord.split('|');
   return (
     <span className="inline-flex items-baseline">
       <span>{parts[0]}</span>
       <span
-        className="text-neutral-500 dark:text-neutral-500 font-light mx-0.5 select-none"
+        className="text-neutral-400 dark:text-neutral-500 font-light select-none px-[0.5px]"
         aria-hidden="true"
       >
         |

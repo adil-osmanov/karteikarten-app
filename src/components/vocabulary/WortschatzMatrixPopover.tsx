@@ -178,7 +178,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
               </span>
             </div>
 
-            {/* СТРОКИ УРОВНЕЙ A1..C1 С ПЕРЕХОДОМ В СЛОВАРЬ ПО КЛИКУ */}
+            {/* СТРОКИ УРОВНЕЙ A1..C1 (ЧИСТО ИНФОРМАЦИОННЫЕ, НЕКЛИКАБЕЛЬНЫЕ) */}
             <div className="space-y-3">
               {DISPLAY_LEVELS.map((levelKey) => {
                 const count = stats[levelKey] || 0;
@@ -189,16 +189,10 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                 return (
                   <div
                     key={levelKey}
-                    onClick={() => {
-                      setModalInitialLevel(levelKey);
-                      setIsWordsModalOpen(true);
-                      setIsMatrixOpen(false);
-                    }}
-                    className="flex flex-col gap-1.5 p-1.5 -mx-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer group"
-                    title={`${levelKey} Wörter anzeigen`}
+                    className="flex flex-col gap-1.5 p-1.5 -mx-1.5 rounded-xl select-none"
                   >
                     <div className="flex justify-between items-center text-xs">
-                      <span className="w-7 h-5 flex items-center justify-center rounded font-mono text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-black/5 dark:border-white/5 group-hover:border-blue-500/30 transition-colors">
+                      <span className="w-7 h-5 flex items-center justify-center rounded font-mono text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-black/5 dark:border-white/5">
                         {levelKey}
                       </span>
 
@@ -208,11 +202,11 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                             +{levelTodayCount}
                           </span>
                         )}
-                        <div className="flex items-center gap-1 cursor-pointer group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
-                          <span className="font-semibold text-zinc-900 dark:text-neutral-200 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors font-mono">
+                        <div className="flex items-center gap-1">
+                          <span className="font-semibold text-zinc-900 dark:text-neutral-200 font-mono">
                             {count}
                           </span>
-                          <span className="text-xs text-zinc-500 dark:text-neutral-400 group-hover:text-blue-500/80 dark:group-hover:text-blue-400/80 transition-colors">
+                          <span className="text-xs text-zinc-500 dark:text-neutral-400">
                             Wörter
                           </span>
                         </div>

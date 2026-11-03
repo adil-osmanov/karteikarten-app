@@ -31,6 +31,7 @@ export interface MasteredWordEntry {
   bookId?: string;
   translation?: string;
   cardId?: string;
+  nextReviewDate?: string | number | null;
 }
 
 export interface CEFRMatrixStats {
@@ -66,30 +67,77 @@ export function isFunctionalParticle(rawWord?: string | null): boolean {
 }
 
 /**
- * Проверяет, относится ли колода или родительская книга к грамматическому тренажеру.
- * ИСКЛЮЧАЕТ ТОЛЬКО специализированные грамматические разделы:
- * книги/колоды, где прямо указано title.includes('Grammatik') или title.includes('Strukturen & NVV'),
- * либо deck.isGrammar === true. Обычные лексические колоды учебников фильтровать ЗАПРЕЩЕНО.
+ * Проверяет, относится ли колода, книга или карточка к режиму «Kontext» или грамматике.
+ * В Wortschatz-Matrix включаются ТОЛЬКО слова из режима карточек (Karteikarten / лексические колоды).
+ * ПОЛНОСТЬЮ ИСКЛЮЧАЮТСЯ:
+ * 1. Карточки/упражнения из режима «Kontext» (mode === 'kontext', deck.isContext === true, item.source === 'context')
+ * 2. Грамматические модули и тренажёры (Grammatik, Strukturen & NVV, starke Verben, Präpositionen)
  */
-export function isGrammarDeckOrBook(deck?: any, parentBook?: any): boolean {
-  if (!deck && !parentBook) return false;
+export function isContextOrGrammarDeck(deck?: any, parentBook?: any, card?: any): boolean {
+  if (!deck && !parentBook && !card) return false;
 
-  // Явный флаг грамматики
+  // 1. Исключаем контекстные карточки и режим «Kontext»
+  if (
+    deck?.isContext === true ||
+    (deck as any)?.is_context === true ||
+    deck?.mode === 'kontext' ||
+    deck?.mode === 'context' ||
+    parentBook?.mode === 'kontext' ||
+    parentBook?.mode === 'context' ||
+    parentBook?.training_mode === 'kontext' ||
+    parentBook?.training_mode === 'context' ||
+    card?.source === 'context' ||
+    (card as any)?.isContext === true ||
+    (card as any)?.is_context === true ||
+    (card as any)?.mode === 'kontext' ||
+    (card as any)?.mode === 'context'
+  ) {
+    return true;
+  }
+
+  // 2. Явный флаг грамматики на колоде
   if (deck?.isGrammar === true || (deck as any)?.is_grammar === true) return true;
+  if (deck?.type === 'grammar' || deck?.type === 'structures') return true;
+  if (parentBook?.category === 'structures' || parentBook?.category === 'grammar') return true;
+
+  const bTrainingMode = (parentBook?.training_mode || deck?.training_mode || '').toLowerCase();
+  if (
+    bTrainingMode === 'starke_verben' ||
+    bTrainingMode === 'preposition_drill' ||
+    bTrainingMode === 'redemittel'
+  ) {
+    return true;
+  }
 
   const deckTitle = (deck?.name || deck?.title || '').toLowerCase();
   const bookTitle = (parentBook?.title || '').toLowerCase();
+  const combined = `${deckTitle} ${bookTitle}`;
 
+  // Исключаем по названию режим контекста
+  if (
+    deckTitle.includes('kontext') ||
+    bookTitle.includes('kontext') ||
+    deckTitle.includes('context') ||
+    bookTitle.includes('context')
+  ) {
+    return true;
+  }
+
+  // Исключаем по названию грамматику и структуры
   const isExplicitGrammar =
-    deckTitle.includes('grammatik') ||
-    bookTitle.includes('grammatik') ||
-    deckTitle.includes('strukturen & nvv') ||
-    bookTitle.includes('strukturen & nvv') ||
-    deckTitle.includes('strukturen und nvv') ||
-    bookTitle.includes('strukturen und nvv');
+    combined.includes('grammatik') ||
+    combined.includes('grammar') ||
+    combined.includes('strukturen & nvv') ||
+    combined.includes('strukturen und nvv') ||
+    combined.includes('nomen-verb') ||
+    combined.includes('nvv') ||
+    combined.includes('präposition') ||
+    combined.includes('praeposition') ||
+    combined.includes('starke verben') ||
+    combined.includes('redemittel');
 
   if (isExplicitGrammar) {
-    // Если в названии колоды прямо указано 'wortschatz' или 'wörter'/'woerter', это лексика — не исключаем
+    // Если в названии колоды прямо указано 'wortschatz' или 'wörter', это лексика — не исключаем
     if (
       deckTitle.includes('wortschatz') ||
       deckTitle.includes('wörter') ||
@@ -102,6 +150,8 @@ export function isGrammarDeckOrBook(deck?: any, parentBook?: any): boolean {
 
   return false;
 }
+
+export const isGrammarDeckOrBook = isContextOrGrammarDeck;
 
 /**
  * Извлекает краткий перевод слова, исключая длинные примеры предложений.
@@ -400,6 +450,7 @@ function initMatrixStore(lang: AppLang) {
               bookId: val?.bookId,
               translation: val?.translation || existing?.translation,
               cardId: val?.cardId || existing?.cardId,
+              nextReviewDate: val?.nextReviewDate || existing?.nextReviewDate,
             });
           }
         });
@@ -485,7 +536,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
         const deckObj = Array.isArray(c.decks) ? c.decks[0] : c.decks;
         const dLang = normalizeLanguageCode(deckObj?.language || 'de');
         if (dLang !== lang) continue;
-        if (isGrammarDeckOrBook(deckObj)) continue;
+        if (isContextOrGrammarDeck(deckObj, undefined, c)) continue;
 
         const rawWord = c.targetWord || '';
         const normalizedKey = normalizeLemmaKey(rawWord);
@@ -503,6 +554,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
 
         const conciseTrans = extractConciseTranslation(c);
         const cardTranslation = conciseTrans || c.translation || prevEntry?.translation;
+        const cardNextReview = c.nextReviewDate ?? c.next_review_date ?? prevEntry?.nextReviewDate;
 
         const alreadyInNext = nextMap.get(normalizedKey);
         if (!alreadyInNext) {
@@ -513,6 +565,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
             bookId: deckObj?.book_id || prevEntry?.bookId,
             translation: cardTranslation,
             cardId: c.id || prevEntry?.cardId,
+            nextReviewDate: cardNextReview,
           });
         } else if (masteredAt > alreadyInNext.masteredAt) {
           nextMap.set(normalizedKey, {
@@ -520,6 +573,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
             masteredAt,
             translation: cardTranslation || alreadyInNext.translation,
             cardId: c.id || alreadyInNext.cardId,
+            nextReviewDate: cardNextReview || alreadyInNext.nextReviewDate,
           });
         }
       }
@@ -749,8 +803,8 @@ export async function autoBackfillMasteredWords(
       const dBookId = deck.bookId || (deck as any).book_id;
       const parentBook = dBookId ? bookMap.get(dBookId) : undefined;
 
-      // Исключаем грамматические колоды и упражнения
-      if (isGrammarDeckOrBook(deck, parentBook)) return;
+      // Исключаем грамматические колоды, режим «Kontext» и упражнения
+      if (isContextOrGrammarDeck(deck, parentBook)) return;
 
       const deckLevel =
         (deck as any).level ||
@@ -761,6 +815,9 @@ export async function autoBackfillMasteredWords(
         null;
 
       deck.cards?.forEach((card: any) => {
+        // Исключаем карточки режима «Kontext»
+        if (isContextOrGrammarDeck(deck, parentBook, card)) return;
+
         const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
         const archived = Boolean(card.isArchived ?? card.is_archived);
         const isMastered = mastery >= 4 || archived === true;
@@ -785,6 +842,8 @@ export async function autoBackfillMasteredWords(
         const existingEntry = deduplicatedMap.get(normalizedKey);
         const conciseTrans = extractConciseTranslation(card);
         const cardTranslation = conciseTrans || card.translation || card.back || existingMap.get(normalizedKey)?.translation;
+        const cardNextReview = card.nextReviewDate ?? card.next_review_date ?? existingMap.get(normalizedKey)?.nextReviewDate;
+
         if (!existingEntry) {
           deduplicatedMap.set(normalizedKey, {
             originalWord: rawWord,
@@ -793,6 +852,7 @@ export async function autoBackfillMasteredWords(
             bookId: dBookId,
             translation: cardTranslation,
             cardId: card.id,
+            nextReviewDate: cardNextReview,
           });
         } else if (masteredAt > existingEntry.masteredAt) {
           deduplicatedMap.set(normalizedKey, {
@@ -800,6 +860,7 @@ export async function autoBackfillMasteredWords(
             masteredAt,
             translation: cardTranslation || existingEntry.translation,
             cardId: card.id || existingEntry.cardId,
+            nextReviewDate: cardNextReview || existingEntry.nextReviewDate,
           });
         }
       });

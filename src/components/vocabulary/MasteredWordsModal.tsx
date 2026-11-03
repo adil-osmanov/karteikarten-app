@@ -32,6 +32,26 @@ const LEVEL_BADGE_STYLES: Record<CEFRLevel, string> = {
   C1: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25',
 };
 
+/**
+ * Вычисляет статус интервального повторения SRS для выученной карточки
+ */
+export function formatSRSStatus(nextReviewDate?: string | number | null): { text: string; isDue: boolean } {
+  if (!nextReviewDate) return { text: 'Освоено', isDue: false };
+  const diffMs = new Date(nextReviewDate).getTime() - Date.now();
+
+  if (diffMs <= 0) {
+    return { text: 'К повтору', isDue: true };
+  }
+
+  const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffHours < 24) {
+    return { text: `через ${diffHours} ч.`, isDue: false };
+  }
+  return { text: `через ${diffDays} дн.`, isDue: false };
+}
+
 export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   isOpen,
   onClose,
@@ -94,7 +114,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     };
   }, [isOpen]);
 
-  // Индексация карточек из всех колод для мгновенного сопоставления переводов и редактирования
+  // Индексация карточек из всех колод для сопоставления переводов, SRS-дат и редактирования
   const { cardsById, cardsByLemma, lemmaTranslationMap } = useMemo(() => {
     const byId = new Map<string, Flashcard>();
     const byLemma = new Map<string, Flashcard>();
@@ -127,7 +147,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return getMasteredWordEntries(currentLang);
   }, [currentLang, isOpen, updateTick]);
 
-  // Обогащение записей краткими переводами и объектами карточек
+  // Обогащение записей краткими переводами, SRS-датами и объектами карточек
   const enrichedWords = useMemo(() => {
     return rawEntries
       .filter(
@@ -155,6 +175,8 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         translation = translation.replace(/\.$/, '').trim();
 
         const level = (entry.level || card?.level || 'B1') as CEFRLevel;
+        const nextReviewDate =
+          card?.nextReviewDate ?? (card as any)?.next_review_date ?? entry.nextReviewDate ?? null;
 
         return {
           key: lKey || entry.originalWord,
@@ -162,6 +184,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           translation,
           level,
           masteredAt: entry.masteredAt || 0,
+          nextReviewDate,
           card,
           entry,
         };
@@ -224,7 +247,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         options: [],
         masteryLevel: 4,
         isArchived: true,
-        nextReviewDate: null,
+        nextReviewDate: item.nextReviewDate ? new Date(item.nextReviewDate).getTime() : null,
         interval: 30,
         repetitions: 4,
         level: item.level,
@@ -251,33 +274,33 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xl animate-in fade-in duration-200 select-none"
+        className="backdrop-blur-2xl bg-black/60 fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 select-none"
         onClick={onClose}
       >
         <div
-          className="max-w-2xl w-full max-h-[80vh] flex flex-col rounded-3xl bg-white/95 dark:bg-neutral-900/95 text-neutral-900 dark:text-neutral-100 border border-neutral-200/80 dark:border-neutral-800 shadow-2xl backdrop-blur-xl p-5 sm:p-6 select-text text-left relative overflow-hidden"
+          className="max-w-2xl w-full max-h-[85vh] rounded-3xl bg-white/90 dark:bg-neutral-900/95 border border-neutral-200 dark:border-white/10 shadow-2xl flex flex-col overflow-hidden p-5 sm:p-6 select-text text-left relative"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
         >
-          {/* 1. ВЕРХНИЙ БЛОК: СТРОКА ПОИСКА + КНОПКА ЗАКРЫТИЯ (БЕЗ ШАПКИ) */}
+          {/* 1. ВЕРХНИЙ БЛОК: СТРОКА ПОИСКА + КНОПКА ЗАКРЫТИЯ (APPLE MINIMALISM) */}
           <div className="flex items-center gap-3 mb-3">
             <div className="relative flex-1">
-              <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Search className="w-4 h-4 text-neutral-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder=""
-                className="w-full bg-neutral-100 dark:bg-neutral-800/60 text-neutral-900 dark:text-neutral-100 border border-neutral-200 dark:border-neutral-700/40 rounded-xl pl-9 pr-9 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all placeholder:text-transparent"
+                placeholder="Поиск"
+                className="w-full bg-black/5 dark:bg-neutral-800/60 border border-black/10 dark:border-neutral-700/50 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition cursor-pointer"
-                  title="Suche leeren"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition cursor-pointer"
+                  title="Очистить поиск"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -287,7 +310,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors cursor-pointer flex-shrink-0"
+              className="p-2.5 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer flex-shrink-0"
               title="Schließen (Esc)"
             >
               <X className="w-5 h-5" />
@@ -295,7 +318,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           </div>
 
           {/* 2. APPLE SEGMENTED CONTROL ДЛЯ УРОВНЕЙ CEFR */}
-          <div className="bg-neutral-100 dark:bg-neutral-800/60 p-1 rounded-xl flex items-center gap-1 border border-neutral-200/80 dark:border-neutral-700/30 overflow-x-auto scrollbar-none mb-3">
+          <div className="p-1 bg-black/5 dark:bg-neutral-800/70 border border-black/10 dark:border-white/10 rounded-2xl flex items-center gap-1 overflow-x-auto scrollbar-none mb-3">
             {FILTER_LEVELS.map((lvl) => {
               const isSelected = selectedLevel === lvl;
               const count = levelCounts[lvl] ?? 0;
@@ -305,10 +328,10 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                   key={lvl}
                   type="button"
                   onClick={() => setSelectedLevel(lvl)}
-                  className={`flex-1 min-w-[56px] py-1 px-2 rounded-lg text-xs font-medium tracking-tight transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                  className={`flex-1 min-w-[56px] rounded-xl px-3 py-1.5 text-xs transition-all cursor-pointer flex items-center justify-center gap-1 ${
                     isSelected
-                      ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white shadow-sm font-semibold'
-                      : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-neutral-800/40'
+                      ? 'bg-white dark:bg-neutral-700/80 text-neutral-900 dark:text-white font-medium shadow-sm'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5'
                   }`}
                 >
                   <span>{lvl}</span>
@@ -330,12 +353,14 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                   LEVEL_BADGE_STYLES[item.level] ||
                   'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25';
 
+                const srs = formatSRSStatus(item.nextReviewDate);
+
                 return (
                   <div
                     key={item.key}
                     className="flex items-center justify-between py-2.5 px-2 rounded-xl hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40 transition-colors group"
                   >
-                    {/* Левая колонка: Немецкое слово + Краткий перевод */}
+                    {/* Левая колонка: Немецкое слово с чистым разделителем | + Краткий перевод */}
                     <div className="flex flex-col min-w-0 pr-3">
                       <span className="text-neutral-900 dark:text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
                         {formatSeparableWord(item.word)}
@@ -351,8 +376,18 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                       )}
                     </div>
 
-                    {/* Правая колонка: Бейдж уровня + Кнопка редактирования */}
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Правая колонка: SRS-статус повторения + Бейдж уровня + Кнопка редактирования */}
+                    <div className="flex items-center gap-2.5 sm:gap-3 flex-shrink-0">
+                      {srs.isDue ? (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-500 dark:text-amber-400 border border-amber-500/30">
+                          {srs.text}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-neutral-400 dark:text-neutral-500 font-normal">
+                          {srs.text}
+                        </span>
+                      )}
+
                       <span
                         className={`text-[11px] font-semibold font-mono px-2 py-0.5 rounded-lg border ${badgeClass}`}
                       >
