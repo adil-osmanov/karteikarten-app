@@ -3554,7 +3554,6 @@ function RapidFlashcardMode({
 
   // 7. Сброс стейта строго по currentCard?.id (устранение мигания инпута при переходе на раунд 3)
   useEffect(() => {
-    stopAllGermanSpeech();
     const mastery = currentCard?.isArchived ? 4 : (isReview ? Math.max(3, currentCard?.masteryLevel ?? progress ?? 3) : (currentCard?.masteryLevel ?? progress ?? 0));
     setLocalMastery(mastery);
     const typingMode = Boolean(forcedReverse || isReview || currentCard?.isArchived || mastery >= 2);
@@ -4353,7 +4352,7 @@ function RapidFlashcardMode({
               <button
                 type="button"
                 onClick={handleProceedNext}
-                className="w-full max-w-sm h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:scale-[0.985] text-white font-semibold text-base shadow-[0_4px_24px_rgba(0,113,227,0.3)] transition-all flex items-center justify-center cursor-pointer select-none"
+                className="w-full max-w-sm py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
               >
                 Weiter
               </button>
@@ -4672,11 +4671,10 @@ function RapidSession({
   };
 
   useEffect(() => {
-    stopAllGermanSpeech();
     return () => {
       stopAllGermanSpeech();
     };
-  }, [queue?.[0]?.card?.id]);
+  }, []);
 
   useEffect(() => {
     getRapidSounds(); // preload so Safari has decoded buffers before the first answer
@@ -5101,12 +5099,12 @@ function StudyInterface({
   const currentDeckId = currentItem?.deckId;
   const currentCardSnapshot = currentItem?.card;
 
+  // Stop speech only when completely exiting the study screen
   useEffect(() => {
-    stopAllGermanSpeech();
     return () => {
       stopAllGermanSpeech();
     };
-  }, [turn, currentCardSnapshot?.id]);
+  }, []);
 
   // Get live card to instantly reflect masteryLevel updates (blue dots)
   const liveCard = useMemo(() => {
@@ -5816,14 +5814,10 @@ function StudyCard({
   });
 
   useEffect(() => {
-    stopAllGermanSpeech();
     setPhase("Question");
     setInputText("");
     setHasErrored(false);
     hasErroredRef.current = false;
-    return () => {
-      stopAllGermanSpeech();
-    };
   }, [card.id]);
 
   useEffect(() => {
@@ -6343,7 +6337,7 @@ function StudyCard({
                   ref={nextButtonRef}
                   type="button"
                   onClick={onNext}
-                  className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
                 >
                   Weiter
                 </button>
@@ -9151,7 +9145,7 @@ function PrepStudyCard({
           <button
             type="button"
             onClick={onNext}
-            className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
           >
             Weiter
           </button>
@@ -9342,7 +9336,7 @@ function VerbStudyCard({
           <button
             type="button"
             onClick={onNext}
-            className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
           >
             Weiter
           </button>
@@ -9857,7 +9851,7 @@ export function RedemittelStudyCard({
                 <button
                   onClick={onNext}
                   autoFocus
-                  className="w-full max-w-sm sm:max-w-md h-13 sm:h-14 rounded-2xl bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#005bb5] active:scale-[0.985] text-white font-semibold text-base tracking-tight shadow-[0_4px_24px_rgba(0,113,227,0.28)] transition-all duration-200 flex items-center justify-center cursor-pointer select-none"
+                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
                 >
                   Weiter
                 </button>
