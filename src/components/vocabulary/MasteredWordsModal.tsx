@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { X, Search, Pencil, BookOpen, Layers } from 'lucide-react';
+import { X, Search, Pencil, Layers } from 'lucide-react';
 import { useStore, type Flashcard } from '@/app/page';
 import {
   getMasteredWordEntries,
   normalizeLanguageCode,
   isFunctionalParticle,
-  type MasteredWordEntry,
+  extractConciseTranslation,
   type CEFRLevel,
   type AppLang,
 } from '@/hooks/useWortschatzMatrix';
@@ -25,11 +25,11 @@ export interface MasteredWordsModalProps {
 const FILTER_LEVELS: Array<'Alle' | CEFRLevel> = ['Alle', 'A1', 'A2', 'B1', 'B2', 'C1'];
 
 const LEVEL_BADGE_STYLES: Record<CEFRLevel, string> = {
-  A1: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
-  A2: 'bg-teal-500/15 text-teal-400 border-teal-500/25',
-  B1: 'bg-blue-500/15 text-blue-400 border-blue-500/25',
-  B2: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
-  C1: 'bg-purple-500/15 text-purple-400 border-purple-500/25',
+  A1: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25',
+  A2: 'bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/25',
+  B1: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25',
+  B2: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25',
+  C1: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/25',
 };
 
 export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
@@ -94,22 +94,31 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     };
   }, [isOpen]);
 
-  // Индексация карточек из колод для мгновенного сопоставления переводов и редактирования
-  const { cardsById, cardsByLemma } = useMemo(() => {
+  // Индексация карточек из всех колод для мгновенного сопоставления переводов и редактирования
+  const { cardsById, cardsByLemma, lemmaTranslationMap } = useMemo(() => {
     const byId = new Map<string, Flashcard>();
     const byLemma = new Map<string, Flashcard>();
+    const lemmaMap = new Map<string, string>();
 
     decks.forEach((deck) => {
       deck.cards?.forEach((c) => {
         if (c.id) byId.set(c.id, c);
         const lKey = normalizeLemmaKey(c.targetWord || '');
-        if (lKey && !byLemma.has(lKey)) {
-          byLemma.set(lKey, c);
+        if (lKey) {
+          if (!byLemma.has(lKey)) {
+            byLemma.set(lKey, c);
+          }
+          const concise = extractConciseTranslation(c);
+          if (concise && !concise.endsWith('.') && concise.split(/\s+/).length <= 6) {
+            if (!lemmaMap.has(lKey) || concise.length < lemmaMap.get(lKey)!.length) {
+              lemmaMap.set(lKey, concise);
+            }
+          }
         }
       });
     });
 
-    return { cardsById: byId, cardsByLemma: byLemma };
+    return { cardsById: byId, cardsByLemma: byLemma, lemmaTranslationMap: lemmaMap };
   }, [decks, updateTick]);
 
   // Получение сырого списка выученных слов из матрицы памяти
@@ -118,7 +127,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return getMasteredWordEntries(currentLang);
   }, [currentLang, isOpen, updateTick]);
 
-  // Обогащение записей переводами и объектами карточек
+  // Обогащение записей краткими переводами и объектами карточек
   const enrichedWords = useMemo(() => {
     return rawEntries
       .filter(
@@ -129,12 +138,22 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
       .map((entry) => {
         const lKey = normalizeLemmaKey(entry.originalWord);
         const card = (entry.cardId && cardsById.get(entry.cardId)) || cardsByLemma.get(lKey) || null;
-        let translation = entry.translation || card?.translation || '';
-        // Если перевод слишком длинный (целое русское предложение), очищаем его
-        if (translation.length > 80 && translation.includes('.')) {
-          const firstSentence = translation.split('.')[0].trim();
-          if (firstSentence.length > 3) translation = firstSentence;
+
+        let translation =
+          lemmaTranslationMap.get(lKey) ||
+          extractConciseTranslation(card, entry.translation) ||
+          entry.translation ||
+          card?.translation ||
+          '';
+
+        // Если в строке перевода осталась часть с тире, берем правую часть определения
+        if (translation.includes('—') || translation.includes('–')) {
+          const parts = translation.split(/[—–]/);
+          translation = parts[parts.length - 1].trim();
         }
+        // Убираем завершающую точку предложения
+        translation = translation.replace(/\.$/, '').trim();
+
         const level = (entry.level || card?.level || 'B1') as CEFRLevel;
 
         return {
@@ -147,7 +166,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           entry,
         };
       });
-  }, [rawEntries, cardsById, cardsByLemma]);
+  }, [rawEntries, cardsById, cardsByLemma, lemmaTranslationMap]);
 
   // Фильтрация и поиск
   const filteredWords = useMemo(() => {
@@ -197,7 +216,6 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     let targetCard = item.card;
 
     if (!targetCard) {
-      // Если карточка не найдена локально, формируем валидный объект Flashcard для редактирования
       targetCard = {
         id: item.entry.cardId || `mastered_${item.key}`,
         targetWord: item.word,
@@ -237,64 +255,28 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         onClick={onClose}
       >
         <div
-          className="max-w-2xl w-full max-h-[80vh] flex flex-col rounded-3xl bg-neutral-900/95 border border-neutral-800 shadow-2xl p-6 select-text text-left relative overflow-hidden"
+          className="max-w-2xl w-full max-h-[80vh] flex flex-col rounded-3xl bg-white/95 dark:bg-neutral-900/95 text-neutral-900 dark:text-neutral-100 border border-neutral-200/80 dark:border-neutral-800 shadow-2xl backdrop-blur-xl p-5 sm:p-6 select-text text-left relative overflow-hidden"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
-          aria-labelledby="mastered-words-title"
         >
-          {/* 1. ШАПКА МОДАЛЬНОГО ОКНА */}
-          <div className="flex items-center justify-between pb-4 border-b border-neutral-800/80">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-2xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                <BookOpen className="w-5 h-5 stroke-[2]" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3
-                    id="mastered-words-title"
-                    className="text-lg font-semibold text-white tracking-tight"
-                  >
-                    Gelernte Wörter
-                  </h3>
-                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-300 border border-neutral-700/50">
-                    {filteredWords.length}
-                  </span>
-                </div>
-                <p className="text-xs text-neutral-400 mt-0.5">
-                  Alle einzigartigen gemeisterten Vokabeln (Stufe 4 & Archiv)
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 rounded-full text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800/80 transition-colors cursor-pointer"
-              title="Schließen (Esc)"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* 2. ПАНЕЛЬ ФИЛЬТРОВ И ПОИСКА */}
-          <div className="py-4 space-y-3 border-b border-neutral-800/80">
-            {/* Поисковая строка */}
-            <div className="relative">
+          {/* 1. ВЕРХНИЙ БЛОК: СТРОКА ПОИСКА + КНОПКА ЗАКРЫТИЯ (БЕЗ ШАПКИ) */}
+          <div className="flex items-center gap-3 mb-3">
+            <div className="relative flex-1">
               <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Wort oder Übersetzung suchen..."
-                className="w-full bg-neutral-800/60 border border-neutral-700/40 rounded-xl pl-9 pr-9 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all"
+                placeholder=""
+                className="w-full bg-neutral-100 dark:bg-neutral-800/60 text-neutral-900 dark:text-neutral-100 border border-neutral-200 dark:border-neutral-700/40 rounded-xl pl-9 pr-9 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 transition-all placeholder:text-transparent"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-neutral-400 hover:text-neutral-200 transition"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition cursor-pointer"
                   title="Suche leeren"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -302,73 +284,68 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
               )}
             </div>
 
-            {/* Apple Segmented Control для уровней CEFR */}
-            <div className="bg-neutral-800/60 p-1 rounded-xl flex items-center gap-1 border border-neutral-700/30 overflow-x-auto scrollbar-none">
-              {FILTER_LEVELS.map((lvl) => {
-                const isSelected = selectedLevel === lvl;
-                const count = levelCounts[lvl] ?? 0;
-
-                return (
-                  <button
-                    key={lvl}
-                    type="button"
-                    onClick={() => setSelectedLevel(lvl)}
-                    className={`flex-1 min-w-[56px] py-1 px-2 rounded-lg text-xs font-medium tracking-tight transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                      isSelected
-                        ? 'bg-neutral-700/90 text-white shadow-sm font-semibold'
-                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800/40'
-                    }`}
-                  >
-                    <span>{lvl}</span>
-                    <span className="text-[10px] opacity-70 font-mono">({count})</span>
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800/80 transition-colors cursor-pointer flex-shrink-0"
+              title="Schließen (Esc)"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          {/* 3. СКРОЛЛИРУЕМЫЙ СПИСОК СЛОВ В СТИЛЕ macOS */}
-          <div className="flex-1 overflow-y-auto divide-y divide-neutral-800/50 py-2 pr-1 min-h-[220px] scrollbar-thin scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-800 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full">
+          {/* 2. APPLE SEGMENTED CONTROL ДЛЯ УРОВНЕЙ CEFR */}
+          <div className="bg-neutral-100 dark:bg-neutral-800/60 p-1 rounded-xl flex items-center gap-1 border border-neutral-200/80 dark:border-neutral-700/30 overflow-x-auto scrollbar-none mb-3">
+            {FILTER_LEVELS.map((lvl) => {
+              const isSelected = selectedLevel === lvl;
+              const count = levelCounts[lvl] ?? 0;
+
+              return (
+                <button
+                  key={lvl}
+                  type="button"
+                  onClick={() => setSelectedLevel(lvl)}
+                  className={`flex-1 min-w-[56px] py-1 px-2 rounded-lg text-xs font-medium tracking-tight transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                    isSelected
+                      ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white shadow-sm font-semibold'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-neutral-800/40'
+                  }`}
+                >
+                  <span>{lvl}</span>
+                  <span className="text-[10px] opacity-70 font-mono">({count})</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 3. СКРОЛЛИРУЕМЫЙ СПИСОК СЛОВ В СТИЛЕ APPLE macOS */}
+          <div className="flex-1 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800/50 py-1 pr-1 min-h-[220px] scrollbar-thin scrollbar-thumb-neutral-300 dark:scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-400 dark:hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-800 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full">
             {filteredWords.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center py-12 text-center select-none">
-                <div className="w-12 h-12 rounded-2xl bg-neutral-800/60 flex items-center justify-center text-neutral-500 mb-3">
-                  <Layers className="w-6 h-6 stroke-[1.5]" />
-                </div>
-                <p className="text-sm font-medium text-neutral-300">
-                  {searchQuery
-                    ? `Keine Wörter gefunden für «${searchQuery}»`
-                    : selectedLevel !== 'Alle'
-                    ? `Noch keine gelernten Wörter auf Niveau ${selectedLevel}`
-                    : 'Noch keine gelernten Wörter vorhanden'}
-                </p>
-                <p className="text-xs text-neutral-500 mt-1 max-w-sm">
-                  {searchQuery
-                    ? 'Versuche einen anderen Suchbegriff oder setze den Filter zurück.'
-                    : 'Schließe Karten auf Stufe 4 ab, um deinen Wortschatz aufzubauen.'}
-                </p>
+              <div className="py-20 flex items-center justify-center text-neutral-300 dark:text-neutral-700 opacity-40">
+                <Layers className="w-12 h-12 stroke-[1.2]" />
               </div>
             ) : (
               filteredWords.map((item) => {
                 const badgeClass =
                   LEVEL_BADGE_STYLES[item.level] ||
-                  'bg-blue-500/15 text-blue-400 border-blue-500/25';
+                  'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25';
 
                 return (
                   <div
                     key={item.key}
-                    className="flex items-center justify-between py-2.5 px-2 rounded-xl hover:bg-neutral-800/40 transition-colors group"
+                    className="flex items-center justify-between py-2.5 px-2 rounded-xl hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40 transition-colors group"
                   >
-                    {/* Левая колонка: Немецкое слово + Перевод */}
+                    {/* Левая колонка: Немецкое слово + Краткий перевод */}
                     <div className="flex flex-col min-w-0 pr-3">
-                      <span className="text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-400 transition-colors">
+                      <span className="text-neutral-900 dark:text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
                         {formatSeparableWord(item.word)}
                       </span>
                       {item.translation ? (
-                        <span className="text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md">
+                        <span className="text-neutral-500 dark:text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md">
                           {item.translation}
                         </span>
                       ) : (
-                        <span className="text-neutral-600 italic font-normal text-xs mt-0.5">
+                        <span className="text-neutral-400 dark:text-neutral-600 italic font-normal text-xs mt-0.5">
                           Keine Übersetzung angegeben
                         </span>
                       )}
@@ -385,7 +362,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleOpenEditor(item)}
-                        className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+                        className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                         title="Karte bearbeiten"
                       >
                         <Pencil className="w-3.5 h-3.5" />

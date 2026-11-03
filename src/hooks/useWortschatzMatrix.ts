@@ -67,54 +67,96 @@ export function isFunctionalParticle(rawWord?: string | null): boolean {
 
 /**
  * Проверяет, относится ли колода или родительская книга к грамматическому тренажеру.
- * Карточки грамматических тренировок (Cloze Deletion, NVV, Strukturen) исключаются из лексической матрицы.
+ * ИСКЛЮЧАЕТ ТОЛЬКО специализированные грамматические разделы:
+ * книги/колоды, где прямо указано title.includes('Grammatik') или title.includes('Strukturen & NVV'),
+ * либо deck.isGrammar === true. Обычные лексические колоды учебников фильтровать ЗАПРЕЩЕНО.
  */
 export function isGrammarDeckOrBook(deck?: any, parentBook?: any): boolean {
   if (!deck && !parentBook) return false;
 
-  const dType = (deck?.type || '').toLowerCase();
-  const dCat = (deck?.category || '').toLowerCase();
-  const bCat = (parentBook?.category || '').toLowerCase();
-  const trainingMode = (
-    deck?.training_mode ||
-    deck?.trainingMode ||
-    parentBook?.training_mode ||
-    parentBook?.trainingMode ||
-    ''
-  ).toLowerCase();
-
-  // Явные флаги грамматики
+  // Явный флаг грамматики
   if (deck?.isGrammar === true || (deck as any)?.is_grammar === true) return true;
-  if (dType === 'grammar' || dType === 'structures') return true;
-  if (bCat === 'structures' || bCat === 'grammar') return true;
-  if (trainingMode.includes('preposition') || trainingMode.includes('starke_verben')) return true;
 
-  // Исключаем по категории
-  if (dCat.includes('gramm') || dCat.includes('struktur')) return true;
-
-  // Проверка названий колоды и книги
-  const deckName = (deck?.name || deck?.title || '').toLowerCase();
+  const deckTitle = (deck?.name || deck?.title || '').toLowerCase();
   const bookTitle = (parentBook?.title || '').toLowerCase();
-  const combined = `${deckName} ${bookTitle}`;
 
-  if (
-    combined.includes('grammatik') ||
-    combined.includes('grammar') ||
-    combined.includes('strukturen') ||
-    combined.includes('structure') ||
-    combined.includes('nvv') ||
-    combined.includes('übungen') ||
-    combined.includes('uebungen') ||
-    combined.includes('präposition') ||
-    combined.includes('starke verben')
-  ) {
-    if (dCat.includes('wört') || dCat.includes('vocab')) {
+  const isExplicitGrammar =
+    deckTitle.includes('grammatik') ||
+    bookTitle.includes('grammatik') ||
+    deckTitle.includes('strukturen & nvv') ||
+    bookTitle.includes('strukturen & nvv') ||
+    deckTitle.includes('strukturen und nvv') ||
+    bookTitle.includes('strukturen und nvv');
+
+  if (isExplicitGrammar) {
+    // Если в названии колоды прямо указано 'wortschatz' или 'wörter'/'woerter', это лексика — не исключаем
+    if (
+      deckTitle.includes('wortschatz') ||
+      deckTitle.includes('wörter') ||
+      deckTitle.includes('woerter')
+    ) {
       return false;
     }
     return true;
   }
 
   return false;
+}
+
+/**
+ * Извлекает краткий перевод слова, исключая длинные примеры предложений.
+ * Проверяет поля карточки: hint, forms, baseWordInfo (где обычно записано "Wort — краткий перевод"),
+ * а также сам card.translation, если он лаконичен.
+ */
+export function extractConciseTranslation(card?: any, fallback?: string): string {
+  if (!card && !fallback) return '';
+
+  const cyrRegex = /[\u0400-\u04FF]/;
+
+  // 1. Проверяем hint, forms, baseWordInfo на наличие тире "Слово — краткий перевод"
+  const extraSources = [
+    card?.hint,
+    card?.forms,
+    card?.baseWordInfo,
+    card?.base_word_info,
+  ];
+
+  for (const src of extraSources) {
+    if (src && typeof src === 'string' && (src.includes('—') || src.includes('–') || src.includes(' - '))) {
+      const parts = src.split(/[—–]|\s-\s/);
+      for (let i = parts.length - 1; i >= 1; i--) {
+        let candidate = parts[i].trim();
+        candidate = candidate.replace(/\[cite:[^\]]*\]/g, '').trim();
+        candidate = candidate.replace(/[.;]+$/, '').trim();
+        if (candidate && cyrRegex.test(candidate) && candidate.split(/\s+/).length <= 7) {
+          return candidate;
+        }
+      }
+    }
+  }
+
+  // 2. Проверяем card.translation или fallback
+  const rawTrans = (card?.translation || card?.back || fallback || '').trim();
+  if (rawTrans) {
+    let clean = rawTrans.replace(/\[cite:[^\]]*\]/g, '').trim();
+
+    // Если в самом переводе есть тире: "Wort — перевод"
+    if (clean.includes('—') || clean.includes('–')) {
+      const parts = clean.split(/[—–]/);
+      const afterDash = parts[parts.length - 1].trim().replace(/[.;]+$/, '');
+      if (cyrRegex.test(afterDash) && afterDash.split(/\s+/).length <= 7) {
+        return afterDash;
+      }
+    }
+
+    // Если перевод короткий и не является предложением с точкой на конце
+    const isSentence = clean.endsWith('.') || clean.endsWith('!') || clean.length > 50 || clean.split(/\s+/).length > 6;
+    if (!isSentence) {
+      return clean;
+    }
+  }
+
+  return (rawTrans || fallback || '').replace(/\[cite:[^\]]*\]/g, '').trim();
 }
 
 export function normalizeLanguageCode(lang?: string | null): AppLang {
@@ -423,7 +465,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
     while (hasMore) {
       const { data: cardRows, error: cardErr } = await supabase
         .from('cards')
-        .select('id, targetWord, translation, masteryLevel, isArchived, nextReviewDate, interval, repetitions, decks!inner(id, name, category, language, level, book_id)')
+        .select('id, targetWord, translation, forms, baseWordInfo, masteryLevel, isArchived, nextReviewDate, interval, repetitions, decks!inner(id, name, category, language, level, book_id)')
         .or('isArchived.eq.true,masteryLevel.gte.4')
         .range(from, from + PAGE_SIZE - 1);
 
@@ -459,6 +501,9 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
         const cardLevel = (c as any).level || remoteMeta?.level || null;
         const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, lang);
 
+        const conciseTrans = extractConciseTranslation(c);
+        const cardTranslation = conciseTrans || c.translation || prevEntry?.translation;
+
         const alreadyInNext = nextMap.get(normalizedKey);
         if (!alreadyInNext) {
           nextMap.set(normalizedKey, {
@@ -466,14 +511,14 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
             level,
             masteredAt,
             bookId: deckObj?.book_id || prevEntry?.bookId,
-            translation: c.translation || prevEntry?.translation,
+            translation: cardTranslation,
             cardId: c.id || prevEntry?.cardId,
           });
         } else if (masteredAt > alreadyInNext.masteredAt) {
           nextMap.set(normalizedKey, {
             ...alreadyInNext,
             masteredAt,
-            translation: c.translation || alreadyInNext.translation,
+            translation: cardTranslation || alreadyInNext.translation,
             cardId: c.id || alreadyInNext.cardId,
           });
         }
@@ -738,7 +783,8 @@ export async function autoBackfillMasteredWords(
         const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, targetLang);
 
         const existingEntry = deduplicatedMap.get(normalizedKey);
-        const cardTranslation = card.translation || card.back || existingMap.get(normalizedKey)?.translation;
+        const conciseTrans = extractConciseTranslation(card);
+        const cardTranslation = conciseTrans || card.translation || card.back || existingMap.get(normalizedKey)?.translation;
         if (!existingEntry) {
           deduplicatedMap.set(normalizedKey, {
             originalWord: rawWord,

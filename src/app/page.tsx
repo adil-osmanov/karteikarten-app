@@ -10524,33 +10524,6 @@ export default function App() {
     }
   }, [activeBookId, decks]);
 
-  const handleGlobalDrill = useCallback((level: LanguageLevel, category: "Grammatik" | "Wörter") => {
-    initAudioCtx();
-    const drillCards: { deckId: string, card: Flashcard }[] = [];
-    
-    filteredDecksList.forEach(d => {
-      if (d.level === level && d.category === category) {
-        d.cards.forEach(c => {
-          if (!c.isArchived) {
-            drillCards.push({ deckId: d.id, card: c });
-          }
-        });
-      }
-    });
-    
-    if (drillCards.length > 0) {
-      const uniqueDrillCards = deduplicateCardsByLemma(drillCards);
-      for (let i = uniqueDrillCards.length - 1; i > 0; i--) {
-         const j = Math.floor(Math.random() * (i + 1));
-         [uniqueDrillCards[i], uniqueDrillCards[j]] = [uniqueDrillCards[j], uniqueDrillCards[i]];
-      }
-      setDrillCards(uniqueDrillCards);
-    } else {
-      alert(`Keine aktiven Karten für Level ${level} (${category}) gefunden.`);
-    }
-  }, [filteredDecksList]);
-
-
   const displayBooks = useMemo(() => {
     const filtered = books.filter(b => (b.language || 'DE').toLowerCase() === appLanguage.toLowerCase());
     if (bookOrder && bookOrder.length > 0) {
@@ -10592,6 +10565,42 @@ export default function App() {
   }, [filteredDecksList, deckOrder]);
 
   const activeBook = useMemo(() => books.find(b => b.id === activeBookId), [books, activeBookId]);
+
+  const handleGlobalDrill = useCallback((level: LanguageLevel, category: "Grammatik" | "Wörter") => {
+    initAudioCtx();
+    const drillCards: { deckId: string, card: Flashcard }[] = [];
+    const isSpecialBook = activeBook?.training_mode && activeBook.training_mode !== 'standard_cloze';
+    const targetDecks = isSpecialBook
+      ? filteredDecksList.filter(d => (d.level || 'A1') === level)
+      : (groupedDecks[`${category}-${level}`] || filteredDecksList.filter(d => (d.level || 'A1') === level && d.category === category));
+
+    targetDecks.forEach(d => {
+      d.cards?.forEach(c => {
+        const isMastered = (c.masteryLevel || 0) >= 4 || c.isArchived;
+        if (!isMastered) {
+          drillCards.push({
+            deckId: d.id,
+            card: {
+              ...c,
+              masteryLevel: 0, // Начинаем изучение с 1-го раунда
+              isArchived: false,
+            },
+          });
+        }
+      });
+    });
+    
+    if (drillCards.length > 0) {
+      const uniqueDrillCards = deduplicateCardsByLemma(drillCards);
+      for (let i = uniqueDrillCards.length - 1; i > 0; i--) {
+         const j = Math.floor(Math.random() * (i + 1));
+         [uniqueDrillCards[i], uniqueDrillCards[j]] = [uniqueDrillCards[j], uniqueDrillCards[i]];
+      }
+      setDrillCards(uniqueDrillCards);
+    } else {
+      alert(`Keine aktiven Karten für Level ${level} (${category}) gefunden.`);
+    }
+  }, [filteredDecksList, activeBook, groupedDecks]);
 
   const dueCards = useMemo(() => {
     const list: { deckId: string, card: Flashcard }[] = [];
@@ -11600,6 +11609,10 @@ export default function App() {
                 const completedDecks = visibleDecks.filter(d => d.cards.length > 0 && d.cards.length === d.cards.filter(c => c.isArchived).length);
                 const isExpanded = expandedCategories[sectionKey] || false;
 
+                const levelCards = sortedDecks.flatMap(d => d.cards || []);
+                const pendingLevelCards = levelCards.filter(c => (c.masteryLevel || 0) < 4 && !c.isArchived);
+                const isLevelCompleted = pendingLevelCards.length === 0;
+
                 return (
                   <section key={sectionKey}>
                     <div className="flex items-center justify-between w-full mb-4">
@@ -11609,9 +11622,19 @@ export default function App() {
                           {level}
                         </span>
                         <button 
-                          onClick={() => handleGlobalDrill(level, activeTab)}
-                          className="w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer"
-                          title={`Training ${level}`}
+                          onClick={() => {
+                            if (!isLevelCompleted) {
+                              handleGlobalDrill(level, activeTab);
+                            }
+                          }}
+                          disabled={isLevelCompleted}
+                          className={cn(
+                            "w-6 h-6 rounded-full flex items-center justify-center transition-all",
+                            isLevelCompleted
+                              ? "opacity-25 pointer-events-none cursor-not-allowed text-zinc-400 dark:text-zinc-600"
+                              : "hover:bg-black/5 dark:hover:bg-white/10 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white cursor-pointer"
+                          )}
+                          title={isLevelCompleted ? `Alle Karten auf Niveau ${level} gemeistert` : `Training ${level}`}
                         >
                           <Play className="w-3 h-3 fill-current" />
                         </button>
