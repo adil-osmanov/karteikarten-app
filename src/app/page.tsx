@@ -3214,6 +3214,26 @@ export function TrennbarDottedBar() {
   );
 }
 
+export function formatSeparableWord(word: string): React.ReactNode {
+  if (!word || !word.includes('|')) return word;
+  const parts = word.split('|');
+  return (
+    <span className="inline-flex items-center">
+      <span>{parts[0]}</span>
+      <span 
+        className="inline-block w-[2.5px] h-[0.8em] mx-1 bg-blue-500/80 dark:bg-blue-400 rounded-full align-middle" 
+        title="Trennbare Vorsilbe"
+      />
+      <span>{parts.slice(1).join('')}</span>
+    </span>
+  );
+}
+
+export function checkAnswer(userInput: string, targetWord: string): boolean {
+  if (!userInput || !targetWord) return false;
+  return userInput.trim().toLowerCase() === targetWord.replace(/\|/g, '').trim().toLowerCase();
+}
+
 export const HELPER_TOKENS = ['jemand', 'jemanden', 'jemandem', 'etwas', 'jdn.', 'jdm.', 'etw.', 'jmd.'] as const;
 const HELPER_TOKEN_SET = new Set(HELPER_TOKENS.map(t => t.toLowerCase()));
 
@@ -3598,6 +3618,11 @@ function RapidFlashcardMode({
     const lowerInput = trimmedInput.toLowerCase();
     const lowerCore = targetCore.toLowerCase();
     const lowerFull = targetFull.toLowerCase();
+
+    // Прямая проверка очищенного целевого слова
+    if (checkAnswer(trimmedInput, currentCard?.targetWord || '')) {
+      return { isMatch: true, isPrefix: true };
+    }
 
     // Для отделяемых глаголов (напр., ausleihen) сравниваем без внутренних пробелов
     if (parsedTarget.isTrennbar) {
@@ -4007,34 +4032,50 @@ function RapidFlashcardMode({
                           : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
                     }${isShaking ? ' animate-shake' : ''}`}
                   >
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      value={typedValue}
-                      onChange={(e) => !isMobile && handleInputChange(e.target.value)}
-                      readOnly={isMobile || isAnswered}
-                      inputMode={isMobile ? "none" : undefined}
-                      tabIndex={isMobile ? -1 : 0}
-                      autoFocus={!isMobile}
-                      autoComplete="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      placeholder=""
-                      style={{ caretColor: 'transparent' }}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
-                    />
-                    <div className={`pointer-events-none select-none flex items-baseline justify-center flex-wrap whitespace-pre ${
-                      displayParts.totalLength > 22
-                        ? 'text-lg sm:text-xl'
-                        : displayParts.totalLength > 14
-                        ? 'text-xl sm:text-2xl'
-                        : 'text-2xl sm:text-[28px]'
-                    }`}>
-                      {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
-                      <span>{displayParts.prefix}</span>
-                      {displayParts.hasDivider && <TrennbarDottedBar />}
-                      {displayParts.stem && <span>{displayParts.stem}</span>}
-                    </div>
+                    {isAnswered ? (
+                      <div className={cn(
+                        "flex items-center justify-center font-bold tracking-wide select-none",
+                        displayParts.totalLength > 22
+                          ? 'text-lg sm:text-xl'
+                          : displayParts.totalLength > 14
+                          ? 'text-xl sm:text-2xl'
+                          : 'text-2xl sm:text-[28px]',
+                        !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-900 dark:text-white'
+                      )}>
+                        {formatSeparableWord(currentCard?.targetWord || typedValue)}
+                      </div>
+                    ) : (
+                      <>
+                        <input
+                          ref={inputRef}
+                          type="text"
+                          value={typedValue}
+                          onChange={(e) => !isMobile && handleInputChange(e.target.value)}
+                          readOnly={isMobile || isAnswered}
+                          inputMode={isMobile ? "none" : undefined}
+                          tabIndex={isMobile ? -1 : 0}
+                          autoFocus={!isMobile}
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          placeholder=""
+                          style={{ caretColor: 'transparent' }}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
+                        />
+                        <div className={`pointer-events-none select-none flex items-baseline justify-center flex-wrap whitespace-pre ${
+                          displayParts.totalLength > 22
+                            ? 'text-lg sm:text-xl'
+                            : displayParts.totalLength > 14
+                            ? 'text-xl sm:text-2xl'
+                            : 'text-2xl sm:text-[28px]'
+                        }`}>
+                          {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
+                          <span>{displayParts.prefix}</span>
+                          {displayParts.hasDivider && <TrennbarDottedBar />}
+                          {displayParts.stem && <span>{displayParts.stem}</span>}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
                 {parsedTarget.suffixContext && (
@@ -4059,34 +4100,50 @@ function RapidFlashcardMode({
                         : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
                   }${isShaking ? ' animate-shake' : ''}`}
                 >
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={typedValue}
-                    onChange={(e) => !isMobile && handleInputChange(e.target.value)}
-                    readOnly={isMobile || isAnswered}
-                    inputMode={isMobile ? "none" : undefined}
-                    tabIndex={isMobile ? -1 : 0}
-                    autoFocus={!isMobile}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    placeholder=""
-                    style={{ caretColor: 'transparent' }}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
-                  />
-                  <div className={`pointer-events-none select-none flex items-baseline justify-center flex-wrap whitespace-pre ${
-                    displayParts.totalLength > 22
-                      ? 'text-lg sm:text-xl'
-                      : displayParts.totalLength > 14
-                      ? 'text-xl sm:text-2xl'
-                      : 'text-2xl sm:text-[28px]'
-                  }`}>
-                    {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
-                    <span>{displayParts.prefix}</span>
-                    {displayParts.hasDivider && <TrennbarDottedBar />}
-                    {displayParts.stem && <span>{displayParts.stem}</span>}
-                  </div>
+                  {isAnswered ? (
+                    <div className={cn(
+                      "flex items-center justify-center font-bold tracking-wide select-none",
+                      displayParts.totalLength > 22
+                        ? 'text-lg sm:text-xl'
+                        : displayParts.totalLength > 14
+                        ? 'text-xl sm:text-2xl'
+                        : 'text-2xl sm:text-[28px]',
+                      !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-900 dark:text-white'
+                    )}>
+                      {formatSeparableWord(currentCard?.targetWord || typedValue)}
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        ref={inputRef}
+                        type="text"
+                        value={typedValue}
+                        onChange={(e) => !isMobile && handleInputChange(e.target.value)}
+                        readOnly={isMobile || isAnswered}
+                        inputMode={isMobile ? "none" : undefined}
+                        tabIndex={isMobile ? -1 : 0}
+                        autoFocus={!isMobile}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        placeholder=""
+                        style={{ caretColor: 'transparent' }}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
+                      />
+                      <div className={`pointer-events-none select-none flex items-baseline justify-center flex-wrap whitespace-pre ${
+                        displayParts.totalLength > 22
+                          ? 'text-lg sm:text-xl'
+                          : displayParts.totalLength > 14
+                          ? 'text-xl sm:text-2xl'
+                          : 'text-2xl sm:text-[28px]'
+                      }`}>
+                        {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
+                        <span>{displayParts.prefix}</span>
+                        {displayParts.hasDivider && <TrennbarDottedBar />}
+                        {displayParts.stem && <span>{displayParts.stem}</span>}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -5258,8 +5315,10 @@ interface ClozeResolution {
 }
 
 function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: string, forms?: string | null): ClozeResolution {
+  const cleanTargetWord = (rawTargetWord || '').replace(/\|/g, '').trim();
+
   if (!rawSentence || rawSentence === '-') {
-    return { parts: ["", ""], clozeWord: rawTargetWord, fullSentence: rawTargetWord, isCustomCloze: false };
+    return { parts: ["", ""], clozeWord: cleanTargetWord, fullSentence: cleanTargetWord, isCustomCloze: false };
   }
 
   // Общая техническая типографика: удаление двойных пробелов и пробелов перед знаками препинания
@@ -5270,8 +5329,8 @@ function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: str
     const splitParts = sentence.split("___");
     return {
       parts: [splitParts[0], splitParts.slice(1).join("___")],
-      clozeWord: targetWord,
-      fullSentence: sentence.replace("___", targetWord),
+      clozeWord: cleanTargetWord,
+      fullSentence: sentence.replace("___", cleanTargetWord),
       isCustomCloze: false
     };
   }
@@ -5281,9 +5340,10 @@ function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: str
   const cleanVerb = tw.replace(/^sich\s+/i, "").replace(/\|/g, "").trim();
 
   const candidates: string[] = [];
-  if (tw) candidates.push(tw);
-  if (cleanTw && cleanTw !== tw) candidates.push(cleanTw);
-  if (cleanVerb && cleanVerb !== tw) candidates.push(cleanVerb);
+  if (cleanTargetWord) candidates.push(cleanTargetWord);
+  if (tw && !candidates.includes(tw)) candidates.push(tw);
+  if (cleanTw && !candidates.includes(cleanTw)) candidates.push(cleanTw);
+  if (cleanVerb && !candidates.includes(cleanVerb)) candidates.push(cleanVerb);
 
   // Multi-word phrase matching with flexible endings (e.g. "tabellarische Lebenslauf" -> "tabellarischen Lebenslauf")
   const twWords = cleanTw.split(/\s+/);
@@ -5596,13 +5656,14 @@ function StudyCard({
   const shouldCapitalize = parts[0]?.trim() === "";
 
   const primaryTarget = useMemo(() => {
-    return shouldCapitalize ? clozeWord.charAt(0).toUpperCase() + clozeWord.slice(1) : clozeWord;
+    const clean = (clozeWord || '').replace(/\|/g, '');
+    return shouldCapitalize ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
   }, [shouldCapitalize, clozeWord]);
 
   const secondaryTarget = useMemo(() => {
     // If targetWord has article and clozeWord does not (or vice versa), allow both!
-    const cleanTw = (card.targetWord || '').replace(/\|/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    const cleanCloze = (clozeWord || '').trim();
+    const cleanTw = (card.targetWord || '').replace(/\|/g, '').replace(/\s{2,}/g, ' ').trim();
+    const cleanCloze = (clozeWord || '').replace(/\|/g, '').trim();
     if (cleanTw.toLowerCase() !== cleanCloze.toLowerCase()) {
       return shouldCapitalize ? cleanTw.charAt(0).toUpperCase() + cleanTw.slice(1) : cleanTw;
     }
@@ -5681,8 +5742,7 @@ function StudyCard({
 
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
-    const optLower = option.trim().toLowerCase();
-    const correct = optLower === card.targetWord.trim().toLowerCase() || optLower === clozeWord.trim().toLowerCase();
+    const correct = checkAnswer(option, card.targetWord) || checkAnswer(option, clozeWord);
     
     // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
     setPhase("Answer");
@@ -5987,9 +6047,9 @@ function StudyCard({
                 parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
               )}>
                 {parsedTargetWord ? (
-                  <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {parsedTargetWord.rest}</>
+                  <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {formatSeparableWord(parsedTargetWord.rest)}</>
                 ) : (
-                  displayAnswerWord
+                  formatSeparableWord(card.targetWord && card.targetWord.includes('|') ? card.targetWord : displayAnswerWord)
                 )}
               </span>
             ) : (

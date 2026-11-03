@@ -167,7 +167,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
               type="text"
               value={targetWord}
               onChange={(e) => setTargetWord(e.target.value)}
-              placeholder="z.B. ausprobieren, die Bestätigung..."
+              placeholder="z.B. aus|probieren, aus|statten, die Bestätigung..."
               className="w-full bg-neutral-100 dark:bg-neutral-800/60 border-0 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/30 outline-none text-zinc-900 dark:text-zinc-100 placeholder:text-neutral-400 font-sans transition-all"
             />
           </div>
