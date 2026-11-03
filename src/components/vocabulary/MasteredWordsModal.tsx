@@ -319,24 +319,42 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           </div>
 
           {/* 2. APPLE SEGMENTED CONTROL ДЛЯ УРОВНЕЙ CEFR */}
-          <div className="p-1 bg-neutral-100 dark:bg-neutral-800/80 rounded-2xl flex items-center gap-1 border border-neutral-200/60 dark:border-white/5 mb-3.5 select-none overflow-x-auto scrollbar-none">
+          <div className="w-full p-1 bg-neutral-200/70 dark:bg-neutral-800/80 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/10 flex items-center gap-1 mb-4 select-none">
             {FILTER_LEVELS.map((lvl) => {
               const isSelected = selectedLevel === lvl;
               const count = levelCounts[lvl] ?? 0;
+              const isEmpty = count === 0 && lvl !== 'Alle';
 
               return (
                 <button
                   key={lvl}
                   type="button"
                   onClick={() => setSelectedLevel(lvl)}
-                  className={`flex-1 min-w-[56px] rounded-xl px-3 py-1.5 text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                    isSelected
-                      ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white font-medium shadow-sm'
-                      : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
-                  }`}
+                  className={`
+                    relative flex-1 py-2 px-2.5 rounded-xl text-xs sm:text-[13px] font-medium 
+                    transition-all duration-200 flex items-center justify-center gap-1.5 outline-none cursor-pointer
+                    ${isSelected 
+                      ? 'bg-white dark:bg-neutral-700/90 text-neutral-900 dark:text-white shadow-sm shadow-black/20 ring-1 ring-black/5 dark:ring-white/10 font-semibold' 
+                      : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5'
+                    }
+                    ${isEmpty ? 'opacity-40' : 'opacity-100'}
+                  `}
                 >
-                  <span>{lvl}</span>
-                  <span className="opacity-70 font-mono text-[10px]">({count})</span>
+                  {/* Название уровня */}
+                  <span className="tracking-tight">{lvl}</span>
+
+                  {/* Аккуратный счетчик слов */}
+                  <span
+                    className={`
+                      text-[11px] px-1.5 py-0.5 rounded-md font-mono transition-colors
+                      ${isSelected 
+                        ? 'bg-neutral-100 dark:bg-white/15 text-neutral-700 dark:text-neutral-200 font-semibold' 
+                        : 'bg-black/5 dark:bg-black/20 text-neutral-500 dark:text-neutral-400'
+                      }
+                    `}
+                  >
+                    {count}
+                  </span>
                 </button>
               );
             })}
