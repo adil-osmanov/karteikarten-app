@@ -62,23 +62,79 @@ export const FUNCTIONAL_PARTICLES = new Set([
   'und', 'aber', 'oder', 'denn', 'weil', 'dass', 'ob', 'als', 'wie'
 ]);
 
+/**
+ * Черный список спряженных форм глаголов, грамматических кусков и не-лемм
+ * (из упражнений на контекст, спряжение и грамматические тренажеры).
+ */
+export const CONJUGATED_VERB_FORMS = new Set([
+  // Настоящее время (2-е и 3-е лицо, неправильные/спряженные формы)
+  'findet', 'findest', 'liest', 'fährst', 'fährt', 'gilt', 'giltst',
+  'sieht', 'siehst', 'hilft', 'hilfst', 'schläft', 'schläfst', 'spricht', 'sprichst',
+  'nimmt', 'nimmst', 'gibt', 'gibst', 'trifft', 'triffst', 'trägst', 'trägt',
+  'vergisst', 'lädt', 'lädst', 'empfiehlt', 'empfiehlst', 'hält', 'hältst',
+  'fällt', 'fällst', 'lässt', 'bricht', 'brichst', 'wirft', 'wirfst',
+  'trinkst', 'trinkt', 'arbeitet', 'arbeitest', 'kommt', 'kommst', 'geht', 'gehst',
+  'steht', 'stehst', 'bleibt', 'bleibst', 'bringt', 'bringst', 'denkt', 'denkst',
+  'kennt', 'kennst', 'weiß', 'weißt', 'wusste', 'wusstest',
+  'hast', 'hat', 'bist', 'ist', 'sind', 'seid', 'war', 'warst', 'waren', 'wart',
+  'hatte', 'hattest', 'hatten', 'hattet',
+  // Модальные глаголы в спряженных формах
+  'kann', 'kannst', 'könnt', 'muss', 'musst', 'müsst', 'darf', 'darfst', 'dürft',
+  'will', 'willst', 'wollt', 'sollst', 'sollt', 'möchte', 'möchtest', 'möchtet',
+  // Прошедшее время и сослагательное наклонение
+  'käme', 'müsste', 'gäbe', 'bliebe', 'wüsste', 'fände', 'ginge', 'täte',
+  'ging', 'schrieb', 'blieb', 'fand', 'nahm', 'stand', 'schlief', 'trug', 'sprach', 'verlor',
+  // Слитные формы предлогов и артиклей
+  'unterden', 'unterdem', 'hinterdas', 'hinterdem', 'vordie', 'nebenden', 'nebendem',
+  'überden', 'überdem', 'zwischendie', 'indie', 'aufdas', 'aufdie', 'aufder',
+  'hinterdie', 'hinterder', 'vorden', 'vordem', 'unterdie', 'unterder', 'nebendas',
+  'überdie', 'überder', 'zwischendas'
+]);
+
 export function isFunctionalParticle(rawWord?: string | null): boolean {
-  if (!rawWord || typeof rawWord !== 'string') return false;
-  const clean = rawWord.trim().toLowerCase().replace(/\|/g, '');
-  return FUNCTIONAL_PARTICLES.has(clean);
+  if (!rawWord || typeof rawWord !== 'string') return true;
+  const trimmed = rawWord.trim();
+  if (trimmed.length < 2) return true;
+
+  // Исключаем контекстные задания с пропусками или целые предложения
+  if (trimmed.includes('___') || /[.?!:;]/.test(trimmed)) return true;
+  if (trimmed.split(/\s+/).length > 4) return true;
+
+  const clean = trimmed.toLowerCase().replace(/\|/g, '');
+  return FUNCTIONAL_PARTICLES.has(clean) || CONJUGATED_VERB_FORMS.has(clean);
 }
 
 /**
- * Проверяет, относится ли колода или родительская книга к чисто грамматическому тренажеру.
- * Исключаются ТОЛЬКО специализированные грамматические разделы:
- * книги/колоды, где прямо указано title.includes('Grammatik') или title.includes('Strukturen & NVV'),
- * либо deck.isGrammar === true, либо тренажеры спряжения/предлогов.
- * Лексические карточки учебников и контекстные слова сохраняются в Wortschatz-Matrix.
+ * Проверяет, относится ли колода, книга или карточка к режиму «Kontext» или грамматике.
+ * В Wortschatz-Matrix включаются ТОЛЬКО слова из режима карточек (Karteikarten / лексические колоды).
+ * ПОЛНОСТЬЮ ИСКЛЮЧАЮТСЯ:
+ * 1. Карточки/упражнения из режима «Kontext» (mode === 'kontext', deck.isContext === true, card.source === 'context')
+ * 2. Грамматические модули и тренажёры (Grammatik, Strukturen & NVV, starke Verben, Präpositionen)
  */
-export function isGrammarDeckOrBook(deck?: any, parentBook?: any, _card?: any): boolean {
-  if (!deck && !parentBook) return false;
+export function isContextOrGrammarDeck(deck?: any, parentBook?: any, card?: any): boolean {
+  if (!deck && !parentBook && !card) return false;
 
-  // Явный флаг грамматики
+  // 1. Исключаем карточки и задания из режима «Kontext»
+  if (
+    card?.isContext === true ||
+    (card as any)?.is_context === true ||
+    (card as any)?.source === 'context' ||
+    (card as any)?.mode === 'kontext' ||
+    (card as any)?.mode === 'context' ||
+    deck?.isContext === true ||
+    (deck as any)?.is_context === true ||
+    deck?.mode === 'kontext' ||
+    deck?.mode === 'context' ||
+    deck?.type === 'context' ||
+    parentBook?.mode === 'kontext' ||
+    parentBook?.mode === 'context' ||
+    parentBook?.training_mode === 'kontext' ||
+    parentBook?.training_mode === 'context'
+  ) {
+    return true;
+  }
+
+  // 2. Исключаем грамматические модули и тренажеры форм
   if (deck?.isGrammar === true || (deck as any)?.is_grammar === true) return true;
   if (deck?.type === 'grammar' || deck?.type === 'structures') return true;
   if (parentBook?.category === 'structures' || parentBook?.category === 'grammar') return true;
@@ -96,6 +152,17 @@ export function isGrammarDeckOrBook(deck?: any, parentBook?: any, _card?: any): 
   const bookTitle = (parentBook?.title || '').toLowerCase();
   const combined = `${deckTitle} ${bookTitle}`;
 
+  // Исключаем по названию режим контекста
+  if (
+    deckTitle.includes('kontext') ||
+    bookTitle.includes('kontext') ||
+    deckTitle.includes('context') ||
+    bookTitle.includes('context')
+  ) {
+    return true;
+  }
+
+  // Исключаем по названию грамматику и структуры
   const isExplicitGrammar =
     combined.includes('grammatik') ||
     combined.includes('grammar') ||
@@ -112,9 +179,18 @@ export function isGrammarDeckOrBook(deck?: any, parentBook?: any, _card?: any): 
     if (
       deckTitle.includes('wortschatz') ||
       deckTitle.includes('wörter') ||
-      deckTitle.includes('woerter')
+      deckTitle.includes('woerter') ||
+      deckTitle.includes('karteikarten')
     ) {
-      return false;
+      const isExplicitGrammarBook =
+        bookTitle.includes('grammatik') ||
+        bookTitle.includes('starke verben') ||
+        bookTitle.includes('präposition') ||
+        bookTitle.includes('strukturen');
+
+      if (!isExplicitGrammarBook) {
+        return false;
+      }
     }
     return true;
   }
@@ -122,7 +198,7 @@ export function isGrammarDeckOrBook(deck?: any, parentBook?: any, _card?: any): 
   return false;
 }
 
-export const isContextOrGrammarDeck = isGrammarDeckOrBook;
+export const isGrammarDeckOrBook = isContextOrGrammarDeck;
 
 /**
  * Извлекает краткий перевод слова, исключая длинные примеры предложений.

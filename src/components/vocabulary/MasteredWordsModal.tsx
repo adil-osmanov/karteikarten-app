@@ -33,43 +33,24 @@ const LEVEL_BADGE_STYLES: Record<CEFRLevel, string> = {
 };
 
 /**
- * Заполняет пропуск ___ в предложении целевым словом с очисткой дублирующихся артиклей
- */
-export function fillBlank(rawSentence?: string | null, rawTargetWord?: string | null): string {
-  if (!rawSentence || rawSentence === '-' || rawSentence === 'VERB_DRILL') return '';
-  const cleanSentence = rawSentence.replace(/\s{2,}/g, ' ').trim();
-  const targetWord = (rawTargetWord || '').replace(/\|/g, '').trim();
-  if (!cleanSentence.includes('___')) {
-    return cleanSentence;
-  }
-
-  // Проверяем, стоит ли перед пропуском артикль
-  const matchBefore = cleanSentence.match(/(?:^|\s)(der|die|das|den|dem|des|ein|eine|einen|einem|einer|eines)\s+___/i);
-  let wordToInsert = targetWord;
-  if (matchBefore) {
-    wordToInsert = targetWord.replace(/^(der|die|das|ein|eine|einen|einem|einer|eines)\s+/i, '');
-  }
-  return cleanSentence.replace(/___/g, wordToInsert).replace(/\s{2,}/g, ' ').trim();
-}
-
-/**
  * Вычисляет статус интервального повторения SRS для выученной карточки
  */
-export function formatSRSStatus(nextReviewDate?: string | number | null): { text: string; isDue: boolean } {
-  if (!nextReviewDate) return { text: 'Освоено', isDue: false };
+export function getSRSStatus(nextReviewDate?: string | number | null): { label: string; isDue: boolean } {
+  if (!nextReviewDate) return { label: 'Освоено', isDue: false };
+
   const diffMs = new Date(nextReviewDate).getTime() - Date.now();
 
   if (diffMs <= 0) {
-    return { text: 'К повтору', isDue: true };
+    return { label: 'К повтору', isDue: true };
   }
 
   const diffHours = Math.round(diffMs / (1000 * 60 * 60));
   const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
   if (diffHours < 24) {
-    return { text: `через ${diffHours} ч.`, isDue: false };
+    return { label: `через ${diffHours} ч.`, isDue: false };
   }
-  return { text: `через ${diffDays} дн.`, isDue: false };
+  return { label: `через ${diffDays} дн.`, isDue: false };
 }
 
 export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
@@ -198,36 +179,6 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         const nextReviewDate =
           card?.nextReviewDate ?? (card as any)?.next_review_date ?? entry.nextReviewDate ?? null;
 
-        // Немецкий пример из контекста (с подстановкой целевого слова в пропуск ___)
-        const rawSentence = card?.sentence || entry.sentence || null;
-        let germanExample: string | null = null;
-        if (
-          rawSentence &&
-          rawSentence !== '-' &&
-          rawSentence !== 'VERB_DRILL' &&
-          rawSentence.trim().toLowerCase() !== entry.originalWord.trim().toLowerCase()
-        ) {
-          germanExample = fillBlank(rawSentence, entry.originalWord);
-        }
-
-        // Русский перевод примера из контекста
-        let russianExample: string | null = null;
-        const cardTrans = (card?.translation || '').trim();
-        const entrySentenceTrans = (entry.sentenceTranslation || (card as any)?.sentenceTranslation || '').trim();
-
-        if (entrySentenceTrans && entrySentenceTrans !== translation) {
-          russianExample = entrySentenceTrans;
-        } else if (cardTrans && cardTrans !== translation) {
-          const isSentence =
-            cardTrans.endsWith('.') ||
-            cardTrans.endsWith('!') ||
-            cardTrans.length > 25 ||
-            cardTrans.split(/\s+/).length > 4;
-          if (isSentence) {
-            russianExample = cardTrans;
-          }
-        }
-
         return {
           key: lKey || entry.originalWord,
           word: entry.originalWord,
@@ -235,8 +186,6 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           level,
           masteredAt: entry.masteredAt || 0,
           nextReviewDate,
-          germanExample,
-          russianExample,
           card,
           entry,
         };
@@ -369,8 +318,8 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
             </button>
           </div>
 
-          {/* 2. APPLE PREMIUM SEGMENTED CONTROL ДЛЯ УРОВНЕЙ CEFR */}
-          <div className="p-1.5 bg-black/5 dark:bg-[#1C1C1E] border border-black/10 dark:border-white/[0.08] rounded-2xl flex items-center gap-1 overflow-x-auto scrollbar-none mb-3.5 shadow-inner">
+          {/* 2. APPLE SEGMENTED CONTROL ДЛЯ УРОВНЕЙ CEFR */}
+          <div className="p-1 bg-neutral-100 dark:bg-neutral-800/80 rounded-2xl flex items-center gap-1 border border-neutral-200/60 dark:border-white/5 mb-3.5 select-none overflow-x-auto scrollbar-none">
             {FILTER_LEVELS.map((lvl) => {
               const isSelected = selectedLevel === lvl;
               const count = levelCounts[lvl] ?? 0;
@@ -380,22 +329,14 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                   key={lvl}
                   type="button"
                   onClick={() => setSelectedLevel(lvl)}
-                  className={`flex-1 min-w-[56px] rounded-xl px-3 py-1.5 text-xs transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 select-none ${
+                  className={`flex-1 min-w-[56px] rounded-xl px-3 py-1.5 text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                     isSelected
-                      ? 'bg-white dark:bg-[#2C2C2E] text-neutral-900 dark:text-white font-semibold shadow-sm border border-black/5 dark:border-white/10'
-                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-black/5 dark:hover:bg-white/5 font-medium'
+                      ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-white font-medium shadow-sm'
+                      : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-200'
                   }`}
                 >
                   <span>{lvl}</span>
-                  <span
-                    className={`text-[10px] font-mono px-1 py-0.2 rounded ${
-                      isSelected
-                        ? 'bg-black/5 dark:bg-white/10 text-neutral-800 dark:text-neutral-200'
-                        : 'opacity-60 text-neutral-400 dark:text-neutral-500'
-                    }`}
-                  >
-                    {count}
-                  </span>
+                  <span className="opacity-70 font-mono text-[10px]">({count})</span>
                 </button>
               );
             })}
@@ -413,59 +354,56 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                   LEVEL_BADGE_STYLES[item.level] ||
                   'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25';
 
+                const srs = getSRSStatus(item.nextReviewDate);
+
                 return (
                   <div
                     key={item.key}
-                    className="py-3 px-2 rounded-xl hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40 transition-colors group flex flex-col gap-1"
+                    className="flex items-center justify-between py-2.5 px-2 rounded-xl hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40 transition-colors group"
                   >
-                    {/* Верхняя строка: Немецкое слово + Правая часть (Уровень + Карандаш) */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex flex-col min-w-0 pr-2">
-                        <span className="text-neutral-900 dark:text-white font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
-                          {formatSeparableWord(item.word)}
+                    {/* Левая часть: Немецкое слово + Краткий русский перевод */}
+                    <div className="flex flex-col min-w-0 pr-3">
+                      <span className="text-neutral-900 dark:text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
+                        {formatSeparableWord(item.word)}
+                      </span>
+                      {item.translation ? (
+                        <span className="text-neutral-500 dark:text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md">
+                          {item.translation}
                         </span>
-                        {item.translation ? (
-                          <span className="text-neutral-500 dark:text-neutral-400 font-normal text-xs mt-0.5">
-                            {item.translation}
-                          </span>
-                        ) : (
-                          <span className="text-neutral-400 dark:text-neutral-600 italic font-normal text-xs mt-0.5">
-                            Keine Übersetzung angegeben
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-shrink-0 pt-0.5">
-                        <span
-                          className={`text-[11px] font-semibold font-mono px-2 py-0.5 rounded-lg border ${badgeClass}`}
-                        >
-                          {item.level}
+                      ) : (
+                        <span className="text-neutral-400 dark:text-neutral-600 italic font-normal text-xs mt-0.5">
+                          Keine Übersetzung angegeben
                         </span>
-
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditor(item)}
-                          className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                          title="Karte bearbeiten"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      )}
                     </div>
 
-                    {/* Пример из контекста: Немецкое предложение + Русский перевод */}
-                    {item.germanExample && (
-                      <div className="mt-1 pl-3 border-l-2 border-blue-500/40 dark:border-blue-400/30 flex flex-col gap-0.5 text-xs">
-                        <p className="text-neutral-800 dark:text-neutral-200 font-normal leading-relaxed">
-                          {item.germanExample}
-                        </p>
-                        {item.russianExample && (
-                          <p className="text-neutral-500 dark:text-neutral-400 font-normal leading-relaxed">
-                            {item.russianExample}
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    {/* Правая часть: SRS-индикатор + Бейдж уровня + Карандаш */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {srs.isDue ? (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-500 dark:text-amber-400 border border-amber-500/30">
+                          {srs.label}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-neutral-400 dark:text-neutral-500 font-normal mr-1">
+                          {srs.label}
+                        </span>
+                      )}
+
+                      <span
+                        className={`text-[11px] font-semibold font-mono px-2 py-0.5 rounded-lg border ${badgeClass}`}
+                      >
+                        {item.level}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditor(item)}
+                        className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                        title="Karte bearbeiten"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 );
               })
