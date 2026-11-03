@@ -282,9 +282,23 @@ export async function recordCardProgress(
 
 // --- SUPABASE MULTI-DEVICE CLOUD SYNC FOR DAILY COUNTER ---
 
+let isSyncingDailyStats = false;
+let lastSyncDailyStatsTime: Record<string, number> = {};
+
 // Загрузка статистики из Supabase (Single Source of Truth в таблице user_stats)
 export async function syncCloudDailyStats(_userId?: string, lang: string = 'de'): Promise<number> {
   const cleanLang = (lang || 'de').toLowerCase();
+  const now = Date.now();
+  if (isSyncingDailyStats) {
+    return getLanguageDailyStats(cleanLang).learnedToday;
+  }
+  if (now - (lastSyncDailyStatsTime[cleanLang] || 0) < 20000) {
+    return getLanguageDailyStats(cleanLang).learnedToday;
+  }
+
+  isSyncingDailyStats = true;
+  lastSyncDailyStatsTime[cleanLang] = now;
+
   const upperLang = cleanLang.toUpperCase();
   const today = getDeviceLocalDate();
   let countFromDb: number | null = null;
@@ -387,6 +401,7 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de')
     window.dispatchEvent(new Event('storage-update'));
   }
 
+  isSyncingDailyStats = false;
   return finalCount;
 }
 
@@ -1108,36 +1123,60 @@ export function isCardDueForReview(card: any): boolean {
 export const isCardDue = isCardDueForReview;
 
 let lastSupabaseCardsCount = 0;
+let isFetchingAllCards = false;
+let lastFetchAllCardsTime = 0;
+let cachedAllCards: any[] = [];
+let pendingFetchAllCardsPromise: Promise<any[]> | null = null;
 
 export async function fetchAllUserCards(userId?: string): Promise<any[]> {
-  let allCards: any[] = [];
-  let from = 0;
-  const PAGE_SIZE = 1000;
-  let hasMore = true;
-
-  while (hasMore) {
-    const { data, error } = await supabase
-      .from('cards')
-      .select('*')
-      .order('id', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (error) {
-      console.error('🚨 [SYNC ERROR] Ошибка пагинации cards:', error);
-      break;
-    }
-    if (data && data.length > 0) {
-      allCards = allCards.concat(data);
-      from += PAGE_SIZE;
-      hasMore = data.length === PAGE_SIZE;
-    } else {
-      hasMore = false;
-    }
+  const now = Date.now();
+  if (pendingFetchAllCardsPromise) {
+    return pendingFetchAllCardsPromise;
   }
-  if (allCards.length > 0) {
-    lastSupabaseCardsCount = allCards.length;
+  if (now - lastFetchAllCardsTime < 25000 && cachedAllCards.length > 0) {
+    return cachedAllCards;
   }
-  return allCards;
+
+  isFetchingAllCards = true;
+  pendingFetchAllCardsPromise = (async () => {
+    let allCards: any[] = [];
+    let from = 0;
+    const PAGE_SIZE = 1000;
+    let hasMore = true;
+
+    try {
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('cards')
+          .select('*')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (error) {
+          console.error('🚨 [SYNC ERROR] Ошибка пагинации cards:', error);
+          break;
+        }
+        if (data && data.length > 0) {
+          allCards = allCards.concat(data);
+          from += PAGE_SIZE;
+          hasMore = data.length === PAGE_SIZE;
+        } else {
+          hasMore = false;
+        }
+      }
+      if (allCards.length > 0) {
+        lastSupabaseCardsCount = allCards.length;
+        cachedAllCards = allCards;
+        lastFetchAllCardsTime = Date.now();
+      }
+      return allCards.length > 0 ? allCards : cachedAllCards;
+    } finally {
+      isFetchingAllCards = false;
+      pendingFetchAllCardsPromise = null;
+    }
+  })();
+
+  return pendingFetchAllCardsPromise;
 }
 
 export async function updateCardInSupabase(cardId: string, validCard: any): Promise<boolean> {
@@ -1204,6 +1243,10 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
   return true;
 }
 
+let isFetchingDueCount = false;
+let lastDueCountFetchTime: Record<string, number> = {};
+let cachedDueCount: Record<string, number> = {};
+
 export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, bookId?: string): Promise<number> {
   const cleanLang = normalizeLanguage(lang);
   const now = Date.now();
@@ -1235,44 +1278,61 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         }
       });
     });
-    return deduplicateCardsByLemma(dueList, false).length;
+    const count = deduplicateCardsByLemma(dueList, false).length;
+    cachedDueCount[cleanLang] = count;
+    return count;
   }
 
-  // 2. Only if local decks are completely empty, query Supabase
-  if (bookId) {
-    try {
-      const { count, error } = await supabase
-        .from('cards')
-        .select('id, decks!inner(book_id)', { count: 'exact', head: true })
-        .or('isArchived.eq.true,masteryLevel.gte.4')
-        .not('nextReviewDate', 'is', null)
-        .lte('nextReviewDate', now)
-        .eq('decks.book_id', bookId);
+  // 2. Only if local decks are completely empty, query Supabase with throttle & in-flight guard
+  if (isFetchingDueCount) return cachedDueCount[cleanLang] || 0;
+  if (now - (lastDueCountFetchTime[cleanLang] || 0) < 20000) return cachedDueCount[cleanLang] || 0;
 
-      if (!error && typeof count === 'number') {
-        return count;
+  isFetchingDueCount = true;
+  lastDueCountFetchTime[cleanLang] = now;
+  try {
+    if (bookId) {
+      try {
+        const { count, error } = await supabase
+          .from('cards')
+          .select('id, decks!inner(book_id)', { count: 'exact', head: true })
+          .or('isArchived.eq.true,masteryLevel.gte.4')
+          .not('nextReviewDate', 'is', null)
+          .lte('nextReviewDate', now)
+          .eq('decks.book_id', bookId);
+
+        if (!error && typeof count === 'number') {
+          cachedDueCount[cleanLang] = count;
+          return count;
+        }
+      } catch (e) {
+        console.warn('Direct query on cards count for book error:', e);
       }
-    } catch (e) {
-      console.warn('Direct query on cards count for book error:', e);
+    } else {
+      try {
+        const { count, error } = await supabase
+          .from('cards')
+          .select('id, decks!inner(language)', { count: 'exact', head: true })
+          .or('isArchived.eq.true,masteryLevel.gte.4')
+          .not('nextReviewDate', 'is', null)
+          .lte('nextReviewDate', now)
+          .ilike('decks.language', cleanLang);
+
+        if (!error && typeof count === 'number') {
+          cachedDueCount[cleanLang] = count;
+          return count;
+        }
+      } catch (e) {}
     }
-  } else {
-    try {
-      const { count, error } = await supabase
-        .from('cards')
-        .select('id, decks!inner(language)', { count: 'exact', head: true })
-        .or('isArchived.eq.true,masteryLevel.gte.4')
-        .not('nextReviewDate', 'is', null)
-        .lte('nextReviewDate', now)
-        .ilike('decks.language', cleanLang);
-
-      if (!error && typeof count === 'number') {
-        return count;
-      }
-    } catch (e) {}
+  } finally {
+    isFetchingDueCount = false;
   }
 
-  return 0;
+  return cachedDueCount[cleanLang] || 0;
 }
+
+let isFetchingDueCardsFromCloud = false;
+let lastDueCardsFromCloudTime: Record<string, number> = {};
+let cachedDueCardsFromCloud: Record<string, { deckId: string, card: Flashcard }[]> = {};
 
 export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: string): Promise<{ deckId: string, card: Flashcard }[]> {
   const cleanLang = normalizeLanguage(lang);
@@ -1295,8 +1355,20 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
         }
       });
     });
-    if (list.length > 0) return deduplicateCardsByLemma(list, false);
+    if (list.length > 0) {
+      const result = deduplicateCardsByLemma(list, false);
+      cachedDueCardsFromCloud[cleanLang] = result;
+      return result;
+    }
   }
+
+  if (isFetchingDueCardsFromCloud) return cachedDueCardsFromCloud[cleanLang] || [];
+  if (now - (lastDueCardsFromCloudTime[cleanLang] || 0) < 20000 && cachedDueCardsFromCloud[cleanLang]) {
+    return cachedDueCardsFromCloud[cleanLang];
+  }
+
+  isFetchingDueCardsFromCloud = true;
+  lastDueCardsFromCloudTime[cleanLang] = now;
 
   try {
     let query = supabase
@@ -1336,16 +1408,30 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
             forms: row.forms
           } as Flashcard
         }));
-      return deduplicateCardsByLemma(mapped, false);
+      const result = deduplicateCardsByLemma(mapped, false);
+      cachedDueCardsFromCloud[cleanLang] = result;
+      return result;
     }
   } catch (e) {
     console.error('Failed to fetch due cards from cloud:', e);
+  } finally {
+    isFetchingDueCardsFromCloud = false;
   }
 
-  return [];
+  return cachedDueCardsFromCloud[cleanLang] || [];
 }
 
+let isSyncingCardsFromSupabase = false;
+let lastSyncCardsFromSupabaseTime = 0;
+
 export async function syncCardsFromSupabase(): Promise<void> {
+  const now = Date.now();
+  if (isSyncingCardsFromSupabase) return;
+  if (now - lastSyncCardsFromSupabaseTime < 25000) return;
+
+  isSyncingCardsFromSupabase = true;
+  lastSyncCardsFromSupabaseTime = now;
+
   try {
     const remoteCards = await fetchAllUserCards();
     if (!remoteCards || remoteCards.length === 0) return;
@@ -1457,6 +1543,8 @@ export async function syncCardsFromSupabase(): Promise<void> {
     await autoBackfillMasteredWords(hasChanges ? nextDecks : currentDecks, useStore.getState().books, useStore.getState().appLanguage);
   } catch (err) {
     console.warn("syncCardsFromSupabase failed:", err);
+  } finally {
+    isSyncingCardsFromSupabase = false;
   }
 }
 
@@ -4536,7 +4624,7 @@ function RapidSession({
         }
       };
     });
-    const uniqueList = deduplicateCardsByLemma(list);
+    const uniqueList = deduplicateCardsByLemma(list, false);
     setQueue([...uniqueList].sort(() => Math.random() - 0.5));
     setTotal(uniqueList.length);
     setSessionTotal(uniqueList.length);
@@ -4559,7 +4647,7 @@ function RapidSession({
         translation: c.translation || c.hint || ''
       }
     }));
-    const uniqueList = deduplicateCardsByLemma(list);
+    const uniqueList = deduplicateCardsByLemma(list, false);
     setQueue([...uniqueList].sort(() => Math.random() - 0.5));
     setTotal(uniqueList.length);
     setSessionTotal(uniqueList.length);
@@ -4590,7 +4678,7 @@ function RapidSession({
         }
       }
     }
-    list = deduplicateCardsByLemma(list);
+    list = deduplicateCardsByLemma(list, false);
     for (let i = list.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [list[i], list[j]] = [list[j], list[i]];
@@ -4961,7 +5049,7 @@ function StudyInterface({
 
   useEffect(() => {
     if (reviewCards) {
-      const uniqueReview = deduplicateCardsByLemma([...reviewCards]);
+      const uniqueReview = deduplicateCardsByLemma([...reviewCards], false);
       setActiveCards(uniqueReview.sort(() => Math.random() - 0.5));
       setInitialTotal(uniqueReview.length);
       setMasteredInSession(0);
@@ -4973,7 +5061,7 @@ function StudyInterface({
       if (deck) {
         const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
         const rawList = active.length > 0 ? active : deck.cards.map(c => ({ deckId, card: c }));
-        const list = deduplicateCardsByLemma(rawList);
+        const list = deduplicateCardsByLemma(rawList, false);
         setActiveCards(list.sort(() => Math.random() - 0.5));
         setInitialTotal(list.length);
         setMasteredInSession(0);
@@ -5194,7 +5282,7 @@ function StudyInterface({
         }
       };
     });
-    const uniqueList = deduplicateCardsByLemma(list);
+    const uniqueList = deduplicateCardsByLemma(list, false);
     setActiveCards([...uniqueList].sort(() => Math.random() - 0.5));
     setInitialTotal(uniqueList.length);
     setMasteredInSession(0);
@@ -5215,7 +5303,8 @@ function StudyInterface({
           sentence: c.sentence || '',
           translation: c.translation || c.hint || ''
         }
-      }))
+      })),
+      false
     );
     setActiveCards(cardsToReview.sort(() => Math.random() - 0.5));
     setInitialTotal(cardsToReview.length);
@@ -9882,12 +9971,16 @@ export default function App() {
     refreshDueCardsCount(appLanguage);
 
     let debounceTimer: any = null;
+    let lastSyncTime = 0;
     const handleSync = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
+        const now = Date.now();
+        if (now - lastSyncTime < 15000) return; // Не спамим базу чаще раза в 15 секунд
+        lastSyncTime = now;
         checkAndResetDailyProgress();
-        refreshDueCardsCount(appLanguage);
-      }, 300);
+        useStore.getState().refreshDueCardsCount(appLanguage);
+      }, 500);
     };
 
     const handleVisibility = () => {
@@ -9920,7 +10013,7 @@ export default function App() {
       window.removeEventListener('pageshow', handleSync);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [appLanguage, refreshDueCardsCount]);
+  }, [appLanguage]);
 
 
   const [theoryViewDeckId, setTheoryViewDeckId] = useState<string | null>(null);
@@ -10365,8 +10458,12 @@ export default function App() {
       .subscribe();
 
     // 2. Refetch on focus and visibilitychange (e.g. switching between Safari and Chrome tabs/windows)
+    let lastFocusSyncTime = 0;
     const handleSyncOnFocus = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        const now = Date.now();
+        if (now - lastFocusSyncTime < 30000) return; // Минимум 30 сек между фокус-синхронизациями
+        lastFocusSyncTime = now;
         try {
           await syncCardsFromSupabase();
           const { data } = await supabase
@@ -10510,14 +10607,15 @@ export default function App() {
   }, [decks, appLanguage, activeBookId]);
 
   // ДИАГНОСТИЧЕСКИЙ ЛОГ В КОНСОЛЬ (ПРОВЕРКА ТОЧНОСТИ)
+  const decksLength = decks.length;
   useEffect(() => {
-    if (!isLoaded || decks.length === 0) return;
+    if (!isLoaded || decksLength === 0) return;
     const allCards = decks.flatMap(d => d.cards || []);
     const masteredLemmas = getMasteredLemmasSet(appLanguage);
     console.log(
       `📊 [SYNC CHECK] Карточек в Supabase: ${lastSupabaseCardsCount || allCards.length} | Карточек к повтору: ${dueCardsCount} | Слов в матрице: ${masteredLemmas.size}`
     );
-  }, [isLoaded, decks, dueCardsCount, appLanguage]);
+  }, [isLoaded, decksLength, dueCardsCount, appLanguage]);
 
   const displayDueCount = dueCardsCount;
 

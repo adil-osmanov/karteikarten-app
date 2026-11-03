@@ -212,6 +212,20 @@ const isSyncingByLang: Record<AppLang, boolean> = {
   es: false,
 };
 
+const lastCloudSyncByLang: Record<AppLang, number> = {
+  de: 0,
+  en: 0,
+  ru: 0,
+  es: 0,
+};
+
+const hasAttemptedCloudSyncByLang: Record<AppLang, boolean> = {
+  de: false,
+  en: false,
+  ru: false,
+  es: false,
+};
+
 function initMatrixStore(lang: AppLang) {
   if (typeof window === 'undefined') return;
   if (isInitializedByLang[lang]) return;
@@ -279,7 +293,12 @@ function initMatrixStore(lang: AppLang) {
 export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<void> {
   initMatrixStore(lang);
   if (isSyncingByLang[lang]) return;
+  const now = Date.now();
+  if (now - (lastCloudSyncByLang[lang] || 0) < 30000) return; // Защита от частых запросов (минимум 30 сек)
+
   isSyncingByLang[lang] = true;
+  lastCloudSyncByLang[lang] = now;
+  hasAttemptedCloudSyncByLang[lang] = true;
 
   try {
     const existingMap = uniqueMasteredWordsByLang[lang];
@@ -706,8 +725,8 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     setStats({ ...globalMatrixStatsByLang[normLang] });
     setTodayProgress(getWordsLearnedToday(normLang));
 
-    // Если локальный стор еще пуст, подтягиваем из облака
-    if (uniqueMasteredWordsByLang[normLang].size === 0) {
+    // Синхронизируем из облака не более 1 раза на старте при абсолютно пустом сторе
+    if (!hasAttemptedCloudSyncByLang[normLang] && uniqueMasteredWordsByLang[normLang].size === 0) {
       syncMasteredWordsFromCloud(normLang);
     }
 
