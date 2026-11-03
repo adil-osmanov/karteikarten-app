@@ -25,6 +25,7 @@ import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
 import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, getMasteredLemmasSet, autoBackfillMasteredWords } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
+import { normalizeLemmaKey, deduplicateCardsByLemma } from "@/lib/utils/lemmaNormalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
@@ -1220,7 +1221,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
     : 0;
 
   if (inMemoryDecks && inMemoryDecks.length > 0 && totalCardsInMemory > 0) {
-    let localCount = 0;
+    const dueList: Flashcard[] = [];
     inMemoryDecks.forEach(deck => {
       if (bookId) {
         const dBookId = deck.bookId || (deck as any).book_id;
@@ -1230,11 +1231,11 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
       }
       deck.cards?.forEach(card => {
         if (isCardDueForReview(card)) {
-          localCount++;
+          dueList.push(card);
         }
       });
     });
-    return localCount;
+    return deduplicateCardsByLemma(dueList, false).length;
   }
 
   // 2. Only if local decks are completely empty, query Supabase
@@ -1294,7 +1295,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
         }
       });
     });
-    if (list.length > 0) return list;
+    if (list.length > 0) return deduplicateCardsByLemma(list, false);
   }
 
   try {
@@ -1316,7 +1317,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       .limit(1000);
 
     if (!error && Array.isArray(data) && data.length > 0) {
-      return data
+      const mapped = data
         .filter((row: any) => isCardDueForReview(row))
         .map((row: any) => ({
           deckId: row.deck_id || row.decks?.id || '',
@@ -1335,6 +1336,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
             forms: row.forms
           } as Flashcard
         }));
+      return deduplicateCardsByLemma(mapped, false);
     }
   } catch (e) {
     console.error('Failed to fetch due cards from cloud:', e);
@@ -2316,17 +2318,48 @@ export const useStore = create<DeckState>()((set, get) => ({
     // 1. ONLINE-FIRST AWAIT: Сначала сохраняем статус карточки в Supabase
     await updateCardInSupabase(cardId, validCard);
 
-    // 2. Обновляем Zustand-стейт и локальный IndexedDB
+    // 2. Автоматическая синхронизация карточек-близнецов (с одинаковым normalizeLemmaKey) в других колодах
+    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+    const targetLemmaKey = normalizeLemmaKey(rawWord);
+    const siblingUpdates: { id: string; card: Flashcard }[] = [];
+
+    // 3. Обновляем Zustand-стейт и локальный IndexedDB
     set((state) => {
       const newDecks = state.decks.map((d) => {
-        if (d.id !== deckId) return d;
+        const updatedCards = d.cards.map((c) => {
+          if (c.id === cardId && d.id === deckId) {
+            return validCard;
+          }
+          if (
+            targetLemmaKey &&
+            targetLemmaKey.length >= 2 &&
+            (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) &&
+            c.id !== cardId
+          ) {
+            const cWord = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+            if (normalizeLemmaKey(cWord) === targetLemmaKey) {
+              const syncedSibling: Flashcard = {
+                ...c,
+                ...srsUpdate,
+                updated_at: validCard.updated_at,
+              };
+              siblingUpdates.push({ id: c.id, card: syncedSibling });
+              return syncedSibling;
+            }
+          }
+          return c;
+        });
         return {
           ...d,
-          cards: d.cards.map((c) => (c.id === cardId ? validCard : c)),
+          cards: updatedCards,
         };
       });
       return { decks: newDecks };
     });
+
+    if (siblingUpdates.length > 0) {
+      Promise.allSettled(siblingUpdates.map((s) => updateCardInSupabase(s.id, s.card))).catch(() => {});
+    }
 
     const nextDecks = get().decks;
     await setIDBItem('app_decks', nextDecks);
@@ -2336,8 +2369,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
 
     // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
-    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const singleLemma = normalizeGermanLemma(rawWord);
+    const singleLemma = targetLemmaKey || normalizeGermanLemma(rawWord);
     const safeLemma = singleLemma.split(' ')[0].trim();
 
     if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
@@ -2408,17 +2440,53 @@ export const useStore = create<DeckState>()((set, get) => ({
     // 1. ONLINE-FIRST AWAIT: Сначала сохраняем статус карточки в Supabase
     await updateCardInSupabase(cardId, card);
 
-    // 2. Обновляем состояние и IndexedDB
+    const validCard = card;
+    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+    const targetLemmaKey = normalizeLemmaKey(rawWord);
+    const siblingUpdates: { id: string; card: Flashcard }[] = [];
+
+    // 2. Обновляем состояние и IndexedDB (включая карточки-близнецы в других колодах при полном освоении)
     set((state) => {
       const newDecks = state.decks.map((d) => {
-        if (d.id !== deckId) return d;
+        const updatedCards = d.cards.map((c) => {
+          if (c.id === cardId && d.id === deckId) {
+            return card;
+          }
+          if (
+            targetLemmaKey &&
+            targetLemmaKey.length >= 2 &&
+            (card.isArchived || (card.masteryLevel && card.masteryLevel >= 4)) &&
+            c.id !== cardId
+          ) {
+            const cWord = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+            if (normalizeLemmaKey(cWord) === targetLemmaKey) {
+              const syncedSibling: Flashcard = {
+                ...c,
+                masteryLevel: card.masteryLevel,
+                isArchived: card.isArchived,
+                nextReviewDate: card.nextReviewDate,
+                interval: card.interval,
+                repetitions: card.repetitions,
+                easeFactor: card.easeFactor,
+                updated_at: card.updated_at,
+              };
+              siblingUpdates.push({ id: c.id, card: syncedSibling });
+              return syncedSibling;
+            }
+          }
+          return c;
+        });
         return {
           ...d,
-          cards: d.cards.map((c) => (c.id === cardId ? card : c)),
+          cards: updatedCards,
         };
       });
       return { decks: newDecks };
     });
+
+    if (siblingUpdates.length > 0) {
+      Promise.allSettled(siblingUpdates.map((s) => updateCardInSupabase(s.id, s.card))).catch(() => {});
+    }
 
     const nextDecks = get().decks;
     await setIDBItem('app_decks', nextDecks);
@@ -2427,9 +2495,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       get().decrementDueCardsCount();
     }
 
-    const validCard = card;
-    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const singleLemma = normalizeGermanLemma(rawWord);
+    const singleLemma = targetLemmaKey || normalizeGermanLemma(rawWord);
     const safeLemma = singleLemma.split(' ')[0].trim();
 
     if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
@@ -4456,9 +4522,10 @@ function RapidSession({
         }
       };
     });
-    setQueue([...list].sort(() => Math.random() - 0.5));
-    setTotal(list.length);
-    setSessionTotal(list.length);
+    const uniqueList = deduplicateCardsByLemma(list);
+    setQueue([...uniqueList].sort(() => Math.random() - 0.5));
+    setTotal(uniqueList.length);
+    setSessionTotal(uniqueList.length);
     setMastered(0);
     setSessionCorrect(0);
     setSessionMistakes([]);
@@ -4478,9 +4545,10 @@ function RapidSession({
         translation: c.translation || c.hint || ''
       }
     }));
-    setQueue([...list].sort(() => Math.random() - 0.5));
-    setTotal(list.length);
-    setSessionTotal(list.length);
+    const uniqueList = deduplicateCardsByLemma(list);
+    setQueue([...uniqueList].sort(() => Math.random() - 0.5));
+    setTotal(uniqueList.length);
+    setSessionTotal(uniqueList.length);
     setMastered(0);
     setSessionCorrect(0);
     setSessionMistakes([]);
@@ -4508,6 +4576,7 @@ function RapidSession({
         }
       }
     }
+    list = deduplicateCardsByLemma(list);
     for (let i = list.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [list[i], list[j]] = [list[j], list[i]];
@@ -4844,28 +4913,29 @@ function StudyInterface({
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
-      return [...reviewCards].sort(() => Math.random() - 0.5);
+      return deduplicateCardsByLemma([...reviewCards], false).sort(() => Math.random() - 0.5);
     }
     if (deckId) {
       const deck = useStore.getState().decks.find((d) => d.id === deckId);
       if (deck) {
         const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
         if (active.length > 0) {
-          return active.sort(() => Math.random() - 0.5);
+          return deduplicateCardsByLemma(active, false).sort(() => Math.random() - 0.5);
         }
-        return deck.cards.map(c => ({ deckId, card: c })).sort(() => Math.random() - 0.5);
+        return deduplicateCardsByLemma(deck.cards.map(c => ({ deckId, card: c })), false).sort(() => Math.random() - 0.5);
       }
     }
     return [];
   });
   const [turn, setTurn] = useState(0);
   const [initialTotal, setInitialTotal] = useState(() => {
-    if (reviewCards && reviewCards.length > 0) return reviewCards.length;
+    if (reviewCards && reviewCards.length > 0) return deduplicateCardsByLemma(reviewCards, false).length;
     if (deckId) {
       const deck = useStore.getState().decks.find((d) => d.id === deckId);
       if (deck) {
         const active = deck.cards.filter((c) => !c.isArchived);
-        return active.length > 0 ? active.length : deck.cards.length;
+        const source = active.length > 0 ? active : deck.cards;
+        return deduplicateCardsByLemma(source, false).length;
       }
     }
     return 0;
@@ -4877,8 +4947,9 @@ function StudyInterface({
 
   useEffect(() => {
     if (reviewCards) {
-      setActiveCards([...reviewCards].sort(() => Math.random() - 0.5));
-      setInitialTotal(reviewCards.length);
+      const uniqueReview = deduplicateCardsByLemma([...reviewCards]);
+      setActiveCards(uniqueReview.sort(() => Math.random() - 0.5));
+      setInitialTotal(uniqueReview.length);
       setMasteredInSession(0);
       setSessionCorrect(0);
       setSessionMistakes([]);
@@ -4887,7 +4958,8 @@ function StudyInterface({
       const deck = useStore.getState().decks.find((d) => d.id === deckId);
       if (deck) {
         const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
-        const list = active.length > 0 ? active : deck.cards.map(c => ({ deckId, card: c }));
+        const rawList = active.length > 0 ? active : deck.cards.map(c => ({ deckId, card: c }));
+        const list = deduplicateCardsByLemma(rawList);
         setActiveCards(list.sort(() => Math.random() - 0.5));
         setInitialTotal(list.length);
         setMasteredInSession(0);
@@ -5108,8 +5180,9 @@ function StudyInterface({
         }
       };
     });
-    setActiveCards([...list].sort(() => Math.random() - 0.5));
-    setInitialTotal(list.length);
+    const uniqueList = deduplicateCardsByLemma(list);
+    setActiveCards([...uniqueList].sort(() => Math.random() - 0.5));
+    setInitialTotal(uniqueList.length);
     setMasteredInSession(0);
     setTurn(t => t + 1);
     setIsMistakesReviewMode(true);
@@ -5119,15 +5192,17 @@ function StudyInterface({
   const handleReviewOnlyMistakes = () => {
     stopAllGermanSpeech();
     if (sessionMistakes.length === 0) return;
-    const cardsToReview = sessionMistakes.map(c => ({
-      deckId: currentDeckId || deckId || '',
-      card: {
-        ...c,
-        targetWord: c.targetWord || (c as any).front || (c as any).lemma || '',
-        sentence: c.sentence || '',
-        translation: c.translation || c.hint || ''
-      }
-    }));
+    const cardsToReview = deduplicateCardsByLemma(
+      sessionMistakes.map(c => ({
+        deckId: currentDeckId || deckId || '',
+        card: {
+          ...c,
+          targetWord: c.targetWord || (c as any).front || (c as any).lemma || '',
+          sentence: c.sentence || '',
+          translation: c.translation || c.hint || ''
+        }
+      }))
+    );
     setActiveCards(cardsToReview.sort(() => Math.random() - 0.5));
     setInitialTotal(cardsToReview.length);
     setMasteredInSession(0);
@@ -10339,11 +10414,12 @@ export default function App() {
     });
     
     if (drillCards.length > 0) {
-      for (let i = drillCards.length - 1; i > 0; i--) {
+      const uniqueDrillCards = deduplicateCardsByLemma(drillCards);
+      for (let i = uniqueDrillCards.length - 1; i > 0; i--) {
          const j = Math.floor(Math.random() * (i + 1));
-         [drillCards[i], drillCards[j]] = [drillCards[j], drillCards[i]];
+         [uniqueDrillCards[i], uniqueDrillCards[j]] = [uniqueDrillCards[j], uniqueDrillCards[i]];
       }
-      setDrillCards(drillCards);
+      setDrillCards(uniqueDrillCards);
     } else {
       alert(`Keine aktiven Karten für Level ${level} (${category}) gefunden.`);
     }
@@ -10401,12 +10477,12 @@ export default function App() {
         }
       });
     });
-    return list;
+    return deduplicateCardsByLemma(list, false);
   }, [filteredDecksList]);
 
   // Хедерный подсчет повторений: строго для текущего активного языка (appLanguage)
   const dueCardsCount = useMemo(() => {
-    return decks
+    const rawDue = decks
       .filter(deck => {
         if (activeBookId) {
           const dBookId = deck.bookId || (deck as any).book_id;
@@ -10415,8 +10491,8 @@ export default function App() {
         return !deck.language || deck.language.toLowerCase() === appLanguage.toLowerCase();
       })
       .flatMap(deck => deck.cards || [])
-      .filter(isCardDueForReview)
-      .length;
+      .filter(isCardDueForReview);
+    return deduplicateCardsByLemma(rawDue, false).length;
   }, [decks, appLanguage, activeBookId]);
 
   // ДИАГНОСТИЧЕСКИЙ ЛОГ В КОНСОЛЬ (ПРОВЕРКА ТОЧНОСТИ)
@@ -10437,7 +10513,7 @@ export default function App() {
 
     // 1. FAST IN-MEMORY PATH: Use local dueCards immediately (0 network requests)
     if (dueCards.length > 0) {
-      setReviewCards(dueCards);
+      setReviewCards(deduplicateCardsByLemma(dueCards));
       return;
     }
 
@@ -10445,7 +10521,7 @@ export default function App() {
       const targetLang = activeBook?.language || appLanguage;
       const freshCards = await fetchDueCardsFromCloud(targetLang, activeBookId || undefined);
       if (freshCards.length > 0) {
-        setReviewCards(freshCards);
+        setReviewCards(deduplicateCardsByLemma(freshCards));
         return;
       }
     } catch (e) {
@@ -11082,7 +11158,7 @@ export default function App() {
                 });
                 initAudioCtx();
                 setIsReviewingMistakes(true);
-                setReviewCards(list);
+                setReviewCards(deduplicateCardsByLemma(list));
               }
             } catch(e) {}
           }}

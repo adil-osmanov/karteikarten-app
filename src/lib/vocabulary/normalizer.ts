@@ -1,4 +1,5 @@
 import { AppLang, normalizeLanguageCode } from './defaultLexiconMap';
+import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
 
 /**
  * Normalization utility for vocabulary words and lemmas across DE, EN, and RU.
@@ -10,13 +11,19 @@ export function extractLemma(rawFront: string, lang: AppLang | string = 'de'): s
   if (!rawFront || typeof rawFront !== 'string') return '';
   const normLang = normalizeLanguageCode(lang);
 
+  if (normLang === 'de') {
+    const normalized = normalizeLemmaKey(rawFront);
+    const single = normalized.split(/\s+/)[0] || '';
+    return single.trim();
+  }
+
   let cleaned = rawFront
     .toLowerCase()
     // 1. Срезаем скобки со сносками [ ... ] или ( ... )
     .replace(/\[.*?\]/g, '')
     .replace(/\(.*?\)/g, '')
     // 2. Срезаем артикли в зависимости от языка
-    .replace(normLang === 'de' ? /^(der|die|das|ein|eine)\s+/i : normLang === 'en' ? /^(the|a|an|to)\s+/i : /^$/, '')
+    .replace(normLang === 'en' ? /^(the|a|an|to)\s+/i : /^$/, '')
     // 3. Срезаем разделители отделяемых приставок и спецсимволы
     .replace(/[|•·\(\)\[\]\{\},;:\.!\?«»"']/g, '')
     // 4. Берем первую часть до разделителей (/, ;, |)
