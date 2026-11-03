@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Check, Pencil } from 'lucide-react';
 import type { Flashcard } from '@/app/page';
+import type { CEFRLevel } from '@/lib/vocabulary/cefrLevelDetector';
 
 export interface CardEditorModalProps {
   card?: Flashcard | null;
@@ -22,6 +23,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   const [translation, setTranslation] = useState(card?.translation || '');
   const [baseWordInfo, setBaseWordInfo] = useState(card?.baseWordInfo || '');
   const [forms, setForms] = useState(card?.forms || card?.hint || '');
+  const [level, setLevel] = useState<CEFRLevel | null>((card?.level as CEFRLevel) || null);
   const [isSaving, setIsSaving] = useState(false);
 
   const sentenceTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -34,6 +36,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
       setTranslation(card.translation || '');
       setBaseWordInfo(card.baseWordInfo || '');
       setForms(card.forms || card.hint || '');
+      setLevel((card.level as CEFRLevel) || null);
       setIsSaving(false);
       
       // Auto-focus sentence input after opening
@@ -61,7 +64,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, card, sentence, targetWord, translation, baseWordInfo, forms]);
+  }, [isOpen, card, sentence, targetWord, translation, baseWordInfo, forms, level]);
 
   if (!isOpen || !card) return null;
 
@@ -89,6 +92,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
         baseWordInfo: trimmedBaseWordInfo || null,
         forms: trimmedForms || null,
         hint: trimmedForms || null,
+        level: level || null,
         updated_at: new Date().toISOString(),
       };
 
@@ -172,7 +176,52 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
             />
           </div>
 
-          {/* 3. Translation */}
+          {/* 3. CEFR Level Selector */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                CEFR-Niveau (Level)
+              </label>
+              {level && (
+                <button
+                  type="button"
+                  onClick={() => setLevel(null)}
+                  className="text-[11px] text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 underline cursor-pointer"
+                >
+                  Zurücksetzen (Auto)
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {(['A1', 'A2', 'B1', 'B2', 'C1'] as const).map((lvl) => {
+                const isSelected = level === lvl;
+                return (
+                  <button
+                    key={lvl}
+                    type="button"
+                    onClick={() => setLevel(isSelected ? null : lvl)}
+                    className={`py-1.5 px-2 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer border ${
+                      isSelected
+                        ? lvl === 'A1'
+                          ? 'bg-emerald-500 text-white border-emerald-600 shadow-sm shadow-emerald-500/20'
+                          : lvl === 'A2'
+                          ? 'bg-teal-500 text-white border-teal-600 shadow-sm shadow-teal-500/20'
+                          : lvl === 'B1'
+                          ? 'bg-blue-600 text-white border-blue-700 shadow-sm shadow-blue-500/20'
+                          : lvl === 'B2'
+                          ? 'bg-amber-500 text-white border-amber-600 shadow-sm shadow-amber-500/20'
+                          : 'bg-purple-600 text-white border-purple-700 shadow-sm shadow-purple-500/20'
+                        : 'bg-neutral-100 dark:bg-neutral-800/60 text-neutral-600 dark:text-neutral-300 border-transparent hover:bg-neutral-200/70 dark:hover:bg-neutral-700/60'
+                    }`}
+                  >
+                    {lvl}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 4. Translation */}
           <div>
             <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
               Übersetzung (Back / Russian Translation)

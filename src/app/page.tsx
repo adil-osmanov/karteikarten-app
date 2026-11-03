@@ -1085,6 +1085,8 @@ export interface Flashcard {
   hint?: string | null;
   grammarHint?: string | null;
   explanation?: string | null;
+  level?: string | null;
+  cefrLevel?: string | null;
   updated_at?: string;
 }
 
@@ -2350,6 +2352,25 @@ export const useStore = create<DeckState>()((set, get) => ({
       if (error) {
         console.error('🚨 [CARD EDIT ERROR] Supabase update error:', error);
         return false;
+      }
+
+      // Синхронизация явного уровня карточки с user_mastered_words при наличии записи
+      if (updates.level && updates.targetWord) {
+        try {
+          const lemmaKey = normalizeLemmaKey(updates.targetWord);
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.id && lemmaKey) {
+            await supabase
+              .from('user_mastered_words')
+              .update({ cefr_level: updates.level })
+              .eq('user_id', user.id)
+              .eq('lemma', lemmaKey);
+          }
+        } catch {}
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('stats-update'));
       }
     } catch (err) {
       console.error('🚨 [CARD EDIT ERROR] Cloud sync failure:', err);

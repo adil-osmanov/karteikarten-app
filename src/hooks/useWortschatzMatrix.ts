@@ -369,7 +369,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
         const priorTs = Math.max(prevEntry?.masteredAt || 0, remoteMeta?.masteredAt || 0);
         const masteredAt = extractCardMasteredAt(c, priorTs);
 
-        const deckLevel = deckObj?.level || null;
+        const deckLevel = deckObj?.level || deckObj?.name || deckObj?.title || null;
         const cardLevel = (c as any).level || remoteMeta?.level || null;
         const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, lang);
 
@@ -601,6 +601,8 @@ export async function autoBackfillMasteredWords(
       const deckLevel =
         (deck as any).level ||
         (parentBook?.activeLevels?.length === 1 ? parentBook.activeLevels[0] : null) ||
+        (deck as any).name ||
+        (deck as any).title ||
         parentBook?.title ||
         null;
 
