@@ -33,6 +33,8 @@ import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
 import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
 import { CardEditorModal } from "@/components/CardEditorModal";
+import { formatSeparableWord } from "@/lib/utils/formatSeparableWord";
+export { formatSeparableWord };
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3400,21 +3402,6 @@ export function TrennbarDottedBar() {
       title="Trennbare Vorsilbe"
       aria-hidden="true"
     />
-  );
-}
-
-export function formatSeparableWord(word: string): React.ReactNode {
-  if (!word || !word.includes('|')) return word;
-  const parts = word.split('|');
-  return (
-    <span className="inline-flex items-center">
-      <span>{parts[0]}</span>
-      <span 
-        className="inline-block w-[2.5px] h-[0.8em] mx-1 bg-blue-500/80 dark:bg-blue-400 rounded-full align-middle" 
-        title="Trennbare Vorsilbe"
-      />
-      <span>{parts.slice(1).join('')}</span>
-    </span>
   );
 }
 

@@ -2,12 +2,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronRight, ChevronDown, BookOpen } from 'lucide-react';
 import {
   useWortschatzMatrix,
   C1_TARGET_WORDS,
   CEFRLevel,
   normalizeLanguageCode,
 } from '@/hooks/useWortschatzMatrix';
+import { MasteredWordsModal } from './MasteredWordsModal';
 
 export { C1_TARGET_WORDS };
 
@@ -23,6 +25,8 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
   language,
 }) => {
   const [isMatrixOpen, setIsMatrixOpen] = useState(false);
+  const [isWordsModalOpen, setIsWordsModalOpen] = useState(false);
+  const [modalInitialLevel, setModalInitialLevel] = useState<'Alle' | CEFRLevel>('Alle');
   const [fallbackLang, setFallbackLang] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -108,15 +112,21 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
         ref={buttonRef}
         type="button"
         onClick={() => setIsMatrixOpen(!isMatrixOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all select-none active:scale-95 cursor-pointer bg-white hover:bg-zinc-50 border border-black/[0.08] text-zinc-800 shadow-sm dark:bg-zinc-900 dark:hover:bg-zinc-800 dark:border-white/10 dark:text-zinc-200"
+        className="group flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all select-none active:scale-95 cursor-pointer bg-white hover:bg-zinc-50 border border-black/[0.08] text-zinc-800 shadow-sm dark:bg-zinc-900 dark:hover:bg-zinc-800 dark:border-white/10 dark:text-zinc-200 hover:border-blue-500/30"
+        title="Wortschatz-Matrix öffnen"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-        <span className="text-xs font-semibold tracking-tight">
+        <span className="text-xs font-semibold tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
           {totalMastered.toLocaleString(localeStr)} {wordLabel}
         </span>
         <span className="text-xs text-zinc-400 dark:text-zinc-500 font-mono">
           • {totalMastered === 0 ? 'A1' : currentLevel || 'A1'}
         </span>
+        <ChevronDown
+          className={`w-3 h-3 text-zinc-400 transition-transform duration-200 ${
+            isMatrixOpen ? 'rotate-180 text-blue-500' : 'group-hover:translate-y-0.5'
+          }`}
+        />
       </button>
 
       {/* ПОПОВЕР МАТРИЦЫ СЛОВАРНОГО ЗАПАСА */}
@@ -134,11 +144,23 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
             {/* ШАПКА МАТРИЦЫ: СЧЕТЧИК СЛОВ, ГАРАНТИРОВАННЫЙ БЕЙДЖ ЗА СЕГОДНЯ И % ОТ ЦЕЛИ C1 */}
             <div className="flex items-start justify-between mb-5">
               <div className="flex flex-col gap-1.5">
-                <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-baseline gap-2">
-                  <span>{totalMastered.toLocaleString(localeStr)}</span>
-                  <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500">
-                    / {targetWordsForLang.toLocaleString(localeStr)}
-                  </span>
+                {/* Интерактивный кликабельный счетчик слов */}
+                <div
+                  onClick={() => {
+                    setModalInitialLevel('Alle');
+                    setIsWordsModalOpen(true);
+                    setIsMatrixOpen(false);
+                  }}
+                  className="cursor-pointer hover:text-blue-400 active:scale-98 transition group flex items-center gap-1.5"
+                  title="Alle gelernten Wörter anzeigen"
+                >
+                  <div className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors flex items-baseline gap-2">
+                    <span>{totalMastered.toLocaleString(localeStr)}</span>
+                    <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500">
+                      / {targetWordsForLang.toLocaleString(localeStr)}
+                    </span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-blue-500 dark:group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all opacity-70 group-hover:opacity-100" />
                 </div>
 
                 {wordsLearnedToday > 0 ? (
@@ -157,7 +179,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
               </span>
             </div>
 
-            {/* СТРОКИ УРОВНЕЙ A1..C1 БЕЗ КНОПОК СКАЧИВАНИЯ И ЛИШНИХ ДРОБЕЙ */}
+            {/* СТРОКИ УРОВНЕЙ A1..C1 С ПЕРЕХОДОМ В СЛОВАРЬ ПО КЛИКУ */}
             <div className="space-y-3">
               {DISPLAY_LEVELS.map((levelKey) => {
                 const count = stats[levelKey] || 0;
@@ -166,9 +188,18 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                   totalMastered > 0 ? Math.min(Math.round((count / totalMastered) * 100), 100) : 0;
 
                 return (
-                  <div key={levelKey} className="flex flex-col gap-1.5">
+                  <div
+                    key={levelKey}
+                    onClick={() => {
+                      setModalInitialLevel(levelKey);
+                      setIsWordsModalOpen(true);
+                      setIsMatrixOpen(false);
+                    }}
+                    className="flex flex-col gap-1.5 p-1.5 -mx-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer group"
+                    title={`${levelKey} Wörter anzeigen`}
+                  >
                     <div className="flex justify-between items-center text-xs">
-                      <span className="w-7 h-5 flex items-center justify-center rounded font-mono text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-black/5 dark:border-white/5">
+                      <span className="w-7 h-5 flex items-center justify-center rounded font-mono text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-black/5 dark:border-white/5 group-hover:border-blue-500/30 transition-colors">
                         {levelKey}
                       </span>
 
@@ -178,13 +209,14 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                             +{levelTodayCount}
                           </span>
                         )}
-                        <div className="flex items-baseline">
-                          <span className="font-semibold text-zinc-900 dark:text-neutral-200 font-mono">
+                        <div className="flex items-center gap-1 cursor-pointer group-hover:text-blue-400 active:scale-98 transition">
+                          <span className="font-semibold text-zinc-900 dark:text-neutral-200 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors font-mono">
                             {count}
                           </span>
-                          <span className="text-xs text-zinc-500 dark:text-neutral-400 ml-1">
+                          <span className="text-xs text-zinc-500 dark:text-neutral-400 group-hover:text-blue-500/80 dark:group-hover:text-blue-400/80 transition-colors">
                             Wörter
                           </span>
+                          <ChevronRight className="w-3 h-3 text-zinc-400 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
                         </div>
                       </div>
                     </div>
@@ -200,9 +232,34 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
                 );
               })}
             </div>
+
+            {/* КНОПКА ОТКРЫТИЯ ПОЛНОГО СЛОВАРЯ */}
+            <div className="pt-3.5 mt-3 border-t border-black/5 dark:border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setModalInitialLevel('Alle');
+                  setIsWordsModalOpen(true);
+                  setIsMatrixOpen(false);
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/15 text-blue-600 dark:text-blue-400 text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>Wörterliste ansehen ({totalMastered})</span>
+                <ChevronRight className="w-3.5 h-3.5 opacity-60" />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* МОДАЛЬНОЕ ОКНО ПРОСМОТРА И ПОИСКА ВЫУЧЕННЫХ СЛОВ */}
+      <MasteredWordsModal
+        isOpen={isWordsModalOpen}
+        onClose={() => setIsWordsModalOpen(false)}
+        language={currentLang}
+        initialLevelFilter={modalInitialLevel}
+      />
     </div>
   );
 };

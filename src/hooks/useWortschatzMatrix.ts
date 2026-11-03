@@ -29,6 +29,8 @@ export interface MasteredWordEntry {
   level: CEFRLevel;
   masteredAt: number;
   bookId?: string;
+  translation?: string;
+  cardId?: string;
 }
 
 export interface CEFRMatrixStats {
@@ -274,6 +276,8 @@ function initMatrixStore(lang: AppLang) {
               level,
               masteredAt,
               bookId: val?.bookId,
+              translation: val?.translation || existing?.translation,
+              cardId: val?.cardId || existing?.cardId,
             });
           }
         });
@@ -380,11 +384,15 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
             level,
             masteredAt,
             bookId: deckObj?.book_id || prevEntry?.bookId,
+            translation: c.translation || prevEntry?.translation,
+            cardId: c.id || prevEntry?.cardId,
           });
         } else if (masteredAt > alreadyInNext.masteredAt) {
           nextMap.set(normalizedKey, {
             ...alreadyInNext,
             masteredAt,
+            translation: c.translation || alreadyInNext.translation,
+            cardId: c.id || alreadyInNext.cardId,
           });
         }
       }
@@ -556,6 +564,15 @@ export function getMasteredLemmasSet(langParam?: string | AppLang): Set<string> 
 }
 
 /**
+ * Возвращает полный список уникальных освоенных слов пользователя для указанного языка
+ */
+export function getMasteredWordEntries(langParam?: string | AppLang): MasteredWordEntry[] {
+  const normLang = normalizeLanguageCode(langParam);
+  initMatrixStore(normLang);
+  return Array.from(uniqueMasteredWordsByLang[normLang].values());
+}
+
+/**
  * Пересчитывает матрицу строго по выученным карточкам пользователя (masteryLevel >= 4 || isArchived === true)
  * с дедупликацией через normalizeLemmaKey и определением уровня через detectWordLevel.
  */
@@ -628,17 +645,22 @@ export async function autoBackfillMasteredWords(
         const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, targetLang);
 
         const existingEntry = deduplicatedMap.get(normalizedKey);
+        const cardTranslation = card.translation || card.back || existingMap.get(normalizedKey)?.translation;
         if (!existingEntry) {
           deduplicatedMap.set(normalizedKey, {
             originalWord: rawWord,
             level,
             masteredAt,
             bookId: dBookId,
+            translation: cardTranslation,
+            cardId: card.id,
           });
         } else if (masteredAt > existingEntry.masteredAt) {
           deduplicatedMap.set(normalizedKey, {
             ...existingEntry,
             masteredAt,
+            translation: cardTranslation || existingEntry.translation,
+            cardId: card.id || existingEntry.cardId,
           });
         }
       });
