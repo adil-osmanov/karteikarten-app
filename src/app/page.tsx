@@ -23,7 +23,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, getMasteredLemmasSet, autoBackfillMasteredWords } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, getMasteredLemmasSet, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma } from "@/lib/utils/lemmaNormalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
@@ -2487,20 +2487,22 @@ export const useStore = create<DeckState>()((set, get) => ({
       if (safeLemma && safeLemma.length >= 2) {
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-        const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-        const deckOrBookLevel =
-          currentDeck?.level ||
-          (currentBook?.activeLevels?.length === 1 ? currentBook.activeLevels[0] : null) ||
-          currentBook?.title ||
-          null;
-        recordMasteredLemma({
-          rawWord,
-          bookLevel: deckOrBookLevel,
-          cardLevel: (validCard as any).level || (validCard as any).cefrLevel || null,
-          bookId: currentDeck?.bookId,
-          language: cardLang,
-          timestamp: Date.now(),
-        });
+        if (!isGrammarDeckOrBook(currentDeck, currentBook) && !isFunctionalParticle(rawWord)) {
+          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
+          const deckOrBookLevel =
+            currentDeck?.level ||
+            (currentBook?.activeLevels?.length === 1 ? currentBook.activeLevels[0] : null) ||
+            currentBook?.title ||
+            null;
+          recordMasteredLemma({
+            rawWord,
+            bookLevel: deckOrBookLevel,
+            cardLevel: (validCard as any).level || (validCard as any).cefrLevel || null,
+            bookId: currentDeck?.bookId,
+            language: cardLang,
+            timestamp: Date.now(),
+          });
+        }
       }
     } else if (wasMasteredBefore && (!isCorrect || isHilfe || !validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel < 4))) {
       // Demotion! Списание при ошибке («Wiederholen / Не знаю»)
@@ -2620,20 +2622,22 @@ export const useStore = create<DeckState>()((set, get) => ({
       if (safeLemma && safeLemma.length >= 2) {
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-        const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-        const deckOrBookLevel =
-          currentDeck?.level ||
-          (currentBook?.activeLevels?.length === 1 ? currentBook.activeLevels[0] : null) ||
-          currentBook?.title ||
-          null;
-        recordMasteredLemma({
-          rawWord,
-          bookLevel: deckOrBookLevel,
-          cardLevel: (validCard as any).level || (validCard as any).cefrLevel || null,
-          bookId: currentDeck?.bookId,
-          language: cardLang,
-          timestamp: Date.now(),
-        });
+        if (!isGrammarDeckOrBook(currentDeck, currentBook) && !isFunctionalParticle(rawWord)) {
+          const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
+          const deckOrBookLevel =
+            currentDeck?.level ||
+            (currentBook?.activeLevels?.length === 1 ? currentBook.activeLevels[0] : null) ||
+            currentBook?.title ||
+            null;
+          recordMasteredLemma({
+            rawWord,
+            bookLevel: deckOrBookLevel,
+            cardLevel: (validCard as any).level || (validCard as any).cefrLevel || null,
+            bookId: currentDeck?.bookId,
+            language: cardLang,
+            timestamp: Date.now(),
+          });
+        }
       }
     } else if (wasMasteredBefore && score < 4) {
       if (safeLemma) {
@@ -3398,10 +3402,12 @@ export interface ParsedTargetPhrase {
 export function TrennbarDottedBar() {
   return (
     <span 
-      className="inline-block w-[2.5px] h-[0.85em] mx-1.5 bg-blue-500/80 dark:bg-blue-400 rounded-full align-middle transition-opacity select-none" 
+      className="text-neutral-500 font-light mx-0.5 select-none" 
       title="Trennbare Vorsilbe"
       aria-hidden="true"
-    />
+    >
+      |
+    </span>
   );
 }
 

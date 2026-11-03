@@ -6,6 +6,7 @@ import { useStore, type Flashcard } from '@/app/page';
 import {
   getMasteredWordEntries,
   normalizeLanguageCode,
+  isFunctionalParticle,
   type MasteredWordEntry,
   type CEFRLevel,
   type AppLang,
@@ -82,6 +83,17 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isEditorOpen, onClose]);
 
+  // Блокировка скролла страницы при открытой модалке (Body Scroll Lock)
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = window.getComputedStyle(document.body).overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
+
   // Индексация карточек из колод для мгновенного сопоставления переводов и редактирования
   const { cardsById, cardsByLemma } = useMemo(() => {
     const byId = new Map<string, Flashcard>();
@@ -108,22 +120,33 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
 
   // Обогащение записей переводами и объектами карточек
   const enrichedWords = useMemo(() => {
-    return rawEntries.map((entry) => {
-      const lKey = normalizeLemmaKey(entry.originalWord);
-      const card = (entry.cardId && cardsById.get(entry.cardId)) || cardsByLemma.get(lKey) || null;
-      const translation = entry.translation || card?.translation || '';
-      const level = (entry.level || card?.level || 'B1') as CEFRLevel;
+    return rawEntries
+      .filter(
+        (entry) =>
+          !isFunctionalParticle(entry.originalWord) &&
+          !isFunctionalParticle(normalizeLemmaKey(entry.originalWord))
+      )
+      .map((entry) => {
+        const lKey = normalizeLemmaKey(entry.originalWord);
+        const card = (entry.cardId && cardsById.get(entry.cardId)) || cardsByLemma.get(lKey) || null;
+        let translation = entry.translation || card?.translation || '';
+        // Если перевод слишком длинный (целое русское предложение), очищаем его
+        if (translation.length > 80 && translation.includes('.')) {
+          const firstSentence = translation.split('.')[0].trim();
+          if (firstSentence.length > 3) translation = firstSentence;
+        }
+        const level = (entry.level || card?.level || 'B1') as CEFRLevel;
 
-      return {
-        key: lKey || entry.originalWord,
-        word: entry.originalWord,
-        translation,
-        level,
-        masteredAt: entry.masteredAt || 0,
-        card,
-        entry,
-      };
-    });
+        return {
+          key: lKey || entry.originalWord,
+          word: entry.originalWord,
+          translation,
+          level,
+          masteredAt: entry.masteredAt || 0,
+          card,
+          entry,
+        };
+      });
   }, [rawEntries, cardsById, cardsByLemma]);
 
   // Фильтрация и поиск
@@ -304,8 +327,8 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
             </div>
           </div>
 
-          {/* 3. СКРОЛЛИРУЕМЫЙ СПИСОК СЛОВ */}
-          <div className="flex-1 overflow-y-auto divide-y divide-neutral-800/50 py-2 pr-1 min-h-[220px]">
+          {/* 3. СКРОЛЛИРУЕМЫЙ СПИСОК СЛОВ В СТИЛЕ macOS */}
+          <div className="flex-1 overflow-y-auto divide-y divide-neutral-800/50 py-2 pr-1 min-h-[220px] scrollbar-thin scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-800 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full">
             {filteredWords.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center py-12 text-center select-none">
                 <div className="w-12 h-12 rounded-2xl bg-neutral-800/60 flex items-center justify-center text-neutral-500 mb-3">
@@ -337,15 +360,15 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                   >
                     {/* Левая колонка: Немецкое слово + Перевод */}
                     <div className="flex flex-col min-w-0 pr-3">
-                      <span className="font-semibold text-sm text-neutral-100 group-hover:text-blue-400 transition-colors tracking-tight">
+                      <span className="text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-400 transition-colors">
                         {formatSeparableWord(item.word)}
                       </span>
                       {item.translation ? (
-                        <span className="text-xs text-neutral-400 truncate mt-0.5 max-w-xs sm:max-w-md">
+                        <span className="text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md">
                           {item.translation}
                         </span>
                       ) : (
-                        <span className="text-xs text-neutral-600 italic mt-0.5">
+                        <span className="text-neutral-600 italic font-normal text-xs mt-0.5">
                           Keine Übersetzung angegeben
                         </span>
                       )}

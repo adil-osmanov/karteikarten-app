@@ -47,6 +47,76 @@ export interface TodayProgress {
 
 const SUPPORTED_LANGS: AppLang[] = ['de', 'en', 'ru', 'es'];
 
+/**
+ * Черный список грамматических частиц, предлогов, связок и местоимений.
+ * Изолированные грамматические элементы не должны попадать в Wortschatz-Matrix.
+ */
+export const FUNCTIONAL_PARTICLES = new Set([
+  'an', 'in', 'auf', 'aus', 'bei', 'mit', 'nach', 'von', 'zu', 'über', 'unter', 'vor', 'hinter',
+  'werde', 'wirst', 'wird', 'wurden', 'worden', 'würde', 'würden',
+  'mich', 'dich', 'sich', 'uns', 'euch', 'mir', 'dir', 'ihm', 'ihr', 'ihnen',
+  'der', 'die', 'das', 'dem', 'den', 'des', 'ein', 'eine', 'einer', 'einem', 'einen', 'eines',
+  'und', 'aber', 'oder', 'denn', 'weil', 'dass', 'ob', 'als', 'wie'
+]);
+
+export function isFunctionalParticle(rawWord?: string | null): boolean {
+  if (!rawWord || typeof rawWord !== 'string') return false;
+  const clean = rawWord.trim().toLowerCase().replace(/\|/g, '');
+  return FUNCTIONAL_PARTICLES.has(clean);
+}
+
+/**
+ * Проверяет, относится ли колода или родительская книга к грамматическому тренажеру.
+ * Карточки грамматических тренировок (Cloze Deletion, NVV, Strukturen) исключаются из лексической матрицы.
+ */
+export function isGrammarDeckOrBook(deck?: any, parentBook?: any): boolean {
+  if (!deck && !parentBook) return false;
+
+  const dType = (deck?.type || '').toLowerCase();
+  const dCat = (deck?.category || '').toLowerCase();
+  const bCat = (parentBook?.category || '').toLowerCase();
+  const trainingMode = (
+    deck?.training_mode ||
+    deck?.trainingMode ||
+    parentBook?.training_mode ||
+    parentBook?.trainingMode ||
+    ''
+  ).toLowerCase();
+
+  // Явные флаги грамматики
+  if (deck?.isGrammar === true || (deck as any)?.is_grammar === true) return true;
+  if (dType === 'grammar' || dType === 'structures') return true;
+  if (bCat === 'structures' || bCat === 'grammar') return true;
+  if (trainingMode.includes('preposition') || trainingMode.includes('starke_verben')) return true;
+
+  // Исключаем по категории
+  if (dCat.includes('gramm') || dCat.includes('struktur')) return true;
+
+  // Проверка названий колоды и книги
+  const deckName = (deck?.name || deck?.title || '').toLowerCase();
+  const bookTitle = (parentBook?.title || '').toLowerCase();
+  const combined = `${deckName} ${bookTitle}`;
+
+  if (
+    combined.includes('grammatik') ||
+    combined.includes('grammar') ||
+    combined.includes('strukturen') ||
+    combined.includes('structure') ||
+    combined.includes('nvv') ||
+    combined.includes('übungen') ||
+    combined.includes('uebungen') ||
+    combined.includes('präposition') ||
+    combined.includes('starke verben')
+  ) {
+    if (dCat.includes('wört') || dCat.includes('vocab')) {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 export function normalizeLanguageCode(lang?: string | null): AppLang {
   const clean = (lang || 'de').toLowerCase().trim();
   if (clean.startsWith('en')) return 'en';
@@ -108,6 +178,14 @@ function calculateActiveLevel(counts: Record<CEFRLevel, number>): CEFRLevel {
 
 function recomputeStatsFromMap(lang: AppLang): CEFRMatrixStats {
   const map = uniqueMasteredWordsByLang[lang];
+
+  // Очистка стоп-слов / грамматических частиц
+  for (const [k, v] of Array.from(map.entries())) {
+    if (isFunctionalParticle(k) || isFunctionalParticle(v.originalWord)) {
+      map.delete(k);
+    }
+  }
+
   const counts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
 
   map.forEach((entry) => {
@@ -260,10 +338,12 @@ function initMatrixStore(lang: AppLang) {
         const map = uniqueMasteredWordsByLang[lang];
         map.clear();
         Object.entries(parsed.entries).forEach(([key, val]: [string, any]) => {
-          const normKey = normalizeLemmaKey(key || val?.originalWord || '');
+          const raw = val?.originalWord || key || '';
+          const normKey = normalizeLemmaKey(raw);
           if (!normKey || normKey.length < 2) return;
+          if (isFunctionalParticle(raw) || isFunctionalParticle(normKey)) return;
           const level: CEFRLevel = detectWordLevel(
-            val?.originalWord || normKey,
+            raw || normKey,
             null,
             val?.level,
             lang
@@ -343,7 +423,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
     while (hasMore) {
       const { data: cardRows, error: cardErr } = await supabase
         .from('cards')
-        .select('targetWord, masteryLevel, isArchived, nextReviewDate, interval, repetitions, decks!inner(language, level, book_id)')
+        .select('id, targetWord, translation, masteryLevel, isArchived, nextReviewDate, interval, repetitions, decks!inner(id, name, category, language, level, book_id)')
         .or('isArchived.eq.true,masteryLevel.gte.4')
         .range(from, from + PAGE_SIZE - 1);
 
@@ -363,10 +443,12 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
         const deckObj = Array.isArray(c.decks) ? c.decks[0] : c.decks;
         const dLang = normalizeLanguageCode(deckObj?.language || 'de');
         if (dLang !== lang) continue;
+        if (isGrammarDeckOrBook(deckObj)) continue;
 
         const rawWord = c.targetWord || '';
         const normalizedKey = normalizeLemmaKey(rawWord);
         if (!normalizedKey || normalizedKey.length < 2) continue;
+        if (isFunctionalParticle(rawWord) || isFunctionalParticle(normalizedKey)) continue;
 
         const prevEntry = existingMap.get(normalizedKey);
         const remoteMeta = remoteMetaByKey.get(normalizedKey);
@@ -450,8 +532,10 @@ export async function recordMasteredLemma(
 
   initMatrixStore(currentLanguage);
 
+  if (isFunctionalParticle(rawWord)) return;
   const normalizedKey = normalizeLemmaKey(rawWord);
   if (!normalizedKey || normalizedKey.length < 2) return;
+  if (isFunctionalParticle(normalizedKey)) return;
 
   const resolvedLevel = detectWordLevel(normalizedKey, deckLevel, cardLevel, currentLanguage);
   const map = uniqueMasteredWordsByLang[currentLanguage];
@@ -528,8 +612,10 @@ export async function removeMasteredLemma(
 
   initMatrixStore(currentLanguage);
 
+  if (isFunctionalParticle(rawWord)) return;
   const normalizedKey = normalizeLemmaKey(rawWord);
   if (!normalizedKey || normalizedKey.length < 2) return;
+  if (isFunctionalParticle(normalizedKey)) return;
 
   const map = uniqueMasteredWordsByLang[currentLanguage];
   if (!map.has(normalizedKey)) return;
@@ -569,7 +655,9 @@ export function getMasteredLemmasSet(langParam?: string | AppLang): Set<string> 
 export function getMasteredWordEntries(langParam?: string | AppLang): MasteredWordEntry[] {
   const normLang = normalizeLanguageCode(langParam);
   initMatrixStore(normLang);
-  return Array.from(uniqueMasteredWordsByLang[normLang].values());
+  return Array.from(uniqueMasteredWordsByLang[normLang].values()).filter(
+    (e) => !isFunctionalParticle(e.originalWord) && !isFunctionalParticle(normalizeLemmaKey(e.originalWord))
+  );
 }
 
 /**
@@ -615,6 +703,10 @@ export async function autoBackfillMasteredWords(
     langDecks.forEach((deck) => {
       const dBookId = deck.bookId || (deck as any).book_id;
       const parentBook = dBookId ? bookMap.get(dBookId) : undefined;
+
+      // Исключаем грамматические колоды и упражнения
+      if (isGrammarDeckOrBook(deck, parentBook)) return;
+
       const deckLevel =
         (deck as any).level ||
         (parentBook?.activeLevels?.length === 1 ? parentBook.activeLevels[0] : null) ||
@@ -638,6 +730,7 @@ export async function autoBackfillMasteredWords(
           '';
         const normalizedKey = normalizeLemmaKey(rawWord);
         if (!normalizedKey || normalizedKey.length < 2) return;
+        if (isFunctionalParticle(rawWord) || isFunctionalParticle(normalizedKey)) return;
 
         const prevTs = existingMap.get(normalizedKey)?.masteredAt || 0;
         const masteredAt = extractCardMasteredAt(card, prevTs);

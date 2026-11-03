@@ -10,12 +10,14 @@ export function formatSeparableWord(word: string): React.ReactNode {
   }
   const parts = word.split('|');
   return (
-    <span className="inline-flex items-center">
+    <span className="inline-flex items-baseline">
       <span>{parts[0]}</span>
       <span
-        className="inline-block w-[2.5px] h-[0.8em] mx-1 bg-blue-500/80 dark:bg-blue-400 rounded-full align-middle"
-        title="Trennbare Vorsilbe"
-      />
+        className="text-neutral-500 dark:text-neutral-500 font-light mx-0.5 select-none"
+        aria-hidden="true"
+      >
+        |
+      </span>
       <span>{parts.slice(1).join('')}</span>
     </span>
   );
