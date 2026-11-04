@@ -8,6 +8,7 @@ import {
   normalizeLanguageCode,
   isFunctionalParticle,
   extractConciseTranslation,
+  purgeJunkExportierenWord,
   type CEFRLevel,
   type AppLang,
 } from '@/hooks/useWortschatzMatrix';
@@ -41,6 +42,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   // Синхронизация при смене начального фильтра или открытии
   useEffect(() => {
     if (isOpen) {
+      purgeJunkExportierenWord().catch(() => {});
       setSelectedLevel(initialLevelFilter || 'Alle');
       setSearchQuery('');
       setTimeout(() => {
@@ -110,17 +112,26 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   // Получение сырого списка выученных слов из матрицы памяти
   const rawEntries = useMemo(() => {
     if (!isOpen) return [];
-    return getMasteredWordEntries(currentLang);
+    return getMasteredWordEntries(currentLang).filter(
+      (e) =>
+        !e.originalWord.toLowerCase().includes('exportieren') &&
+        !(e.translation && e.translation.toLowerCase().includes('деяние'))
+    );
   }, [currentLang, isOpen, updateTick]);
 
   // Обогащение записей краткими переводами, SRS-датами и объектами карточек
   const enrichedWords = useMemo(() => {
     return rawEntries
-      .filter(
-        (entry) =>
+      .filter((entry) => {
+        const w = (entry.originalWord || '').toLowerCase();
+        const tr = (entry.translation || '').toLowerCase();
+        return (
+          !w.includes('exportieren') &&
+          !tr.includes('деяние') &&
           !isFunctionalParticle(entry.originalWord) &&
           !isFunctionalParticle(normalizeLemmaKey(entry.originalWord))
-      )
+        );
+      })
       .map((entry) => {
         const lKey = normalizeLemmaKey(entry.originalWord);
         const card = (entry.cardId && cardsById.get(entry.cardId)) || cardsByLemma.get(lKey) || null;
@@ -305,21 +316,29 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                 return (
                   <div
                     key={item.key}
-                    className="group flex items-center gap-3.5 py-3 px-4 rounded-2xl hover:bg-amber-500/[0.04] transition-all duration-200"
+                    className="group relative flex items-center justify-between p-4 my-1.5 rounded-2xl bg-neutral-100/50 dark:bg-white/[0.03] hover:bg-neutral-100 dark:hover:bg-white/[0.07] border border-black/[0.03] dark:border-white/[0.05] hover:border-amber-500/30 transition-all duration-200"
                   >
-                    {/* Тонкий золотой маркер-индикатор слева с мягким свечением */}
-                    <div className="w-1 h-6 rounded-full bg-gradient-to-b from-amber-300 to-amber-500 shadow-[0_0_8px_rgba(251,191,36,0.6)] shrink-0" />
-
-                    {/* Немецкое слово + Русский перевод под ним */}
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-[16px] font-medium text-neutral-900 dark:text-neutral-100 group-hover:text-amber-500 dark:group-hover:text-amber-200 transition-colors tracking-tight truncate">
-                        {formatSeparableWord(item.word)}
-                      </span>
-                      {item.translation ? (
-                        <span className="text-xs text-neutral-500 dark:text-neutral-400 font-normal mt-0.5 truncate max-w-sm sm:max-w-xl">
-                          {item.translation}
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      {/* Золотая печать мастера (Apple Gold Seal) */}
+                      <div className="w-2 h-2 rounded-full bg-gradient-to-tr from-amber-500 to-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.7)] shrink-0" />
+                      
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[16px] font-medium text-neutral-900 dark:text-neutral-100 tracking-tight group-hover:text-amber-500 dark:group-hover:text-amber-300 transition-colors truncate">
+                          {formatSeparableWord(item.word)}
                         </span>
-                      ) : null}
+                        {item.translation ? (
+                          <span className="text-xs text-neutral-500 dark:text-neutral-400 font-normal truncate mt-0.5">
+                            {item.translation}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {/* Правый блок: чистый матовый уровень */}
+                    <div className="shrink-0 flex items-center gap-2">
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-neutral-200/70 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border border-black/5 dark:border-white/5">
+                        {item.level || 'B2'}
+                      </span>
                     </div>
                   </div>
                 );

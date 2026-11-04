@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
 import { CEFRLevel, detectWordLevel } from '@/lib/vocabulary/cefrLevelDetector';
+import { getIDBItem, setIDBItem } from '@/hooks/useDayStats';
 
 export type AppLang = 'de' | 'en' | 'ru' | 'es';
 export type { CEFRLevel };
@@ -354,9 +355,14 @@ function calculateActiveLevel(counts: Record<CEFRLevel, number>): CEFRLevel {
 function recomputeStatsFromMap(lang: AppLang): CEFRMatrixStats {
   const map = uniqueMasteredWordsByLang[lang];
 
-  // Очистка стоп-слов / грамматических частиц
+  // Очистка стоп-слов / грамматических частиц и мусорных слов
   for (const [k, v] of Array.from(map.entries())) {
-    if (isFunctionalParticle(k) || isFunctionalParticle(v.originalWord)) {
+    const isJunkExportieren = 
+      k.toLowerCase().includes('exportieren') ||
+      v.originalWord.toLowerCase().includes('exportieren') ||
+      (v.translation && v.translation.toLowerCase().includes('деяние'));
+
+    if (isFunctionalParticle(k) || isFunctionalParticle(v.originalWord) || isJunkExportieren) {
       map.delete(k);
     }
   }
@@ -1051,6 +1057,75 @@ export async function purgeOrphanedMasteredWords(
 }
 
 /**
+ * Одноразовая чистка мусорной записи «exportieren» («деяние») из памяти,
+ * Supabase user_mastered_words и IndexedDB app_decks.
+ */
+export async function purgeJunkExportierenWord(): Promise<void> {
+  try {
+    let memoryChanged = false;
+    const langs: AppLang[] = ['de', 'en', 'ru', 'es'];
+    for (const lang of langs) {
+      const map = uniqueMasteredWordsByLang[lang];
+      const toDelete: string[] = [];
+      map.forEach((v, k) => {
+        const isJunk =
+          k.toLowerCase().includes('exportieren') ||
+          v.originalWord.toLowerCase().includes('exportieren') ||
+          (v.translation && v.translation.toLowerCase().includes('деяние'));
+        if (isJunk) {
+          toDelete.push(k);
+        }
+      });
+      if (toDelete.length > 0) {
+        toDelete.forEach((k) => map.delete(k));
+        recomputeStatsFromMap(lang);
+        persistMatrixToStorage(lang);
+        notifyListeners(lang);
+        memoryChanged = true;
+      }
+    }
+
+    if (memoryChanged && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('stats-update'));
+    }
+
+    // Удаление из Supabase user_mastered_words
+    try {
+      await supabase
+        .from('user_mastered_words')
+        .delete()
+        .or('lemma.ilike.%exportieren%,translation.ilike.%деяние%');
+    } catch {}
+
+    // Удаление из IndexedDB app_decks
+    try {
+      const decks = await getIDBItem<any[]>('app_decks');
+      if (Array.isArray(decks)) {
+        let idbChanged = false;
+        decks.forEach((d) => {
+          if (Array.isArray(d.cards)) {
+            const beforeLen = d.cards.length;
+            d.cards = d.cards.filter((c: any) => {
+              const tw = (c.targetWord || '').toLowerCase();
+              const tr = (c.translation || '').toLowerCase();
+              return !tw.includes('exportieren') && !tr.includes('деяние');
+            });
+            if (d.cards.length !== beforeLen) {
+              idbChanged = true;
+            }
+          }
+        });
+        if (idbChanged) {
+          await setIDBItem('app_decks', decks);
+        }
+      }
+    } catch {}
+  } catch (err) {
+    console.warn('purgeJunkExportierenWord notice:', err);
+  }
+}
+
+/**
  * Синхронизирует матрицу при явном удалении колоды, книги или карточки.
  */
 export async function reconcileMasteredWords(
@@ -1185,6 +1260,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
 
   useEffect(() => {
     initMatrixStore(normLang);
+    purgeJunkExportierenWord().catch(() => {});
     setStats({ ...globalMatrixStatsByLang[normLang] });
     setTodayProgress(getWordsLearnedToday(normLang));
 

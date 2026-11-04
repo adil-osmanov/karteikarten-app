@@ -4060,14 +4060,14 @@ function RapidFlashcardMode({
            РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
            ======================================================= */
         <div 
-          className="w-full max-w-[760px] flex flex-col items-center gap-6 perspective-1000"
+          className="w-full max-w-2xl flex flex-col items-center perspective-1000"
           style={{ perspective: 1000, WebkitPerspective: 1000 }}
         >
           {/* 3D Оболочка */}
           <div
             onClick={toggleFlip}
             className={cn(
-              "w-full min-h-[460px] relative cursor-pointer transform-style-3d",
+              "w-full h-[440px] min-h-[440px] relative cursor-pointer transform-style-3d",
               isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
             style={{
@@ -4090,7 +4090,7 @@ function RapidFlashcardMode({
               }}
             >
               {/* Шапка */}
-              <div className="flex items-center justify-between w-full shrink-0">
+              <div className="w-full flex items-center justify-between shrink-0 mb-4">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -4119,20 +4119,20 @@ function RapidFlashcardMode({
               </div>
 
               {/* Центр: Слово + Множественное число */}
-              <div className="my-auto text-center space-y-2 select-text">
-                <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                  {article && <span className={getArticleColor(article)}>{article}</span>}
+              <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto space-y-4 select-text">
+                <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+                  {article && <span className={getArticleColor(article)}>{article} </span>}
                   {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                 </h2>
                 {plural && (
-                  <p className="text-sm font-normal text-zinc-600 dark:text-zinc-400 tracking-normal mt-1">
+                  <p className="text-sm font-normal text-neutral-500 dark:text-neutral-400 tracking-normal">
                     {plural}
                   </p>
                 )}
               </div>
 
               {/* Низ: Пусто для чистоты */}
-              <div className="h-6 shrink-0" />
+              <div className="w-full flex justify-center shrink-0 mt-6 h-6" />
             </CardContainer>
 
             {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР + КНОПКА ДИНАМИКА) */}
@@ -4148,7 +4148,7 @@ function RapidFlashcardMode({
               }}
             >
               {/* Шапка с кнопкой озвучки на обратной стороне */}
-              <div className="flex items-center justify-between w-full shrink-0">
+              <div className="w-full flex items-center justify-between shrink-0 mb-4">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -4176,27 +4176,27 @@ function RapidFlashcardMode({
                 </div>
               </div>
 
-              {/* Центр: Слово, перевод, чистый пример без серой плашки */}
-              <div className="my-auto text-center space-y-6 select-text w-full max-w-xl mx-auto">
+              {/* Центр: Слово, перевод, чистый пример */}
+              <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto space-y-4 select-text">
                 <div className="space-y-1">
-                  <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                    {article && <span className={getArticleColor(article)}>{article}</span>}
+                  <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+                    {article && <span className={getArticleColor(article)}>{article} </span>}
                     {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                   </h2>
                   {plural && (
-                    <p className="text-sm font-normal text-zinc-600 dark:text-zinc-400 tracking-normal mt-1">
+                    <p className="text-sm font-normal text-neutral-500 dark:text-neutral-400 tracking-normal">
                       {plural}
                     </p>
                   )}
                 </div>
 
-                <p className="text-xl sm:text-2xl font-medium text-zinc-800 dark:text-zinc-100">
+                <p className="text-lg md:text-xl text-neutral-600 dark:text-neutral-300 font-normal">
                   {currentCard?.translation || currentCard?.hint}
                 </p>
 
-                {/* 6. Чистая цитата примера (без серой плашки, строго как на скриншоте 3) */}
+                {/* Чистая цитата примера */}
                 {displaySentence && (
-                  <div className="mt-8 border-l border-zinc-300 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-600 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
+                  <div className="text-sm text-neutral-500 dark:text-neutral-400 max-w-lg mt-2 italic font-normal leading-relaxed select-text">
                     {displaySentence}
                   </div>
                 )}
@@ -4208,7 +4208,7 @@ function RapidFlashcardMode({
 
           {/* Кнопки оценки [ ✕ ] И [ ✓ ] при перевороте карточки */}
           <div className={cn(
-            "flex items-center justify-center gap-4 sm:gap-6 mt-6 transition-all duration-200",
+            "min-h-[58px] flex items-center justify-center gap-4 sm:gap-6 mt-6 transition-all duration-200",
             isFlipped ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95"
           )}>
             <button
@@ -6549,10 +6549,10 @@ function StudyCard({
                   <button
                     key={`${opt}-${idx}`}
                     onClick={() => handleOptionClick(opt)}
-                    className="w-full py-3.5 px-4 rounded-xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-zinc-50 hover:bg-zinc-100/80 border border-zinc-200/70 hover:border-zinc-300 text-zinc-900 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/80 dark:border-white/10 dark:hover:border-white/20 dark:text-zinc-100 shadow-sm"
+                    className="w-full py-3.5 px-4 rounded-2xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-neutral-100/80 hover:bg-neutral-200/80 border border-black/5 text-neutral-800 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] dark:border-white/10 dark:text-neutral-100 shadow-sm"
                   >
                     <span className="truncate pr-2">{displayOpt}</span>
-                    <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 text-zinc-400 dark:text-zinc-400 font-mono shrink-0 pointer-events-none">
+                    <span className="text-xs text-neutral-400 bg-black/5 dark:bg-white/10 px-2 py-0.5 rounded-md font-mono shrink-0 pointer-events-none">
                       {idx + 1}
                     </span>
                   </button>
@@ -6940,10 +6940,10 @@ function HeaderWidgets({
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="h-9 px-3.5 rounded-full bg-white dark:bg-[#1C1C1E] hover:bg-zinc-50 dark:hover:bg-[#2C2C2E] border border-zinc-200/80 dark:border-white/15 shadow-sm text-zinc-900 dark:text-white text-sm font-medium flex items-center gap-2 transition-all active:scale-95 cursor-pointer select-none transform-gpu"
+                className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
                 title="Zurück zur Übersicht"
               >
-                <ArrowLeft className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
+                <ArrowLeft className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
                 <span className="truncate max-w-[130px] sm:max-w-[200px]">{activeBook.title}</span>
               </button>
             ) : (
@@ -6951,12 +6951,12 @@ function HeaderWidgets({
                 <button
                   type="button"
                   onClick={() => setIsLangOpen(prev => !prev)}
-                  className="h-9 px-3 rounded-full flex items-center gap-2 bg-white dark:bg-[#1C1C1E] border border-zinc-200/80 dark:border-white/15 shadow-sm text-zinc-900 dark:text-white hover:bg-zinc-50 dark:hover:bg-[#2C2C2E] transition-all duration-150 active:scale-95 cursor-pointer select-none transform-gpu"
+                  className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
                   title="Sprache wählen"
                 >
                   <span className="text-base leading-none select-none">{currentLang.flag}</span>
-                  <span className="font-bold text-xs tracking-tight text-zinc-900 dark:text-white">{appLanguage}</span>
-                  <ChevronDown className={cn("w-3 h-3 text-zinc-500 dark:text-zinc-400 transition-transform duration-200", isLangOpen && "rotate-180")} />
+                  <span className="font-bold text-xs tracking-tight text-neutral-800 dark:text-neutral-200">{appLanguage}</span>
+                  <ChevronDown className={cn("w-3 h-3 text-neutral-400 dark:text-neutral-400 transition-transform duration-200", isLangOpen && "rotate-180")} />
                 </button>
 
                 <AnimatePresence>
@@ -7048,16 +7048,16 @@ function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all select-none active:scale-95 cursor-pointer bg-white hover:bg-zinc-50 border border-black/[0.08] text-zinc-800 shadow-sm dark:bg-zinc-900 dark:hover:bg-zinc-800 dark:border-white/10 dark:text-zinc-200"
+              className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
               title="Статистика дня"
             >
-              <svg className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="m12 3-9 5 9 5 9-5-9-5z" />
                 <path d="m3 12 9 5 9-5" />
                 <path d="m3 17 9 5 9-5" />
               </svg>
               <span suppressHydrationWarning className="text-xs font-semibold tabular-nums tracking-tight font-sans">
-                {Math.max(langStats.learnedToday || 0, stats?.cardsDone || 0)} <span className="text-zinc-400 dark:text-zinc-500 font-normal">/ 200</span>
+                {Math.max(langStats.learnedToday || 0, stats?.cardsDone || 0)} <span className="text-neutral-400 dark:text-neutral-500 font-normal">/ 200</span>
               </span>
             </button>
 
@@ -7065,7 +7065,7 @@ function HeaderWidgets({
             <button 
               type="button"
               onClick={toggleTheme}
-              className="w-9 h-9 rounded-full bg-white/80 dark:bg-zinc-900/80 hover:bg-white dark:hover:bg-zinc-800/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition shadow-sm active:scale-95 cursor-pointer"
+              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl flex items-center justify-center text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all active:scale-95 cursor-pointer"
               aria-label="Toggle theme"
               title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
@@ -11705,17 +11705,17 @@ export default function App() {
               aria-hidden="true"
             />
             
-            {/* Dynamic Apple Segmented Control with i18n */}
+            {/* Dynamic Apple Segmented Control with i18n (Apple Glass Segment) */}
             <div className="w-full flex justify-center mt-4 sm:mt-6 mb-6 sm:mb-8 px-4">
-              <div className="max-w-full overflow-x-auto no-scrollbar inline-flex p-1 rounded-full bg-zinc-200/50 dark:bg-zinc-900/60 border border-zinc-300/30 dark:border-white/5 backdrop-blur-md">
+              <div className="max-w-full overflow-x-auto no-scrollbar inline-flex p-1 rounded-full bg-neutral-200/70 dark:bg-neutral-900/70 backdrop-blur-xl border border-black/5 dark:border-white/10 items-center gap-1 shadow-inner">
                 {getTabsForLanguage(appLanguage).map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveCategory(tab.id)}
-                    className={`px-3.5 py-1.5 rounded-full text-xs whitespace-nowrap font-medium transition-all duration-200 cursor-pointer ${
+                    className={`rounded-full px-4 py-1.5 text-xs whitespace-nowrap font-medium transition-all duration-200 cursor-pointer ${
                       activeCategory === tab.id
-                        ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                        : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                        ? 'bg-white dark:bg-white/15 text-neutral-900 dark:text-white font-medium shadow-sm'
+                        : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
                     }`}
                   >
                     {tab.label}

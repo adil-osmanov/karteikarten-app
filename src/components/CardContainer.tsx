@@ -26,39 +26,39 @@ export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean,
     return "border border-amber-400/40 shadow-[0_0_120px_rgba(245,158,11,0.45)] transition-all duration-300";
   }
   if (!round || round <= 1) {
-    return "border border-white/10 dark:border-white/5 bg-neutral-900/90 shadow-2xl transition-all duration-700";
+    // Раунд 1: без свечения
+    return "transition-all duration-700";
   }
   if (round === 2) {
-    return "border border-emerald-500/20 shadow-[0_0_80px_-15px_rgba(16,185,129,0.25)] transition-all duration-700";
+    // Раунд 2 (Зеленый / Emerald)
+    return "shadow-[0_15px_60px_-15px_rgba(16,185,129,0.18)] dark:shadow-[0_0_80px_-15px_rgba(16,185,129,0.25)] border-emerald-500/25 transition-all duration-700";
   }
   if (round === 3) {
-    return "border border-blue-500/20 shadow-[0_0_90px_-15px_rgba(59,130,246,0.28)] transition-all duration-700";
+    // Раунд 3 (Синий / Sapphire)
+    return "shadow-[0_15px_60px_-15px_rgba(59,130,246,0.18)] dark:shadow-[0_0_90px_-15px_rgba(59,130,246,0.28)] border-blue-500/25 transition-all duration-700";
   }
-  // Round 4 (Purple / Epic)
+  // Раунд 4 (Фиолетовый / Epic)
   return cn(
-    "border border-purple-500/25 shadow-[0_0_100px_-12px_rgba(168,85,247,0.32)] transition-all duration-700",
+    "shadow-[0_15px_60px_-15px_rgba(168,85,247,0.20)] dark:shadow-[0_0_100px_-12px_rgba(168,85,247,0.32)] border-purple-500/30 transition-all duration-700",
     isArchivingPulse && "shadow-[0_0_110px_rgba(168,85,247,0.45)] animate-pulse"
   );
 }
 
 /**
  * Apple HIG Surface styling for cards:
- * - Light Mode: Pure white background 'bg-white' popping off Apple's system grouped '#f2f2f7' background,
- *   with an ultra-thin 'border-black/[0.06]' border and diffused multi-layer shadow 'shadow-[0_12px_32px_rgba(0,0,0,0.05),_0_2px_6px_rgba(0,0,0,0.03)]'.
- * - Dark Mode: Subtle vertical gradient 'from-[#1e1e22] to-[#141416]', border 'border-white/[0.08]',
- *   deep shadow 'shadow-[0_20px_50px_rgba(0,0,0,0.6)]', and backdrop-blur.
- * - Top specular highlight rim light on dark mode.
+ * - Light Mode: Pure frosted glass 'bg-white/90 text-neutral-900 border border-black/5 shadow-2xl shadow-neutral-200/50 backdrop-blur-2xl'
+ * - Dark Mode: Deep frosted glass 'dark:bg-neutral-900/90 dark:text-neutral-100 dark:border-white/10 dark:shadow-2xl dark:shadow-black/60'
  */
 export const CARD_CONTAINER_SURFACE_CLASSES = cn(
-  "rounded-[32px] border transition-all duration-300 select-none",
-  // Light Mode (Apple Pure White Card)
-  "bg-white",
+  "rounded-3xl border transition-all duration-300 select-none",
+  // Light Mode (Apple Premium Glass Card)
+  "bg-white/90 text-neutral-900 border-black/5 shadow-2xl shadow-neutral-200/50 backdrop-blur-2xl",
   // Dark Mode (Apple Dark Mode clean, deep & matte)
-  "dark:bg-[#1c1c1e]"
+  "dark:bg-neutral-900/90 dark:text-neutral-100 dark:border-white/10 dark:shadow-2xl dark:shadow-black/60"
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "w-full max-w-[760px] min-h-[460px] p-8 sm:p-12 pb-9 sm:pb-12 flex flex-col justify-between mx-auto relative group animate-card-enter",
+  "w-full max-w-2xl min-h-[440px] p-8 md:p-10 flex flex-col justify-between items-center mx-auto relative group animate-card-enter",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 
@@ -101,7 +101,7 @@ export function ProgressDots({
   const getDotStyle = (idx: number) => {
     const isFilled = idx < filledCount;
     if (!isFilled) {
-      return "w-2 h-2 rounded-full bg-neutral-800 border border-neutral-700/40 shadow-none";
+      return "w-2 h-2 rounded-full bg-neutral-200 dark:bg-neutral-800 border border-black/10 dark:border-neutral-700/40 shadow-none";
     }
     if (round === 2) {
       return "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] border-transparent";
@@ -137,7 +137,7 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
         ref={ref}
         className={cn(
           is3DFace
-            ? cn("absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden group", CARD_CONTAINER_SURFACE_CLASSES)
+            ? cn("absolute inset-0 p-8 md:p-10 flex flex-col justify-between items-center backface-hidden group", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
           "relative transition-all duration-400 ease-out will-change-transform",
