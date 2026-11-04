@@ -23,7 +23,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma } from "@/lib/utils/lemmaNormalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
@@ -1019,62 +1019,7 @@ export const playSuccessSound = () => playFeedbackSound(true);
 export const playErrorSound = () => playFeedbackSound(false);
 
 export function playVaporizeSound() {
-  if (typeof window === 'undefined') return;
-  try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const ctx = getAudioContext() || new AudioContextClass();
-
-    const now = ctx.currentTime;
-
-    // 1. Воздушный шелестящий шум сгорания (Noise Burst with Bandpass sweep)
-    const bufferSize = Math.floor(ctx.sampleRate * 0.35); // 350 мс
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-
-    const noise = ctx.createBufferSource();
-    noise.buffer = buffer;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(1200, now);
-    filter.frequency.exponentialRampToValueAtTime(3200, now + 0.2);
-    filter.frequency.exponentialRampToValueAtTime(400, now + 0.35);
-    filter.Q.setValueAtTime(3.0, now);
-
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.01, now);
-    noiseGain.gain.linearRampToValueAtTime(0.18, now + 0.06);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-
-    noise.connect(filter);
-    filter.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
-
-    // 2. Тонкий хрустальный резонанс (Gemini Sparkle Chime)
-    const osc = ctx.createOscillator();
-    const oscGain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, now); // A5
-    osc.frequency.exponentialRampToValueAtTime(1760, now + 0.25); // A6
-
-    oscGain.gain.setValueAtTime(0.01, now);
-    oscGain.gain.linearRampToValueAtTime(0.12, now + 0.05);
-    oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
-
-    osc.connect(oscGain);
-    oscGain.connect(ctx.destination);
-
-    noise.start(now);
-    osc.start(now);
-    noise.stop(now + 0.35);
-    osc.stop(now + 0.38);
-  } catch (e) {
-    console.error('Audio play error', e);
-  }
+  // Silent archiving - no synthesized sound
 }
 
 export const playSealingSound = playVaporizeSound;
@@ -3824,7 +3769,6 @@ function RapidFlashcardMode({
     if (remembered) {
       if (currentRound === 4) {
         setIsVaporizing(true);
-        playSafeAudio(() => playVaporizeSound());
         triggerHaptic('success');
         setTimeout(() => {
           setIsVaporizing(false);
@@ -3877,8 +3821,8 @@ function RapidFlashcardMode({
 
     if (currentRound === 4) {
       setIsVaporizing(true);
-      playSafeAudio(() => playVaporizeSound());
       triggerHaptic('success');
+      playSafeAudio(() => playCardAudio(currentCard?.targetWord));
       setTimeout(() => {
         setIsVaporizing(false);
         setIsTransitioning(false);
@@ -4110,7 +4054,7 @@ function RapidFlashcardMode({
   }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, toggleFlip, playCardAudio]);
 
   return (
-    <div className={`w-full flex flex-col items-center select-none transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
+    <div key={currentCard?.id} className={`w-full flex flex-col items-center select-none animate-card-enter transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
       {isRound1or2 ? (
         /* =======================================================
            РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
@@ -4165,7 +4109,7 @@ function RapidFlashcardMode({
                       e.stopPropagation();
                       setIsEditModalOpen(true);
                     }}
-                    className="opacity-30 hover:opacity-100 transition-opacity p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
                     title="Karte bearbeiten"
                   >
                     <Pencil className="w-3.5 h-3.5" />
@@ -4223,7 +4167,7 @@ function RapidFlashcardMode({
                       e.stopPropagation();
                       setIsEditModalOpen(true);
                     }}
-                    className="opacity-30 hover:opacity-100 transition-opacity p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
                     title="Karte bearbeiten"
                   >
                     <Pencil className="w-3.5 h-3.5" />
@@ -4262,23 +4206,28 @@ function RapidFlashcardMode({
             </CardContainer>
           </div>
 
-          {/* 2. ПАРЯЩИЕ КНОПКИ УПРАВЛЕНИЯ [ ✕ ] И [ ✓ ] - ТОЛЬКО ДЛЯ ТАЧ-УСТРОЙСТВ */}
-          <div className="hidden [@media(pointer:coarse)]:flex items-center justify-center gap-6 mt-6">
+          {/* Кнопки оценки [ ✕ ] И [ ✓ ] при перевороте карточки */}
+          <div className={cn(
+            "flex items-center justify-center gap-4 sm:gap-6 mt-6 transition-all duration-200",
+            isFlipped ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95"
+          )}>
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); handleRateCard(false); }}
-              className="w-14 h-14 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-rose-500 hover:border-rose-500/40 hover:bg-rose-500/10 transition-all active:scale-90 shadow-lg shadow-zinc-950/5 dark:shadow-xl cursor-pointer"
+              className="px-6 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 flex items-center gap-2.5 text-zinc-700 dark:text-zinc-300 hover:text-rose-500 hover:border-rose-500/40 hover:bg-rose-500/10 transition-all active:scale-95 shadow-lg shadow-zinc-950/5 dark:shadow-xl cursor-pointer"
               title="Не знаю (ArrowLeft)"
             >
-              <X className="w-6 h-6 stroke-[2.5]"/>
+              <X className="w-5 h-5 stroke-[2.5] text-rose-500"/>
+              <span className="text-sm font-medium">Nicht gewusst</span>
             </button>
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); handleRateCard(true); }}
-              className="w-14 h-14 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-all active:scale-90 shadow-lg shadow-zinc-950/5 dark:shadow-xl cursor-pointer"
+              className="px-6 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 flex items-center gap-2.5 text-zinc-700 dark:text-zinc-300 hover:text-emerald-500 hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-all active:scale-95 shadow-lg shadow-zinc-950/5 dark:shadow-xl cursor-pointer"
               title="Знаю (ArrowRight)"
             >
-              <Check className="w-6 h-6 stroke-[2.5]"/>
+              <Check className="w-5 h-5 stroke-[2.5] text-emerald-500"/>
+              <span className="text-sm font-medium">Gewusst</span>
             </button>
           </div>
         </div>
@@ -4313,7 +4262,7 @@ function RapidFlashcardMode({
                   e.stopPropagation();
                   setIsEditModalOpen(true);
                 }}
-                className="opacity-30 hover:opacity-100 transition-opacity p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+                className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
                 title="Karte bearbeiten"
               >
                 <Pencil className="w-3.5 h-3.5" />
@@ -6174,7 +6123,6 @@ function StudyCard({
       if (willBeVaporized) {
         setIsVaporizing(true);
         setIsTransitionLocked(true);
-        playSafeAudio(() => playVaporizeSound());
         triggerHaptic('success');
         try {
           onAnswer(true, false);
@@ -6248,7 +6196,6 @@ function StudyCard({
       if (willBeVaporized) {
         setIsVaporizing(true);
         setIsTransitionLocked(true);
-        playSafeAudio(() => playVaporizeSound());
         triggerHaptic('success');
         try {
           onAnswer(true, false);
@@ -6478,7 +6425,7 @@ function StudyCard({
                 e.stopPropagation();
                 setIsEditModalOpen(true);
               }}
-              className="opacity-30 hover:opacity-100 transition-opacity p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+              className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
               title="Karte bearbeiten"
             >
               <Pencil className="w-3.5 h-3.5" />

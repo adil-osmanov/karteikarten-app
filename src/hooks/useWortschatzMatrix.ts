@@ -871,6 +871,11 @@ export async function autoBackfillMasteredWords(
     books.forEach((b) => bookMap.set(b.id, b));
   }
 
+  // Очищаем любые «сиротские» выученные слова, не принадлежащие существующим карточкам
+  try {
+    await purgeOrphanedMasteredWords(decks, books as any, targetLangParam);
+  } catch {}
+
   // Пересчитываем для всех поддерживаемых языков, присутствующих в колодах
   const langsToProcess: AppLang[] = SUPPORTED_LANGS;
 
@@ -977,6 +982,75 @@ export async function autoBackfillMasteredWords(
 }
 
 /**
+ * Очищает «сиротские» выученные слова (чьи карточки больше не принадлежат ни одной существующей колоде или книге)
+ */
+export async function purgeOrphanedMasteredWords(
+  currentDecks: Array<{ id: string; cards?: Array<any> }>,
+  currentBooks?: Array<{ id: string; decks?: Array<any> }>,
+  langParam?: string | AppLang
+): Promise<number> {
+  const normLang = normalizeLanguageCode(langParam);
+  initMatrixStore(normLang);
+
+  // 1. Собираем ID всех актуальных существующих карточек
+  const validCardIds = new Set<string>();
+  (currentDecks || []).forEach((d: any) => {
+    (d.cards || []).forEach((c: any) => {
+      if (c && c.id) validCardIds.add(c.id);
+    });
+  });
+  (currentBooks || []).forEach((b: any) => {
+    (b.decks || []).forEach((d: any) => {
+      (d.cards || []).forEach((c: any) => {
+        if (c && c.id) validCardIds.add(c.id);
+      });
+    });
+  });
+
+  if (validCardIds.size === 0) return 0;
+
+  // 2. Фильтруем локальную матрицу uniqueMasteredWordsByLang
+  const currentMap = uniqueMasteredWordsByLang[normLang];
+  let changed = false;
+  const removedKeys: string[] = [];
+
+  currentMap.forEach((entry, key) => {
+    if (entry.cardId && !validCardIds.has(entry.cardId)) {
+      removedKeys.push(key);
+      changed = true;
+    }
+  });
+
+  removedKeys.forEach(k => currentMap.delete(k));
+
+  if (changed) {
+    recomputeStatsFromMap(normLang);
+    persistMatrixToStorage(normLang);
+    notifyListeners(normLang);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
+      window.dispatchEvent(new Event('stats-update'));
+    }
+  }
+
+  // 3. Удаляем «сиротские» записи из Supabase user_mastered_words
+  try {
+    const validCardIdList = Array.from(validCardIds);
+    if (validCardIdList.length > 0) {
+      await supabase
+        .from('user_mastered_words')
+        .delete()
+        .not('card_id', 'in', `(${validCardIdList.join(',')})`);
+    }
+  } catch (err) {
+    console.warn('[Wortschatz-Matrix] Supabase orphaned words purge notice:', err);
+  }
+
+  return removedKeys.length;
+}
+
+/**
  * Синхронизирует матрицу при явном удалении колоды, книги или карточки.
  */
 export async function reconcileMasteredWords(
@@ -986,6 +1060,9 @@ export async function reconcileMasteredWords(
 ) {
   if (!isExplicitDeletion) {
     return;
+  }
+  if (Array.isArray(providedDecks)) {
+    await purgeOrphanedMasteredWords(providedDecks, undefined, targetLangParam);
   }
   await autoBackfillMasteredWords(providedDecks, undefined, targetLangParam);
 }
