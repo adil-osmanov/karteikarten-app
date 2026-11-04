@@ -4,7 +4,7 @@ import "./globals.css";
 export const viewport: Viewport = {
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#fbfbfd" },
-    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
   ],
 };
 
@@ -61,20 +61,20 @@ export default function RootLayout({
                 const isDark = stored ? stored === 'dark' : prefersDark;
                 if (isDark) {
                   document.documentElement.classList.add('dark');
-                  document.documentElement.style.backgroundColor = '#09090b';
+                  document.documentElement.style.backgroundColor = '#000000';
                 } else {
                   document.documentElement.classList.remove('dark');
                   document.documentElement.style.backgroundColor = '#fbfbfd';
                 }
                 let metaTheme = document.querySelector('meta[name="theme-color"]');
-                if (metaTheme) metaTheme.setAttribute('content', isDark ? '#09090b' : '#fbfbfd');
+                if (metaTheme) metaTheme.setAttribute('content', isDark ? '#000000' : '#fbfbfd');
               } catch (_) {}
             `,
           }}
         />
       </head>
 
-      <body className="min-h-screen bg-[#fbfbfd] dark:bg-[#09090b] text-zinc-900 dark:text-[#F5F5F7] font-sans antialiased selection:bg-blue-600/20 dark:selection:bg-blue-500/30 transition-colors duration-200">
+      <body className="min-h-screen bg-[#fbfbfd] dark:bg-black text-zinc-900 dark:text-[#F5F5F7] font-sans antialiased selection:bg-blue-600/20 dark:selection:bg-blue-500/30 transition-colors duration-200">
         {children}
       </body>
     </html>

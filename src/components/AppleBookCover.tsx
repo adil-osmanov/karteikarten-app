@@ -53,7 +53,7 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
 
       {/* Контейнер книги с многослойной физической тенью и физикой Apple */}
       <div 
-        className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden bg-zinc-900 shadow-[0_15px_30px_-6px_rgba(0,0,0,0.18),0_3px_8px_-1px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.75),0_4px_12px_rgba(0,0,0,0.45)] group-hover:-translate-y-2 group-hover:shadow-[0_25px_45px_-8px_rgba(0,0,0,0.25)] dark:group-hover:shadow-[0_30px_55px_-10px_rgba(0,0,0,0.95)] transition-all duration-300 ease-out transform-gpu will-change-transform"
+        className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden bg-zinc-900 shadow-[0_15px_30px_-6px_rgba(0,0,0,0.18),0_3px_8px_-1px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.9)] hover:shadow-[0_25px_60px_-10px_rgba(255,255,255,0.06)] hover:-translate-y-1.5 transition-all duration-300 ease-out transform-gpu will-change-transform"
         style={hasImage ? undefined : { backgroundColor: tintColor || '#1C1C1E' }}
       >
         {/* Исходная обложка */}

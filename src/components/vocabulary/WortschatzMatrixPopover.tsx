@@ -112,7 +112,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
         ref={buttonRef}
         type="button"
         onClick={() => setIsMatrixOpen(!isMatrixOpen)}
-        className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all select-none active:scale-95 cursor-pointer"
+        className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-white/[0.05] border border-black/5 dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all select-none active:scale-95 cursor-pointer"
         title="Wortschatz-Matrix öffnen"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />

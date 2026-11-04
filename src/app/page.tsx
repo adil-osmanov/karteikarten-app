@@ -6833,10 +6833,8 @@ function HeaderWidgets({
 
       <header 
         className={cn(
-          "sticky top-0 z-50 w-full select-none transition-all duration-300",
-          isScrolled 
-            ? "bg-white/80 dark:bg-black/75 backdrop-blur-md border-b border-black/[0.06] dark:border-white/10 shadow-sm" 
-            : "bg-transparent border-b border-transparent"
+          "sticky top-0 z-50 w-full select-none backdrop-blur-2xl transition-all duration-300 border-b",
+          "bg-white/70 dark:bg-black/70 border-black/[0.06] dark:border-white/[0.06]"
         )}
       >
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-2.5 sm:py-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-y-2.5 sm:gap-y-0">
@@ -6846,7 +6844,7 @@ function HeaderWidgets({
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-white/[0.05] border border-black/5 dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
                 title="Zurück zur Übersicht"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
@@ -6857,7 +6855,7 @@ function HeaderWidgets({
                 <button
                   type="button"
                   onClick={() => setIsLangOpen(prev => !prev)}
-                  className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                  className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-white/[0.05] border border-black/5 dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
                   title="Sprache wählen"
                 >
                   <span className="text-base leading-none select-none">{currentLang.flag}</span>
@@ -6910,14 +6908,14 @@ function HeaderWidgets({
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
               <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная переливающаяся аура: мягкая пастельная в светлой теме, глубокая в темной */}
+                {/* Анимированная переливающаяся аура */}
                 <div className="absolute -inset-[1.5px] rounded-full opacity-40 blur-lg bg-gradient-to-r from-blue-400 via-indigo-300 to-cyan-300 dark:opacity-70 dark:bg-gradient-to-r dark:from-blue-500 dark:via-indigo-500 dark:to-cyan-400 group-hover:opacity-70 dark:group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
 
-                {/* Сама кнопка в стиле Apple Frosted Glass (молочное стекло в светлой теме, глубокое в темной) */}
+                {/* Сама кнопка в стиле Apple Frosted Glass */}
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-white/85 text-neutral-900 border border-neutral-200/80 shadow-md shadow-blue-500/10 backdrop-blur-xl dark:bg-neutral-950/85 dark:text-white dark:border-white/15 dark:shadow-2xl font-medium text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-300 active:scale-[0.98] cursor-pointer"
+                  className="relative px-5 py-2.5 rounded-full bg-white/85 text-neutral-900 border border-neutral-200/80 shadow-md shadow-blue-500/10 backdrop-blur-xl dark:bg-blue-950/40 dark:text-white dark:border-blue-400/40 dark:shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] font-medium text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-300 active:scale-[0.98] cursor-pointer"
                 >
                   <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
                   <span className="font-medium text-neutral-900 dark:text-white">
@@ -6929,7 +6927,7 @@ function HeaderWidgets({
               <button
                 type="button"
                 disabled
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none text-xs font-medium tracking-wider uppercase"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none text-xs font-medium tracking-wider uppercase"
               >
                 <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
                 <span>
@@ -6954,7 +6952,7 @@ function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+              className="px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-white/[0.05] border border-black/5 dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
               title="Статистика дня"
             >
               <svg className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -6971,7 +6969,7 @@ function HeaderWidgets({
             <button 
               type="button"
               onClick={toggleTheme}
-              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white/80 dark:bg-neutral-900/60 border border-black/5 dark:border-white/10 backdrop-blur-xl flex items-center justify-center text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all active:scale-95 cursor-pointer"
+              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white/80 dark:bg-white/[0.05] border border-black/5 dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all active:scale-95 cursor-pointer"
               aria-label="Toggle theme"
               title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
@@ -7117,25 +7115,25 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
       </TiltBookCard>
 
       {/* Название книги, автор/издательство и прогресс в стиле Apple Books */}
-      <div className="mt-3.5 flex flex-col text-left w-full">
+      <div className="flex flex-col text-left w-full">
         <h3 
-          className="text-zinc-900 dark:text-zinc-100 font-semibold text-sm tracking-tight truncate"
+          className="text-[15px] font-semibold text-neutral-900 dark:text-white tracking-tight mt-3 truncate"
           title={cleanTitle}
         >
           {cleanTitle}
         </h3>
         {book.subtitle && (
           <p 
-            className="text-xs font-normal leading-normal text-zinc-500 dark:text-zinc-400 mt-0.5 truncate"
+            className="text-xs text-neutral-500 font-normal leading-normal mt-0.5 truncate"
             title={book.subtitle}
           >
             {book.subtitle}
           </p>
         )}
         {totalCards > 0 && (
-          <div className="w-full h-1 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden mt-2.5">
+          <div className="w-full h-1 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mt-2.5">
             <div 
-              className="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-all duration-300"
+              className="h-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)] rounded-full transition-all duration-300"
               style={{ width: `${Math.min(100, Math.max(0, Math.round(progressPercent)))}%` }}
             />
           </div>
@@ -10840,7 +10838,7 @@ export default function App() {
     return list;
   }, [filteredDecksList]);
 
-  if (!isMounted) return <main className="min-h-screen bg-[#fbfbfd] dark:bg-[#09090b]" />;
+  if (!isMounted) return <main className="min-h-screen bg-[#fbfbfd] dark:bg-black" />;
 
 
   if (activeDeckId) {
@@ -11412,7 +11410,7 @@ export default function App() {
     : ((activeBook?.accentColor && activeBook.accentColor.startsWith('#')) ? activeBook.accentColor : '#3B82F6');
 
   return (
-    <div className="min-h-screen relative w-full bg-[#fbfbfd] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
+    <div className="min-h-screen relative w-full bg-[#fbfbfd] dark:bg-black text-zinc-900 dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
       {/* Кинозерно (Аппаратный шум) */}
       <div 
         className="fixed inset-0 pointer-events-none opacity-[0.015] mix-blend-overlay z-[9999]"
@@ -11607,7 +11605,7 @@ export default function App() {
             
             {/* Dynamic Apple Segmented Control with i18n (Apple Glass Segment) */}
             <div className="w-full flex justify-center mt-4 sm:mt-6 mb-6 sm:mb-8 px-4">
-              <div className="max-w-full overflow-x-auto no-scrollbar inline-flex p-1 rounded-full bg-neutral-200/70 dark:bg-neutral-900/70 backdrop-blur-xl border border-black/5 dark:border-white/10 items-center gap-1 shadow-inner">
+              <div className="max-w-full overflow-x-auto no-scrollbar inline-flex p-1 rounded-full bg-neutral-200/70 dark:bg-white/[0.05] backdrop-blur-xl border border-black/5 dark:border-white/10 items-center gap-1 shadow-inner">
                 {getTabsForLanguage(appLanguage).map((tab) => (
                   <button
                     key={tab.id}
@@ -11675,7 +11673,7 @@ export default function App() {
                     />
 
                     {/* Обложка-форзац с книжными пропорциями и корешком */}
-                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_15px_30px_-6px_rgba(0,0,0,0.18),0_3px_8px_-1px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_35px_-8px_rgba(0,0,0,0.75),0_4px_12px_rgba(0,0,0,0.45)] group-hover:-translate-y-2 group-hover:shadow-[0_25px_45px_-8px_rgba(0,0,0,0.25)] dark:group-hover:shadow-[0_30px_55px_-10px_rgba(0,0,0,0.95)] transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
+                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_15px_30px_-6px_rgba(0,0,0,0.18),0_3px_8px_-1px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.9)] hover:shadow-[0_25px_60px_-10px_rgba(255,255,255,0.06)] hover:-translate-y-1.5 transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
                       {/* КОНТЕЙНЕР КОРЕШКА И ЖЕЛОБКА (SPINE & HINGE GROOVE) */}
                       <div className="absolute inset-y-0 left-0 pointer-events-none z-10 select-none overflow-hidden rounded-l-[3px] w-[6%] min-w-[7px] max-w-[14px]">
                         {/* 1. Объемное скругление самого левого ребра корешка (мягкий цилиндрический свет) */}
