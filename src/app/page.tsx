@@ -23,7 +23,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, getMasteredLemmasSet, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma } from "@/lib/utils/lemmaNormalizer";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
@@ -1017,6 +1017,35 @@ export function playSafeAudio(audioSrcOrFn: () => Promise<void> | void) {
 
 export const playSuccessSound = () => playFeedbackSound(true);
 export const playErrorSound = () => playFeedbackSound(false);
+
+export const playSealingSound = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) {
+      playFeedbackSound(true);
+      return;
+    }
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(520, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+
+    gain.gain.setValueAtTime(0.4, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.12);
+  } catch {
+    playFeedbackSound(true);
+  }
+};
 
 
 export const initAudioCtx = async () => {
@@ -2036,9 +2065,21 @@ export const useStore = create<DeckState>()((set, get) => ({
   },
   deleteBook: async (id) => {
     const previousBooks = get().books;
-    set({ books: previousBooks.filter(b => b.id !== id) });
+    const bookDecks = get().decks.filter(d => (d.bookId || (d as any).book_id) === id);
+    const deletedCardIds = bookDecks.flatMap(d => (d.cards || []).map(c => c.id)).filter(Boolean);
     const remainingDecks = get().decks.filter(d => (d.bookId || (d as any).book_id) !== id);
-    reconcileMasteredWords(remainingDecks, get().appLanguage, true);
+
+    set({ 
+      books: previousBooks.filter(b => b.id !== id),
+      decks: remainingDecks
+    });
+
+    await removeMasteredWordsByCardIds(deletedCardIds, id, get().appLanguage);
+    await reconcileMasteredWords(remainingDecks, get().appLanguage, true);
+    
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('stats-update'));
+    }
     
     const { error } = await supabase.from('books').delete().eq('id', id);
     
@@ -2047,6 +2088,9 @@ export const useStore = create<DeckState>()((set, get) => ({
       if (typeof window !== 'undefined') toast.error("Fehler: Buch konnte nicht gespeichert werden. (RLS oder ID fehlt)");
       set({ books: previousBooks });
       reconcileMasteredWords(get().decks, get().appLanguage, false);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('stats-update'));
+      }
     }
   },
   incrementDailyProgress: (targetLang?: string) => {
@@ -2282,15 +2326,29 @@ export const useStore = create<DeckState>()((set, get) => ({
 
   deleteDeck: async (deckId) => {
     const previousDecks = get().decks;
+    const deckToDelete = previousDecks.find(d => d.id === deckId);
+    const deletedCardIds = (deckToDelete?.cards || []).map(c => c.id).filter(Boolean);
     const remainingDecks = previousDecks.filter(d => d.id !== deckId);
+
     set({ decks: remainingDecks });
-    reconcileMasteredWords(remainingDecks, get().appLanguage, true);
+
+    if (deletedCardIds.length > 0) {
+      await removeMasteredWordsByCardIds(deletedCardIds, undefined, get().appLanguage);
+    }
+    await reconcileMasteredWords(remainingDecks, get().appLanguage, true);
     
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('stats-update'));
+    }
+
     const { error } = await supabase.from('decks').delete().eq('id', deckId);
     if (error) {
       console.error("Supabase Delete Deck Error:", error.message);
       set({ decks: previousDecks });
       reconcileMasteredWords(previousDecks, get().appLanguage, false);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('stats-update'));
+      }
     }
   },
 
@@ -2304,7 +2362,11 @@ export const useStore = create<DeckState>()((set, get) => ({
       };
     });
     set({ decks: nextDecks });
-    reconcileMasteredWords(nextDecks, get().appLanguage, true);
+    await removeMasteredWordsByCardIds([cardId], undefined, get().appLanguage);
+    await reconcileMasteredWords(nextDecks, get().appLanguage, true);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('stats-update'));
+    }
     try {
       await supabase.from('cards').delete().eq('id', cardId);
     } catch (e) {
@@ -3539,10 +3601,11 @@ function RapidFlashcardMode({
   const isMobile = useIsMobile();
 
   const [isFlipped, setIsFlipped] = useState(false);
-  const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived || isReview ? 4 : (currentCard?.masteryLevel ?? progress ?? 0)));
-  const currentRound = Math.max(1, Math.min(4, localMastery || (currentCard?.masteryLevel ?? 0) + 1));
-  const isTypingRecall = Boolean(forcedReverse || isReview || (currentCard?.masteryLevel ?? progress ?? 0) >= 2 || currentCard?.isArchived);
+  const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived || isReview ? 3 : (currentCard?.masteryLevel ?? progress ?? 0)));
+  const currentRound = Math.max(1, Math.min(4, isReview || currentCard?.isArchived ? 4 : (localMastery ?? currentCard?.masteryLevel ?? progress ?? 0) + 1));
+  const isTypingRecall = Boolean(forcedReverse || isReview || currentCard?.isArchived || currentRound >= 3);
   const [isRound1or2, setIsRound1or2] = useState(() => !isTypingRecall);
+  const [isSealed, setIsSealed] = useState(false);
   const [isAnswered, setIsAnswered] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
   const [typedValue, setTypedValue] = useState("");
@@ -3555,20 +3618,22 @@ function RapidFlashcardMode({
 
   // 7. Сброс стейта строго по currentCard?.id (устранение мигания инпута при переходе на раунд 3)
   useEffect(() => {
-    const mastery = currentCard?.isArchived ? 4 : (isReview ? Math.max(3, currentCard?.masteryLevel ?? progress ?? 3) : (currentCard?.masteryLevel ?? progress ?? 0));
+    const mastery = currentCard?.isArchived || isReview ? 3 : (currentCard?.masteryLevel ?? progress ?? 0);
     setLocalMastery(mastery);
-    const typingMode = Boolean(forcedReverse || isReview || currentCard?.isArchived || mastery >= 2);
+    const round = Math.max(1, Math.min(4, isReview || currentCard?.isArchived ? 4 : mastery + 1));
+    const typingMode = Boolean(forcedReverse || isReview || currentCard?.isArchived || round >= 3);
     setIsRound1or2(!typingMode);
     setIsFlipped(false);
     setIsAnswered(false);
     setIsSurrendered(false);
+    setIsSealed(false);
     setTypedValue("");
     setIsErrorMismatch(false);
     setIsShaking(false);
     setCardAnimClass('opacity-100 scale-100');
     setIsTransitioning(false);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-  }, [currentCard?.id, forcedReverse, isReview]);
+  }, [currentCard?.id, forcedReverse, isReview, progress, currentCard?.masteryLevel, currentCard?.isArchived]);
 
   // Парсинг целевой конструкции (управление, отделяемая приставка, артикль)
   const parsedTarget = useMemo(() => {
@@ -3706,6 +3771,18 @@ function RapidFlashcardMode({
     setIsTransitioning(true);
 
     if (remembered) {
+      if (currentRound === 4) {
+        setIsSealed(true);
+        playSafeAudio(() => playSealingSound());
+        triggerHaptic('success');
+        setTimeout(() => {
+          setIsSealed(false);
+          setIsTransitioning(false);
+          onAnswer(true, false);
+        }, 900);
+        return;
+      }
+
       playSafeAudio(() => playSuccessSound());
       const nextMastery = Math.min(4, (localMastery || 0) + 1);
       setLocalMastery(nextMastery);
@@ -3721,7 +3798,7 @@ function RapidFlashcardMode({
     setTimeout(() => {
       onAnswer(remembered, false);
     }, 140);
-  }, [locked, isTransitioning, localMastery, onAnswer]);
+  }, [locked, isTransitioning, currentRound, localMastery, onAnswer]);
 
   const toggleFlip = useCallback(() => {
     setIsFlipped(prev => !prev);
@@ -3747,10 +3824,23 @@ function RapidFlashcardMode({
     const nextMastery = Math.min(4, (localMastery || 0) + 1);
     setLocalMastery(nextMastery);
 
+    if (currentRound === 4) {
+      setIsSealed(true);
+      playSafeAudio(() => playSealingSound());
+      playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+      triggerHaptic('success');
+      setTimeout(() => {
+        setIsSealed(false);
+        setIsTransitioning(false);
+        onAnswer(true, false, false);
+      }, 900);
+      return;
+    }
+
     playSafeAudio(() => playSuccessSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     triggerHaptic('success');
-  }, [isAnswered, localMastery, playCardAudio, currentCard?.targetWord]);
+  }, [isAnswered, localMastery, currentRound, playCardAudio, currentCard?.targetWord, onAnswer]);
 
   const handleGiveUp = useCallback(() => {
     if (locked || isAnswered) return;
@@ -3996,6 +4086,8 @@ function RapidFlashcardMode({
             {/* ФРОНТАЛЬНАЯ СТОРОНА (СЛОВО НА НЕМЕЦКОМ) */}
             <CardContainer 
               is3DFace 
+              rarityRound={currentRound}
+              isSealed={isSealed}
               style={{
                 WebkitBackfaceVisibility: 'hidden',
                 backfaceVisibility: 'hidden',
@@ -4028,7 +4120,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={currentRound} />
+                  <ProgressDots level={currentRound} isSealed={isSealed} />
                 </div>
               </div>
 
@@ -4043,6 +4135,12 @@ function RapidFlashcardMode({
                     {plural}
                   </p>
                 )}
+                {isSealed && (
+                  <div className="mt-4 text-xs font-medium tracking-wider uppercase text-amber-400/90 flex items-center justify-center gap-1.5 animate-in fade-in duration-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                    Ins Langzeitgedächtnis versiegelt
+                  </div>
+                )}
               </div>
 
               {/* Низ: Пусто для чистоты */}
@@ -4052,6 +4150,8 @@ function RapidFlashcardMode({
             {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР + КНОПКА ДИНАМИКА) */}
             <CardContainer 
               is3DFace 
+              rarityRound={currentRound}
+              isSealed={isSealed}
               style={{
                 WebkitBackfaceVisibility: 'hidden',
                 backfaceVisibility: 'hidden',
@@ -4084,7 +4184,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={currentRound} />
+                  <ProgressDots level={currentRound} isSealed={isSealed} />
                 </div>
               </div>
 
@@ -4110,6 +4210,13 @@ function RapidFlashcardMode({
                 {displaySentence && (
                   <div className="mt-8 border-l border-zinc-300 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-600 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
                     {displaySentence}
+                  </div>
+                )}
+
+                {isSealed && (
+                  <div className="mt-4 text-xs font-medium tracking-wider uppercase text-amber-400/90 flex items-center justify-center gap-1.5 animate-in fade-in duration-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                    Ins Langzeitgedächtnis versiegelt
                   </div>
                 )}
               </div>
@@ -4142,7 +4249,10 @@ function RapidFlashcardMode({
         /* =======================================================
            РАУНДЫ 3-4: ЧИСТЫЙ АКТИВНЫЙ ВВОД (ACTIVE RECALL)
            ======================================================= */
-        <CardContainer>
+        <CardContainer
+          rarityRound={currentRound}
+          isSealed={isSealed}
+        >
           {/* Шапка */}
           <div className="flex items-center justify-between w-full shrink-0">
             <button
@@ -4171,7 +4281,7 @@ function RapidFlashcardMode({
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              <ProgressDots level={currentRound} />
+              <ProgressDots level={currentRound} isSealed={isSealed} />
 
               <button
                 type="button"
@@ -4193,6 +4303,13 @@ function RapidFlashcardMode({
             <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white mb-8 max-w-lg">
               {currentCard?.translation || currentCard?.hint}
             </h2>
+
+            {isSealed && (
+              <div className="mb-6 text-xs font-medium tracking-wider uppercase text-amber-400/90 flex items-center justify-center gap-1.5 animate-in fade-in duration-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                Ins Langzeitgedächtnis versiegelt
+              </div>
+            )}
 
             {parsedTarget.prefixContext ? (
               <div className="w-full max-w-xl flex flex-wrap items-center justify-center gap-x-3.5 gap-y-2.5">
@@ -4353,7 +4470,8 @@ function RapidFlashcardMode({
               <button
                 type="button"
                 onClick={handleProceedNext}
-                className="w-full max-w-sm py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
+                className="w-full max-w-sm py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 border-none select-none cursor-pointer flex items-center justify-center"
+                style={{ outline: 'none', border: 'none' }}
               >
                 Weiter
               </button>
@@ -5901,9 +6019,13 @@ function StudyCard({
   }, [isMobile, phase]);
 
   // Attach typing sound natively to window to bypass React event limitations and ensure it fires
+  const currentRound = Math.max(1, Math.min(4, isReview || forceInputMode || card.isArchived ? 4 : (localMastery ?? card.masteryLevel ?? 0) + 1));
+  const isRecognitionMode = !forceInputMode && !isReview && currentRound <= 2;
+  const isMultipleChoice = isRecognitionMode && phase === "Question" && Boolean(card.options && card.options.length >= 2);
+
   useEffect(() => {
     if (phase !== "Question") return;
-    if (!forceInputMode && card.masteryLevel < 2) return;
+    if (isRecognitionMode) return;
     
     const handleNativeGlobalKeyDown = (e: KeyboardEvent) => {
       const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Enter' || e.key === 'Tab';
@@ -5913,15 +6035,13 @@ function StudyCard({
     
     window.addEventListener('keydown', handleNativeGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleNativeGlobalKeyDown);
-  }, [phase, forceInputMode, card.masteryLevel]);
-
-  const isMultipleChoice = !forceInputMode && !isReview && phase === "Question" && card.masteryLevel < 2 && Boolean(card.options && card.options.length >= 2);
+  }, [phase, isRecognitionMode]);
 
   useEffect(() => {
-    if (!isMobile && phase === "Question" && !isMultipleChoice && inputRef.current) {
+    if (!isMobile && phase === "Question" && !isRecognitionMode && inputRef.current) {
       inputRef.current.focus();
     }
-  }, [isMobile, isMultipleChoice, phase]);
+  }, [isMobile, isRecognitionMode, phase]);
 
   const playAudio = useCallback((text: string) => {
     setIsPlayingAudio(true);
@@ -5932,11 +6052,17 @@ function StudyCard({
   }, [playbackSpeed]);
 
   const handleReveal = useCallback(() => {
+    if (phase !== "Question") return;
     setPhase("Answer");
+    playSafeAudio(() => playSuccessSound());
     playSafeAudio(() => playAudio(fullSentence));
-  }, [fullSentence, playAudio]);
-
-  const currentRound = Math.max(1, Math.min(4, localMastery || card.masteryLevel || 1));
+    triggerHaptic('success');
+    try {
+      onAnswer(true, false);
+    } catch (e) {
+      console.warn('onAnswer error caught:', e);
+    }
+  }, [phase, fullSentence, playAudio, onAnswer]);
 
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
@@ -5962,7 +6088,7 @@ function StudyCard({
       if (willBeSealed) {
         setIsSealed(true);
         setIsTransitionLocked(true);
-        playSafeAudio(() => playSuccessSound());
+        playSafeAudio(() => playSealingSound());
         playSafeAudio(() => playAudio(fullSentence));
         triggerHaptic('success');
         try {
@@ -5971,6 +6097,8 @@ function StudyCard({
           console.warn('onAnswer error caught:', e);
         }
         transitionTimerRef.current = setTimeout(() => {
+          setIsSealed(false);
+          setIsTransitionLocked(false);
           onNext();
         }, 900);
         return;
@@ -6035,7 +6163,7 @@ function StudyCard({
       if (willBeSealed) {
         setIsSealed(true);
         setIsTransitionLocked(true);
-        playSafeAudio(() => playSuccessSound());
+        playSafeAudio(() => playSealingSound());
         playSafeAudio(() => playAudio(fullSentence));
         triggerHaptic('success');
         try {
@@ -6044,6 +6172,8 @@ function StudyCard({
           console.warn('onAnswer error caught:', e);
         }
         transitionTimerRef.current = setTimeout(() => {
+          setIsSealed(false);
+          setIsTransitionLocked(false);
           onNext();
         }, 900);
         return;
@@ -6121,6 +6251,14 @@ function StudyCard({
 
       if (document.activeElement?.tagName === 'INPUT') return;
 
+      if (phase === "Question" && isRecognitionMode && !isMultipleChoice) {
+        if (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter') {
+          e.preventDefault();
+          handleReveal();
+          return;
+        }
+      }
+
       if (phase === "Question" && isMultipleChoice) {
         if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); handleOptionClick(card.options[0]); }
         if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); handleOptionClick(card.options[1]); }
@@ -6142,7 +6280,7 @@ function StudyCard({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [phase, isMultipleChoice, card, playAudio, onNext, fullSentence, parts]);
+  }, [phase, isMultipleChoice, isRecognitionMode, handleReveal, card, playAudio, onNext, fullSentence, parts]);
 
   const renderInputChars = () => {
     if (inputText.length === 0) {
@@ -6205,7 +6343,7 @@ function StudyCard({
         isArchivingPulse={isArchivePulse}
         isSealed={isSealed}
         onClick={() => {
-          if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
+          if (!isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
           }
         }}
@@ -6298,6 +6436,14 @@ function StudyCard({
                   <span className="inline-block align-baseline mx-1.5 min-w-[100px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent select-none">
                     {displayAnswerWord}
                   </span>
+                ) : isRecognitionMode ? (
+                  <span 
+                    onClick={handleReveal}
+                    className="inline-block relative align-baseline border-b-2 border-dashed border-blue-500/70 hover:border-blue-400 px-3 min-w-[100px] text-center font-medium text-blue-500 hover:text-blue-400 cursor-pointer mx-1.5 select-none transition-colors"
+                    title="Lösung anzeigen"
+                  >
+                    Lösung anzeigen
+                  </span>
                 ) : (
                   <span 
                     className="inline-block relative align-baseline border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5"
@@ -6343,7 +6489,7 @@ function StudyCard({
             </p>
 
             {isSealed && (
-              <div className="text-amber-400 text-xs font-medium tracking-wide uppercase mt-4 animate-fade-in flex items-center justify-center gap-1.5">
+              <div className="mt-4 text-xs font-medium tracking-wider uppercase text-amber-400/90 flex items-center justify-center gap-1.5 animate-in fade-in duration-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
                 Ins Langzeitgedächtnis versiegelt
               </div>
@@ -6399,9 +6545,22 @@ function StudyCard({
                   type="button"
                   disabled={isTransitionLocked}
                   onClick={isTransitionLocked ? undefined : onNext}
-                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center disabled:opacity-80"
+                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-none select-none cursor-pointer flex items-center justify-center disabled:opacity-80"
+                  style={{ outline: 'none', border: 'none' }}
                 >
                   Weiter
+                </button>
+              ) : isRecognitionMode ? (
+                <button
+                  type="button"
+                  onClick={handleReveal}
+                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.12] active:scale-[0.98] text-neutral-800 dark:text-neutral-200 font-medium text-base border border-black/5 dark:border-white/10 shadow-sm transition-all outline-none select-none cursor-pointer flex items-center justify-center gap-2"
+                  style={{ outline: 'none', border: 'none' }}
+                >
+                  <span>Lösung anzeigen</span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 text-neutral-500 dark:text-neutral-400 font-mono">
+                    Leertaste
+                  </span>
                 </button>
               ) : (
                 <div className="h-13 sm:h-14 invisible pointer-events-none" />
@@ -6411,7 +6570,7 @@ function StudyCard({
         </div>
       </CardContainer>
 
-      {phase === "Question" && !isMultipleChoice && isMobile && (
+      {phase === "Question" && !isRecognitionMode && isMobile && (
         <MobileKeyboard 
           onKeyPress={handleVirtualKeyPress}
           onBackspace={handleVirtualBackspace}
@@ -9230,7 +9389,8 @@ function PrepStudyCard({
           <button
             type="button"
             onClick={onNext}
-            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
+            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 border-none select-none cursor-pointer flex items-center justify-center"
+            style={{ outline: 'none', border: 'none' }}
           >
             Weiter
           </button>
@@ -9421,7 +9581,8 @@ function VerbStudyCard({
           <button
             type="button"
             onClick={onNext}
-            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
+            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 border-none select-none cursor-pointer flex items-center justify-center"
+            style={{ outline: 'none', border: 'none' }}
           >
             Weiter
           </button>
@@ -9937,7 +10098,8 @@ export function RedemittelStudyCard({
                 <button
                   onClick={onNext}
                   autoFocus
-                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
+                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 border-none select-none cursor-pointer flex items-center justify-center"
+                  style={{ outline: 'none', border: 'none' }}
                 >
                   Weiter
                 </button>

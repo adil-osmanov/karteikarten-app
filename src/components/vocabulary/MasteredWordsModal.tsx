@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { X, Search, Pencil, Layers } from 'lucide-react';
+import { X, Search, Edit3, Layers } from 'lucide-react';
 import { useStore, type Flashcard } from '@/app/page';
 import {
   getMasteredWordEntries,
@@ -60,9 +60,10 @@ export function getWordMaturity(card?: any, entry?: any, nextReviewDate?: string
   const daysUntilNext = nextReviewDate ? Math.max(0, (new Date(nextReviewDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
   const effectiveInterval = Math.max(intervalDays, daysUntilNext);
 
-  if (effectiveInterval >= 90) return 'titanium'; // 3+ месяца без ошибок
-  if (effectiveInterval >= 30) return 'master';    // 1-3 месяца
-  return 'sealed';                                // 14-29 дней (свежеосвоенное)
+  // Тестирование градаций зрелости (Dev-пороги)
+  if (effectiveInterval >= 14) return 'titanium'; // 14+ дней -> TITAN
+  if (effectiveInterval >= 6) return 'master';     // 7d+ (6+ дней) -> Gold Master
+  return 'sealed';                                // Свежеосвоенные
 }
 
 export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
@@ -252,22 +253,6 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return counts;
   }, [enrichedWords]);
 
-  // Статистика градации зрелости слов (Apple Vault Tiers)
-  const maturityStats = useMemo(() => {
-    let titanium = 0;
-    let master = 0;
-    let sealed = 0;
-
-    enrichedWords.forEach((item) => {
-      const m = getWordMaturity(item.card, item.entry, item.nextReviewDate);
-      if (m === 'titanium') titanium++;
-      else if (m === 'master') master++;
-      else sealed++;
-    });
-
-    return { total: enrichedWords.length, titanium, master, sealed };
-  }, [enrichedWords]);
-
   // Открытие модального окна редактирования карточки
   const handleOpenEditor = (item: (typeof enrichedWords)[0]) => {
     let targetCard = item.card;
@@ -393,15 +378,6 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
             })}
           </div>
 
-          {/* Статистика зрелости слов (Apple Vault Tiers) */}
-          <div className="flex items-center px-1 mb-3 text-xs text-neutral-500 dark:text-neutral-400 select-none font-normal">
-            <span>
-              {currentLang === 'de'
-                ? `${maturityStats.total} Wörter gemeistert • ${maturityStats.titanium} Titan • ${maturityStats.master} Gold-Aktiv`
-                : `${maturityStats.total} слов освоено • ${maturityStats.titanium} титановых • ${maturityStats.master} в золотом активе`}
-            </span>
-          </div>
-
           {/* 3. СКРОЛЛИРУЕМЫЙ СПИСОК СЛОВ В СТИЛЕ APPLE macOS */}
           <div className="flex-1 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800/50 py-1 pr-1 min-h-[220px] scrollbar-thin scrollbar-thumb-neutral-300 dark:scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-400 dark:hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-800 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full">
             {filteredWords.length === 0 ? (
@@ -410,63 +386,59 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
               </div>
             ) : (
               filteredWords.map((item) => {
-                const badgeClass =
-                  LEVEL_BADGE_STYLES[item.level] ||
-                  'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25';
-
                 const srs = getSRSStatus(item.nextReviewDate);
                 const maturity = getWordMaturity(item.card, item.entry, item.nextReviewDate);
 
                 return (
                   <div
                     key={item.key}
-                    className="flex items-center justify-between py-2.5 px-3 -mx-2 rounded-xl hover:bg-neutral-100/70 dark:hover:bg-white/[0.04] transition-colors group"
+                    className="group flex items-center justify-between py-2.5 px-3 rounded-xl hover:bg-neutral-100/70 dark:hover:bg-white/[0.03] transition-colors"
                   >
-                    {/* Левая часть: Немецкое слово + Краткий русский перевод (чистая линия слева) */}
-                    <div className="flex flex-col min-w-0 pr-3">
-                      <span className="text-neutral-900 dark:text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
+                    {/* Левая колонка: Немецкое слово + Перевод */}
+                    <div className="flex flex-col min-w-0 pr-4">
+                      <span className="text-[15px] font-medium text-neutral-900 dark:text-neutral-100 tracking-tight truncate group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
                         {formatSeparableWord(item.word)}
                       </span>
                       {item.translation ? (
-                        <span className="text-neutral-500 dark:text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md">
+                        <span className="text-xs text-neutral-500 dark:text-neutral-400 font-normal truncate mt-0.5 max-w-xs sm:max-w-md">
                           {item.translation}
                         </span>
                       ) : null}
                     </div>
 
-                    {/* Правая часть: Статус зрелости + SRS + Бейдж уровня + Карандаш (проявляется при hover) */}
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Правая колонка: Градация зрелости + Таймер повтора + Бейдж уровня + Карандаш (только при hover) */}
+                    <div className="flex items-center gap-2.5 shrink-0">
                       {maturity === 'titanium' ? (
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider uppercase bg-gradient-to-r from-slate-200 via-neutral-100 to-zinc-300 text-neutral-900 shadow-sm border border-white/40">
                           TITAN
                         </span>
                       ) : maturity === 'master' ? (
                         <span className="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/20">
-                          30d+
+                          7d+
                         </span>
                       ) : srs.isDue ? (
                         <span className="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20">
                           {srs.label}
                         </span>
                       ) : (
-                        <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-normal mr-0.5">
+                        <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-normal">
                           {srs.label}
                         </span>
                       )}
 
-                      <span
-                        className={`text-[11px] font-semibold font-mono px-2 py-0.5 rounded-lg border ${badgeClass}`}
-                      >
+                      {/* Бейдж уровня */}
+                      <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-neutral-200/80 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border border-black/5 dark:border-neutral-700/50">
                         {item.level}
                       </span>
 
+                      {/* Карандаш (только при hover) */}
                       <button
                         type="button"
                         onClick={() => handleOpenEditor(item)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800 cursor-pointer"
+                        className="opacity-0 group-hover:opacity-100 p-1 text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-opacity duration-150 cursor-pointer"
                         title="Karte bearbeiten"
                       >
-                        <Pencil className="w-3.5 h-3.5" />
+                        <Edit3 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>

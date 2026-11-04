@@ -991,6 +991,71 @@ export async function reconcileMasteredWords(
 }
 
 /**
+ * Каскадное удаление выученных слов при удалении книги, колоды или карточек
+ */
+export async function removeMasteredWordsByCardIds(
+  cardIds: string[], 
+  bookId?: string, 
+  langParam?: string | AppLang
+): Promise<void> {
+  const normLang = normalizeLanguageCode(langParam);
+  initMatrixStore(normLang);
+
+  const cardIdSet = new Set(cardIds.filter(Boolean));
+  const currentMap = uniqueMasteredWordsByLang[normLang];
+  const keysToRemove: string[] = [];
+
+  currentMap.forEach((entry, key) => {
+    if (entry.cardId && cardIdSet.has(entry.cardId)) {
+      keysToRemove.push(key);
+    } else if (bookId && entry.bookId === bookId) {
+      keysToRemove.push(key);
+    }
+  });
+
+  keysToRemove.forEach((k) => currentMap.delete(k));
+
+  recomputeStatsFromMap(normLang);
+  persistMatrixToStorage(normLang);
+  notifyListeners(normLang);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
+  }
+
+  // Удаление из Supabase таблицы user_mastered_words
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id;
+    if (userId) {
+      if (cardIds.length > 0) {
+        await supabase
+          .from('user_mastered_words')
+          .delete()
+          .eq('user_id', userId)
+          .in('card_id', cardIds);
+      }
+      if (bookId) {
+        await supabase
+          .from('user_mastered_words')
+          .delete()
+          .eq('user_id', userId)
+          .eq('source_book_id', bookId);
+      }
+      if (keysToRemove.length > 0) {
+        await supabase
+          .from('user_mastered_words')
+          .delete()
+          .eq('user_id', userId)
+          .in('lemma', keysToRemove);
+      }
+    }
+  } catch (err) {
+    console.warn('[Wortschatz-Matrix] Remote cascade delete notice:', err);
+  }
+}
+
+/**
  * Подсчет слов, выученных сегодня в локальном часовом поясе пользователя:
  * todayStart <= masteredAt < todayEnd
  */
