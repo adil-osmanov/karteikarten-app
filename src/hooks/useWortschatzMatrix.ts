@@ -301,6 +301,16 @@ export function normalizeLanguageCode(lang?: string | null): AppLang {
   return 'de';
 }
 
+let cachedAuthUserId: string | null = null;
+export async function getMatrixAuthUserId(): Promise<string | null> {
+  if (cachedAuthUserId) return cachedAuthUserId;
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    cachedAuthUserId = authData?.user?.id || null;
+  } catch {}
+  return cachedAuthUserId;
+}
+
 // Единственный источник правды в памяти: Map<normalizedKey, { originalWord, level, masteredAt, bookId }>
 const uniqueMasteredWordsByLang: Record<AppLang, Map<string, MasteredWordEntry>> = {
   de: new Map<string, MasteredWordEntry>(),
@@ -767,8 +777,7 @@ export async function recordMasteredLemma(
 
   // Сохраняем в Supabase user_mastered_words (при наличии авторизованного пользователя)
   try {
-    const { data: authData } = await supabase.auth.getUser();
-    const userId = authData?.user?.id;
+    const userId = await getMatrixAuthUserId();
     if (!userId) return;
 
     await supabase.from('user_mastered_words').upsert(
@@ -826,8 +835,7 @@ export async function removeMasteredLemma(
   }
 
   try {
-    const { data: authData } = await supabase.auth.getUser();
-    const userId = authData?.user?.id;
+    const userId = await getMatrixAuthUserId();
     if (!userId) return;
 
     await supabase
@@ -1040,19 +1048,7 @@ export async function purgeOrphanedMasteredWords(
     }
   }
 
-  // 3. Удаляем «сиротские» записи из Supabase user_mastered_words
-  try {
-    const validCardIdList = Array.from(validCardIds);
-    if (validCardIdList.length > 0) {
-      await supabase
-        .from('user_mastered_words')
-        .delete()
-        .not('card_id', 'in', `(${validCardIdList.join(',')})`);
-    }
-  } catch (err) {
-    console.warn('[Wortschatz-Matrix] Supabase orphaned words purge notice:', err);
-  }
-
+  // Сиротские записи очищены строго в локальной памяти JavaScript без опасных сетевых запросов
   return removedKeys.length;
 }
 

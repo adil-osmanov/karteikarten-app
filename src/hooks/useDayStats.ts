@@ -173,11 +173,30 @@ export async function getIDBItem<T>(key: string): Promise<T | null> {
 
 // --- SUPABASE CLOUD DATABASE STORAGE ---
 let cloudSyncTimeout: ReturnType<typeof setTimeout> | null = null;
+let lastSupabaseSyncTime: Record<string, number> = {};
+let cachedDayStatsUserId: string | null = null;
+
+async function getDayStatsUserId(): Promise<string | null> {
+  if (cachedDayStatsUserId) return cachedDayStatsUserId;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    cachedDayStatsUserId = user?.id || null;
+  } catch {}
+  return cachedDayStatsUserId;
+}
 
 export async function syncStatsToSupabase(lang: string, stats: DailyStats, immediate: boolean = false): Promise<void> {
   const normLang = normalizeLanguage(lang);
+  const now = Date.now();
+
+  // Throttling: do not spam Supabase more than once every 5 minutes during training unless exiting (immediate)
+  if (!immediate && now - (lastSupabaseSyncTime[normLang] || 0) < 300000) {
+    return;
+  }
+
   const performSync = async () => {
     try {
+      lastSupabaseSyncTime[normLang] = Date.now();
       const history = getDailyStatsHistory(normLang, 30);
       const payload = {
         date: stats.date,
@@ -193,13 +212,13 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
         daily_activity: payload
       }, { onConflict: 'language' });
 
-      // Synchronize with user_daily_stats if authenticated and table exists
+      // Synchronize with user_daily_stats if authenticated
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
+        const userId = await getDayStatsUserId();
+        if (userId) {
           const todayRecord = getDayRecord(normLang, stats.date);
           await supabase.from('user_daily_stats').upsert({
-            user_id: user.id,
+            user_id: userId,
             language: normLang,
             date: stats.date,
             cards_reviewed: todayRecord.cardsReviewed,
@@ -228,7 +247,7 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
     cloudSyncTimeout = setTimeout(() => {
       performSync();
       cloudSyncTimeout = null;
-    }, 1500);
+    }, 5000);
   }
 }
 
@@ -838,7 +857,7 @@ function getOrCreateStats(lang: string = 'DE'): DailyStats {
   return statsByLang[normLang];
 }
 
-function notifyLang(lang: string, options?: { skipCloudSync?: boolean }) {
+function notifyLang(lang: string, _options?: { skipCloudSync?: boolean }) {
   const normLang = normalizeLanguage(lang);
   const current = getOrCreateStats(normLang);
   if (typeof window !== 'undefined') {
@@ -848,9 +867,7 @@ function notifyLang(lang: string, options?: { skipCloudSync?: boolean }) {
     setStatsInIDB(normLang, current);
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
   }
-  if (!options?.skipCloudSync) {
-    syncStatsToSupabase(normLang, current, false);
-  }
+  // No Supabase calls in notifyLang — purely local notification
   if (listenersByLang[normLang]) {
     listenersByLang[normLang].forEach(fn => fn(current));
   }
@@ -914,7 +931,7 @@ function initGlobalTimer() {
         } catch {}
 
         const realCards = getTodayCompletedCardsCount(lang);
-        statsByLang[lang] = {
+        const newStats = {
           date: today,
           activeSeconds: 1,
           cardsDone: realCards,
@@ -922,6 +939,8 @@ function initGlobalTimer() {
           mistakesCountToday: 0,
           mistakesPool: current.mistakesPool || []
         };
+        statsByLang[lang] = newStats;
+        notifyLang(lang);
       } else {
         const nextSeconds = (current.activeSeconds || 0) + 1;
         const updated = {
@@ -930,7 +949,12 @@ function initGlobalTimer() {
         };
         statsByLang[lang] = updated;
 
-        // Periodically update focus minutes in DayRecord and sync to IndexedDB & Supabase every 30 seconds
+        // Update local React subscribers smoothly without heavy storage / network overhead
+        if (listenersByLang[lang]) {
+          listenersByLang[lang].forEach(fn => fn(updated));
+        }
+
+        // Periodically persist focus minutes to local IndexedDB every 30 seconds
         if (nextSeconds % 30 === 0) {
           const focusMins = Math.floor(nextSeconds / 60);
           saveDayRecord(lang, {
@@ -938,10 +962,13 @@ function initGlobalTimer() {
             focusMinutes: focusMins
           });
           setStatsInIDB(lang, updated);
+        }
+
+        // In Supabase send at most once every 10 minutes (600s) during ongoing study
+        if (nextSeconds % 600 === 0) {
           syncStatsToSupabase(lang, updated, false);
         }
       }
-      notifyLang(lang);
     });
   }, 1000);
 }
@@ -1163,8 +1190,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
 
     statsByLang[targetLang] = nextStats;
     notifyLang(targetLang);
-    // Instant sync to Supabase database so reload never loses anything
-    syncStatsToSupabase(targetLang, nextStats, true);
+    // Local memory and IndexedDB are updated; Supabase is synced on session exit or 10m timer
   }, [lang]);
 
   return { stats, setStats, recordCardResult };

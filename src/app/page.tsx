@@ -160,126 +160,52 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
   return result;
 }
 
-// --- SUPABASE PER-CARD PROGRESS & STATS REGISTRATION ---
-let cardStatsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingCardStatsQueue: Array<{
-  cardId: string;
-  isCorrect: boolean;
-  meta?: { deckId?: string; bookId?: string; card?: any; language?: string };
-}> = [];
-
-export async function recordCardProgress(
+// --- LOCAL IN-MEMORY & STORAGE PER-CARD PROGRESS ---
+export function recordCardProgress(
   cardId: string,
   isCorrect: boolean,
   meta?: { deckId?: string; bookId?: string; card?: any; language?: string }
-): Promise<void> {
+): void {
   if (!cardId) return;
-  const nowIso = new Date().toISOString();
-
-  // 1. Get authenticated user ID (single source of truth for user)
-  let userId = 'default_user';
+  // Local-first update with 0 network calls during card study
   try {
-    const { data: authData } = await supabase.auth.getUser();
-    if (authData?.user?.id) {
-      userId = authData.user.id;
-    }
-  } catch {}
-
-  // 2. Try Supabase RPCs if available in public schema
-  try {
-    if (isCorrect) {
-      await supabase.rpc('increment_card_correct', { p_card_id: cardId });
-    } else {
-      await supabase.rpc('increment_card_mistake', { p_card_id: cardId });
-    }
-  } catch {}
-
-  // 3. Try Supabase card_progress table if available
-  try {
-    await supabase.from('card_progress').upsert({
-      user_id: userId,
-      card_id: cardId,
-      deck_id: meta?.deckId || null,
-      book_id: meta?.bookId || null,
-      review_count: 1,
-      correct_count: isCorrect ? 1 : 0,
-      mistake_count: isCorrect ? 0 : 1,
-      last_reviewed_at: nowIso
-    }, { onConflict: 'user_id,card_id' });
-  } catch {}
-
-  // 4. Update CARD_STATS row in user_stats (guaranteed to succeed via JSONB)
-  pendingCardStatsQueue.push({ cardId, isCorrect, meta });
-
-  const flushCardStats = async () => {
-    if (pendingCardStatsQueue.length === 0) return;
-    const batch = [...pendingCardStatsQueue];
-    pendingCardStatsQueue = [];
-
+    const localKey = 'local_card_stats';
+    let currentStats: any = {};
     try {
-      const { data: statsRow } = await supabase
-        .from('user_stats')
-        .select('daily_activity')
-        .eq('language', 'CARD_STATS')
-        .maybeSingle();
+      const stored = localStorage.getItem(localKey);
+      if (stored) currentStats = JSON.parse(stored);
+    } catch {}
 
-      const currentStats = (statsRow?.daily_activity && typeof statsRow.daily_activity === 'object')
-        ? statsRow.daily_activity
-        : { totalCorrect: 0, totalMistakes: 0, totalReviews: 0, cardRecords: {} };
+    const records = currentStats.cardRecords || {};
+    const existing = records[cardId] || {
+      card_id: cardId,
+      deck_id: meta?.deckId || '',
+      book_id: meta?.bookId || '',
+      review_count: 0,
+      correct_count: 0,
+      mistake_count: 0,
+      last_reviewed_at: new Date().toISOString()
+    };
 
-      let totalCorrect = currentStats.totalCorrect || 0;
-      let totalMistakes = currentStats.totalMistakes || 0;
-      let totalReviews = currentStats.totalReviews || 0;
-      const records = { ...(currentStats.cardRecords || {}) };
-
-      for (const item of batch) {
-        totalReviews += 1;
-        if (item.isCorrect) {
-          totalCorrect += 1;
-        } else {
-          totalMistakes += 1;
-        }
-
-        const existing = records[item.cardId] || {
-          user_id: userId,
-          card_id: item.cardId,
-          deck_id: item.meta?.deckId || '',
-          book_id: item.meta?.bookId || '',
-          review_count: 0,
-          correct_count: 0,
-          mistake_count: 0,
-          last_reviewed_at: nowIso
-        };
-
-        existing.review_count = (existing.review_count || 0) + 1;
-        if (item.isCorrect) {
-          existing.correct_count = (existing.correct_count || 0) + 1;
-        } else {
-          existing.mistake_count = (existing.mistake_count || 0) + 1;
-        }
-        existing.last_reviewed_at = nowIso;
-        if (item.meta?.deckId) existing.deck_id = item.meta.deckId;
-        if (item.meta?.bookId) existing.book_id = item.meta.bookId;
-        records[item.cardId] = existing;
-      }
-
-      await supabase.from('user_stats').upsert({
-        language: 'CARD_STATS',
-        daily_activity: {
-          totalCorrect,
-          totalMistakes,
-          totalReviews,
-          updated_at: new Date().toISOString(),
-          cardRecords: records
-        }
-      }, { onConflict: 'language' });
-    } catch (e) {
-      console.warn('CARD_STATS sync notice:', e);
+    existing.review_count = (existing.review_count || 0) + 1;
+    if (isCorrect) {
+      existing.correct_count = (existing.correct_count || 0) + 1;
+    } else {
+      existing.mistake_count = (existing.mistake_count || 0) + 1;
     }
-  };
+    existing.last_reviewed_at = new Date().toISOString();
+    records[cardId] = existing;
 
-  if (cardStatsDebounceTimer) clearTimeout(cardStatsDebounceTimer);
-  cardStatsDebounceTimer = setTimeout(flushCardStats, 400);
+    currentStats.cardRecords = records;
+    currentStats.totalReviews = (currentStats.totalReviews || 0) + 1;
+    if (isCorrect) {
+      currentStats.totalCorrect = (currentStats.totalCorrect || 0) + 1;
+    } else {
+      currentStats.totalMistakes = (currentStats.totalMistakes || 0) + 1;
+    }
+
+    safeSetStorage(localKey, JSON.stringify(currentStats));
+  } catch {}
 }
 
 // --- SUPABASE MULTI-DEVICE CLOUD SYNC FOR DAILY COUNTER ---
@@ -411,62 +337,21 @@ export async function fetchDailyStatsFromCloud(lang: string): Promise<number | n
   return syncCloudDailyStats(undefined, lang);
 }
 
-export async function syncDailyStatsToCloud(lang: string, count: number, currentStats?: Partial<LanguageDailyProgress>): Promise<void> {
-  const cleanLang = (lang || 'de').toLowerCase();
+let cloudDailyStatsDebounceTimer: Record<string, ReturnType<typeof setTimeout>> = {};
+let lastCloudDailyStatsSyncTime: Record<string, number> = {};
+
+async function performDailyStatsToCloudSync(cleanLang: string, count: number, currentStats?: Partial<LanguageDailyProgress>): Promise<void> {
   const upperLang = cleanLang.toUpperCase();
   const today = getDeviceLocalDate();
   const nowIso = new Date().toISOString();
-
-  let effectiveCount = count;
-
-  // Если браузер (например Safari) ещё не успел подтянуть облачный счетчик в этой сессии,
-  // сначала сверяемся с облаком, чтобы никогда не затереть больший счетчик нулем!
-  if (cloudSyncedToday[cleanLang] !== today) {
-    try {
-      const { data } = await supabase
-        .from('user_stats')
-        .select('language, daily_activity')
-        .in('language', [`DAILY_STATS_${upperLang}`, upperLang, `DAY_STATS_${upperLang}`]);
-
-      if (data && Array.isArray(data)) {
-        const dailyRow = data.find(r => r.language === `DAILY_STATS_${upperLang}`);
-        const histRow = data.find(r => r.language === upperLang);
-        const dayRow = data.find(r => r.language === `DAY_STATS_${upperLang}`);
-
-        const c1 = (dailyRow?.daily_activity?.date === today)
-          ? (dailyRow.daily_activity.cards_count ?? dailyRow.daily_activity.learnedToday ?? 0)
-          : 0;
-        const rawHist = histRow?.daily_activity?.[today];
-        const c2 = typeof rawHist === 'number' ? rawHist : 0;
-        const c3 = (dayRow?.daily_activity?.date === today)
-          ? (dayRow.daily_activity.cardsDone ?? dayRow.daily_activity.correctCount ?? 0)
-          : 0;
-
-        const cloudMax = Math.max(c1, c2, c3);
-        if (cloudMax >= effectiveCount) {
-          effectiveCount = cloudMax + 1;
-          const localCur = getLanguageDailyStats(cleanLang);
-          localCur.learnedToday = effectiveCount;
-          localCur.correctCount = Math.max(localCur.correctCount, effectiveCount);
-          localCur.totalCount = Math.max(localCur.totalCount, effectiveCount + (localCur.mistakesCount || 0));
-          localCur.accuracy = localCur.totalCount > 0 ? Math.round((localCur.correctCount / localCur.totalCount) * 100) : 100;
-          persistDailyStatsLocal(cleanLang, today, localCur);
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: effectiveCount } }));
-            window.dispatchEvent(new Event('storage-update'));
-          }
-        }
-        cloudSyncedToday[cleanLang] = today;
-      }
-    } catch {}
-  }
+  lastCloudDailyStatsSyncTime[cleanLang] = Date.now();
 
   try {
     const fullDaily = {
       ...(currentStats || {}),
       date: today,
-      learnedToday: effectiveCount,
-      cards_count: effectiveCount,
+      learnedToday: count,
+      cards_count: count,
       updated_at: nowIso
     };
 
@@ -482,10 +367,10 @@ export async function syncDailyStatsToCloud(lang: string, count: number, current
         const stored = localStorage.getItem(histKey);
         if (stored) progress = JSON.parse(stored);
       } catch {}
-      progress[today] = Math.max(typeof progress[today] === 'number' ? progress[today] : 0, effectiveCount);
+      progress[today] = Math.max(typeof progress[today] === 'number' ? progress[today] : 0, count);
       safeSetStorage(histKey, JSON.stringify(progress));
     } else {
-      progress[today] = effectiveCount;
+      progress[today] = count;
     }
 
     await supabase.from('user_stats').upsert({
@@ -495,6 +380,36 @@ export async function syncDailyStatsToCloud(lang: string, count: number, current
   } catch (e) {
     console.error('Ошибка синхронизации дневной статистики в Supabase user_stats:', e);
   }
+}
+
+export async function flushDailyStatsToCloud(lang: string): Promise<void> {
+  const cleanLang = (lang || 'de').toLowerCase();
+  if (cloudDailyStatsDebounceTimer[cleanLang]) {
+    clearTimeout(cloudDailyStatsDebounceTimer[cleanLang]);
+    delete cloudDailyStatsDebounceTimer[cleanLang];
+  }
+  const current = getLanguageDailyStats(cleanLang);
+  await performDailyStatsToCloudSync(cleanLang, current.learnedToday, current);
+}
+
+export function syncDailyStatsToCloud(lang: string, count: number, currentStats?: Partial<LanguageDailyProgress>, immediate: boolean = false): void {
+  const cleanLang = (lang || 'de').toLowerCase();
+  if (immediate) {
+    flushDailyStatsToCloud(cleanLang);
+    return;
+  }
+  // Hard debounce: queue at most once every 5 minutes (300,000 ms) during study
+  const now = Date.now();
+  if (now - (lastCloudDailyStatsSyncTime[cleanLang] || 0) < 300000) {
+    return;
+  }
+  if (cloudDailyStatsDebounceTimer[cleanLang]) {
+    clearTimeout(cloudDailyStatsDebounceTimer[cleanLang]);
+  }
+  cloudDailyStatsDebounceTimer[cleanLang] = setTimeout(() => {
+    delete cloudDailyStatsDebounceTimer[cleanLang];
+    flushDailyStatsToCloud(cleanLang);
+  }, 300000);
 }
 
 export async function syncDailyStatsFromCloud(lang: string): Promise<number> {
@@ -1158,7 +1073,7 @@ export async function fetchAllUserCards(userId?: string): Promise<any[]> {
       while (hasMore) {
         const { data, error } = await supabase
           .from('cards')
-          .select('*')
+          .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, created_at, updated_at')
           .order('id', { ascending: true })
           .range(from, from + PAGE_SIZE - 1);
 
@@ -1216,11 +1131,10 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
   if (validCard.baseWordInfo !== undefined) primaryPayload.baseWordInfo = validCard.baseWordInfo;
   if (validCard.forms !== undefined) primaryPayload.forms = validCard.forms;
 
-  let { data, error } = await supabase
+  let { error } = await supabase
     .from('cards')
     .update(primaryPayload)
-    .eq('id', cardId)
-    .select('id');
+    .eq('id', cardId);
 
   if (error) {
     const isoReviewDate = numericReviewDate ? new Date(numericReviewDate).toISOString() : null;
@@ -1234,20 +1148,16 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
     const retry = await supabase
       .from('cards')
       .update(snakePayload)
-      .eq('id', cardId)
-      .select('id');
+      .eq('id', cardId);
     if (!retry.error) {
       error = null;
-      data = retry.data;
+    } else {
+      error = retry.error;
     }
   }
 
   if (error) {
     console.error('🚨 [SYNC ERROR] Ошибка сохранения карточки в Supabase:', error);
-    return false;
-  }
-  if (!data || data.length === 0) {
-    console.warn('🚨 [SYNC ERROR] Supabase Update Card: 0 rows affected (RLS or missing row for ID:', cardId, ')');
     return false;
   }
   return true;
@@ -1974,7 +1884,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     const newBooks = previousBooks.map(b => b.id === bookId ? updatedBook : b);
     set({ books: newBooks });
     
-    const { data, error } = await supabase.from('books').update(updates).eq('id', bookId).select();
+    const { data, error } = await supabase.from('books').update(updates).eq('id', bookId).select('id');
     if (error) {
       console.error("Supabase updateBookSettings error:", error);
       set({ books: previousBooks });
@@ -2006,12 +1916,12 @@ export const useStore = create<DeckState>()((set, get) => ({
       activeLevels: book.activeLevels || ['A1']
     };
     
-    let { data, error } = await supabase.from('books').update(payload).eq('id', book.id).select();
+    let { data, error } = await supabase.from('books').update(payload).eq('id', book.id).select('id');
     
     // If 0 rows updated, it means the book is missing in Supabase (e.g. fallback book verbs-de). Try to UPSERT it!
     if (!error && (!data || data.length === 0)) {
        const upsertPayload = { id: book.id, ...payload };
-       const upsertRes = await supabase.from('books').upsert(upsertPayload).select();
+       const upsertRes = await supabase.from('books').upsert(upsertPayload).select('id');
        error = upsertRes.error;
        data = upsertRes.data;
        
@@ -2028,7 +1938,7 @@ export const useStore = create<DeckState>()((set, get) => ({
          coverimage: book.coverImage || null,
          activelevels: book.activeLevels || ['A1']
        };
-       const fallbackRes = await supabase.from('books').upsert(fallbackPayload).select();
+       const fallbackRes = await supabase.from('books').upsert(fallbackPayload).select('id');
        error = fallbackRes.error;
        if (!error && (!fallbackRes.data || fallbackRes.data.length === 0)) {
          error = { message: 'RLS blocked fallback upsert', code: '403', details: '' } as any;
@@ -2317,11 +2227,6 @@ export const useStore = create<DeckState>()((set, get) => ({
       } catch (e) {
         console.warn('Supabase cascade delete user_mastered_words notice:', e);
       }
-      try {
-        await supabase.from('card_progress').delete().in('card_id', deckCardIds);
-      } catch (e) {
-        console.warn('Supabase cascade delete card_progress notice:', e);
-      }
 
       // 3. Cascade delete in local matrix storage
       await removeMasteredWordsByCardIds(deckCardIds, undefined, get().appLanguage);
@@ -2577,20 +2482,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
     } catch (e) {}
 
-    // Also attempt upsert into user_card_progress for compatibility with multi-user / RPC
-    try {
-      const currentUserId = await getCachedUserId();
-      if (currentUserId) {
-        const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
-        await supabase.from('user_card_progress').upsert({
-          user_id: currentUserId,
-          card_id: cardId,
-          next_review_at: nextIso,
-          repetition_level: validCard.repetitions || 0,
-          last_reviewed_at: new Date().toISOString()
-        }, { onConflict: 'user_id,card_id' });
-      }
-    } catch {}
+
   },
 
   // Rapid flashcards: persist the 0-4 round score of a word. 4 => archived (learned).
@@ -2711,19 +2603,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
     } catch (e) {}
 
-    try {
-      const currentUserId = await getCachedUserId();
-      if (currentUserId) {
-        const nextIso = validCard.nextReviewDate ? new Date(validCard.nextReviewDate).toISOString() : null;
-        await supabase.from('user_card_progress').upsert({
-          user_id: currentUserId,
-          card_id: cardId,
-          next_review_at: nextIso,
-          repetition_level: validCard.repetitions || 0,
-          last_reviewed_at: new Date().toISOString()
-        }, { onConflict: 'user_id,card_id' });
-      }
-    } catch {}
+
   }
 }));
 
@@ -4980,6 +4860,12 @@ function RapidSession({
     // NO automatic timer! The user reads the word and explicitly taps «Weiter» to advance.
   }, [queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
 
+  useEffect(() => {
+    return () => {
+      flushDailyStatsToCloud(studyLanguage);
+    };
+  }, [studyLanguage]);
+
   if (queue === null) return null;
 
   if (queue.length === 0) {
@@ -4989,7 +4875,10 @@ function RapidSession({
         sessionTotal={sessionTotal || total}
         sessionMistakes={sessionMistakes}
         onReviewMistakes={handleReviewOnlyMistakes}
-        onBack={onBack}
+        onBack={() => {
+          flushDailyStatsToCloud(studyLanguage);
+          onBack();
+        }}
         subtitle={reviewCards ? "Alle fälligen Karten wurden wiederholt." : "Du hast alle Karten in diesem Deck gemeistert."}
       />
     );
@@ -5002,7 +4891,7 @@ function RapidSession({
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
       <div className="w-full max-w-3xl mx-auto px-4 mb-2.5">
         <div className="flex items-center justify-between mb-2">
-          <button onClick={onBack} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
+          <button onClick={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <span
@@ -5506,6 +5395,12 @@ function StudyInterface({
     }
   }, [activeCards, decks, books, trainingMode]);
 
+  useEffect(() => {
+    return () => {
+      flushDailyStatsToCloud(studyLanguage);
+    };
+  }, [studyLanguage]);
+
   if (activeCards.length === 0 || !currentCardSnapshot || !liveCard) {
     return (
       <SessionResultScreen
@@ -5513,7 +5408,10 @@ function StudyInterface({
         sessionTotal={initialTotal}
         sessionMistakes={sessionMistakes}
         onReviewMistakes={handleReviewOnlyMistakes}
-        onBack={onBack}
+        onBack={() => {
+          flushDailyStatsToCloud(studyLanguage);
+          onBack();
+        }}
         subtitle={
           isReviewSession 
             ? "Alle fälligen Karten wurden wiederholt." 
@@ -5531,7 +5429,7 @@ function StudyInterface({
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
       <div className="w-full max-w-3xl mx-auto px-4 mb-2.5">
         <div className="flex items-center justify-between mb-2">
-          <button onClick={onBack} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
+          <button onClick={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-2.5">
@@ -10551,8 +10449,8 @@ export default function App() {
         );
 
         const fetchPromise = Promise.all([
-          supabase.from('books').select('*').order('created_at', { ascending: true }),
-          supabase.from('decks').select('*').order('created_at', { ascending: true }),
+          supabase.from('books').select('id, language, title, subtitle, tintColor, coverImage, activeLevels, category, training_mode, cover_url_light, created_at, updated_at').order('created_at', { ascending: true }),
+          supabase.from('decks').select('id, book_id, bookId, name, category, level, language, card_count, created_at, updated_at').order('created_at', { ascending: true }),
           fetchAllUserCards(),
           supabase.from('user_stats').select('language, daily_activity')
         ]).then(([booksRes, decksRes, allCards, statsRes]) => ({ booksRes, decksRes, allCards, statsRes }));
