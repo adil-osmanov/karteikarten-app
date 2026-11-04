@@ -23,21 +23,21 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  */
 export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean): string {
   if (isSealed) {
-    return "border border-amber-400/80 ring-2 ring-amber-400/40 shadow-[0_0_70px_-5px_rgba(251,191,36,0.35)] transition-all duration-300";
+    return "border border-amber-400/40 shadow-[0_0_120px_rgba(245,158,11,0.45)] transition-all duration-300";
   }
   if (!round || round <= 1) {
-    return "border border-white/5 dark:border-white/5 bg-neutral-900/90 shadow-2xl transition-all duration-500";
+    return "border border-white/10 dark:border-white/5 bg-neutral-900/90 shadow-2xl transition-all duration-700";
   }
   if (round === 2) {
-    return "border border-emerald-500/30 ring-1 ring-emerald-500/20 shadow-[0_0_50px_-10px_rgba(16,185,129,0.22)] transition-all duration-500";
+    return "border border-emerald-500/20 shadow-[0_0_80px_-15px_rgba(16,185,129,0.25)] transition-all duration-700";
   }
   if (round === 3) {
-    return "border border-blue-500/35 ring-1 ring-blue-500/25 shadow-[0_0_55px_-10px_rgba(59,130,246,0.25)] transition-all duration-500";
+    return "border border-blue-500/20 shadow-[0_0_90px_-15px_rgba(59,130,246,0.28)] transition-all duration-700";
   }
-  // Round 4 (Amethyst / Epic)
+  // Round 4 (Purple / Epic)
   return cn(
-    "border border-purple-500/40 ring-1 ring-purple-500/30 shadow-[0_0_60px_-10px_rgba(168,85,247,0.28)] transition-all duration-500",
-    isArchivingPulse && "ring-2 ring-purple-400/80 shadow-[0_0_65px_rgba(168,85,247,0.45)] animate-pulse"
+    "border border-purple-500/25 shadow-[0_0_100px_-12px_rgba(168,85,247,0.32)] transition-all duration-700",
+    isArchivingPulse && "shadow-[0_0_110px_rgba(168,85,247,0.45)] animate-pulse"
   );
 }
 
@@ -141,7 +141,7 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
           "relative transition-all duration-400 ease-out will-change-transform",
-          isVaporizing && "scale-[1.02] -translate-y-2 opacity-0 blur-md brightness-150 shadow-[0_0_90px_rgba(245,158,11,0.45)] border-amber-400/80 pointer-events-none",
+          isVaporizing && "scale-[1.02] -translate-y-2 opacity-0 blur-md brightness-150 shadow-[0_0_120px_rgba(245,158,11,0.45)] border-amber-400/40 pointer-events-none",
           className
         )}
         style={{

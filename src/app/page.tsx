@@ -2359,18 +2359,35 @@ export const useStore = create<DeckState>()((set, get) => ({
   deleteDeck: async (deckId) => {
     const previousDecks = get().decks;
     const deckToDelete = previousDecks.find(d => d.id === deckId);
-    const deletedCardIds = (deckToDelete?.cards || []).map(c => c.id).filter(Boolean);
+    const deckCardIds = (deckToDelete?.cards || []).map(c => c.id).filter(Boolean);
     const remainingDecks = previousDecks.filter(d => d.id !== deckId);
 
+    // 1. Optimistic local state update in Zustand
     set({ decks: remainingDecks });
 
-    if (deletedCardIds.length > 0) {
-      await removeMasteredWordsByCardIds(deletedCardIds, undefined, get().appLanguage);
+    // 2. Cascade delete from Supabase database
+    if (deckCardIds.length > 0) {
+      try {
+        await supabase.from('user_mastered_words').delete().in('card_id', deckCardIds);
+      } catch (e) {
+        console.warn('Supabase cascade delete user_mastered_words notice:', e);
+      }
+      try {
+        await supabase.from('card_progress').delete().in('card_id', deckCardIds);
+      } catch (e) {
+        console.warn('Supabase cascade delete card_progress notice:', e);
+      }
+
+      // 3. Cascade delete in local matrix storage
+      await removeMasteredWordsByCardIds(deckCardIds, undefined, get().appLanguage);
     }
+
+    // 4. Reconcile matrix and dispatch stats updates
     await reconcileMasteredWords(remainingDecks, get().appLanguage, true);
     
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('stats-update'));
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: get().appLanguage } }));
     }
 
     const { error } = await supabase.from('decks').delete().eq('id', deckId);
@@ -2380,6 +2397,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       reconcileMasteredWords(previousDecks, get().appLanguage, false);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('stats-update'));
+        window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: get().appLanguage } }));
       }
     }
   },

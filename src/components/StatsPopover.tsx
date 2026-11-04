@@ -3,7 +3,7 @@ import { X, CheckCircle2, RotateCcw, Clock, Target } from 'lucide-react';
 import { 
   getTodayCompletedCardsCount, 
   normalizeLanguage, 
-  getDailyStatsHistory, 
+  getCurrentWeekDailyStats, 
   getTodayKey, 
   DayRecord 
 } from '@/hooks/useDayStats';
@@ -19,7 +19,6 @@ export interface StatsPopoverProps {
 
 const STATS_I18N: Record<string, {
   title: string;
-  resetSubtitle: string;
   thisWeek: string;
   cards: string;
   focus: string;
@@ -43,7 +42,6 @@ const STATS_I18N: Record<string, {
 }> = {
   DE: {
     title: "Aktivität & Statistik",
-    resetSubtitle: "Reset um 00:00",
     thisWeek: "Diese Woche",
     cards: "Karten",
     focus: "Fokus",
@@ -61,13 +59,12 @@ const STATS_I18N: Record<string, {
     noMistakes: "Keine Fehler",
     reviewButton: "Wiederholen",
     closeTooltip: "Schließen",
-    days: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
-    fullDays: ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'],
+    days: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
+    fullDays: ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'],
     today: "Heute",
   },
   EN: {
     title: "Activity & Statistics",
-    resetSubtitle: "Resets at 00:00",
     thisWeek: "This week",
     cards: "cards",
     focus: "focus",
@@ -85,13 +82,12 @@ const STATS_I18N: Record<string, {
     noMistakes: "No mistakes",
     reviewButton: "Review",
     closeTooltip: "Close",
-    days: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'],
-    fullDays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+    days: ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'],
+    fullDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
     today: "Today",
   },
   RU: {
     title: "Активность и статистика",
-    resetSubtitle: "Сброс в 00:00",
     thisWeek: "На этой неделе",
     cards: "карт",
     focus: "фокуса",
@@ -109,8 +105,8 @@ const STATS_I18N: Record<string, {
     noMistakes: "Нет ошибок",
     reviewButton: "Повторить",
     closeTooltip: "Закрыть",
-    days: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'],
-    fullDays: ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'],
+    days: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
+    fullDays: ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'],
     today: "Сегодня",
   }
 };
@@ -119,7 +115,8 @@ function getDayLabel(dateStr: string, daysList: string[]): string {
   const parts = dateStr.split('-');
   if (parts.length === 3) {
     const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    return daysList[d.getDay()] || '';
+    const isoDay = (d.getDay() + 6) % 7; // 0: Mo, 1: Di, ..., 6: So
+    return daysList[isoDay] || '';
   }
   return '';
 }
@@ -128,7 +125,8 @@ function getFormattedFullDate(dateStr: string, fullDaysList: string[]): string {
   const parts = dateStr.split('-');
   if (parts.length === 3) {
     const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    const dayName = fullDaysList[d.getDay()] || '';
+    const isoDay = (d.getDay() + 6) % 7; // 0: Mo, 1: Di, ..., 6: So
+    const dayName = fullDaysList[isoDay] || '';
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     return `${dayName}, ${dd}.${mm}`;
@@ -185,10 +183,10 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     };
   }, [isOpen, onClose]);
 
-  // Compute 7-day strip history
+  // Compute Monday..Sunday week history
   const historyDays: DayRecord[] = useMemo(() => {
     if (!isOpen) return [];
-    return getDailyStatsHistory(currentLang, 7);
+    return getCurrentWeekDailyStats(currentLang);
   }, [isOpen, currentLang, stats?.cardsDone, stats?.activeSeconds, stats?.mistakesCountToday]);
 
   // Weekly momentum totals (sum over the 7 days)
@@ -315,7 +313,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
               {t.title}
             </h3>
             <p className="text-[11px] font-normal text-zinc-400 dark:text-zinc-500 mt-0.5">
-              {isSelectedToday ? t.resetSubtitle : getFormattedFullDate(selectedDate, t.fullDays)}
+              {getFormattedFullDate(selectedDate, t.fullDays)}
             </p>
           </div>
           <button 
@@ -328,9 +326,19 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
           </button>
         </div>
 
-        {/* Недельная сводка (Momentum Header) */}
-        <div className="text-xs text-neutral-500 dark:text-neutral-400 font-medium mt-3.5 mb-3 select-none">
-          {t.thisWeek}: <span className="text-zinc-900 dark:text-neutral-100 font-semibold">{weekTotalCards} {t.cards}</span> • <span className="text-zinc-900 dark:text-neutral-100 font-semibold">{weekTotalHours} {t.unitHour} {t.focus}</span>
+        {/* Солидная сводка недели (Premium Stats Pill) */}
+        <div className="flex items-center justify-between p-3.5 mt-3.5 mb-4 rounded-2xl bg-black/[0.03] dark:bg-neutral-800/50 border border-black/5 dark:border-white/5 backdrop-blur-md select-none">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">{t.thisWeek}</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            <span className="font-semibold text-neutral-900 dark:text-neutral-100 bg-black/5 dark:bg-white/10 px-2.5 py-1 rounded-lg">
+              {weekTotalCards} {t.cards}
+            </span>
+            <span className="font-semibold text-neutral-600 dark:text-neutral-300">
+              {weekTotalHours} {t.unitHour} {t.focus}
+            </span>
+          </div>
         </div>
 
         {/* 7-дневный график активности в стиле Apple (Weekly Bar Strip) */}
@@ -341,12 +349,11 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
               const isToday = day.date === todayKey;
               const dayCards = isToday ? todayLiveCards : day.cardsReviewed;
               const dayTarget = day.targetCards || 200;
-              const isGoalMet = dayCards >= dayTarget && dayTarget > 0;
               const dayLabel = getDayLabel(day.date, t.days);
 
               // Bar fill height (proportional to daily target)
               const fillHeight = dayCards > 0
-                ? Math.min(100, Math.max(8, Math.round((dayCards / dayTarget) * 100)))
+                ? Math.min(100, Math.max(10, Math.round((dayCards / dayTarget) * 100)))
                 : 0;
 
               return (
@@ -354,22 +361,22 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
                   key={day.date}
                   type="button"
                   onClick={() => setSelectedDate(day.date)}
-                  className={`flex-1 flex flex-col items-center gap-1.5 py-2 px-1 rounded-xl transition-all duration-200 cursor-pointer outline-none select-none ${
+                  className={`flex-1 flex flex-col items-center gap-2 py-2 px-1 rounded-xl transition-all duration-200 cursor-pointer outline-none select-none ${
                     isSelected
                       ? 'bg-black/[0.06] dark:bg-white/[0.1] shadow-sm ring-1 ring-black/10 dark:ring-white/15'
                       : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'
                   }`}
                   title={`${dayLabel}: ${dayCards} / ${dayTarget}`}
                 >
-                  {/* Вертикальный трек столбика */}
-                  <div className="w-2.5 h-14 bg-neutral-200 dark:bg-neutral-800 rounded-full overflow-hidden flex flex-col justify-end p-[1px]">
+                  {/* Чистая цельная скругленная капсула (pill) без делений */}
+                  <div className="w-3 h-20 bg-neutral-200 dark:bg-neutral-800/80 rounded-full overflow-hidden flex flex-col justify-end p-0.5">
                     <div
                       className={`w-full rounded-full transition-all duration-500 ${
-                        isGoalMet
-                          ? 'bg-emerald-400 dark:bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,0.5)]'
-                          : (isSelected || isToday)
-                            ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]'
-                            : 'bg-neutral-300 dark:bg-neutral-600'
+                        isToday
+                          ? 'bg-gradient-to-t from-blue-600 to-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.6)]'
+                          : dayCards > 0
+                            ? 'bg-gradient-to-t from-emerald-500 to-teal-400'
+                            : 'h-0 opacity-0'
                       }`}
                       style={{ height: `${fillHeight}%` }}
                     />

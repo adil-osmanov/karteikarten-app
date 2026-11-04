@@ -615,6 +615,61 @@ export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7)
   return result;
 }
 
+/**
+ * Возвращает 7 дней текущей календарной недели строго с Понедельника по Воскресенье
+ */
+export function getCurrentWeekDailyStats(lang: string = 'DE'): DayRecord[] {
+  const normLang = normalizeLanguage(lang);
+  const todayKey = getTodayKey();
+  const currentToday = statsByLang[normLang];
+
+  const now = new Date();
+  const dayOfWeek = (now.getDay() + 6) % 7; // 0 for Mo, 1 for Di, ..., 6 for So
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - dayOfWeek);
+
+  const result: DayRecord[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    let record = getDayRecord(normLang, dateStr);
+
+    if (dateStr === todayKey && currentToday) {
+      const liveCards = Math.max(record.cardsReviewed, currentToday.cardsDone || 0, getTodayCompletedCardsCount(normLang));
+      const liveSeconds = currentToday.activeSeconds || 0;
+      const liveMinutes = Math.max(record.focusMinutes, Math.floor(liveSeconds / 60));
+      const liveMistakes = typeof currentToday.mistakesCountToday === 'number'
+        ? currentToday.mistakesCountToday
+        : (currentToday.mistakesPool?.length || 0);
+      const totalAttempts = liveCards + liveMistakes;
+      const liveAccuracy = totalAttempts > 0 ? Math.round((liveCards / totalAttempts) * 100) : 100;
+
+      record = {
+        ...record,
+        cardsReviewed: liveCards,
+        focusMinutes: liveMinutes,
+        accuracy: liveAccuracy,
+        mistakesCount: liveMistakes
+      };
+      saveDayRecord(normLang, record);
+    }
+
+    const effectiveMinutes = Math.max(
+      record.focusMinutes || 0,
+      (record.cardsReviewed || 0) > 0 ? Math.max(1, Math.round(((record.cardsReviewed || 0) * 4.5) / 60)) : 0
+    );
+
+    result.push({
+      ...record,
+      focusMinutes: effectiveMinutes
+    });
+  }
+
+  return result;
+}
+
 function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
   const normLang = normalizeLanguage(lang);
   const todayKey = getTodayKey();
