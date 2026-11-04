@@ -10,6 +10,7 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
   rarityRound?: number; // 1: Common, 2: Uncommon (Emerald), 3: Rare (Sapphire), 4: Epic (Purple)
   isArchivingPulse?: boolean;
   isSealed?: boolean;
+  isLegendary?: boolean;
   isVaporizing?: boolean;
 }
 
@@ -19,11 +20,14 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  * - Round 2 (Uncommon): Soft emerald contour with subtle green ambient glow.
  * - Round 3 (Rare): Sapphire contour with noble blue ambient glow.
  * - Round 4 (Epic): Amethyst contour with magical purple ambient glow.
- * - The Sealing Ritual (Round 4 Mastered): Noble gold contour with golden aura.
+ * - Legendary (SRS Repeat / Sealed Mastered): Noble gold contour with golden aura.
  */
-export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean): string {
+export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean, isLegendary?: boolean): string {
   if (isSealed) {
-    return "border border-amber-400/40 shadow-[0_0_100px_rgba(245,158,11,0.35)] transition-all duration-400";
+    return "border border-amber-400/30 shadow-[0_0_100px_rgba(245,158,11,0.35)] transition-all duration-300";
+  }
+  if (isLegendary) {
+    return "border border-amber-400/20 shadow-[0_0_70px_rgba(245,158,11,0.20)] transition-all duration-300";
   }
   if (!round || round <= 1) {
     // Раунд 1: без свечения
@@ -70,21 +74,23 @@ export function ProgressDots({
   level = 1, 
   max = 4, 
   isSealed = false,
+  isLegendary = false,
   className 
 }: { 
   level: number; 
   max?: number; 
   isSealed?: boolean;
+  isLegendary?: boolean;
   className?: string; 
 }) {
-  // If sealed / vaporizing: all 4 dots burst synchronously into pure glowing gold
-  if (isSealed) {
+  // If sealed / vaporizing / legendary: all 4 dots burst into pure glowing gold
+  if (isSealed || isLegendary) {
     return (
       <div className={cn("flex items-center gap-1.5 select-none shrink-0", className)}>
         {Array.from({ length: max }, (_, idx) => (
           <span
             key={idx}
-            className="w-2 h-2 shrink-0 rounded-full transition-transform duration-200 bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.9)] scale-110 border-transparent"
+            className="w-2 h-2 shrink-0 rounded-full transition-transform duration-200 bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,1)] scale-110 border-transparent"
           />
         ))}
       </div>
@@ -129,8 +135,8 @@ export function ProgressDots({
 }
 
 export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
-  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, isVaporizing = false, style, ...props }, ref) => {
-    const rarityClasses = getRarityCardClasses(rarityRound, isArchivingPulse, isSealed || isVaporizing);
+  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, isLegendary, isVaporizing = false, style, ...props }, ref) => {
+    const rarityClasses = getRarityCardClasses(rarityRound, isArchivingPulse, isSealed || isVaporizing, isLegendary);
 
     return (
       <div

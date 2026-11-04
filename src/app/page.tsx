@@ -4010,16 +4010,12 @@ function RapidFlashcardMode({
     }
   }, [locked, isAnswered, typedValue, checkTargetMatch, handleSuccessAnswer, handleMistakeOrGiveUp]);
 
-  // Клик по карточке на раундах 1-2: 1-й клик переворачивает, 2-й клик переводит к следующей карточке
+  // Клик по карточке на раундах 1-2: бесконечный флип лица и оборота туда-обратно (без переключения карточки)
   const handleCardClick = useCallback(() => {
     if (isRound1or2) {
-      if (!isFlipped) {
-        setIsFlipped(true);
-      } else {
-        handleRateCard(true);
-      }
+      setIsFlipped(prev => !prev);
     }
-  }, [isRound1or2, isFlipped, handleRateCard]);
+  }, [isRound1or2]);
 
   // 3. Двухшаговое управление стрелками, Space для бесконечного флипа туда-обратно, Enter/Space для Weiter
   useEffect(() => {
@@ -4033,14 +4029,10 @@ function RapidFlashcardMode({
       }
 
       if (isRound1or2) {
-        if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
+        if (e.code === 'Space' || e.key === ' ') {
           e.preventDefault();
-          if (!isFlipped) {
-            setIsFlipped(true);
-          } else {
-            handleRateCard(true);
-          }
-        } else if (e.key === 'ArrowRight') {
+          setIsFlipped(prev => !prev);
+        } else if (e.key === 'Enter' || e.key === 'ArrowRight') {
           e.preventDefault();
           if (!isFlipped) {
             setIsFlipped(true);
@@ -4077,6 +4069,9 @@ function RapidFlashcardMode({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, handleMistakeOrGiveUp, playCardAudio]);
 
+  const isMasteredGolden = currentRound >= 4 && isAnswered && !isSurrendered;
+  const isLegendaryActive = Boolean(isReview || currentCard?.isArchived) && !isSurrendered;
+
   return (
     <div key={currentCard?.id} className={`w-full flex flex-col items-center select-none animate-card-enter transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
       {isRound1or2 ? (
@@ -4105,6 +4100,8 @@ function RapidFlashcardMode({
             <CardContainer 
               is3DFace 
               rarityRound={currentRound}
+              isSealed={isMasteredGolden || isVaporizing}
+              isLegendary={isLegendaryActive}
               isVaporizing={isVaporizing}
               style={{
                 WebkitBackfaceVisibility: 'hidden',
@@ -4138,7 +4135,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={currentRound} isSealed={isVaporizing} />
+                  <ProgressDots level={currentRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryActive} />
                 </div>
               </div>
 
@@ -4163,6 +4160,8 @@ function RapidFlashcardMode({
             <CardContainer 
               is3DFace 
               rarityRound={currentRound}
+              isSealed={isMasteredGolden || isVaporizing}
+              isLegendary={isLegendaryActive}
               isVaporizing={isVaporizing}
               style={{
                 WebkitBackfaceVisibility: 'hidden',
@@ -4196,7 +4195,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={currentRound} isSealed={isVaporizing} />
+                  <ProgressDots level={currentRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryActive} />
                 </div>
               </div>
 
@@ -4237,6 +4236,8 @@ function RapidFlashcardMode({
            ======================================================= */
         <CardContainer
           rarityRound={currentRound}
+          isSealed={isMasteredGolden || isVaporizing}
+          isLegendary={isLegendaryActive}
           isVaporizing={isVaporizing}
         >
           {/* Шапка */}
@@ -4267,7 +4268,7 @@ function RapidFlashcardMode({
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              <ProgressDots level={currentRound} isSealed={isVaporizing} />
+              <ProgressDots level={currentRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryActive} />
 
               <button
                 type="button"
@@ -4304,7 +4305,9 @@ function RapidFlashcardMode({
                       isAnswered
                         ? (!isSurrendered
                             ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                            : 'text-red-500 dark:text-red-400 border-red-500/40 bg-red-500/5 dark:bg-red-500/10')
+                            : (typedValue 
+                                ? 'text-red-500 dark:text-red-400 border-red-500/40 bg-red-500/5 dark:bg-red-500/10'
+                                : 'text-neutral-400 dark:text-neutral-500 border-neutral-300 dark:border-white/10 bg-neutral-50 dark:bg-white/[0.03]'))
                         : isErrorMismatch
                           ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
                           : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
@@ -4318,9 +4321,15 @@ function RapidFlashcardMode({
                           : displayParts.totalLength > 14
                           ? 'text-xl sm:text-2xl'
                           : 'text-2xl sm:text-[28px]',
-                        !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400 line-through'
+                        !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
                       )}>
-                        {typedValue ? formatSeparableWord(typedValue) : '—'}
+                        {typedValue ? (
+                          formatSeparableWord(typedValue)
+                        ) : (
+                          <span className="text-neutral-400 dark:text-neutral-500 font-normal text-base sm:text-lg">
+                            Nicht gewusst
+                          </span>
+                        )}
                       </div>
                     ) : (
                       <>
@@ -4372,7 +4381,9 @@ function RapidFlashcardMode({
                     isAnswered
                       ? (!isSurrendered
                           ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                          : 'text-red-500 dark:text-red-400 border-red-500/40 bg-red-500/5 dark:bg-red-500/10')
+                          : (typedValue 
+                              ? 'text-red-500 dark:text-red-400 border-red-500/40 bg-red-500/5 dark:bg-red-500/10'
+                              : 'text-neutral-400 dark:text-neutral-500 border-neutral-300 dark:border-white/10 bg-neutral-50 dark:bg-white/[0.03]'))
                       : isErrorMismatch
                         ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
                         : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
@@ -4386,9 +4397,15 @@ function RapidFlashcardMode({
                         : displayParts.totalLength > 14
                         ? 'text-xl sm:text-2xl'
                         : 'text-2xl sm:text-[28px]',
-                      !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400 line-through'
+                      !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
                     )}>
-                      {typedValue ? formatSeparableWord(typedValue) : '—'}
+                      {typedValue ? (
+                        formatSeparableWord(typedValue)
+                      ) : (
+                        <span className="text-neutral-400 dark:text-neutral-500 font-normal text-base sm:text-lg">
+                          Nicht gewusst
+                        </span>
+                      )}
                     </div>
                   ) : (
                     <>
@@ -4430,8 +4447,16 @@ function RapidFlashcardMode({
             {isAnswered && isSurrendered && (
               <div className="w-full flex flex-col items-center mt-3 animate-in fade-in duration-300">
                 <div className="text-xl sm:text-2xl font-semibold text-neutral-900 dark:text-neutral-100 tracking-tight">
-                  {article && <span className={getArticleColor(article)}>{article} </span>}
-                  {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
+                  {parsedTarget.prefixContext ? (
+                    renderFormattedWord(parsedTarget.coreWord || parsedTarget.cleanCoreWord)
+                  ) : article ? (
+                    <>
+                      <span className={getArticleColor(article)}>{article} </span>
+                      {renderFormattedWord(wordOnly || parsedTarget.cleanCoreWord || currentCard?.targetWord || '')}
+                    </>
+                  ) : (
+                    renderFormattedWord(wordOnly || parsedTarget.cleanCoreWord || currentCard?.targetWord || '')
+                  )}
                 </div>
               </div>
             )}
@@ -6380,6 +6405,8 @@ function StudyCard({
     : null;
 
   const isArchivePulse = phase === "Answer" && !hasErrored && currentRound >= 4;
+  const isMasteredGolden = currentRound >= 4 && phase === "Answer" && !hasErrored;
+  const isLegendaryActive = Boolean(isReview || card.isArchived) && !hasErrored;
 
   return (
     <>
@@ -6387,6 +6414,8 @@ function StudyCard({
         key={card.id}
         rarityRound={currentRound}
         isArchivingPulse={isArchivePulse}
+        isSealed={isMasteredGolden || isVaporizing}
+        isLegendary={isLegendaryActive}
         isVaporizing={isVaporizing}
         onClick={() => {
           if (!isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
@@ -6445,7 +6474,11 @@ function StudyCard({
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
-            <ProgressDots level={currentRound} isSealed={isVaporizing} />
+            <ProgressDots 
+              level={currentRound} 
+              isSealed={isMasteredGolden || isVaporizing} 
+              isLegendary={isLegendaryActive} 
+            />
             <button 
               type="button"
               onClick={handleHilfe}
