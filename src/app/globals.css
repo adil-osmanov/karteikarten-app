@@ -61,11 +61,11 @@ a:focus-visible {
   animation: cardAppear 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-@keyframes cardOpticalEnter {
+@keyframes smoothCardEnter {
   0% {
-    opacity: 0.4;
+    opacity: 0;
     filter: blur(8px);
-    transform: scale(0.985);
+    transform: scale(0.99);
   }
   100% {
     opacity: 1;
@@ -75,8 +75,8 @@ a:focus-visible {
 }
 
 .animate-card-enter {
-  animation: cardOpticalEnter 160ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: transform, filter, opacity;
+  animation: smoothCardEnter 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: opacity, filter, transform;
 }
 
 @keyframes fadeIn {

@@ -3710,13 +3710,19 @@ function RapidFlashcardMode({
     setIsErrorMismatch(false);
     setIsShaking(false);
 
+    // Записываем эталонное немецкое слово прямо внутрь поля ввода
+    const target = parsedTarget.prefixContext
+      ? (parsedTarget.cleanCoreWord || currentCard?.targetWord || '')
+      : (currentCard?.targetWord || '');
+    setTypedValue(target);
+
     // Звук ошибки и озвучка правильного немецкого ответа
     playSafeAudio(() => playErrorSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     triggerHaptic('error');
 
     // Карточка показывает правильный ответ и СПОКОЙНО ЖДЕТ, пока пользователь прочитает и нажмет «Weiter»
-  }, [locked, isAnswered, currentCard?.targetWord, playCardAudio]);
+  }, [locked, isAnswered, parsedTarget, currentCard?.targetWord, playCardAudio]);
 
   // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter
   const handleProceedNext = useCallback(() => {
@@ -3727,6 +3733,7 @@ function RapidFlashcardMode({
       setIsVaporizing(true);
       setIsTransitioning(true);
       triggerHaptic('success');
+      setCardAnimClass('opacity-0 blur-sm scale-[1.01] -translate-y-1 transition-all duration-250 ease-out');
       setTimeout(() => {
         setIsVaporizing(false);
         setIsTransitioning(false);
@@ -3735,7 +3742,7 @@ function RapidFlashcardMode({
         setTypedValue('');
         setIsErrorMismatch(false);
         onAnswer(true, false, false);
-      }, 420);
+      }, 250);
       return;
     }
 
@@ -3931,10 +3938,6 @@ function RapidFlashcardMode({
         if (e.key === 'Enter') {
           e.preventDefault();
           handleEnterSubmit();
-        }
-        if (e.code === 'KeyH' || e.key === 'h' || e.key === 'H' || e.key === 'р' || e.key === 'Р') {
-          e.preventDefault();
-          handleMistakeOrGiveUp();
         }
       }
 
@@ -4155,7 +4158,7 @@ function RapidFlashcardMode({
                 onClick={(e) => { e.stopPropagation(); handleMistakeOrGiveUp(); }}
                 disabled={isAnswered || locked}
                 className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
-                title="Lösung anzeigen (H)"
+                title="Lösung anzeigen"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
               </button>
@@ -4185,9 +4188,7 @@ function RapidFlashcardMode({
                       isAnswered
                         ? (!isSurrendered
                             ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                            : (typedValue 
-                                ? 'text-red-500 dark:text-red-400 border-red-500/40 bg-red-500/5 dark:bg-red-500/10'
-                                : 'text-neutral-400 dark:text-neutral-500 border-neutral-300 dark:border-white/10 bg-neutral-50 dark:bg-white/[0.03]'))
+                            : 'border-red-500/40 bg-red-500/5 text-red-500 dark:text-red-300 font-semibold text-lg text-center')
                         : isErrorMismatch
                           ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
                           : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
@@ -4201,15 +4202,9 @@ function RapidFlashcardMode({
                           : displayParts.totalLength > 14
                           ? 'text-xl sm:text-2xl'
                           : 'text-2xl sm:text-[28px]',
-                        !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
+                        !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-300'
                       )}>
-                        {typedValue ? (
-                          formatSeparableWord(typedValue)
-                        ) : (
-                          <span className="text-neutral-400 dark:text-neutral-500 font-normal text-base sm:text-lg">
-                            Nicht gewusst
-                          </span>
-                        )}
+                        {formatSeparableWord(typedValue || parsedTarget.cleanCoreWord || currentCard?.targetWord || '')}
                       </div>
                     ) : (
                       <>
@@ -4219,6 +4214,7 @@ function RapidFlashcardMode({
                           value={typedValue}
                           onChange={(e) => !isMobile && handleInputChange(e.target.value)}
                           readOnly={isMobile || isAnswered}
+                          disabled={isAnswered}
                           inputMode={isMobile ? "none" : undefined}
                           tabIndex={isMobile ? -1 : 0}
                           autoFocus={!isMobile}
@@ -4261,9 +4257,7 @@ function RapidFlashcardMode({
                     isAnswered
                       ? (!isSurrendered
                           ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                          : (typedValue 
-                              ? 'text-red-500 dark:text-red-400 border-red-500/40 bg-red-500/5 dark:bg-red-500/10'
-                              : 'text-neutral-400 dark:text-neutral-500 border-neutral-300 dark:border-white/10 bg-neutral-50 dark:bg-white/[0.03]'))
+                          : 'border-red-500/40 bg-red-500/5 text-red-500 dark:text-red-300 font-semibold text-lg text-center')
                       : isErrorMismatch
                         ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
                         : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
@@ -4277,15 +4271,9 @@ function RapidFlashcardMode({
                         : displayParts.totalLength > 14
                         ? 'text-xl sm:text-2xl'
                         : 'text-2xl sm:text-[28px]',
-                      !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
+                      !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-300'
                     )}>
-                      {typedValue ? (
-                        formatSeparableWord(typedValue)
-                      ) : (
-                        <span className="text-neutral-400 dark:text-neutral-500 font-normal text-base sm:text-lg">
-                          Nicht gewusst
-                        </span>
-                      )}
+                      {formatSeparableWord(typedValue || currentCard?.targetWord || '')}
                     </div>
                   ) : (
                     <>
@@ -4295,6 +4283,7 @@ function RapidFlashcardMode({
                         value={typedValue}
                         onChange={(e) => !isMobile && handleInputChange(e.target.value)}
                         readOnly={isMobile || isAnswered}
+                        disabled={isAnswered}
                         inputMode={isMobile ? "none" : undefined}
                         tabIndex={isMobile ? -1 : 0}
                         autoFocus={!isMobile}
@@ -4318,24 +4307,6 @@ function RapidFlashcardMode({
                         {displayParts.stem && <span>{displayParts.stem}</span>}
                       </div>
                     </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Плавный показ правильного ответа при ошибке или сдаче */}
-            {isAnswered && isSurrendered && (
-              <div className="w-full flex flex-col items-center mt-3 animate-in fade-in duration-300">
-                <div className="text-xl sm:text-2xl font-semibold text-neutral-900 dark:text-neutral-100 tracking-tight">
-                  {parsedTarget.prefixContext ? (
-                    renderFormattedWord(parsedTarget.coreWord || parsedTarget.cleanCoreWord)
-                  ) : article ? (
-                    <>
-                      <span className={getArticleColor(article)}>{article} </span>
-                      {renderFormattedWord(wordOnly || parsedTarget.cleanCoreWord || currentCard?.targetWord || '')}
-                    </>
-                  ) : (
-                    renderFormattedWord(wordOnly || parsedTarget.cleanCoreWord || currentCard?.targetWord || '')
                   )}
                 </div>
               </div>
@@ -6032,7 +6003,7 @@ function StudyCard({
         setIsVaporizing(false);
         setIsTransitionLocked(false);
         onNext();
-      }, 420);
+      }, 250);
       return;
     }
 
@@ -6104,6 +6075,7 @@ function StudyCard({
     setLocalMastery(nextMastery);
     setHasErrored(true);
     hasErroredRef.current = true;
+    setInputText(clozeWord || card.targetWord || "");
     playSafeAudio(() => playErrorSound());
     const fullSentenceText = fullSentence || card.sentence || (card as any).text;
     if (fullSentenceText) {
@@ -6239,11 +6211,6 @@ function StudyCard({
         e.preventDefault();
         const speechSentence = phase === "Answer" ? fullSentence : (parts[0] + "Lücke" + parts[1]);
         playAudio(speechSentence);
-      }
-      
-      if (e.code === 'KeyH' && phase === "Question") {
-        e.preventDefault();
-        handleHilfe();
       }
     };
 
@@ -6385,7 +6352,7 @@ function StudyCard({
                 "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
                 phase !== "Question" && "opacity-0 pointer-events-none"
               )}
-              title="Hilfe (H)"
+              title="Hilfe"
             >
               <HelpCircle className="w-3.5 h-3.5" />
             </button>
@@ -9926,12 +9893,6 @@ export function RedemittelStudyCard({
         handlePlayAudio();
         return;
       }
-
-      if (e.key === 'h' || e.key === 'H' || e.key === '?') {
-        e.preventDefault();
-        handleSurrender();
-        return;
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -9981,7 +9942,7 @@ export function RedemittelStudyCard({
                 "w-8 h-8 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors duration-150 cursor-pointer",
                 (status === 'success' || status === 'surrender') && "opacity-0 pointer-events-none"
               )}
-              title="Hilfe (H)"
+              title="Hilfe"
             >
               <HelpCircle className="w-5 h-5" />
             </button>
