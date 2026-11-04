@@ -53,6 +53,18 @@ export function getSRSStatus(nextReviewDate?: string | number | null): { label: 
   return { label: `через ${diffDays} дн.`, isDue: false };
 }
 
+export type WordMaturity = 'sealed' | 'master' | 'titanium';
+
+export function getWordMaturity(card?: any, entry?: any, nextReviewDate?: string | number | null): WordMaturity {
+  const intervalDays = card?.interval ?? (card as any)?.repetitionInterval ?? (entry as any)?.interval ?? 0;
+  const daysUntilNext = nextReviewDate ? Math.max(0, (new Date(nextReviewDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
+  const effectiveInterval = Math.max(intervalDays, daysUntilNext);
+
+  if (effectiveInterval >= 90) return 'titanium'; // 3+ месяца без ошибок
+  if (effectiveInterval >= 30) return 'master';    // 1-3 месяца
+  return 'sealed';                                // 14-29 дней (свежеосвоенное)
+}
+
 export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   isOpen,
   onClose,
@@ -240,6 +252,22 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return counts;
   }, [enrichedWords]);
 
+  // Статистика градации зрелости слов (Apple Vault Tiers)
+  const maturityStats = useMemo(() => {
+    let titanium = 0;
+    let master = 0;
+    let sealed = 0;
+
+    enrichedWords.forEach((item) => {
+      const m = getWordMaturity(item.card, item.entry, item.nextReviewDate);
+      if (m === 'titanium') titanium++;
+      else if (m === 'master') master++;
+      else sealed++;
+    });
+
+    return { total: enrichedWords.length, titanium, master, sealed };
+  }, [enrichedWords]);
+
   // Открытие модального окна редактирования карточки
   const handleOpenEditor = (item: (typeof enrichedWords)[0]) => {
     let targetCard = item.card;
@@ -324,7 +352,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           </div>
 
           {/* 2. APPLE SEGMENTED CONTROL ДЛЯ УРОВНЕЙ CEFR */}
-          <div className="w-full p-1 bg-neutral-200/70 dark:bg-neutral-800/80 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/10 flex items-center gap-1 mb-4 select-none">
+          <div className="w-full p-1 bg-neutral-200/70 dark:bg-neutral-800/80 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/10 flex items-center gap-1 mb-2.5 select-none">
             {FILTER_LEVELS.map((lvl) => {
               const isSelected = selectedLevel === lvl;
               const count = levelCounts[lvl] ?? 0;
@@ -365,6 +393,15 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
             })}
           </div>
 
+          {/* Статистика зрелости слов (Apple Vault Tiers) */}
+          <div className="flex items-center px-1 mb-3 text-xs text-neutral-500 dark:text-neutral-400 select-none font-normal">
+            <span>
+              {currentLang === 'de'
+                ? `${maturityStats.total} Wörter gemeistert • ${maturityStats.titanium} Titan • ${maturityStats.master} Gold-Aktiv`
+                : `${maturityStats.total} слов освоено • ${maturityStats.titanium} титановых • ${maturityStats.master} в золотом активе`}
+            </span>
+          </div>
+
           {/* 3. СКРОЛЛИРУЕМЫЙ СПИСОК СЛОВ В СТИЛЕ APPLE macOS */}
           <div className="flex-1 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800/50 py-1 pr-1 min-h-[220px] scrollbar-thin scrollbar-thumb-neutral-300 dark:scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-400 dark:hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-800 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full">
             {filteredWords.length === 0 ? (
@@ -378,49 +415,41 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                   'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25';
 
                 const srs = getSRSStatus(item.nextReviewDate);
-                const cardInterval = item.card?.interval ?? (item.card as any)?.repetitionInterval ?? (item.entry as any)?.interval ?? 0;
-                const daysUntilNext = item.nextReviewDate ? (item.nextReviewDate - Date.now()) / (1000 * 60 * 60 * 24) : 0;
-                const isAbsoluteMastery = cardInterval >= 30 || daysUntilNext >= 30;
+                const maturity = getWordMaturity(item.card, item.entry, item.nextReviewDate);
 
                 return (
                   <div
                     key={item.key}
-                    className="flex items-center justify-between py-2.5 px-2 rounded-xl hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40 transition-colors group"
+                    className="flex items-center justify-between py-2.5 px-3 -mx-2 rounded-xl hover:bg-neutral-100/70 dark:hover:bg-white/[0.04] transition-colors group"
                   >
-                    {/* Левая часть: Немецкое слово + Краткий русский перевод */}
+                    {/* Левая часть: Немецкое слово + Краткий русский перевод (чистая линия слева) */}
                     <div className="flex flex-col min-w-0 pr-3">
-                      <div className="flex items-center">
-                        {/* Индикатор ценности слова (Gold / Cyan Artifact) */}
-                        {isAbsoluteMastery ? (
-                          <span
-                            className="w-1.5 h-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.8)] inline-block mr-2 shrink-0"
-                            title="Абсолютное знание (интервал > 30 дней)"
-                          />
-                        ) : (
-                          <span
-                            className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)] inline-block mr-2 shrink-0"
-                            title="Освоенное слово"
-                          />
-                        )}
-                        <span className="text-neutral-900 dark:text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
-                          {formatSeparableWord(item.word)}
-                        </span>
-                      </div>
+                      <span className="text-neutral-900 dark:text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
+                        {formatSeparableWord(item.word)}
+                      </span>
                       {item.translation ? (
-                        <span className="text-neutral-500 dark:text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md pl-3.5">
+                        <span className="text-neutral-500 dark:text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md">
                           {item.translation}
                         </span>
                       ) : null}
                     </div>
 
-                    {/* Правая часть: SRS-индикатор + Бейдж уровня + Карандаш */}
+                    {/* Правая часть: Статус зрелости + SRS + Бейдж уровня + Карандаш (проявляется при hover) */}
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {srs.isDue ? (
-                        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/15 text-amber-500 dark:text-amber-400 border border-amber-500/30">
+                      {maturity === 'titanium' ? (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider uppercase bg-gradient-to-r from-slate-200 via-neutral-100 to-zinc-300 text-neutral-900 shadow-sm border border-white/40">
+                          TITAN
+                        </span>
+                      ) : maturity === 'master' ? (
+                        <span className="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/20">
+                          30d+
+                        </span>
+                      ) : srs.isDue ? (
+                        <span className="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20">
                           {srs.label}
                         </span>
                       ) : (
-                        <span className="text-[11px] text-neutral-400 dark:text-neutral-500 font-normal mr-1">
+                        <span className="text-[11px] text-neutral-500 dark:text-neutral-400 font-normal mr-0.5">
                           {srs.label}
                         </span>
                       )}
@@ -434,7 +463,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleOpenEditor(item)}
-                        className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-200/60 dark:hover:bg-neutral-800 cursor-pointer"
                         title="Karte bearbeiten"
                       >
                         <Pencil className="w-3.5 h-3.5" />
