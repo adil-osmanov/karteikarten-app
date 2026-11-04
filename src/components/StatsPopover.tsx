@@ -194,7 +194,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   // Weekly momentum totals (sum over the 7 days)
   const { weekTotalCards, weekTotalHours } = useMemo(() => {
     const totalCards = historyDays.reduce((sum, d) => sum + (d.cardsReviewed || 0), 0);
-    const totalMinutes = historyDays.reduce((sum, d) => sum + (d.focusMinutes || 0), 0);
+    const totalMinutes = historyDays.reduce((sum, d) => {
+      const eff = Math.max(
+        d.focusMinutes || 0,
+        (d.cardsReviewed || 0) > 0 ? Math.max(1, Math.round(((d.cardsReviewed || 0) * 4.5) / 60)) : 0
+      );
+      return sum + eff;
+    }, 0);
     const hours = (totalMinutes / 60).toFixed(1).replace('.0', '');
     return {
       weekTotalCards: totalCards,
@@ -262,7 +268,15 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const displayTarget = selectedRecord.targetCards || 200;
   const displayProgressPercent = Math.min(Math.round((displayCardsDone / displayTarget) * 100), 100);
 
-  const displaySeconds = isSelectedToday ? todayLiveSeconds : (selectedRecord.focusMinutes * 60);
+  const rawRecordMinutes = selectedRecord.focusMinutes || 0;
+  const effectiveRecordMinutes = Math.max(
+    rawRecordMinutes,
+    (selectedRecord.cardsReviewed || 0) > 0 ? Math.max(1, Math.round(((selectedRecord.cardsReviewed || 0) * 4.5) / 60)) : 0
+  );
+
+  const displaySeconds = isSelectedToday 
+    ? Math.max(todayLiveSeconds, todayLiveCards > 0 ? Math.round(todayLiveCards * 4.5) : 0) 
+    : (effectiveRecordMinutes * 60);
   const displayMinutes = Math.floor(displaySeconds / 60);
   const displayHours = Math.floor(displayMinutes / 60);
   const displayRemainingMinutes = displayMinutes % 60;

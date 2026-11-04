@@ -22,21 +22,21 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  */
 export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean): string {
   if (isSealed) {
-    return "border-amber-400/90 ring-2 ring-amber-400/40 shadow-[0_0_55px_-5px_rgba(251,191,36,0.35)] transition-all duration-300";
+    return "border border-amber-400/80 ring-2 ring-amber-400/40 shadow-[0_0_70px_-5px_rgba(251,191,36,0.35)] transition-all duration-300";
   }
   if (!round || round <= 1) {
-    return "border-black/[0.06] dark:border-neutral-800 shadow-[0_12px_32px_rgba(0,0,0,0.05),_0_2px_6px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/50";
+    return "border border-white/5 dark:border-white/5 bg-neutral-900/90 shadow-2xl transition-all duration-500";
   }
   if (round === 2) {
-    return "border border-emerald-500/40 shadow-[0_0_35px_-8px_rgba(16,185,129,0.18)]";
+    return "border border-emerald-500/30 ring-1 ring-emerald-500/20 shadow-[0_0_50px_-10px_rgba(16,185,129,0.22)] transition-all duration-500";
   }
   if (round === 3) {
-    return "border border-blue-500/50 shadow-[0_0_40px_-6px_rgba(59,130,246,0.22)]";
+    return "border border-blue-500/35 ring-1 ring-blue-500/25 shadow-[0_0_55px_-10px_rgba(59,130,246,0.25)] transition-all duration-500";
   }
-  // Round 4 (Epic / Archive)
+  // Round 4 (Amethyst / Epic)
   return cn(
-    "border border-purple-500/60 shadow-[0_0_45px_-5px_rgba(168,85,247,0.25)]",
-    isArchivingPulse && "ring-2 ring-purple-400/80 shadow-[0_0_55px_rgba(168,85,247,0.45)] animate-pulse"
+    "border border-purple-500/40 ring-1 ring-purple-500/30 shadow-[0_0_60px_-10px_rgba(168,85,247,0.28)] transition-all duration-500",
+    isArchivingPulse && "ring-2 ring-purple-400/80 shadow-[0_0_65px_rgba(168,85,247,0.45)] animate-pulse"
   );
 }
 
@@ -100,7 +100,7 @@ export function ProgressDots({
   const getDotStyle = (idx: number) => {
     const isFilled = idx < filledCount;
     if (!isFilled) {
-      return "w-2 h-2 rounded-full bg-neutral-800 border border-neutral-700/50 shadow-none";
+      return "w-2 h-2 rounded-full bg-neutral-800 border border-neutral-700/40 shadow-none";
     }
     if (round === 2) {
       return "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] border-transparent";

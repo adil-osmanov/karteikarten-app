@@ -3601,9 +3601,10 @@ function RapidFlashcardMode({
   const isMobile = useIsMobile();
 
   const [isFlipped, setIsFlipped] = useState(false);
-  const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived || isReview ? 3 : (currentCard?.masteryLevel ?? progress ?? 0)));
-  const currentRound = Math.max(1, Math.min(4, isReview || currentCard?.isArchived ? 4 : (localMastery ?? currentCard?.masteryLevel ?? progress ?? 0) + 1));
-  const isTypingRecall = Boolean(forcedReverse || isReview || currentCard?.isArchived || currentRound >= 3);
+  const effectiveMastery = currentCard?.isArchived || isReview ? 3 : (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0));
+  const [localMastery, setLocalMastery] = useState(() => effectiveMastery);
+  const currentRound = Math.max(1, Math.min(4, isReview || currentCard?.isArchived ? 4 : (localMastery ?? effectiveMastery) + 1));
+  const isTypingRecall = Boolean(isReview || currentCard?.isArchived || currentRound >= 3);
   const [isRound1or2, setIsRound1or2] = useState(() => !isTypingRecall);
   const [isSealed, setIsSealed] = useState(false);
   const [isAnswered, setIsAnswered] = useState(false);
@@ -3618,10 +3619,10 @@ function RapidFlashcardMode({
 
   // 7. Сброс стейта строго по currentCard?.id (устранение мигания инпута при переходе на раунд 3)
   useEffect(() => {
-    const mastery = currentCard?.isArchived || isReview ? 3 : (currentCard?.masteryLevel ?? progress ?? 0);
+    const mastery = currentCard?.isArchived || isReview ? 3 : (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0));
     setLocalMastery(mastery);
     const round = Math.max(1, Math.min(4, isReview || currentCard?.isArchived ? 4 : mastery + 1));
-    const typingMode = Boolean(forcedReverse || isReview || currentCard?.isArchived || round >= 3);
+    const typingMode = Boolean(isReview || currentCard?.isArchived || round >= 3);
     setIsRound1or2(!typingMode);
     setIsFlipped(false);
     setIsAnswered(false);
@@ -3633,7 +3634,7 @@ function RapidFlashcardMode({
     setCardAnimClass('opacity-100 scale-100');
     setIsTransitioning(false);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-  }, [currentCard?.id, forcedReverse, isReview, progress, currentCard?.masteryLevel, currentCard?.isArchived]);
+  }, [currentCard?.id, progress, isReview, currentCard?.masteryLevel, currentCard?.isArchived]);
 
   // Парсинг целевой конструкции (управление, отделяемая приставка, артикль)
   const parsedTarget = useMemo(() => {
@@ -4917,7 +4918,14 @@ function RapidSession({
         setMastered(m => m + 1);
         setQueue(q => (q ? q.filter(item => item.card.id !== id) : q));
       } else {
-        setQueue(q => (q ? [...q.filter(item => item.card.id !== id), current] : q));
+        const updatedCurrent = {
+          ...current,
+          card: {
+            ...current.card,
+            masteryLevel: newScore
+          }
+        };
+        setQueue(q => (q ? [...q.filter(item => item.card.id !== id), updatedCurrent] : q));
       }
       setTurn(t => t + 1);
       setLocked(false);
@@ -5005,11 +5013,11 @@ function RapidSession({
         <RapidFlashcardMode
           key={`${current.card.id}-${turn}`}
           card={liveCard}
-          progress={wordProgress[current.card.id] || 0}
+          progress={wordProgress[current.card.id] ?? liveCard.masteryLevel ?? 0}
           locked={locked}
           onAnswer={handleAnswer}
           onHintPenalty={handleHintPenalty}
-          reverse={Boolean(reviewCards || liveCard.isArchived || (wordProgress[current.card.id] || 0) >= 2)}
+          reverse={Boolean(reviewCards || liveCard.isArchived)}
         />
       </div>
 
@@ -5081,7 +5089,7 @@ function RapidStudyCard({
   // prompt MUST be in Russian (reverse = true) so the user actively recalls the German translation.
   const isReverse = reverse !== undefined 
     ? reverse 
-    : (isReview || card.isArchived || progress >= 2);
+    : (isReview || card.isArchived);
 
   return (
     <div className="w-full flex justify-center relative">
@@ -6019,9 +6027,58 @@ function StudyCard({
   }, [isMobile, phase]);
 
   // Attach typing sound natively to window to bypass React event limitations and ensure it fires
+  const resolvedOptions = useMemo(() => {
+    const target = (clozeWord || card.targetWord || '').replace(/\|/g, '').trim();
+    const existing = Array.isArray(card.options) ? card.options.map(o => o.replace(/\|/g, '').trim()).filter(Boolean) : [];
+    
+    // If card already has 4 valid options including target, shuffle and use them
+    const hasTarget = existing.some(o => o.toLowerCase() === target.toLowerCase());
+    if (existing.length >= 4 && hasTarget) {
+      return [...existing].sort(() => Math.random() - 0.5);
+    }
+    
+    // Otherwise gather distractors from other cards in the deck/store
+    const allCards = useStore.getState().decks.flatMap(d => d.cards || []);
+    const candidateWords = new Set<string>();
+    
+    // First from same deck if possible
+    const currentDeck = useStore.getState().decks.find(d => d.cards.some(c => c.id === card.id));
+    if (currentDeck) {
+      currentDeck.cards.forEach(c => {
+        const w = (c.targetWord || '').replace(/\|/g, '').trim();
+        if (w && w.toLowerCase() !== target.toLowerCase()) {
+          candidateWords.add(w);
+        }
+      });
+    }
+    
+    // If not enough, gather from all cards
+    if (candidateWords.size < 3) {
+      allCards.forEach(c => {
+        const w = (c.targetWord || '').replace(/\|/g, '').trim();
+        if (w && w.toLowerCase() !== target.toLowerCase()) {
+          candidateWords.add(w);
+        }
+      });
+    }
+
+    const distractors = Array.from(candidateWords).sort(() => Math.random() - 0.5).slice(0, 3);
+    const opts = [target, ...distractors];
+    if (opts.length < 4) {
+      const fallbackDistractors = ['haben', 'sein', 'werden', 'können', 'müssen', 'machen', 'geben', 'nehmen', 'wollen', 'sollen'];
+      for (const fb of fallbackDistractors) {
+        if (opts.length >= 4) break;
+        if (!opts.some(o => o.toLowerCase() === fb.toLowerCase())) {
+          opts.push(fb);
+        }
+      }
+    }
+    return opts.sort(() => Math.random() - 0.5);
+  }, [card.id, card.options, card.targetWord, clozeWord]);
+
   const currentRound = Math.max(1, Math.min(4, isReview || forceInputMode || card.isArchived ? 4 : (localMastery ?? card.masteryLevel ?? 0) + 1));
   const isRecognitionMode = !forceInputMode && !isReview && currentRound <= 2;
-  const isMultipleChoice = isRecognitionMode && phase === "Question" && Boolean(card.options && card.options.length >= 2);
+  const isMultipleChoice = isRecognitionMode && phase === "Question";
 
   useEffect(() => {
     if (phase !== "Question") return;
@@ -6260,10 +6317,10 @@ function StudyCard({
       }
 
       if (phase === "Question" && isMultipleChoice) {
-        if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); handleOptionClick(card.options[0]); }
-        if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); handleOptionClick(card.options[1]); }
-        if (e.code === 'Digit3' || e.code === 'Numpad3') { e.preventDefault(); handleOptionClick(card.options[2]); }
-        if (e.code === 'Digit4' || e.code === 'Numpad4') { e.preventDefault(); handleOptionClick(card.options[3]); }
+        if (e.code === 'Digit1' || e.code === 'Numpad1') { e.preventDefault(); if (resolvedOptions[0]) handleOptionClick(resolvedOptions[0]); }
+        if (e.code === 'Digit2' || e.code === 'Numpad2') { e.preventDefault(); if (resolvedOptions[1]) handleOptionClick(resolvedOptions[1]); }
+        if (e.code === 'Digit3' || e.code === 'Numpad3') { e.preventDefault(); if (resolvedOptions[2]) handleOptionClick(resolvedOptions[2]); }
+        if (e.code === 'Digit4' || e.code === 'Numpad4') { e.preventDefault(); if (resolvedOptions[3]) handleOptionClick(resolvedOptions[3]); }
       }
 
       if (e.code === 'KeyR') {
@@ -6280,7 +6337,7 @@ function StudyCard({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [phase, isMultipleChoice, isRecognitionMode, handleReveal, card, playAudio, onNext, fullSentence, parts]);
+  }, [phase, isMultipleChoice, isRecognitionMode, handleReveal, card, playAudio, onNext, fullSentence, parts, resolvedOptions]);
 
   const renderInputChars = () => {
     if (inputText.length === 0) {
@@ -6519,7 +6576,7 @@ function StudyCard({
         <div className="mt-2 w-full">
           {isMultipleChoice && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mt-4">
-              {card.options.map((opt, idx) => {
+              {resolvedOptions.map((opt, idx) => {
                 const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
                 return (
                   <button

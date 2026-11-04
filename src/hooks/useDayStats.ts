@@ -498,11 +498,17 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
     }
   }
 
+  // Fallback for focus minutes: ~4.5 seconds per card reviewed
+  const effectiveFocusMinutes = Math.max(
+    focusMinutes || 0,
+    cardsReviewed > 0 ? Math.max(1, Math.round((cardsReviewed * 4.5) / 60)) : 0
+  );
+
   return {
     date: dateStr,
     cardsReviewed,
     targetCards,
-    focusMinutes,
+    focusMinutes: effectiveFocusMinutes,
     accuracy,
     mistakesCount,
     wordsMastered
@@ -512,11 +518,18 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
 export function saveDayRecord(lang: string = 'DE', record: Partial<DayRecord> & { date: string }): DayRecord {
   const normLang = normalizeLanguage(lang);
   const current = getDayRecord(normLang, record.date);
+  const reviewed = typeof record.cardsReviewed === 'number' ? record.cardsReviewed : current.cardsReviewed;
+  const rawMinutes = typeof record.focusMinutes === 'number' ? record.focusMinutes : current.focusMinutes;
+  const effectiveMinutes = Math.max(
+    rawMinutes || 0,
+    reviewed > 0 ? Math.max(1, Math.round((reviewed * 4.5) / 60)) : 0
+  );
+
   const updated: DayRecord = {
     date: record.date,
-    cardsReviewed: typeof record.cardsReviewed === 'number' ? record.cardsReviewed : current.cardsReviewed,
+    cardsReviewed: reviewed,
     targetCards: typeof record.targetCards === 'number' ? record.targetCards : (current.targetCards || 200),
-    focusMinutes: typeof record.focusMinutes === 'number' ? record.focusMinutes : current.focusMinutes,
+    focusMinutes: effectiveMinutes,
     accuracy: typeof record.accuracy === 'number' ? record.accuracy : current.accuracy,
     mistakesCount: typeof record.mistakesCount === 'number' ? record.mistakesCount : current.mistakesCount,
     wordsMastered: typeof record.wordsMastered === 'number' ? record.wordsMastered : current.wordsMastered,
@@ -588,7 +601,15 @@ export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7)
       saveDayRecord(normLang, record);
     }
 
-    result.push(record);
+    const effectiveMinutes = Math.max(
+      record.focusMinutes || 0,
+      (record.cardsReviewed || 0) > 0 ? Math.max(1, Math.round(((record.cardsReviewed || 0) * 4.5) / 60)) : 0
+    );
+
+    result.push({
+      ...record,
+      focusMinutes: effectiveMinutes
+    });
   }
 
   return result;
@@ -812,8 +833,7 @@ function initGlobalTimer() {
   window.addEventListener('beforeunload', flushAll);
 
   setInterval(() => {
-    if (document.hidden) return;
-    if (Date.now() - lastActivityTime > 60000) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
 
     const today = getTodayKey();
 
@@ -849,16 +869,21 @@ function initGlobalTimer() {
         };
       } else {
         const nextSeconds = (current.activeSeconds || 0) + 1;
-        statsByLang[lang] = {
+        const updated = {
           ...current,
           activeSeconds: nextSeconds
         };
-        // Periodically update focus minutes in DayRecord
+        statsByLang[lang] = updated;
+
+        // Periodically update focus minutes in DayRecord and sync to IndexedDB & Supabase every 30 seconds
         if (nextSeconds % 30 === 0) {
+          const focusMins = Math.floor(nextSeconds / 60);
           saveDayRecord(lang, {
             date: today,
-            focusMinutes: Math.floor(nextSeconds / 60)
+            focusMinutes: focusMins
           });
+          setStatsInIDB(lang, updated);
+          syncStatsToSupabase(lang, updated, false);
         }
       }
       notifyLang(lang);
@@ -977,6 +1002,17 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       window.removeEventListener('stats-update', handleCustomUpdate);
       if (isStudying) {
         activeStudyCounts[lang] = Math.max(0, (activeStudyCounts[lang] || 0) - 1);
+        const current = statsByLang[lang];
+        if (current) {
+          const today = getTodayKey();
+          const focusMins = Math.floor((current.activeSeconds || 0) / 60);
+          saveDayRecord(lang, {
+            date: today,
+            focusMinutes: focusMins
+          });
+          setStatsInIDB(lang, current);
+          syncStatsToSupabase(lang, current, false);
+        }
       }
     };
   }, [isStudying, lang]);
