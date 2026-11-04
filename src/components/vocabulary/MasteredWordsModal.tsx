@@ -175,6 +175,11 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         // Убираем завершающую точку предложения
         translation = translation.replace(/\.$/, '').trim();
 
+        // Защита: если перевод длиннее 35 символов или содержит знаки препинания предложения, исключаем
+        if (translation.length > 35 || translation.split(/\s+/).length > 6 || /[.?!:;]/.test(translation)) {
+          translation = '';
+        }
+
         const level = (entry.level || card?.level || 'B1') as CEFRLevel;
         const nextReviewDate =
           card?.nextReviewDate ?? (card as any)?.next_review_date ?? entry.nextReviewDate ?? null;
@@ -373,6 +378,9 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                   'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25';
 
                 const srs = getSRSStatus(item.nextReviewDate);
+                const cardInterval = item.card?.interval ?? (item.card as any)?.repetitionInterval ?? (item.entry as any)?.interval ?? 0;
+                const daysUntilNext = item.nextReviewDate ? (item.nextReviewDate - Date.now()) / (1000 * 60 * 60 * 24) : 0;
+                const isAbsoluteMastery = cardInterval >= 30 || daysUntilNext >= 30;
 
                 return (
                   <div
@@ -381,18 +389,28 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                   >
                     {/* Левая часть: Немецкое слово + Краткий русский перевод */}
                     <div className="flex flex-col min-w-0 pr-3">
-                      <span className="text-neutral-900 dark:text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
-                        {formatSeparableWord(item.word)}
-                      </span>
+                      <div className="flex items-center">
+                        {/* Индикатор ценности слова (Gold / Cyan Artifact) */}
+                        {isAbsoluteMastery ? (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.8)] inline-block mr-2 shrink-0"
+                            title="Абсолютное знание (интервал > 30 дней)"
+                          />
+                        ) : (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)] inline-block mr-2 shrink-0"
+                            title="Освоенное слово"
+                          />
+                        )}
+                        <span className="text-neutral-900 dark:text-neutral-100 font-medium text-base tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
+                          {formatSeparableWord(item.word)}
+                        </span>
+                      </div>
                       {item.translation ? (
-                        <span className="text-neutral-500 dark:text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md">
+                        <span className="text-neutral-500 dark:text-neutral-400 font-normal text-xs mt-0.5 truncate max-w-xs sm:max-w-md pl-3.5">
                           {item.translation}
                         </span>
-                      ) : (
-                        <span className="text-neutral-400 dark:text-neutral-600 italic font-normal text-xs mt-0.5">
-                          Keine Übersetzung angegeben
-                        </span>
-                      )}
+                      ) : null}
                     </div>
 
                     {/* Правая часть: SRS-индикатор + Бейдж уровня + Карандаш */}

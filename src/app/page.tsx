@@ -3540,6 +3540,7 @@ function RapidFlashcardMode({
 
   const [isFlipped, setIsFlipped] = useState(false);
   const [localMastery, setLocalMastery] = useState(() => (currentCard?.isArchived || isReview ? 4 : (currentCard?.masteryLevel ?? progress ?? 0)));
+  const currentRound = Math.max(1, Math.min(4, localMastery || (currentCard?.masteryLevel ?? 0) + 1));
   const isTypingRecall = Boolean(forcedReverse || isReview || (currentCard?.masteryLevel ?? progress ?? 0) >= 2 || currentCard?.isArchived);
   const [isRound1or2, setIsRound1or2] = useState(() => !isTypingRecall);
   const [isAnswered, setIsAnswered] = useState(false);
@@ -4027,7 +4028,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={localMastery || 0} />
+                  <ProgressDots level={currentRound} />
                 </div>
               </div>
 
@@ -4083,7 +4084,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={localMastery || 0} />
+                  <ProgressDots level={currentRound} />
                 </div>
               </div>
 
@@ -4170,7 +4171,7 @@ function RapidFlashcardMode({
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              <ProgressDots level={localMastery || 0} />
+              <ProgressDots level={currentRound} />
 
               <button
                 type="button"
@@ -6146,10 +6147,15 @@ function StudyCard({
     ? (parseTargetNoun(displayAnswerWord) || (!isCustomCloze ? parseTargetNoun(card.targetWord) : null))
     : null;
 
+  const currentRound = Math.max(1, Math.min(4, localMastery || card.masteryLevel || 1));
+  const isArchivePulse = phase === "Answer" && !hasErrored && currentRound >= 4;
+
   return (
     <>
       <CardContainer 
         key={card.id}
+        rarityRound={currentRound}
+        isArchivingPulse={isArchivePulse}
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -6207,7 +6213,7 @@ function StudyCard({
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
-            <ProgressDots level={localMastery || 0} />
+            <ProgressDots level={currentRound} />
             <button 
               type="button"
               onClick={handleHilfe}
@@ -6533,6 +6539,14 @@ const LANGUAGES = [
   { code: 'RU', flag: '🇷🇺', label: 'Русский' },
 ] as const;
 
+function getRepeatButtonLabel(lang?: string): string {
+  const code = (lang || '').toLowerCase().trim();
+  if (code.startsWith('en')) return 'REVIEW CARDS';
+  if (code.startsWith('es')) return 'REPASAR TARJETAS';
+  if (code.startsWith('ru')) return 'ПОВТОРИТЬ КАРТОЧКИ';
+  return 'KARTEN WIEDERHOLEN';
+}
+
 function HeaderWidgets({ 
   activeBook, 
   onBack, 
@@ -6749,24 +6763,35 @@ function HeaderWidgets({
 
           {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ВСЕГДА В DOM ПО APPLE HIG */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
-            <button
-              type="button"
-              onClick={dueCount > 0 ? onStartReview : undefined}
-              disabled={dueCount === 0}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all duration-200 select-none ${
-                dueCount > 0
-                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md active:scale-95 border-blue-500 cursor-pointer'
-                  : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-500 border-black/5 dark:border-white/5 cursor-default opacity-70'
-              }`}
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${dueCount > 0 ? 'text-white' : 'text-zinc-400'}`} />
-              <span className="font-mono text-xs font-bold px-1.5 py-0.5 rounded bg-black/15 dark:bg-white/10">
-                {dueCount}
-              </span>
-              <span className="text-xs font-semibold tracking-wide uppercase">
-                Karten wiederholen
-              </span>
-            </button>
+            {dueCount > 0 ? (
+              <div className="relative group inline-flex items-center justify-center">
+                {/* Анимированная переливающаяся аура Gemini */}
+                <div className="absolute -inset-[1.5px] rounded-full bg-gradient-to-r from-blue-500 via-indigo-500 via-purple-500 to-cyan-400 opacity-75 blur-md group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse" />
+
+                {/* Сама кнопка в стиле Apple Frosted Glass */}
+                <button
+                  type="button"
+                  onClick={onStartReview}
+                  className="relative px-5 py-2.5 rounded-full bg-neutral-950/80 dark:bg-neutral-900/90 hover:bg-neutral-900 text-white font-medium text-xs tracking-wider uppercase border border-white/20 backdrop-blur-xl shadow-inner flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
+                >
+                  <RotateCw className="w-3.5 h-3.5 text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
+                  <span>
+                    {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
+                  </span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-zinc-850 text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none text-xs font-medium tracking-wider uppercase"
+              >
+                <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
+                <span>
+                  0 {getRepeatButtonLabel(effectiveLang || appLanguage)}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* 3. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
@@ -9586,6 +9611,7 @@ export function RedemittelStudyCard({
   const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'surrender'>('idle');
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [localMastery, setLocalMastery] = useState(() => (card.masteryLevel ?? (card.isArchived ? 4 : 0)));
+  const currentRound = Math.max(1, Math.min(4, localMastery || card.masteryLevel || 1));
 
   useEffect(() => {
     setLocalMastery(card.masteryLevel ?? (card.isArchived ? 4 : 0));
@@ -9775,7 +9801,7 @@ export function RedemittelStudyCard({
             >
               <HelpCircle className="w-5 h-5" />
             </button>
-            <ProgressDots level={localMastery || 0} />
+            <ProgressDots level={currentRound} />
           </div>
         </div>
 

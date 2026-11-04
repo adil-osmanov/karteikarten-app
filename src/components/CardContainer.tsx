@@ -7,6 +7,36 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
   children?: React.ReactNode;
   className?: string;
   is3DFace?: boolean;
+  rarityRound?: number; // 1: Common, 2: Uncommon (Emerald), 3: Rare (Sapphire), 4: Epic (Purple)
+  isArchivingPulse?: boolean;
+}
+
+/**
+ * World of Warcraft Word Rarity Styling:
+ * - Round 1 (Common): Matte minimal border, no glow.
+ * - Round 2 (Uncommon): Soft emerald contour with subtle green ambient glow.
+ * - Round 3 (Rare): Sapphire contour with noble blue ambient glow.
+ * - Round 4 (Epic): Amethyst contour with magical purple ambient glow.
+ */
+export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean): string {
+  if (!round || round <= 1) {
+    return "border-black/[0.06] dark:border-neutral-800 shadow-[0_12px_32px_rgba(0,0,0,0.05),_0_2px_6px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/50";
+  }
+  if (round === 2) {
+    return cn(
+      "border-emerald-500/40 ring-1 ring-emerald-500/20 shadow-[0_0_35px_-8px_rgba(16,185,129,0.18)]"
+    );
+  }
+  if (round === 3) {
+    return cn(
+      "border-blue-500/50 ring-1 ring-blue-500/30 shadow-[0_0_40px_-6px_rgba(59,130,246,0.22)]"
+    );
+  }
+  // Round 4 (Epic / Archive)
+  return cn(
+    "border-purple-500/60 ring-1 ring-purple-500/40 shadow-[0_0_45px_-5px_rgba(168,85,247,0.25)]",
+    isArchivingPulse && "ring-2 ring-purple-400/80 shadow-[0_0_55px_rgba(168,85,247,0.45)] animate-pulse"
+  );
 }
 
 /**
@@ -18,11 +48,11 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  * - Top specular highlight rim light on dark mode.
  */
 export const CARD_CONTAINER_SURFACE_CLASSES = cn(
-  "rounded-[32px] border transition-all duration-200 select-none",
+  "rounded-[32px] border transition-all duration-300 select-none",
   // Light Mode (Apple Pure White Card)
-  "bg-white border-black/[0.06] shadow-[0_12px_32px_rgba(0,0,0,0.05),_0_2px_6px_rgba(0,0,0,0.03)]",
+  "bg-white",
   // Dark Mode (Apple Dark Mode clean, deep & matte)
-  "dark:bg-[#1c1c1e] dark:border-white/[0.08] dark:shadow-2xl dark:shadow-black/50"
+  "dark:bg-[#1c1c1e]"
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
@@ -43,19 +73,36 @@ export function ProgressDots({
   max?: number; 
   className?: string; 
 }) {
+  const round = Math.max(1, Math.min(4, level || 1));
+
+  const getDotStyle = (step: number) => {
+    if (step > round) {
+      return "bg-zinc-200 dark:bg-white/10 shadow-none";
+    }
+    // Completed dots styled according to WoW Rarity
+    if (round === 2) {
+      return "bg-emerald-500 dark:bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]";
+    }
+    if (round === 3) {
+      return "bg-blue-600 dark:bg-blue-500 shadow-[0_0_8px_rgba(37,99,235,0.5)]";
+    }
+    if (round >= 4) {
+      return "bg-purple-600 dark:bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]";
+    }
+    // Round 1 (Common)
+    return "bg-zinc-400 dark:bg-zinc-500 shadow-none";
+  };
+
   return (
     <div className={cn("flex items-center gap-1.5 select-none shrink-0", className)}>
       {Array.from({ length: max }, (_, idx) => {
         const step = idx + 1;
-        const isCompleted = step <= level;
         return (
           <span
             key={step}
             className={cn(
-              "w-2.5 h-2.5 shrink-0 rounded-full transition-all duration-200",
-              isCompleted
-                ? "bg-blue-600 dark:bg-blue-500 shadow-[0_0_8px_rgba(37,99,235,0.4)] dark:shadow-[0_0_8px_rgba(59,130,246,0.5)]"
-                : "bg-zinc-200 dark:bg-white/10"
+              "w-2.5 h-2.5 shrink-0 rounded-full transition-all duration-300",
+              getDotStyle(step)
             )}
           />
         );
@@ -65,7 +112,9 @@ export function ProgressDots({
 }
 
 export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
-  ({ children, className, is3DFace = false, style, ...props }, ref) => {
+  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, style, ...props }, ref) => {
+    const rarityClasses = getRarityCardClasses(rarityRound, isArchivingPulse);
+
     return (
       <div
         ref={ref}
@@ -73,6 +122,7 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
           is3DFace
             ? cn("absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
+          rarityClasses,
           className
         )}
         style={{

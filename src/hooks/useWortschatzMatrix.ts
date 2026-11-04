@@ -63,6 +63,19 @@ export const FUNCTIONAL_PARTICLES = new Set([
 ]);
 
 /**
+ * Черный список грамматических форм и спряжений глаголов,
+ * которые не должны попадать в список выученных слов и матрицу.
+ */
+export const EXCLUDED_GRAMMAR_FORMS = new Set([
+  'bin', 'bist', 'ist', 'sind', 'seid', 'war', 'waren',
+  'habe', 'hast', 'hat', 'haben', 'habt', 'hatte', 'hatten',
+  'werde', 'wirst', 'wird', 'werden', 'werdet', 'wurde', 'wurden',
+  'wäscht', 'läuft', 'findet', 'liest', 'fährt', 'gilt', 'gibt',
+  'mein', 'dein', 'sein', 'ihr', 'unser', 'euer',
+  'mich', 'dich', 'sich', 'uns', 'euch', 'ihm', 'ihnen', 'dir', 'mir', 'an'
+]);
+
+/**
  * Черный список спряженных форм глаголов, грамматических кусков и не-лемм
  * (из упражнений на контекст, спряжение и грамматические тренажеры).
  */
@@ -97,11 +110,20 @@ export function isFunctionalParticle(rawWord?: string | null): boolean {
   if (trimmed.length < 2) return true;
 
   // Исключаем контекстные задания с пропусками или целые предложения
-  if (trimmed.includes('___') || /[.?!:;]/.test(trimmed)) return true;
+  if (trimmed.includes('___') || trimmed.includes('...') || /[.?!:;]/.test(trimmed)) return true;
   if (trimmed.split(/\s+/).length > 4) return true;
 
   const clean = trimmed.toLowerCase().replace(/\|/g, '');
-  return FUNCTIONAL_PARTICLES.has(clean) || CONJUGATED_VERB_FORMS.has(clean);
+  if (EXCLUDED_GRAMMAR_FORMS.has(clean)) return true;
+  if (FUNCTIONAL_PARTICLES.has(clean) || CONJUGATED_VERB_FORMS.has(clean)) return true;
+
+  // Если одиночное изолированное слово из черного списка
+  const parts = clean.split(/\s+/);
+  if (parts.length === 1 && (EXCLUDED_GRAMMAR_FORMS.has(parts[0]) || FUNCTIONAL_PARTICLES.has(parts[0]))) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -131,6 +153,11 @@ export function isContextOrGrammarDeck(deck?: any, parentBook?: any, card?: any)
     parentBook?.training_mode === 'kontext' ||
     parentBook?.training_mode === 'context'
   ) {
+    return true;
+  }
+
+  // 1.1 Исключаем карточки с пропусками предложений (___ или ...)
+  if (card?.sentence && (card.sentence.includes('___') || card.sentence.includes('...'))) {
     return true;
   }
 
@@ -247,13 +274,22 @@ export function extractConciseTranslation(card?: any, fallback?: string): string
     }
 
     // Если перевод короткий и не является предложением с точкой на конце
-    const isSentence = clean.endsWith('.') || clean.endsWith('!') || clean.length > 50 || clean.split(/\s+/).length > 6;
+    const isSentence =
+      clean.endsWith('.') ||
+      clean.endsWith('!') ||
+      clean.length > 35 ||
+      clean.split(/\s+/).length > 6 ||
+      /[.?!]/.test(clean);
+
     if (!isSentence) {
       return clean;
     }
+
+    // Длинные контекстные предложения исключаем из перевода
+    return '';
   }
 
-  return (rawTrans || fallback || '').replace(/\[cite:[^\]]*\]/g, '').trim();
+  return '';
 }
 
 export function normalizeLanguageCode(lang?: string | null): AppLang {
