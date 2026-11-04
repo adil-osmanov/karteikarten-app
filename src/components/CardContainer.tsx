@@ -23,42 +23,42 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  */
 export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean): string {
   if (isSealed) {
-    return "border border-amber-400/40 shadow-[0_0_120px_rgba(245,158,11,0.45)] transition-all duration-300";
+    return "border border-amber-400/40 shadow-[0_0_100px_rgba(245,158,11,0.35)] transition-all duration-400";
   }
   if (!round || round <= 1) {
     // Раунд 1: без свечения
-    return "transition-all duration-700";
+    return "shadow-2xl border border-black/5 dark:border-white/5";
   }
   if (round === 2) {
-    // Раунд 2 (Зеленый / Emerald)
-    return "shadow-[0_15px_60px_-15px_rgba(16,185,129,0.18)] dark:shadow-[0_0_80px_-15px_rgba(16,185,129,0.25)] border-emerald-500/25 transition-all duration-700";
+    // Раунд 2 (1 зеленая точка)
+    return "shadow-[0_0_70px_-15px_rgba(16,185,129,0.20)] border border-emerald-500/20 transition-shadow duration-500";
   }
   if (round === 3) {
-    // Раунд 3 (Синий / Sapphire)
-    return "shadow-[0_15px_60px_-15px_rgba(59,130,246,0.18)] dark:shadow-[0_0_90px_-15px_rgba(59,130,246,0.28)] border-blue-500/25 transition-all duration-700";
+    // Раунд 3 (2 синие точки)
+    return "shadow-[0_0_80px_-15px_rgba(59,130,246,0.22)] border border-blue-500/20 transition-shadow duration-500";
   }
-  // Раунд 4 (Фиолетовый / Epic)
+  // Раунд 4 (3 фиолетовые точки)
   return cn(
-    "shadow-[0_15px_60px_-15px_rgba(168,85,247,0.20)] dark:shadow-[0_0_100px_-12px_rgba(168,85,247,0.32)] border-purple-500/30 transition-all duration-700",
+    "shadow-[0_0_90px_-15px_rgba(168,85,247,0.25)] border border-purple-500/25 transition-shadow duration-500",
     isArchivingPulse && "shadow-[0_0_110px_rgba(168,85,247,0.45)] animate-pulse"
   );
 }
 
 /**
  * Apple HIG Surface styling for cards:
- * - Light Mode: Pure frosted glass 'bg-white/90 text-neutral-900 border border-black/5 shadow-2xl shadow-neutral-200/50 backdrop-blur-2xl'
- * - Dark Mode: Deep frosted glass 'dark:bg-neutral-900/90 dark:text-neutral-100 dark:border-white/10 dark:shadow-2xl dark:shadow-black/60'
+ * Important: do NOT set shadow-<color> here because Tailwind's --tw-shadow-color variable
+ * would override the colored ambient glow shadows from getRarityCardClasses!
  */
 export const CARD_CONTAINER_SURFACE_CLASSES = cn(
-  "rounded-3xl border transition-all duration-300 select-none",
+  "rounded-3xl border transition-all duration-200 select-none",
   // Light Mode (Apple Premium Glass Card)
-  "bg-white/90 text-neutral-900 border-black/5 shadow-2xl shadow-neutral-200/50 backdrop-blur-2xl",
+  "bg-white/90 text-neutral-900 border-black/5 backdrop-blur-2xl",
   // Dark Mode (Apple Dark Mode clean, deep & matte)
-  "dark:bg-neutral-900/90 dark:text-neutral-100 dark:border-white/10 dark:shadow-2xl dark:shadow-black/60"
+  "dark:bg-neutral-900/90 dark:text-neutral-100 dark:border-white/5"
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "w-full max-w-2xl min-h-[440px] p-8 md:p-10 flex flex-col justify-between items-center mx-auto relative group animate-card-enter",
+  "w-full max-w-3xl h-[480px] min-h-[480px] max-h-[480px] p-8 md:p-10 flex flex-col justify-between items-center mx-auto relative group animate-card-enter select-none",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 
@@ -84,7 +84,7 @@ export function ProgressDots({
         {Array.from({ length: max }, (_, idx) => (
           <span
             key={idx}
-            className="w-2 h-2 shrink-0 rounded-full transition-transform duration-200 bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,1)] scale-110 border-transparent"
+            className="w-2 h-2 shrink-0 rounded-full transition-transform duration-200 bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.9)] scale-110 border-transparent"
           />
         ))}
       </div>
@@ -137,11 +137,11 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
         ref={ref}
         className={cn(
           is3DFace
-            ? cn("absolute inset-0 p-8 md:p-10 flex flex-col justify-between items-center backface-hidden group", CARD_CONTAINER_SURFACE_CLASSES)
+            ? cn("absolute inset-0 w-full h-[480px] min-h-[480px] max-h-[480px] p-8 md:p-10 flex flex-col justify-between items-center backface-hidden group", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
-          "relative transition-all duration-400 ease-out will-change-transform",
-          isVaporizing && "scale-[1.02] -translate-y-2 opacity-0 blur-md brightness-150 shadow-[0_0_120px_rgba(245,158,11,0.45)] border-amber-400/40 pointer-events-none",
+          "transition-all duration-400 ease-out will-change-transform",
+          isVaporizing && "scale-[1.02] -translate-y-2 opacity-0 blur-md brightness-125 shadow-[0_0_100px_rgba(245,158,11,0.35)] border-amber-400/40 pointer-events-none",
           className
         )}
         style={{

@@ -3816,9 +3816,6 @@ function RapidFlashcardMode({
     setIsErrorMismatch(false);
     setIsShaking(false);
 
-    const nextMastery = Math.min(4, (localMastery || 0) + 1);
-    setLocalMastery(nextMastery);
-
     if (currentRound === 4) {
       setIsVaporizing(true);
       triggerHaptic('success');
@@ -3827,14 +3824,14 @@ function RapidFlashcardMode({
         setIsVaporizing(false);
         setIsTransitioning(false);
         onAnswer(true, false, false);
-      }, 420);
+      }, 400);
       return;
     }
 
     playSafeAudio(() => playSuccessSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     triggerHaptic('success');
-  }, [isAnswered, localMastery, currentRound, playCardAudio, currentCard?.targetWord, onAnswer]);
+  }, [isAnswered, currentRound, playCardAudio, currentCard?.targetWord, onAnswer]);
 
   const handleGiveUp = useCallback(() => {
     if (locked || isAnswered) return;
@@ -4016,23 +4013,19 @@ function RapidFlashcardMode({
         if (e.code === 'Space' || e.key === ' ') {
           e.preventDefault();
           toggleFlip();
+        } else if (e.key === 'Enter' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          if (!isFlipped) {
+            setIsFlipped(true);
+          } else {
+            handleRateCard(true);
+          }
         } else if (e.key === 'ArrowLeft') {
           e.preventDefault();
           if (!isFlipped) {
-            // Шаг 1: На лицевой стороне стрелка раскрывает ответ (без озвучки на обратной стороне)
             setIsFlipped(true);
           } else {
-            // Шаг 2: На обратной стороне стрелка влево оценивает "Не знаю"
             handleRateCard(false);
-          }
-        } else if (e.key === 'ArrowRight') {
-          e.preventDefault();
-          if (!isFlipped) {
-            // Шаг 1: На лицевой стороне стрелка раскрывает ответ (без озвучки на обратной стороне)
-            setIsFlipped(true);
-          } else {
-            // Шаг 2: На обратной стороне стрелка вправо оценивает "Знаю"
-            handleRateCard(true);
           }
         }
       } else {
@@ -4060,14 +4053,14 @@ function RapidFlashcardMode({
            РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
            ======================================================= */
         <div 
-          className="w-full max-w-2xl flex flex-col items-center perspective-1000"
+          className="w-full max-w-3xl flex flex-col items-center perspective-1000"
           style={{ perspective: 1000, WebkitPerspective: 1000 }}
         >
           {/* 3D Оболочка */}
           <div
             onClick={toggleFlip}
             className={cn(
-              "w-full h-[440px] min-h-[440px] relative cursor-pointer transform-style-3d",
+              "w-full h-[480px] min-h-[480px] max-h-[480px] relative cursor-pointer transform-style-3d",
               isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
             style={{
@@ -4132,7 +4125,7 @@ function RapidFlashcardMode({
               </div>
 
               {/* Низ: Пусто для чистоты */}
-              <div className="w-full flex justify-center shrink-0 mt-6 h-6" />
+              <div className="w-full flex justify-center shrink-0 min-h-[52px]" />
             </CardContainer>
 
             {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР + КНОПКА ДИНАМИКА) */}
@@ -4148,7 +4141,7 @@ function RapidFlashcardMode({
               }}
             >
               {/* Шапка с кнопкой озвучки на обратной стороне */}
-              <div className="w-full flex items-center justify-between shrink-0 mb-4">
+              <div className="w-full flex items-center justify-between shrink-0">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -4202,33 +4195,21 @@ function RapidFlashcardMode({
                 )}
               </div>
 
-              <div className="h-6 shrink-0" />
+              {/* Низ: Кнопка Weiter */}
+              <div className="w-full flex justify-center shrink-0 min-h-[52px]">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRateCard(true);
+                  }}
+                  className="w-full max-w-sm py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center"
+                  style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
+                >
+                  Weiter
+                </button>
+              </div>
             </CardContainer>
-          </div>
-
-          {/* Кнопки оценки [ ✕ ] И [ ✓ ] при перевороте карточки */}
-          <div className={cn(
-            "min-h-[58px] flex items-center justify-center gap-4 sm:gap-6 mt-6 transition-all duration-200",
-            isFlipped ? "opacity-100 pointer-events-auto scale-100" : "opacity-0 pointer-events-none scale-95"
-          )}>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); handleRateCard(false); }}
-              className="px-6 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 flex items-center gap-2.5 text-zinc-700 dark:text-zinc-300 hover:text-rose-500 hover:border-rose-500/40 hover:bg-rose-500/10 transition-all active:scale-95 shadow-lg shadow-zinc-950/5 dark:shadow-xl cursor-pointer"
-              title="Не знаю (ArrowLeft)"
-            >
-              <X className="w-5 h-5 stroke-[2.5] text-rose-500"/>
-              <span className="text-sm font-medium">Nicht gewusst</span>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); handleRateCard(true); }}
-              className="px-6 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 flex items-center gap-2.5 text-zinc-700 dark:text-zinc-300 hover:text-emerald-500 hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-all active:scale-95 shadow-lg shadow-zinc-950/5 dark:shadow-xl cursor-pointer"
-              title="Знаю (ArrowRight)"
-            >
-              <Check className="w-5 h-5 stroke-[2.5] text-emerald-500"/>
-              <span className="text-sm font-medium">Gewusst</span>
-            </button>
           </div>
         </div>
       ) : (
@@ -4965,7 +4946,7 @@ function RapidSession({
 
   return (
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
-      <div className="w-full max-w-[760px] mx-auto px-4 mb-2.5">
+      <div className="w-full max-w-3xl mx-auto px-4 mb-2.5">
         <div className="flex items-center justify-between mb-2">
           <button onClick={onBack} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
@@ -4985,7 +4966,7 @@ function RapidSession({
       </div>
 
       <div className={cn(
-        "w-full max-w-[760px] mx-auto px-4 flex flex-col items-center select-none relative",
+        "w-full max-w-3xl mx-auto px-4 flex flex-col items-center select-none relative",
         (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[320px] md:pb-6" : ""
       )}>
         <RapidFlashcardMode
@@ -5494,7 +5475,7 @@ function StudyInterface({
 
   return (
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
-      <div className="w-full max-w-[760px] mx-auto px-4 mb-2.5">
+      <div className="w-full max-w-3xl mx-auto px-4 mb-2.5">
         <div className="flex items-center justify-between mb-2">
           <button onClick={onBack} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
@@ -5521,7 +5502,7 @@ function StudyInterface({
       </div>
 
       <div className={cn(
-        "w-full max-w-[760px] mx-auto px-4 flex flex-col items-center select-none relative",
+        "w-full max-w-3xl mx-auto px-4 flex flex-col items-center select-none relative",
         isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[320px] md:pb-6" : ""
       )}>
         <AnimatePresence mode="wait">
@@ -6106,13 +6087,9 @@ function StudyCard({
     // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
     setPhase("Answer");
 
-    // 2. Мгновенно вычисляем и зажигаем синюю точку в шапке
-    const nextMastery = correct 
-      ? Math.min(4, (localMastery || 0) + 1) 
-      : Math.max(0, (localMastery || 0) - 1);
-    setLocalMastery(nextMastery);
-
     if (!correct) {
+      const nextMastery = Math.max(0, (localMastery || 0) - 1);
+      setLocalMastery(nextMastery);
       setHasErrored(true);
       hasErroredRef.current = true;
     }
@@ -6121,6 +6098,7 @@ function StudyCard({
     if (correct) {
       const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
       if (willBeVaporized) {
+        setLocalMastery(4);
         setIsVaporizing(true);
         setIsTransitionLocked(true);
         triggerHaptic('success');
@@ -6188,12 +6166,9 @@ function StudyCard({
       // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
       setPhase("Answer");
 
-      // 2. Мгновенно вычисляем и зажигаем синюю точку в шапке
-      const nextMastery = isReview || forceInputMode ? 4 : Math.min(4, (localMastery || 0) + 1);
-      setLocalMastery(nextMastery);
-
       const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
       if (willBeVaporized) {
+        setLocalMastery(4);
         setIsVaporizing(true);
         setIsTransitionLocked(true);
         triggerHaptic('success');

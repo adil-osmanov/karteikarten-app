@@ -316,30 +316,22 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                 return (
                   <div
                     key={item.key}
-                    className="group relative flex items-center justify-between p-4 my-1.5 rounded-2xl bg-neutral-100/50 dark:bg-white/[0.03] hover:bg-neutral-100 dark:hover:bg-white/[0.07] border border-black/[0.03] dark:border-white/[0.05] hover:border-amber-500/30 transition-all duration-200"
+                    className="group relative flex items-center justify-between px-5 py-3.5 my-1 rounded-2xl bg-neutral-100/60 dark:bg-neutral-900/40 hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 border border-black/5 dark:border-white/5 transition-all duration-150"
                   >
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      {/* Золотая печать мастера (Apple Gold Seal) */}
-                      <div className="w-2 h-2 rounded-full bg-gradient-to-tr from-amber-500 to-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.7)] shrink-0" />
+                    <div className="flex items-center gap-3 min-w-0">
+                      {/* Золотая точка освоенного слова */}
+                      <div className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)] shrink-0" />
                       
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-[16px] font-medium text-neutral-900 dark:text-neutral-100 tracking-tight group-hover:text-amber-500 dark:group-hover:text-amber-300 transition-colors truncate">
-                          {formatSeparableWord(item.word)}
-                        </span>
-                        {item.translation ? (
-                          <span className="text-xs text-neutral-500 dark:text-neutral-400 font-normal truncate mt-0.5">
-                            {item.translation}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {/* Правый блок: чистый матовый уровень */}
-                    <div className="shrink-0 flex items-center gap-2">
-                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-neutral-200/70 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border border-black/5 dark:border-white/5">
-                        {item.level || 'B2'}
+                      {/* Только чистое немецкое слово */}
+                      <span className="text-[17px] font-medium text-neutral-900 dark:text-neutral-100 tracking-tight group-hover:text-amber-500 dark:group-hover:text-amber-300 transition-colors truncate">
+                        {formatSeparableWord(item.word)}
                       </span>
                     </div>
+
+                    {/* Бейдж уровня */}
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-lg bg-neutral-200/80 dark:bg-neutral-800/80 text-neutral-600 dark:text-neutral-400 border border-black/5 dark:border-white/5 shrink-0">
+                      {item.level || 'B2'}
+                    </span>
                   </div>
                 );
               })
