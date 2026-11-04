@@ -3822,28 +3822,27 @@ function RapidFlashcardMode({
     triggerHaptic('success');
   }, [isAnswered, playCardAudio, currentCard?.targetWord]);
 
-  const handleGiveUp = useCallback(() => {
+  // ЭТАП 1: Фиксация ошибки на текущей карточке (без переключения и штрафов)
+  const handleMistakeOrGiveUp = useCallback(() => {
     if (locked || isAnswered) return;
     setIsAnswered(true);
     setIsSurrendered(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
 
-    const updatedMastery = Math.max(0, (localMastery || 0) - 1);
-    setLocalMastery(updatedMastery);
-
-    setTypedValue(parsedTarget.cleanCoreWord);
-
+    // Звук ошибки и озвучка правильного немецкого ответа
+    playSafeAudio(() => playErrorSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
-    try {
-      onHintPenalty?.(updatedMastery);
-    } catch {}
-  }, [locked, isAnswered, localMastery, parsedTarget, currentCard?.targetWord, playCardAudio, onHintPenalty]);
+    triggerHaptic('error');
 
+    // Карточка показывает правильный ответ и СПОКОЙНО ЖДЕТ, пока пользователь прочитает и нажмет «Weiter»
+  }, [locked, isAnswered, currentCard?.targetWord, playCardAudio]);
+
+  // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter
   const handleProceedNext = useCallback(() => {
     if (!isAnswered || isTransitioning) return;
 
-    // На 4-м раунде при сознательном переходе запускаем оптическое растворение
+    // На 4-м раунде при сознательном переходе запускаем оптическое растворение (если без сдачи)
     if (currentRound === 4 && !isSurrendered) {
       setIsVaporizing(true);
       setIsTransitioning(true);
@@ -3870,12 +3869,17 @@ function RapidFlashcardMode({
       setIsErrorMismatch(false);
 
       if (isSurrendered) {
+        // Слово помечается как требующее повторного закрепления только после нажатия Weiter
+        const updatedMastery = Math.max(0, (localMastery || 0) - 1);
+        try {
+          onHintPenalty?.(updatedMastery);
+        } catch {}
         onAnswer(false, false, true);
       } else {
         onAnswer(true, false, false);
       }
     }, 140);
-  }, [isAnswered, isTransitioning, isSurrendered, currentRound, onAnswer]);
+  }, [isAnswered, isTransitioning, isSurrendered, currentRound, localMastery, onHintPenalty, onAnswer]);
 
   // Проверка совпадения ввода с целевым словом или всей фразой
   const checkTargetMatch = useCallback((input: string) => {
@@ -4001,9 +4005,21 @@ function RapidFlashcardMode({
     if (isMatch) {
       handleSuccessAnswer();
     } else {
-      triggerErrorShake();
+      // При неверном вводе или нажатии Enter на пустом поле показываем правильный ответ
+      handleMistakeOrGiveUp();
     }
-  }, [locked, isAnswered, typedValue, checkTargetMatch, handleSuccessAnswer, triggerErrorShake]);
+  }, [locked, isAnswered, typedValue, checkTargetMatch, handleSuccessAnswer, handleMistakeOrGiveUp]);
+
+  // Клик по карточке на раундах 1-2: 1-й клик переворачивает, 2-й клик переводит к следующей карточке
+  const handleCardClick = useCallback(() => {
+    if (isRound1or2) {
+      if (!isFlipped) {
+        setIsFlipped(true);
+      } else {
+        handleRateCard(true);
+      }
+    }
+  }, [isRound1or2, isFlipped, handleRateCard]);
 
   // 3. Двухшаговое управление стрелками, Space для бесконечного флипа туда-обратно, Enter/Space для Weiter
   useEffect(() => {
@@ -4017,10 +4033,14 @@ function RapidFlashcardMode({
       }
 
       if (isRound1or2) {
-        if (e.code === 'Space' || e.key === ' ') {
+        if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
-          toggleFlip();
-        } else if (e.key === 'Enter' || e.key === 'ArrowRight') {
+          if (!isFlipped) {
+            setIsFlipped(true);
+          } else {
+            handleRateCard(true);
+          }
+        } else if (e.key === 'ArrowRight') {
           e.preventDefault();
           if (!isFlipped) {
             setIsFlipped(true);
@@ -4040,6 +4060,10 @@ function RapidFlashcardMode({
           e.preventDefault();
           handleEnterSubmit();
         }
+        if (e.code === 'KeyH' || e.key === 'h' || e.key === 'H' || e.key === 'р' || e.key === 'Р') {
+          e.preventDefault();
+          handleMistakeOrGiveUp();
+        }
       }
 
       // Озвучка по клавише R (в раундах 1-2 с обеих сторон карточки, или в раундах 3-4 ТОЛЬКО ПОСЛЕ ответа)
@@ -4051,7 +4075,7 @@ function RapidFlashcardMode({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, toggleFlip, playCardAudio]);
+  }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, handleMistakeOrGiveUp, playCardAudio]);
 
   return (
     <div key={currentCard?.id} className={`w-full flex flex-col items-center select-none animate-card-enter transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
@@ -4065,7 +4089,7 @@ function RapidFlashcardMode({
         >
           {/* 3D Оболочка */}
           <div
-            onClick={toggleFlip}
+            onClick={handleCardClick}
             className={cn(
               "w-full min-h-[500px] h-[500px] relative cursor-pointer transform-style-3d",
               isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
@@ -4202,21 +4226,8 @@ function RapidFlashcardMode({
                 )}
               </div>
 
-              {/* Низ: Кнопка Weiter */}
-              <div className="w-full flex justify-center shrink-0 min-h-[52px]">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRateCard(true);
-                  }}
-                  className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-sm shadow-lg shadow-blue-600/30 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center gap-2"
-                  style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
-                >
-                  <span>Weiter</span>
-                  <span className="text-[11px] opacity-60 bg-black/20 px-1.5 py-0.5 rounded">↵ Enter</span>
-                </button>
-              </div>
+              {/* Низ: Пусто для чистоты */}
+              <div className="w-full flex justify-center shrink-0 min-h-[52px]" />
             </CardContainer>
           </div>
         </div>
@@ -4260,10 +4271,10 @@ function RapidFlashcardMode({
 
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); handleGiveUp(); }}
+                onClick={(e) => { e.stopPropagation(); handleMistakeOrGiveUp(); }}
                 disabled={isAnswered || locked}
                 className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
-                title="Сдаться (-1 раунд)"
+                title="Lösung anzeigen (H)"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
               </button>
@@ -4293,7 +4304,7 @@ function RapidFlashcardMode({
                       isAnswered
                         ? (!isSurrendered
                             ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                            : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
+                            : 'text-red-500 dark:text-red-400 border-red-500/40 bg-red-500/5 dark:bg-red-500/10')
                         : isErrorMismatch
                           ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
                           : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
@@ -4307,9 +4318,9 @@ function RapidFlashcardMode({
                           : displayParts.totalLength > 14
                           ? 'text-xl sm:text-2xl'
                           : 'text-2xl sm:text-[28px]',
-                        !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-900 dark:text-white'
+                        !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400 line-through'
                       )}>
-                        {formatSeparableWord(currentCard?.targetWord || typedValue)}
+                        {typedValue ? formatSeparableWord(typedValue) : '—'}
                       </div>
                     ) : (
                       <>
@@ -4361,7 +4372,7 @@ function RapidFlashcardMode({
                     isAnswered
                       ? (!isSurrendered
                           ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                          : 'text-zinc-900 dark:text-white border-zinc-300 dark:border-white/20 bg-zinc-100 dark:bg-white/[0.05]')
+                          : 'text-red-500 dark:text-red-400 border-red-500/40 bg-red-500/5 dark:bg-red-500/10')
                       : isErrorMismatch
                         ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
                         : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
@@ -4375,9 +4386,9 @@ function RapidFlashcardMode({
                         : displayParts.totalLength > 14
                         ? 'text-xl sm:text-2xl'
                         : 'text-2xl sm:text-[28px]',
-                      !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-900 dark:text-white'
+                      !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400 line-through'
                     )}>
-                      {formatSeparableWord(currentCard?.targetWord || typedValue)}
+                      {typedValue ? formatSeparableWord(typedValue) : '—'}
                     </div>
                   ) : (
                     <>
@@ -4415,9 +4426,19 @@ function RapidFlashcardMode({
               </div>
             )}
 
+            {/* Плавный показ правильного ответа при ошибке или сдаче */}
+            {isAnswered && isSurrendered && (
+              <div className="w-full flex flex-col items-center mt-3 animate-in fade-in duration-300">
+                <div className="text-xl sm:text-2xl font-semibold text-neutral-900 dark:text-neutral-100 tracking-tight">
+                  {article && <span className={getArticleColor(article)}>{article} </span>}
+                  {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
+                </div>
+              </div>
+            )}
+
             {/* Пример предложения и формы слова после ввода ответа (как в раундах 1-2) */}
             {isAnswered && (
-              <div className="w-full max-w-lg mx-auto mt-6 space-y-3 animate-in fade-in duration-300">
+              <div className="w-full max-w-lg mx-auto mt-5 space-y-3 animate-in fade-in duration-300">
                 {plural && (
                   <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal">
                     {plural}
@@ -4432,17 +4453,16 @@ function RapidFlashcardMode({
             )}
           </div>
 
-          {/* Низ: Кнопка Weiter с хоткеями */}
+          {/* Низ: Кнопка Weiter */}
           <div className="w-full flex justify-center mt-6 min-h-[56px]">
             {isAnswered && (
               <button
                 type="button"
                 onClick={handleProceedNext}
-                className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-sm shadow-lg shadow-blue-600/30 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center gap-2"
+                className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-sm shadow-lg shadow-blue-600/30 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center"
                 style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
               >
-                <span>Weiter</span>
-                <span className="text-[11px] opacity-60 bg-black/20 px-1.5 py-0.5 rounded">↵ Enter</span>
+                Weiter
               </button>
             )}
           </div>
@@ -6559,11 +6579,10 @@ function StudyCard({
               type="button"
               disabled={isTransitionLocked}
               onClick={isTransitionLocked ? undefined : handleAdvanceNext}
-              className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center gap-2 cursor-pointer border-0 select-none disabled:opacity-80"
+              className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center cursor-pointer border-0 select-none disabled:opacity-80"
               style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
             >
-              <span>Weiter</span>
-              <span className="text-[11px] opacity-60 bg-black/20 px-1.5 py-0.5 rounded">↵ Enter</span>
+              Weiter
             </button>
           ) : isRecognitionMode ? (
             <button
