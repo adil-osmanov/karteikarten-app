@@ -5807,6 +5807,9 @@ function StudyCard({
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
+  const [isSealed, setIsSealed] = useState(false);
+  const [isTransitionLocked, setIsTransitionLocked] = useState(false);
+  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [localMastery, setLocalMastery] = useState(() => {
     if (isReview || forceInputMode) {
       return 4;
@@ -5819,6 +5822,12 @@ function StudyCard({
     setInputText("");
     setHasErrored(false);
     hasErroredRef.current = false;
+    setIsSealed(false);
+    setIsTransitionLocked(false);
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
   }, [card.id]);
 
   useEffect(() => {
@@ -5927,6 +5936,8 @@ function StudyCard({
     playSafeAudio(() => playAudio(fullSentence));
   }, [fullSentence, playAudio]);
 
+  const currentRound = Math.max(1, Math.min(4, localMastery || card.masteryLevel || 1));
+
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
     const correct = checkAnswer(option, card.targetWord) || checkAnswer(option, clozeWord);
@@ -5945,8 +5956,26 @@ function StudyCard({
       hasErroredRef.current = true;
     }
 
-    // 3. Безопасная озвучка (не крашит поток в Safari)
+    // 3. Безопасная озвучка и ритуал запечатывания на 4 раунде
     if (correct) {
+      const willBeSealed = currentRound >= 4 && !hasErroredRef.current;
+      if (willBeSealed) {
+        setIsSealed(true);
+        setIsTransitionLocked(true);
+        playSafeAudio(() => playSuccessSound());
+        playSafeAudio(() => playAudio(fullSentence));
+        triggerHaptic('success');
+        try {
+          onAnswer(true, false);
+        } catch (e) {
+          console.warn('onAnswer error caught:', e);
+        }
+        transitionTimerRef.current = setTimeout(() => {
+          onNext();
+        }, 900);
+        return;
+      }
+
       playSafeAudio(() => playSuccessSound());
       playSafeAudio(() => playAudio(fullSentence));
     } else {
@@ -6001,6 +6030,24 @@ function StudyCard({
       // 2. Мгновенно вычисляем и зажигаем синюю точку в шапке
       const nextMastery = isReview || forceInputMode ? 4 : Math.min(4, (localMastery || 0) + 1);
       setLocalMastery(nextMastery);
+
+      const willBeSealed = currentRound >= 4 && !hasErroredRef.current;
+      if (willBeSealed) {
+        setIsSealed(true);
+        setIsTransitionLocked(true);
+        playSafeAudio(() => playSuccessSound());
+        playSafeAudio(() => playAudio(fullSentence));
+        triggerHaptic('success');
+        try {
+          onAnswer(true, false);
+        } catch (e) {
+          console.warn('onAnswer error caught:', e);
+        }
+        transitionTimerRef.current = setTimeout(() => {
+          onNext();
+        }, 900);
+        return;
+      }
 
       playSafeAudio(() => playSuccessSound());
       playSafeAudio(() => playAudio(fullSentence));
@@ -6065,6 +6112,7 @@ function StudyCard({
       if (phase === "Answer") {
         if (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter') {
           e.preventDefault();
+          if (isTransitionLocked) return;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           onNext();
           return;
@@ -6147,7 +6195,6 @@ function StudyCard({
     ? (parseTargetNoun(displayAnswerWord) || (!isCustomCloze ? parseTargetNoun(card.targetWord) : null))
     : null;
 
-  const currentRound = Math.max(1, Math.min(4, localMastery || card.masteryLevel || 1));
   const isArchivePulse = phase === "Answer" && !hasErrored && currentRound >= 4;
 
   return (
@@ -6156,6 +6203,7 @@ function StudyCard({
         key={card.id}
         rarityRound={currentRound}
         isArchivingPulse={isArchivePulse}
+        isSealed={isSealed}
         onClick={() => {
           if (!isMobile && !isMultipleChoice && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -6213,7 +6261,7 @@ function StudyCard({
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
-            <ProgressDots level={currentRound} />
+            <ProgressDots level={currentRound} isSealed={isSealed} />
             <button 
               type="button"
               onClick={handleHilfe}
@@ -6294,6 +6342,13 @@ function StudyCard({
               {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
             </p>
 
+            {isSealed && (
+              <div className="text-amber-400 text-xs font-medium tracking-wide uppercase mt-4 animate-fade-in flex items-center justify-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                Ins Langzeitgedächtnis versiegelt
+              </div>
+            )}
+
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
               <div className="mt-5 flex flex-col items-center gap-1.5 transition-opacity duration-200">
                 <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm mt-3 mb-2 max-w-[95%]">
@@ -6342,8 +6397,9 @@ function StudyCard({
                 <button
                   ref={nextButtonRef}
                   type="button"
-                  onClick={onNext}
-                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center"
+                  disabled={isTransitionLocked}
+                  onClick={isTransitionLocked ? undefined : onNext}
+                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 border-none select-none cursor-pointer flex items-center justify-center disabled:opacity-80"
                 >
                   Weiter
                 </button>
@@ -6765,17 +6821,17 @@ function HeaderWidgets({
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
               <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная переливающаяся аура Gemini */}
-                <div className="absolute -inset-[1.5px] rounded-full bg-gradient-to-r from-blue-500 via-indigo-500 via-purple-500 to-cyan-400 opacity-75 blur-md group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse" />
+                {/* Анимированная переливающаяся аура: мягкая пастельная в светлой теме, глубокая в темной */}
+                <div className="absolute -inset-[1.5px] rounded-full opacity-40 blur-lg bg-gradient-to-r from-blue-400 via-indigo-300 to-cyan-300 dark:opacity-70 dark:bg-gradient-to-r dark:from-blue-500 dark:via-indigo-500 dark:to-cyan-400 group-hover:opacity-70 dark:group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
 
-                {/* Сама кнопка в стиле Apple Frosted Glass */}
+                {/* Сама кнопка в стиле Apple Frosted Glass (молочное стекло в светлой теме, глубокое в темной) */}
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-neutral-950/80 dark:bg-neutral-900/90 hover:bg-neutral-900 text-white font-medium text-xs tracking-wider uppercase border border-white/20 backdrop-blur-xl shadow-inner flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
+                  className="relative px-5 py-2.5 rounded-full bg-white/85 text-neutral-900 border border-neutral-200/80 shadow-md shadow-blue-500/10 backdrop-blur-xl dark:bg-neutral-950/85 dark:text-white dark:border-white/15 dark:shadow-2xl font-medium text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-300 active:scale-[0.98] cursor-pointer"
                 >
-                  <RotateCw className="w-3.5 h-3.5 text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
-                  <span>
+                  <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
+                  <span className="font-medium text-neutral-900 dark:text-white">
                     {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
                   </span>
                 </button>
@@ -7039,8 +7095,8 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
-        "h-full min-h-[152px] p-5 rounded-2xl bg-white dark:bg-zinc-900/60 hover:bg-zinc-50 dark:hover:bg-zinc-900 border border-black/[0.06] dark:border-white/5 hover:border-black/[0.12] dark:hover:border-white/15 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-lg relative select-none cursor-pointer group",
-        isCompleted && "opacity-75 hover:opacity-100"
+        "relative p-5 rounded-2xl bg-white dark:bg-neutral-900/70 border border-neutral-200/80 dark:border-white/5 hover:border-blue-500/40 dark:hover:border-blue-500/30 shadow-sm hover:shadow-xl hover:shadow-black/5 dark:hover:shadow-black/40 hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[152px]",
+        isCompleted && "opacity-85 hover:opacity-100"
       )}
     >
       {/* Action Buttons: Rename (Pencil) & Delete */}
@@ -7048,7 +7104,7 @@ const DeckCard = React.memo(({
         {onRename && (
           <button 
             onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-            className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
+            className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800/90 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200/60 dark:border-white/10 flex items-center justify-center text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
             title="Lektion umbenennen"
           >
             <Edit2 className="w-3.5 h-3.5" />
@@ -7056,7 +7112,7 @@ const DeckCard = React.memo(({
         )}
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
-          className="w-7 h-7 rounded-full bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
+          className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800/90 hover:bg-rose-50 dark:hover:bg-rose-500/20 border border-neutral-200/60 dark:border-white/10 flex items-center justify-center text-neutral-600 dark:text-neutral-300 hover:text-rose-600 dark:hover:text-rose-400 transition-all active:scale-95 shadow-sm cursor-pointer"
           title="Löschen"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -7065,16 +7121,18 @@ const DeckCard = React.memo(({
 
       {/* Header / Title */}
       <div className="min-h-[3rem] flex items-start pr-14 mb-2">
-        <h3 className="text-base font-semibold text-zinc-900 dark:text-white tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
-          {deck.name}
-          {isCompleted && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 inline-block ml-2 align-text-bottom" />}
+        <h3 className="text-neutral-900 dark:text-neutral-100 font-semibold text-base tracking-tight truncate group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors flex items-center gap-1.5 w-full">
+          <span className="truncate">{deck.name}</span>
+          {isCompleted && (
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 inline-block ml-1" />
+          )}
         </h3>
       </div>
       
       {/* Footer / Controls & Status */}
       <div className="mt-auto pt-4 flex flex-col w-full">
         <div className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-neutral-100/60 dark:bg-neutral-800/60 p-0.5 rounded-xl border border-neutral-200/50 dark:border-white/5">
             {showTheoryButton && (
               <DeckTheoryIndicator 
                 deckId={deck.id} 
@@ -7085,10 +7143,10 @@ const DeckCard = React.memo(({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); initAudioCtx(); onOpenStory(deck.id); }}
-                className="w-8 h-8 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] active:scale-95 border border-black/[0.06] dark:border-white/[0.06] flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
                 title="Lesetext (Режим чтения)"
               >
-                <BookOpen className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />
+                <BookOpen className="w-3.5 h-3.5" />
               </button>
             )}
             {!isVerbBook && (
@@ -7096,33 +7154,35 @@ const DeckCard = React.memo(({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
-                  className="w-8 h-8 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] active:scale-95 border border-black/[0.06] dark:border-white/[0.06] flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
+                  className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
                   title="Diktat / Schreiben (Письмо)"
                 >
-                  <Keyboard className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />
+                  <Keyboard className="w-3.5 h-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
-                  className="w-8 h-8 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] active:scale-95 border border-black/[0.06] dark:border-white/[0.06] flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all shadow-sm cursor-pointer"
+                  className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
                   title="Shadowing / Hören (Аудио)"
                 >
-                  <Mic className="w-3.5 h-3.5 text-zinc-700 dark:text-zinc-300" />
+                  <Mic className="w-3.5 h-3.5" />
                 </button>
               </>
             )}
           </div>
-          <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400 ml-auto tabular-nums">
+          <span className="text-xs font-mono font-medium text-neutral-400 dark:text-neutral-500 ml-auto tabular-nums">
             {mastered} / {total}
           </span>
         </div>
 
         {/* Apple Progress Bar */}
-        <div className="w-full h-1 bg-zinc-200 dark:bg-zinc-800/80 rounded-full mt-3 overflow-hidden">
+        <div className="h-1.5 w-full bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden mt-3">
           <div
             className={cn(
-              "h-full rounded-full transition-all duration-300",
-              progressPercentage >= 100 ? "bg-emerald-500" : "bg-blue-500"
+              "h-full rounded-full transition-all duration-500",
+              progressPercentage >= 100 
+                ? "bg-gradient-to-r from-emerald-500 to-teal-400" 
+                : "bg-gradient-to-r from-blue-500 to-indigo-500"
             )}
             style={{ width: `${progressPercentage}%` }}
           />

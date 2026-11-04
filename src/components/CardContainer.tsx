@@ -9,6 +9,7 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
   is3DFace?: boolean;
   rarityRound?: number; // 1: Common, 2: Uncommon (Emerald), 3: Rare (Sapphire), 4: Epic (Purple)
   isArchivingPulse?: boolean;
+  isSealed?: boolean;
 }
 
 /**
@@ -17,8 +18,12 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  * - Round 2 (Uncommon): Soft emerald contour with subtle green ambient glow.
  * - Round 3 (Rare): Sapphire contour with noble blue ambient glow.
  * - Round 4 (Epic): Amethyst contour with magical purple ambient glow.
+ * - The Sealing Ritual (Round 4 Mastered): Noble gold contour with golden aura.
  */
-export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean): string {
+export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean): string {
+  if (isSealed) {
+    return "border-amber-400/80 ring-2 ring-amber-400/30 shadow-[0_0_60px_-10px_rgba(251,191,36,0.35)] transition-all duration-300";
+  }
   if (!round || round <= 1) {
     return "border-black/[0.06] dark:border-neutral-800 shadow-[0_12px_32px_rgba(0,0,0,0.05),_0_2px_6px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/50";
   }
@@ -65,55 +70,70 @@ export const AUDIO_BUTTON_CLASSES = cn(
 );
 
 export function ProgressDots({ 
-  level = 0, 
+  level = 1, 
   max = 4, 
+  isSealed = false,
   className 
 }: { 
   level: number; 
   max?: number; 
+  isSealed?: boolean;
   className?: string; 
 }) {
-  const round = Math.max(1, Math.min(4, level || 1));
+  // If sealed: all 4 dots burst into noble gold
+  if (isSealed) {
+    return (
+      <div className={cn("flex items-center gap-1.5 select-none shrink-0", className)}>
+        {Array.from({ length: max }, (_, idx) => (
+          <span
+            key={idx}
+            className="w-2 h-2 shrink-0 rounded-full transition-all duration-300 bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.9)] border-transparent"
+          />
+        ))}
+      </div>
+    );
+  }
 
-  const getDotStyle = (step: number) => {
-    if (step > round) {
-      return "bg-zinc-200 dark:bg-white/10 shadow-none";
+  const round = Math.max(1, Math.min(4, level || 1));
+  // Round 1: 0 filled, 4 empty
+  // Round 2: 1 filled (emerald), 3 empty
+  // Round 3: 2 filled (blue), 2 empty
+  // Round 4: 3 filled (purple), 1 empty
+  const filledCount = round - 1;
+
+  const getDotStyle = (idx: number) => {
+    const isFilled = idx < filledCount;
+    if (!isFilled) {
+      return "w-2 h-2 rounded-full bg-neutral-700/40 dark:bg-neutral-800 border border-neutral-600/30 shadow-none";
     }
-    // Completed dots styled according to WoW Rarity
     if (round === 2) {
-      return "bg-emerald-500 dark:bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]";
+      return "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] border-transparent";
     }
     if (round === 3) {
-      return "bg-blue-600 dark:bg-blue-500 shadow-[0_0_8px_rgba(37,99,235,0.5)]";
+      return "w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)] border-transparent";
     }
-    if (round >= 4) {
-      return "bg-purple-600 dark:bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]";
-    }
-    // Round 1 (Common)
-    return "bg-zinc-400 dark:bg-zinc-500 shadow-none";
+    // round === 4
+    return "w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.8)] border-transparent";
   };
 
   return (
     <div className={cn("flex items-center gap-1.5 select-none shrink-0", className)}>
-      {Array.from({ length: max }, (_, idx) => {
-        const step = idx + 1;
-        return (
-          <span
-            key={step}
-            className={cn(
-              "w-2.5 h-2.5 shrink-0 rounded-full transition-all duration-300",
-              getDotStyle(step)
-            )}
-          />
-        );
-      })}
+      {Array.from({ length: max }, (_, idx) => (
+        <span
+          key={idx}
+          className={cn(
+            "shrink-0 transition-all duration-300",
+            getDotStyle(idx)
+          )}
+        />
+      ))}
     </div>
   );
 }
 
 export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
-  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, style, ...props }, ref) => {
-    const rarityClasses = getRarityCardClasses(rarityRound, isArchivingPulse);
+  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, style, ...props }, ref) => {
+    const rarityClasses = getRarityCardClasses(rarityRound, isArchivingPulse, isSealed);
 
     return (
       <div
