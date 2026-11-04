@@ -3816,22 +3816,11 @@ function RapidFlashcardMode({
     setIsErrorMismatch(false);
     setIsShaking(false);
 
-    if (currentRound === 4) {
-      setIsVaporizing(true);
-      triggerHaptic('success');
-      playSafeAudio(() => playCardAudio(currentCard?.targetWord));
-      setTimeout(() => {
-        setIsVaporizing(false);
-        setIsTransitioning(false);
-        onAnswer(true, false, false);
-      }, 400);
-      return;
-    }
-
+    // Никаких авто-таймеров! Карточка ждет нажатия «Weiter» или Enter.
     playSafeAudio(() => playSuccessSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     triggerHaptic('success');
-  }, [isAnswered, currentRound, playCardAudio, currentCard?.targetWord, onAnswer]);
+  }, [isAnswered, playCardAudio, currentCard?.targetWord]);
 
   const handleGiveUp = useCallback(() => {
     if (locked || isAnswered) return;
@@ -3853,6 +3842,24 @@ function RapidFlashcardMode({
 
   const handleProceedNext = useCallback(() => {
     if (!isAnswered || isTransitioning) return;
+
+    // На 4-м раунде при сознательном переходе запускаем оптическое растворение
+    if (currentRound === 4 && !isSurrendered) {
+      setIsVaporizing(true);
+      setIsTransitioning(true);
+      triggerHaptic('success');
+      setTimeout(() => {
+        setIsVaporizing(false);
+        setIsTransitioning(false);
+        setIsAnswered(false);
+        setIsSurrendered(false);
+        setTypedValue('');
+        setIsErrorMismatch(false);
+        onAnswer(true, false, false);
+      }, 420);
+      return;
+    }
+
     setIsTransitioning(true);
     setCardAnimClass('opacity-0 scale-[0.97] transition-all duration-140 ease-out');
 
@@ -3868,7 +3875,7 @@ function RapidFlashcardMode({
         onAnswer(true, false, false);
       }
     }, 140);
-  }, [isAnswered, isTransitioning, isSurrendered, onAnswer]);
+  }, [isAnswered, isTransitioning, isSurrendered, currentRound, onAnswer]);
 
   // Проверка совпадения ввода с целевым словом или всей фразой
   const checkTargetMatch = useCallback((input: string) => {
@@ -4060,7 +4067,7 @@ function RapidFlashcardMode({
           <div
             onClick={toggleFlip}
             className={cn(
-              "w-full h-[480px] min-h-[480px] max-h-[480px] relative cursor-pointer transform-style-3d",
+              "w-full min-h-[500px] h-[500px] relative cursor-pointer transform-style-3d",
               isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
             style={{
@@ -4203,10 +4210,11 @@ function RapidFlashcardMode({
                     e.stopPropagation();
                     handleRateCard(true);
                   }}
-                  className="w-full max-w-sm py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center"
+                  className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-sm shadow-lg shadow-blue-600/30 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center gap-2"
                   style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
                 >
-                  Weiter
+                  <span>Weiter</span>
+                  <span className="text-[11px] opacity-60 bg-black/20 px-1.5 py-0.5 rounded">↵ Enter</span>
                 </button>
               </div>
             </CardContainer>
@@ -4430,10 +4438,11 @@ function RapidFlashcardMode({
               <button
                 type="button"
                 onClick={handleProceedNext}
-                className="w-full max-w-sm py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center"
+                className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-sm shadow-lg shadow-blue-600/30 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center gap-2"
                 style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
               >
-                Weiter
+                <span>Weiter</span>
+                <span className="text-[11px] opacity-60 bg-black/20 px-1.5 py-0.5 rounded">↵ Enter</span>
               </button>
             )}
           </div>
@@ -6067,24 +6076,50 @@ function StudyCard({
     });
   }, [playbackSpeed]);
 
+  const handleAdvanceNext = useCallback(() => {
+    if (isTransitionLocked) return;
+
+    const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
+    if (willBeVaporized) {
+      setLocalMastery(4);
+      setIsVaporizing(true);
+      setIsTransitionLocked(true);
+      triggerHaptic('success');
+      transitionTimerRef.current = setTimeout(() => {
+        setIsVaporizing(false);
+        setIsTransitionLocked(false);
+        onNext();
+      }, 420);
+      return;
+    }
+
+    onNext();
+  }, [isTransitionLocked, currentRound, onNext]);
+
   const handleReveal = useCallback(() => {
     if (phase !== "Question") return;
     setPhase("Answer");
     playSafeAudio(() => playSuccessSound());
-    playSafeAudio(() => playAudio(fullSentence));
+    const fullSentenceText = fullSentence || card.sentence || (card as any).text;
+    if (fullSentenceText) {
+      playSafeAudio(() => playAudio(fullSentenceText));
+    }
     triggerHaptic('success');
     try {
       onAnswer(true, false);
     } catch (e) {
       console.warn('onAnswer error caught:', e);
     }
-  }, [phase, fullSentence, playAudio, onAnswer]);
+    setTimeout(() => {
+      nextButtonRef.current?.focus();
+    }, 50);
+  }, [phase, fullSentence, card, playAudio, onAnswer]);
 
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
     const correct = checkAnswer(option, card.targetWord) || checkAnswer(option, clozeWord);
     
-    // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
+    // 1. Фиксируем результат без автопереключения
     setPhase("Answer");
 
     if (!correct) {
@@ -6092,60 +6127,53 @@ function StudyCard({
       setLocalMastery(nextMastery);
       setHasErrored(true);
       hasErroredRef.current = true;
-    }
-
-    // 3. Безопасная озвучка и ритуал сгорания на 4 раунде
-    if (correct) {
-      const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
-      if (willBeVaporized) {
-        setLocalMastery(4);
-        setIsVaporizing(true);
-        setIsTransitionLocked(true);
-        triggerHaptic('success');
-        try {
-          onAnswer(true, false);
-        } catch (e) {
-          console.warn('onAnswer error caught:', e);
-        }
-        transitionTimerRef.current = setTimeout(() => {
-          setIsVaporizing(false);
-          setIsTransitionLocked(false);
-          onNext();
-        }, 420);
-        return;
-      }
-
-      playSafeAudio(() => playSuccessSound());
-      playSafeAudio(() => playAudio(fullSentence));
-    } else {
       playSafeAudio(() => playErrorSound());
-      playSafeAudio(() => playAudio(fullSentence));
+    } else {
+      playSafeAudio(() => playSuccessSound());
+      triggerHaptic('success');
     }
 
-    // 4. Оповещаем родителя
+    // 2. Озвучиваем все предложение целиком при ответе
+    const fullSentenceText = fullSentence || card.sentence || (card as any).text;
+    if (fullSentenceText) {
+      playSafeAudio(() => playAudio(fullSentenceText));
+    }
+
+    // 3. Оповещаем родителя
     try {
       onAnswer(correct, false);
     } catch (e) {
       console.warn('onAnswer error caught:', e);
     }
+
+    // 4. Переводим фокус на кнопку «Weiter»
+    setTimeout(() => {
+      nextButtonRef.current?.focus();
+    }, 50);
   };
 
   const handleSelectOption = handleOptionClick;
 
   const handleHilfe = () => {
-    // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
+    // 1. Показываем ответ без автопереключения
     setPhase("Answer");
     const nextMastery = isReview || forceInputMode ? 1 : Math.max(0, (localMastery || 0) - 1);
     setLocalMastery(nextMastery);
     setHasErrored(true);
     hasErroredRef.current = true;
     playSafeAudio(() => playErrorSound());
-    playSafeAudio(() => playAudio(fullSentence));
+    const fullSentenceText = fullSentence || card.sentence || (card as any).text;
+    if (fullSentenceText) {
+      playSafeAudio(() => playAudio(fullSentenceText));
+    }
     try {
       onAnswer(false, true); // isHilfe = true
     } catch (e) {
       console.warn('onAnswer error caught:', e);
     }
+    setTimeout(() => {
+      nextButtonRef.current?.focus();
+    }, 50);
   };
 
   const processNewValue = (value: string) => {
@@ -6163,30 +6191,17 @@ function StudyCard({
     }
 
     if (isValid && isComplete) {
-      // 1. ГАРАНТИРУЕМ ПОЯВЛЕНИЕ КНОПКИ WEITER В SAFARI СРАЗУ
+      // 1. Фиксируем результат: НИКАКИХ авто-таймеров перехода!
       setPhase("Answer");
 
-      const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
-      if (willBeVaporized) {
-        setLocalMastery(4);
-        setIsVaporizing(true);
-        setIsTransitionLocked(true);
-        triggerHaptic('success');
-        try {
-          onAnswer(true, false);
-        } catch (e) {
-          console.warn('onAnswer error caught:', e);
-        }
-        transitionTimerRef.current = setTimeout(() => {
-          setIsVaporizing(false);
-          setIsTransitionLocked(false);
-          onNext();
-        }, 420);
-        return;
+      playSafeAudio(() => playSuccessSound());
+
+      // 2. Озвучиваем всё немецкое предложение целиком
+      const fullSentenceText = fullSentence || card.sentence || (card as any).text;
+      if (fullSentenceText) {
+        playSafeAudio(() => playAudio(fullSentenceText));
       }
 
-      playSafeAudio(() => playSuccessSound());
-      playSafeAudio(() => playAudio(fullSentence));
       triggerHaptic('success');
 
       try {
@@ -6194,6 +6209,11 @@ function StudyCard({
       } catch (e) {
         console.warn('onAnswer error caught:', e);
       }
+
+      // 3. Фокус автоматически переходит на кнопку «Weiter»
+      setTimeout(() => {
+        nextButtonRef.current?.focus();
+      }, 50);
     }
   };
 
@@ -6250,7 +6270,7 @@ function StudyCard({
           e.preventDefault();
           if (isTransitionLocked) return;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-          onNext();
+          handleAdvanceNext();
           return;
         }
       }
@@ -6286,7 +6306,7 @@ function StudyCard({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [phase, isMultipleChoice, isRecognitionMode, handleReveal, card, playAudio, onNext, fullSentence, parts, resolvedOptions]);
+  }, [phase, isMultipleChoice, isRecognitionMode, handleReveal, card, playAudio, handleAdvanceNext, fullSentence, parts, resolvedOptions]);
 
   const renderInputChars = () => {
     if (inputText.length === 0) {
@@ -6489,14 +6509,14 @@ function StudyCard({
             {parts[1]}
           </div>
 
-          <div className="mt-4 mb-6 w-full text-center">
-            <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal mt-3 text-center transition-colors max-w-2xl mx-auto leading-relaxed">
+          <div className="w-full text-center">
+            <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal text-center transition-colors max-w-2xl mx-auto leading-relaxed">
               {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
             </p>
 
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
-              <div className="mt-5 flex flex-col items-center gap-1.5 transition-opacity duration-200">
-                <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm mt-3 mb-2 max-w-[95%]">
+              <div className="mt-4 flex flex-col items-center gap-1.5 transition-opacity duration-200">
+                <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm max-w-[95%]">
                   {renderFormattedGrammarRule(
                     card.grammarHint || 
                     card.explanation || 
@@ -6511,20 +6531,19 @@ function StudyCard({
               </div>
             )}
           </div>
-
-
         </div>
 
-        <div className="mt-2 w-full">
-          {isMultipleChoice && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full mt-4">
+        {/* 3. Нижняя панель действий (СТРОГО ВНУТРИ КАРТОЧКИ) */}
+        <div className="w-full flex justify-center shrink-0 mt-8 pt-2 min-h-[52px]">
+          {isMultipleChoice && phase === "Question" ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
               {resolvedOptions.map((opt, idx) => {
                 const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
                 return (
                   <button
                     key={`${opt}-${idx}`}
                     onClick={() => handleOptionClick(opt)}
-                    className="w-full py-3.5 px-4 rounded-2xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-neutral-100/80 hover:bg-neutral-200/80 border border-black/5 text-neutral-800 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] dark:border-white/10 dark:text-neutral-100 shadow-sm"
+                    className="w-full py-3 px-4 rounded-2xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-neutral-100/80 hover:bg-neutral-200/80 border border-black/5 text-neutral-800 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] dark:border-white/10 dark:text-neutral-100 shadow-sm"
                   >
                     <span className="truncate pr-2">{displayOpt}</span>
                     <span className="text-xs text-neutral-400 bg-black/5 dark:bg-white/10 px-2 py-0.5 rounded-md font-mono shrink-0 pointer-events-none">
@@ -6534,37 +6553,32 @@ function StudyCard({
                 );
               })}
             </div>
-          )}
-
-          {!isMultipleChoice && (
-            <div className="w-full flex flex-col items-center justify-center mt-8 sm:mt-10 shrink-0">
-              {phase === "Answer" ? (
-                <button
-                  ref={nextButtonRef}
-                  type="button"
-                  disabled={isTransitionLocked}
-                  onClick={isTransitionLocked ? undefined : onNext}
-                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center disabled:opacity-80"
-                  style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
-                >
-                  Weiter
-                </button>
-              ) : isRecognitionMode ? (
-                <button
-                  type="button"
-                  onClick={handleReveal}
-                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.12] active:scale-[0.98] text-neutral-800 dark:text-neutral-200 font-medium text-base border border-black/5 dark:border-white/10 shadow-sm transition-all outline-none select-none cursor-pointer flex items-center justify-center gap-2"
-                  style={{ outline: 'none', border: 'none' }}
-                >
-                  <span>Lösung anzeigen</span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10 text-neutral-500 dark:text-neutral-400 font-mono">
-                    Leertaste
-                  </span>
-                </button>
-              ) : (
-                <div className="h-13 sm:h-14 invisible pointer-events-none" />
-              )}
-            </div>
+          ) : phase === "Answer" ? (
+            <button
+              ref={nextButtonRef}
+              type="button"
+              disabled={isTransitionLocked}
+              onClick={isTransitionLocked ? undefined : handleAdvanceNext}
+              className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center gap-2 cursor-pointer border-0 select-none disabled:opacity-80"
+              style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
+            >
+              <span>Weiter</span>
+              <span className="text-[11px] opacity-60 bg-black/20 px-1.5 py-0.5 rounded">↵ Enter</span>
+            </button>
+          ) : isRecognitionMode ? (
+            <button
+              type="button"
+              onClick={handleReveal}
+              className="w-full max-w-xs py-3 px-8 rounded-full bg-neutral-100 hover:bg-neutral-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.12] active:scale-[0.98] text-neutral-800 dark:text-neutral-200 font-medium text-sm border border-black/5 dark:border-white/10 shadow-sm transition-all outline-none select-none cursor-pointer flex items-center justify-center gap-2"
+              style={{ outline: 'none', border: 'none' }}
+            >
+              <span>Lösung anzeigen</span>
+              <span className="text-[11px] opacity-60 bg-black/20 dark:bg-white/10 px-1.5 py-0.5 rounded font-mono">
+                Leertaste
+              </span>
+            </button>
+          ) : (
+            <div className="h-10 invisible pointer-events-none" />
           )}
         </div>
       </CardContainer>
