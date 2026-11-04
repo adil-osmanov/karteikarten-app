@@ -10,6 +10,16 @@ export interface DailyStats {
   mistakesPool: any[];
 }
 
+export interface DayRecord {
+  date: string; // 'YYYY-MM-DD'
+  cardsReviewed: number;
+  targetCards: number;
+  focusMinutes: number;
+  accuracy: number; // процент 0..100
+  mistakesCount: number;
+  wordsMastered: number; // сколько слов перешло в Stufe 4
+}
+
 export type SupportedLanguage = 'DE' | 'EN' | 'RU' | string;
 
 export const normalizeLanguage = (lang?: string | null): SupportedLanguage => {
@@ -168,18 +178,40 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
   const normLang = normalizeLanguage(lang);
   const performSync = async () => {
     try {
+      const history = getDailyStatsHistory(normLang, 30);
       const payload = {
         date: stats.date,
         activeSeconds: stats.activeSeconds || 0,
         cardsDone: stats.cardsDone || 0,
         correctCount: stats.correctCount || 0,
         mistakesCountToday: stats.mistakesCountToday || 0,
-        mistakesPool: Array.isArray(stats.mistakesPool) ? stats.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : []
+        mistakesPool: Array.isArray(stats.mistakesPool) ? stats.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : [],
+        history
       };
       await supabase.from('user_stats').upsert({
         language: `DAY_STATS_${normLang}`,
         daily_activity: payload
       }, { onConflict: 'language' });
+
+      // Synchronize with user_daily_stats if authenticated and table exists
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const todayRecord = getDayRecord(normLang, stats.date);
+          await supabase.from('user_daily_stats').upsert({
+            user_id: user.id,
+            language: normLang,
+            date: stats.date,
+            cards_reviewed: todayRecord.cardsReviewed,
+            target_cards: todayRecord.targetCards,
+            focus_minutes: todayRecord.focusMinutes,
+            accuracy: todayRecord.accuracy,
+            mistakes_count: todayRecord.mistakesCount,
+            words_mastered: todayRecord.wordsMastered,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id,language,date' });
+        }
+      } catch {}
     } catch (e) {
       console.warn('Supabase stats sync notice:', e);
     }
@@ -224,6 +256,15 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
   const normLang = normalizeLanguage(lang);
   const current = getOrCreateStats(normLang);
   if (!cloudRaw || typeof cloudRaw !== 'object') return current;
+
+  // Reconcile multi-day history
+  if (Array.isArray(cloudRaw.history)) {
+    for (const hItem of cloudRaw.history) {
+      if (hItem && hItem.date) {
+        saveDayRecord(normLang, hItem);
+      }
+    }
+  }
 
   const todayKey = getTodayKey();
   const cloudPool = Array.isArray(cloudRaw.mistakesPool) ? cloudRaw.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : [];
@@ -404,6 +445,155 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
   }
 }
 
+// --- HISTORICAL MULTI-DAY TRACKING & STORAGE ---
+export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
+  const normLang = normalizeLanguage(lang);
+  const targetCards = 200;
+
+  // 1. Check daily_stats_history map in localStorage
+  if (typeof window !== 'undefined') {
+    try {
+      const histKey = `daily_stats_history_${normLang}`;
+      const histRaw = localStorage.getItem(histKey);
+      if (histRaw) {
+        const histMap: Record<string, DayRecord> = JSON.parse(histRaw);
+        if (histMap && histMap[dateStr]) {
+          return histMap[dateStr];
+        }
+      }
+    } catch {}
+  }
+
+  // 2. Fallback: check scoped daily_stats_{lang}_{date}
+  let cardsReviewed = 0;
+  let focusMinutes = 0;
+  let accuracy = 100;
+  let mistakesCount = 0;
+  let wordsMastered = 0;
+
+  if (typeof window !== 'undefined') {
+    try {
+      const scopedKey = `daily_stats_${normLang.toLowerCase()}_${dateStr}`;
+      const scopedRaw = localStorage.getItem(scopedKey);
+      if (scopedRaw) {
+        const parsed = JSON.parse(scopedRaw);
+        if (typeof parsed?.learnedToday === 'number') cardsReviewed = parsed.learnedToday;
+        if (typeof parsed?.focusSeconds === 'number') focusMinutes = Math.floor(parsed.focusSeconds / 60);
+        if (typeof parsed?.accuracy === 'number') accuracy = parsed.accuracy;
+        if (typeof parsed?.mistakesCount === 'number') mistakesCount = parsed.mistakesCount;
+      }
+    } catch {}
+
+    // 3. Fallback: check daily_activity_{lang}
+    if (cardsReviewed === 0) {
+      try {
+        const actRaw = localStorage.getItem(`daily_activity_${normLang}`);
+        if (actRaw) {
+          const parsed = JSON.parse(actRaw);
+          const val = parsed?.[dateStr];
+          const num = typeof val === 'number' ? val : (val?.total || (typeof val === 'string' ? parseInt(val, 10) || 0 : 0));
+          if (num > cardsReviewed) cardsReviewed = num;
+        }
+      } catch {}
+    }
+  }
+
+  return {
+    date: dateStr,
+    cardsReviewed,
+    targetCards,
+    focusMinutes,
+    accuracy,
+    mistakesCount,
+    wordsMastered
+  };
+}
+
+export function saveDayRecord(lang: string = 'DE', record: Partial<DayRecord> & { date: string }): DayRecord {
+  const normLang = normalizeLanguage(lang);
+  const current = getDayRecord(normLang, record.date);
+  const updated: DayRecord = {
+    date: record.date,
+    cardsReviewed: typeof record.cardsReviewed === 'number' ? record.cardsReviewed : current.cardsReviewed,
+    targetCards: typeof record.targetCards === 'number' ? record.targetCards : (current.targetCards || 200),
+    focusMinutes: typeof record.focusMinutes === 'number' ? record.focusMinutes : current.focusMinutes,
+    accuracy: typeof record.accuracy === 'number' ? record.accuracy : current.accuracy,
+    mistakesCount: typeof record.mistakesCount === 'number' ? record.mistakesCount : current.mistakesCount,
+    wordsMastered: typeof record.wordsMastered === 'number' ? record.wordsMastered : current.wordsMastered,
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      const histKey = `daily_stats_history_${normLang}`;
+      const histRaw = localStorage.getItem(histKey);
+      const histMap: Record<string, DayRecord> = histRaw ? JSON.parse(histRaw) : {};
+      histMap[record.date] = updated;
+      safeSetStorage(histKey, JSON.stringify(histMap));
+
+      // Synchronize with daily_activity map
+      const actKey = `daily_activity_${normLang}`;
+      const actRaw = localStorage.getItem(actKey);
+      const actMap = actRaw ? JSON.parse(actRaw) : {};
+      actMap[record.date] = Math.max(actMap[record.date] || 0, updated.cardsReviewed);
+      safeSetStorage(actKey, JSON.stringify(actMap));
+
+      // Synchronize with daily_stats_{lang}_{date}
+      const scopedKey = `daily_stats_${normLang.toLowerCase()}_${record.date}`;
+      const existingScoped = localStorage.getItem(scopedKey);
+      const scopedParsed = existingScoped ? JSON.parse(existingScoped) : {};
+      safeSetStorage(scopedKey, JSON.stringify({
+        ...scopedParsed,
+        date: record.date,
+        learnedToday: updated.cardsReviewed,
+        focusSeconds: updated.focusMinutes * 60,
+        accuracy: updated.accuracy,
+        mistakesCount: updated.mistakesCount
+      }));
+    } catch {}
+  }
+
+  return updated;
+}
+
+export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7): DayRecord[] {
+  const normLang = normalizeLanguage(lang);
+  const todayKey = getTodayKey();
+  const currentToday = statsByLang[normLang];
+
+  const result: DayRecord[] = [];
+  for (let i = daysCount - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    let record = getDayRecord(normLang, dateStr);
+
+    if (dateStr === todayKey && currentToday) {
+      const liveCards = Math.max(record.cardsReviewed, currentToday.cardsDone || 0, getTodayCompletedCardsCount(normLang));
+      const liveSeconds = currentToday.activeSeconds || 0;
+      const liveMinutes = Math.max(record.focusMinutes, Math.floor(liveSeconds / 60));
+      const liveMistakes = typeof currentToday.mistakesCountToday === 'number'
+        ? currentToday.mistakesCountToday
+        : (currentToday.mistakesPool?.length || 0);
+      const totalAttempts = liveCards + liveMistakes;
+      const liveAccuracy = totalAttempts > 0 ? Math.round((liveCards / totalAttempts) * 100) : 100;
+
+      record = {
+        ...record,
+        cardsReviewed: liveCards,
+        focusMinutes: liveMinutes,
+        accuracy: liveAccuracy,
+        mistakesCount: liveMistakes
+      };
+      saveDayRecord(normLang, record);
+    }
+
+    result.push(record);
+  }
+
+  return result;
+}
+
 function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
   const normLang = normalizeLanguage(lang);
   const todayKey = getTodayKey();
@@ -540,6 +730,22 @@ function getOrCreateStats(lang: string = 'DE'): DailyStats {
   const current = statsByLang[normLang];
   const today = getTodayKey();
   if (current.date !== today) {
+    // Preserve completed yesterday stats in multi-day history
+    try {
+      const prevCards = current.cardsDone || 0;
+      const prevMistakes = current.mistakesCountToday || 0;
+      const prevAttempts = prevCards + prevMistakes;
+      saveDayRecord(normLang, {
+        date: current.date,
+        cardsReviewed: prevCards,
+        targetCards: 200,
+        focusMinutes: Math.floor((current.activeSeconds || 0) / 60),
+        accuracy: prevAttempts > 0 ? Math.round((prevCards / prevAttempts) * 100) : 100,
+        mistakesCount: prevMistakes,
+        wordsMastered: 0
+      });
+    } catch {}
+
     const realToday = getTodayCompletedCardsCount(normLang);
     statsByLang[normLang] = {
       date: today,
@@ -590,6 +796,12 @@ function initGlobalTimer() {
     Object.keys(statsByLang).forEach(l => {
       const s = statsByLang[l];
       if (s) {
+        saveDayRecord(l, {
+          date: s.date,
+          cardsReviewed: s.cardsDone,
+          focusMinutes: Math.floor((s.activeSeconds || 0) / 60),
+          mistakesCount: s.mistakesCountToday || 0
+        });
         safeSetStorage(getStorageKey(l), JSON.stringify(s));
         setStatsInIDB(l, s);
         syncStatsToSupabase(l, s, true);
@@ -611,6 +823,21 @@ function initGlobalTimer() {
 
       const current = getOrCreateStats(lang);
       if (current.date !== today) {
+        try {
+          const prevCards = current.cardsDone || 0;
+          const prevMistakes = current.mistakesCountToday || 0;
+          const prevAttempts = prevCards + prevMistakes;
+          saveDayRecord(lang, {
+            date: current.date,
+            cardsReviewed: prevCards,
+            targetCards: 200,
+            focusMinutes: Math.floor((current.activeSeconds || 0) / 60),
+            accuracy: prevAttempts > 0 ? Math.round((prevCards / prevAttempts) * 100) : 100,
+            mistakesCount: prevMistakes,
+            wordsMastered: 0
+          });
+        } catch {}
+
         const realCards = getTodayCompletedCardsCount(lang);
         statsByLang[lang] = {
           date: today,
@@ -621,10 +848,18 @@ function initGlobalTimer() {
           mistakesPool: current.mistakesPool || []
         };
       } else {
+        const nextSeconds = (current.activeSeconds || 0) + 1;
         statsByLang[lang] = {
           ...current,
-          activeSeconds: (current.activeSeconds || 0) + 1
+          activeSeconds: nextSeconds
         };
+        // Periodically update focus minutes in DayRecord
+        if (nextSeconds % 30 === 0) {
+          saveDayRecord(lang, {
+            date: today,
+            focusMinutes: Math.floor(nextSeconds / 60)
+          });
+        }
       }
       notifyLang(lang);
     });
@@ -822,6 +1057,18 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       mistakesCountToday: newMistakesToday,
       mistakesPool: updatedPool
     };
+
+    // Keep today's entry up-to-date in multi-day history
+    const totalAttempts = newCardsDone + newMistakesToday;
+    const currentAcc = totalAttempts > 0 ? Math.round((newCardsDone / totalAttempts) * 100) : 100;
+    saveDayRecord(targetLang, {
+      date: today,
+      cardsReviewed: newCardsDone,
+      targetCards: 200,
+      focusMinutes: Math.floor((nextStats.activeSeconds || 0) / 60),
+      accuracy: currentAcc,
+      mistakesCount: newMistakesToday
+    });
 
     statsByLang[targetLang] = nextStats;
     notifyLang(targetLang);
