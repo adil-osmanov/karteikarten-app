@@ -1018,34 +1018,66 @@ export function playSafeAudio(audioSrcOrFn: () => Promise<void> | void) {
 export const playSuccessSound = () => playFeedbackSound(true);
 export const playErrorSound = () => playFeedbackSound(false);
 
-export const playSealingSound = () => {
+export function playVaporizeSound() {
   if (typeof window === 'undefined') return;
   try {
-    const ctx = getAudioContext();
-    if (!ctx) {
-      playFeedbackSound(true);
-      return;
-    }
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = getAudioContext() || new AudioContextClass();
+
     const now = ctx.currentTime;
+
+    // 1. Воздушный шелестящий шум сгорания (Noise Burst with Bandpass sweep)
+    const bufferSize = Math.floor(ctx.sampleRate * 0.35); // 350 мс
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1200, now);
+    filter.frequency.exponentialRampToValueAtTime(3200, now + 0.2);
+    filter.frequency.exponentialRampToValueAtTime(400, now + 0.35);
+    filter.Q.setValueAtTime(3.0, now);
+
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.01, now);
+    noiseGain.gain.linearRampToValueAtTime(0.18, now + 0.06);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+
+    // 2. Тонкий хрустальный резонанс (Gemini Sparkle Chime)
     const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
+    const oscGain = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(520, now);
-    osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+    osc.frequency.setValueAtTime(880, now); // A5
+    osc.frequency.exponentialRampToValueAtTime(1760, now + 0.25); // A6
 
-    gain.gain.setValueAtTime(0.4, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    oscGain.gain.setValueAtTime(0.01, now);
+    oscGain.gain.linearRampToValueAtTime(0.12, now + 0.05);
+    oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+    osc.connect(oscGain);
+    oscGain.connect(ctx.destination);
 
+    noise.start(now);
     osc.start(now);
-    osc.stop(now + 0.12);
-  } catch {
-    playFeedbackSound(true);
+    noise.stop(now + 0.35);
+    osc.stop(now + 0.38);
+  } catch (e) {
+    console.error('Audio play error', e);
   }
-};
+}
+
+export const playSealingSound = playVaporizeSound;
 
 
 export const initAudioCtx = async () => {
@@ -3606,7 +3638,7 @@ function RapidFlashcardMode({
   const currentRound = Math.max(1, Math.min(4, isReview || currentCard?.isArchived ? 4 : (localMastery ?? effectiveMastery) + 1));
   const isTypingRecall = Boolean(isReview || currentCard?.isArchived || currentRound >= 3);
   const [isRound1or2, setIsRound1or2] = useState(() => !isTypingRecall);
-  const [isSealed, setIsSealed] = useState(false);
+  const [isVaporizing, setIsVaporizing] = useState(false);
   const [isAnswered, setIsAnswered] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
   const [typedValue, setTypedValue] = useState("");
@@ -3627,7 +3659,7 @@ function RapidFlashcardMode({
     setIsFlipped(false);
     setIsAnswered(false);
     setIsSurrendered(false);
-    setIsSealed(false);
+    setIsVaporizing(false);
     setTypedValue("");
     setIsErrorMismatch(false);
     setIsShaking(false);
@@ -3773,14 +3805,14 @@ function RapidFlashcardMode({
 
     if (remembered) {
       if (currentRound === 4) {
-        setIsSealed(true);
-        playSafeAudio(() => playSealingSound());
+        setIsVaporizing(true);
+        playSafeAudio(() => playVaporizeSound());
         triggerHaptic('success');
         setTimeout(() => {
-          setIsSealed(false);
+          setIsVaporizing(false);
           setIsTransitioning(false);
           onAnswer(true, false);
-        }, 900);
+        }, 420);
         return;
       }
 
@@ -3826,15 +3858,14 @@ function RapidFlashcardMode({
     setLocalMastery(nextMastery);
 
     if (currentRound === 4) {
-      setIsSealed(true);
-      playSafeAudio(() => playSealingSound());
-      playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+      setIsVaporizing(true);
+      playSafeAudio(() => playVaporizeSound());
       triggerHaptic('success');
       setTimeout(() => {
-        setIsSealed(false);
+        setIsVaporizing(false);
         setIsTransitioning(false);
         onAnswer(true, false, false);
-      }, 900);
+      }, 420);
       return;
     }
 
@@ -4088,7 +4119,7 @@ function RapidFlashcardMode({
             <CardContainer 
               is3DFace 
               rarityRound={currentRound}
-              isSealed={isSealed}
+              isVaporizing={isVaporizing}
               style={{
                 WebkitBackfaceVisibility: 'hidden',
                 backfaceVisibility: 'hidden',
@@ -4121,7 +4152,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={currentRound} isSealed={isSealed} />
+                  <ProgressDots level={currentRound} isSealed={isVaporizing} />
                 </div>
               </div>
 
@@ -4136,12 +4167,6 @@ function RapidFlashcardMode({
                     {plural}
                   </p>
                 )}
-                {isSealed && (
-                  <div className="mt-4 text-xs font-medium tracking-wider uppercase text-amber-400/90 flex items-center justify-center gap-1.5 animate-in fade-in duration-300">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                    Ins Langzeitgedächtnis versiegelt
-                  </div>
-                )}
               </div>
 
               {/* Низ: Пусто для чистоты */}
@@ -4152,7 +4177,7 @@ function RapidFlashcardMode({
             <CardContainer 
               is3DFace 
               rarityRound={currentRound}
-              isSealed={isSealed}
+              isVaporizing={isVaporizing}
               style={{
                 WebkitBackfaceVisibility: 'hidden',
                 backfaceVisibility: 'hidden',
@@ -4185,7 +4210,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={currentRound} isSealed={isSealed} />
+                  <ProgressDots level={currentRound} isSealed={isVaporizing} />
                 </div>
               </div>
 
@@ -4211,13 +4236,6 @@ function RapidFlashcardMode({
                 {displaySentence && (
                   <div className="mt-8 border-l border-zinc-300 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-600 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
                     {displaySentence}
-                  </div>
-                )}
-
-                {isSealed && (
-                  <div className="mt-4 text-xs font-medium tracking-wider uppercase text-amber-400/90 flex items-center justify-center gap-1.5 animate-in fade-in duration-300">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                    Ins Langzeitgedächtnis versiegelt
                   </div>
                 )}
               </div>
@@ -4252,7 +4270,7 @@ function RapidFlashcardMode({
            ======================================================= */
         <CardContainer
           rarityRound={currentRound}
-          isSealed={isSealed}
+          isVaporizing={isVaporizing}
         >
           {/* Шапка */}
           <div className="flex items-center justify-between w-full shrink-0">
@@ -4282,7 +4300,7 @@ function RapidFlashcardMode({
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              <ProgressDots level={currentRound} isSealed={isSealed} />
+              <ProgressDots level={currentRound} isSealed={isVaporizing} />
 
               <button
                 type="button"
@@ -4304,13 +4322,6 @@ function RapidFlashcardMode({
             <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white mb-8 max-w-lg">
               {currentCard?.translation || currentCard?.hint}
             </h2>
-
-            {isSealed && (
-              <div className="mb-6 text-xs font-medium tracking-wider uppercase text-amber-400/90 flex items-center justify-center gap-1.5 animate-in fade-in duration-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                Ins Langzeitgedächtnis versiegelt
-              </div>
-            )}
 
             {parsedTarget.prefixContext ? (
               <div className="w-full max-w-xl flex flex-wrap items-center justify-center gap-x-3.5 gap-y-2.5">
@@ -4471,8 +4482,8 @@ function RapidFlashcardMode({
               <button
                 type="button"
                 onClick={handleProceedNext}
-                className="w-full max-w-sm py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 border-none select-none cursor-pointer flex items-center justify-center"
-                style={{ outline: 'none', border: 'none' }}
+                className="w-full max-w-sm py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center"
+                style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
               >
                 Weiter
               </button>
@@ -5933,7 +5944,7 @@ function StudyCard({
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
-  const [isSealed, setIsSealed] = useState(false);
+  const [isVaporizing, setIsVaporizing] = useState(false);
   const [isTransitionLocked, setIsTransitionLocked] = useState(false);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [localMastery, setLocalMastery] = useState(() => {
@@ -5948,7 +5959,7 @@ function StudyCard({
     setInputText("");
     setHasErrored(false);
     hasErroredRef.current = false;
-    setIsSealed(false);
+    setIsVaporizing(false);
     setIsTransitionLocked(false);
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
@@ -6021,10 +6032,10 @@ function StudyCard({
   }, [checkInputValidation, inputText]);
 
   useEffect(() => {
-    if (!isMobile && phase === "Answer" && nextButtonRef.current) {
-      nextButtonRef.current.focus();
+    if (phase === "Answer" && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
     }
-  }, [isMobile, phase]);
+  }, [phase]);
 
   // Attach typing sound natively to window to bypass React event limitations and ensure it fires
   const resolvedOptions = useMemo(() => {
@@ -6139,14 +6150,13 @@ function StudyCard({
       hasErroredRef.current = true;
     }
 
-    // 3. Безопасная озвучка и ритуал запечатывания на 4 раунде
+    // 3. Безопасная озвучка и ритуал сгорания на 4 раунде
     if (correct) {
-      const willBeSealed = currentRound >= 4 && !hasErroredRef.current;
-      if (willBeSealed) {
-        setIsSealed(true);
+      const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
+      if (willBeVaporized) {
+        setIsVaporizing(true);
         setIsTransitionLocked(true);
-        playSafeAudio(() => playSealingSound());
-        playSafeAudio(() => playAudio(fullSentence));
+        playSafeAudio(() => playVaporizeSound());
         triggerHaptic('success');
         try {
           onAnswer(true, false);
@@ -6154,10 +6164,10 @@ function StudyCard({
           console.warn('onAnswer error caught:', e);
         }
         transitionTimerRef.current = setTimeout(() => {
-          setIsSealed(false);
+          setIsVaporizing(false);
           setIsTransitionLocked(false);
           onNext();
-        }, 900);
+        }, 420);
         return;
       }
 
@@ -6216,12 +6226,11 @@ function StudyCard({
       const nextMastery = isReview || forceInputMode ? 4 : Math.min(4, (localMastery || 0) + 1);
       setLocalMastery(nextMastery);
 
-      const willBeSealed = currentRound >= 4 && !hasErroredRef.current;
-      if (willBeSealed) {
-        setIsSealed(true);
+      const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
+      if (willBeVaporized) {
+        setIsVaporizing(true);
         setIsTransitionLocked(true);
-        playSafeAudio(() => playSealingSound());
-        playSafeAudio(() => playAudio(fullSentence));
+        playSafeAudio(() => playVaporizeSound());
         triggerHaptic('success');
         try {
           onAnswer(true, false);
@@ -6229,10 +6238,10 @@ function StudyCard({
           console.warn('onAnswer error caught:', e);
         }
         transitionTimerRef.current = setTimeout(() => {
-          setIsSealed(false);
+          setIsVaporizing(false);
           setIsTransitionLocked(false);
           onNext();
-        }, 900);
+        }, 420);
         return;
       }
 
@@ -6398,7 +6407,7 @@ function StudyCard({
         key={card.id}
         rarityRound={currentRound}
         isArchivingPulse={isArchivePulse}
-        isSealed={isSealed}
+        isVaporizing={isVaporizing}
         onClick={() => {
           if (!isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -6456,7 +6465,7 @@ function StudyCard({
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
-            <ProgressDots level={currentRound} isSealed={isSealed} />
+            <ProgressDots level={currentRound} isSealed={isVaporizing} />
             <button 
               type="button"
               onClick={handleHilfe}
@@ -6545,13 +6554,6 @@ function StudyCard({
               {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
             </p>
 
-            {isSealed && (
-              <div className="mt-4 text-xs font-medium tracking-wider uppercase text-amber-400/90 flex items-center justify-center gap-1.5 animate-in fade-in duration-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                Ins Langzeitgedächtnis versiegelt
-              </div>
-            )}
-
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
               <div className="mt-5 flex flex-col items-center gap-1.5 transition-opacity duration-200">
                 <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm mt-3 mb-2 max-w-[95%]">
@@ -6602,8 +6604,8 @@ function StudyCard({
                   type="button"
                   disabled={isTransitionLocked}
                   onClick={isTransitionLocked ? undefined : onNext}
-                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-none select-none cursor-pointer flex items-center justify-center disabled:opacity-80"
-                  style={{ outline: 'none', border: 'none' }}
+                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center disabled:opacity-80"
+                  style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
                 >
                   Weiter
                 </button>
@@ -9446,8 +9448,8 @@ function PrepStudyCard({
           <button
             type="button"
             onClick={onNext}
-            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 border-none select-none cursor-pointer flex items-center justify-center"
-            style={{ outline: 'none', border: 'none' }}
+            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center"
+            style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
           >
             Weiter
           </button>
@@ -9638,8 +9640,8 @@ function VerbStudyCard({
           <button
             type="button"
             onClick={onNext}
-            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 border-none select-none cursor-pointer flex items-center justify-center"
-            style={{ outline: 'none', border: 'none' }}
+            className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center"
+            style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
           >
             Weiter
           </button>
@@ -10153,10 +10155,10 @@ export function RedemittelStudyCard({
                 className="w-full flex justify-center"
               >
                 <button
+                  type="button"
                   onClick={onNext}
-                  autoFocus
-                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 border-none select-none cursor-pointer flex items-center justify-center"
-                  style={{ outline: 'none', border: 'none' }}
+                  className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center"
+                  style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
                 >
                   Weiter
                 </button>

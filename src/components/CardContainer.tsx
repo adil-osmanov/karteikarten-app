@@ -10,6 +10,7 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
   rarityRound?: number; // 1: Common, 2: Uncommon (Emerald), 3: Rare (Sapphire), 4: Epic (Purple)
   isArchivingPulse?: boolean;
   isSealed?: boolean;
+  isVaporizing?: boolean;
 }
 
 /**
@@ -76,14 +77,14 @@ export function ProgressDots({
   isSealed?: boolean;
   className?: string; 
 }) {
-  // If sealed: all 4 dots burst into noble gold
+  // If sealed / vaporizing: all 4 dots burst synchronously into pure glowing gold
   if (isSealed) {
     return (
       <div className={cn("flex items-center gap-1.5 select-none shrink-0", className)}>
         {Array.from({ length: max }, (_, idx) => (
           <span
             key={idx}
-            className="w-2 h-2 shrink-0 rounded-full transition-all duration-300 bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.95)] border-transparent"
+            className="w-2 h-2 shrink-0 rounded-full transition-transform duration-200 bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,1)] scale-110 border-transparent"
           />
         ))}
       </div>
@@ -128,8 +129,8 @@ export function ProgressDots({
 }
 
 export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
-  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, style, ...props }, ref) => {
-    const rarityClasses = getRarityCardClasses(rarityRound, isArchivingPulse, isSealed);
+  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, isVaporizing = false, style, ...props }, ref) => {
+    const rarityClasses = getRarityCardClasses(rarityRound, isArchivingPulse, isSealed || isVaporizing);
 
     return (
       <div
@@ -139,6 +140,8 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
             ? cn("absolute inset-0 p-8 sm:p-12 flex flex-col justify-between backface-hidden", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
+          "relative transition-all duration-400 ease-out will-change-transform",
+          isVaporizing && "scale-[1.02] -translate-y-2 opacity-0 blur-md brightness-150 shadow-[0_0_90px_rgba(245,158,11,0.45)] border-amber-400/80 pointer-events-none",
           className
         )}
         style={{
