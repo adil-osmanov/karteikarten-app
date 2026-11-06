@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Search, Layers } from 'lucide-react';
 import { useStore, type Flashcard } from '@/app/page';
 import {
@@ -30,9 +31,14 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   language = 'de',
   initialLevelFilter = 'Alle',
 }) => {
+  const [mounted, setMounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLevel, setSelectedLevel] = useState<'Alle' | CEFRLevel>(initialLevelFilter);
   const [updateTick, setUpdateTick] = useState(0);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const decks = useStore((state) => state.decks);
@@ -216,37 +222,38 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return counts;
   }, [enrichedWords]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
+  return createPortal(
     <div
-      className="backdrop-blur-2xl bg-black/60 fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md transition-opacity select-none"
       onClick={onClose}
     >
       <div
-        className="max-w-2xl w-full max-h-[85vh] rounded-3xl bg-white/95 dark:bg-[#121214]/98 border border-neutral-200 dark:border-white/[0.08] shadow-2xl flex flex-col overflow-hidden p-5 sm:p-6 select-text text-left relative"
+        className="relative w-full max-w-xl max-h-[85vh] flex flex-col rounded-3xl bg-neutral-900/95 border border-white/10 shadow-[0_25px_70px_rgba(0,0,0,0.8)] overflow-hidden select-text text-left"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-          {/* 1. ВЕРХНИЙ БЛОК: СТРОКА ПОИСКА + КНОПКА ЗАКРЫТИЯ (APPLE MINIMALISM) */}
-          <div className="flex items-center gap-3 mb-3">
+        {/* 1. ШАПКА: ПОИСК И СЕГМЕНТНЫЕ ФИЛЬТРЫ УРОВНЯ */}
+        <div className="p-6 pb-4 border-b border-white/5 space-y-4 shrink-0">
+          <div className="flex items-center justify-between gap-3">
             <div className="relative flex-1">
-              <Search className="w-4 h-4 text-neutral-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Поиск"
-                className="w-full bg-black/5 dark:bg-[#1C1C1E] border border-black/10 dark:border-white/[0.08] rounded-2xl pl-11 pr-10 py-2.5 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-blue-500/40 transition-all"
+                placeholder="Поиск по выученным словам..."
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-9 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:border-amber-400/50 transition-colors"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition cursor-pointer"
-                  title="Очистить поиск"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                  title="Очистить"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -256,47 +263,34 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-2.5 rounded-full text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer flex-shrink-0"
+              className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
               title="Schließen (Esc)"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* 2. APPLE SEGMENTED CONTROL ДЛЯ УРОВНЕЙ CEFR */}
-          <div className="w-full p-1 bg-neutral-200/70 dark:bg-neutral-800/80 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/10 flex items-center gap-1 mb-2.5 select-none">
+          {/* Сегментные фильтры уровня */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
             {FILTER_LEVELS.map((lvl) => {
               const isSelected = selectedLevel === lvl;
               const count = levelCounts[lvl] ?? 0;
-              const isEmpty = count === 0 && lvl !== 'Alle';
-
               return (
                 <button
                   key={lvl}
                   type="button"
                   onClick={() => setSelectedLevel(lvl)}
-                  className={`
-                    relative flex-1 py-2 px-2.5 rounded-xl text-xs sm:text-[13px] font-medium 
-                    transition-all duration-200 flex items-center justify-center gap-1.5 outline-none cursor-pointer
-                    ${isSelected 
-                      ? 'bg-white dark:bg-neutral-700/90 text-neutral-900 dark:text-white shadow-sm shadow-black/20 ring-1 ring-black/5 dark:ring-white/10 font-semibold' 
-                      : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/5'
-                    }
-                    ${isEmpty ? 'opacity-40' : 'opacity-100'}
-                  `}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer outline-none shrink-0 ${
+                    isSelected
+                      ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
+                      : 'bg-white/5 text-neutral-400 border border-white/5 hover:bg-white/10'
+                  }`}
                 >
-                  {/* Название уровня */}
-                  <span className="tracking-tight">{lvl}</span>
-
-                  {/* Аккуратный счетчик слов */}
+                  <span>{lvl}</span>
                   <span
-                    className={`
-                      text-[11px] px-1.5 py-0.5 rounded-md font-mono transition-colors
-                      ${isSelected 
-                        ? 'bg-neutral-100 dark:bg-white/15 text-neutral-700 dark:text-neutral-200 font-semibold' 
-                        : 'bg-black/5 dark:bg-black/20 text-neutral-500 dark:text-neutral-400'
-                      }
-                    `}
+                    className={`text-[10px] px-1.5 py-0.5 rounded-md ${
+                      isSelected ? 'bg-amber-400/20 text-amber-200' : 'bg-white/5 text-neutral-500'
+                    }`}
                   >
                     {count}
                   </span>
@@ -304,40 +298,46 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
               );
             })}
           </div>
+        </div>
 
-          {/* 3. СКРОЛЛИРУЕМЫЙ СПИСОК СЛОВ В СТИЛЕ APPLE GOLDEN VAULT */}
-          <div className="flex-1 overflow-y-auto space-y-1 py-1 pr-1 min-h-[220px] scrollbar-thin scrollbar-thumb-neutral-300 dark:scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-400 dark:hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-300 dark:[&::-webkit-scrollbar-thumb]:bg-neutral-800 hover:[&::-webkit-scrollbar-thumb]:bg-neutral-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full">
-            {filteredWords.length === 0 ? (
-              <div className="py-20 flex items-center justify-center text-neutral-300 dark:text-neutral-700 opacity-40">
-                <Layers className="w-12 h-12 stroke-[1.2]" />
-              </div>
-            ) : (
-              filteredWords.map((item) => {
-                return (
-                  <div
-                    key={item.key}
-                    className="group relative flex items-center justify-between px-5 py-3.5 my-1 rounded-2xl bg-neutral-100/60 dark:bg-neutral-900/40 hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 border border-black/5 dark:border-white/5 transition-all duration-150"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      {/* Золотая точка освоенного слова */}
-                      <div className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)] shrink-0" />
-                      
-                      {/* Только чистое немецкое слово */}
-                      <span className="text-[17px] font-medium text-neutral-900 dark:text-neutral-100 tracking-tight group-hover:text-amber-500 dark:group-hover:text-amber-300 transition-colors truncate">
-                        {formatSeparableWord(item.word)}
-                      </span>
-                    </div>
+        {/* 2. СКРОЛЛИРУЕМЫЙ СПИСОК СЛОВ В СТИЛЕ APPLE GOLDEN VAULT */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-1.5 min-h-[220px] scrollbar-thin scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent">
+          {filteredWords.length === 0 ? (
+            <div className="py-20 flex items-center justify-center text-neutral-600 opacity-40">
+              <Layers className="w-12 h-12 stroke-[1.2]" />
+            </div>
+          ) : (
+            filteredWords.map((item) => (
+              <div
+                key={item.key}
+                className="group flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.02] hover:bg-white/[0.06] border border-white/5 hover:border-amber-400/20 transition-all duration-150"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {/* Золотая точка освоенного слова */}
+                  <div className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)] shrink-0" />
 
-                    {/* Бейдж уровня */}
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-lg bg-neutral-200/80 dark:bg-neutral-800/80 text-neutral-600 dark:text-neutral-400 border border-black/5 dark:border-white/5 shrink-0">
-                      {item.level || 'B2'}
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[15px] font-medium text-neutral-100 group-hover:text-amber-300 transition-colors truncate">
+                      {formatSeparableWord(item.word)}
                     </span>
+                    {item.translation && (
+                      <span className="text-xs text-neutral-400 truncate">
+                        {item.translation}
+                      </span>
+                    )}
                   </div>
-                );
-              })
-            )}
-          </div>
+                </div>
+
+                {/* Бейдж уровня */}
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-white/5 text-neutral-400 border border-white/5 shrink-0">
+                  {item.level || 'B2'}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
+    </div>,
+    document.body
   );
 };

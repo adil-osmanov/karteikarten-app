@@ -23,28 +23,25 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  * - Legendary (SRS Repeat / Sealed Mastered): Noble gold contour with golden aura.
  */
 export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean, isLegendary?: boolean): string {
-  if (isSealed) {
-    return "border border-amber-400/30 shadow-[0_0_100px_rgba(245,158,11,0.35)] transition-all duration-300";
-  }
-  if (isLegendary) {
-    return "border border-amber-400/20 shadow-[0_0_70px_rgba(245,158,11,0.20)] transition-all duration-300";
+  if (isSealed || isLegendary) {
+    return "border border-amber-400/50 dark:border-amber-400/50 shadow-[0_0_120px_rgba(245,158,11,0.55),0_0_45px_rgba(245,158,11,0.25)] transition-all duration-500";
   }
   if (!round || round <= 1) {
-    // Раунд 1: без свечения
-    return "shadow-2xl border border-black/5 dark:border-white/5";
+    // Раунд 1 (Серый / Стартовый)
+    return "border border-black/10 dark:border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.8)] transition-all duration-500";
   }
   if (round === 2) {
-    // Раунд 2 (1 зеленая точка)
-    return "shadow-[0_0_70px_-15px_rgba(16,185,129,0.20)] border border-emerald-500/20 transition-shadow duration-500";
+    // Раунд 2 (Зеленый / Необычный)
+    return "border border-emerald-500/35 dark:border-emerald-500/35 shadow-[0_0_90px_-10px_rgba(16,185,129,0.38),0_0_30px_rgba(16,185,129,0.15)] transition-all duration-500";
   }
   if (round === 3) {
-    // Раунд 3 (2 синие точки)
-    return "shadow-[0_0_80px_-15px_rgba(59,130,246,0.22)] border border-blue-500/20 transition-shadow duration-500";
+    // Раунд 3 (Синий / Редкий)
+    return "border border-blue-500/40 dark:border-blue-500/40 shadow-[0_0_100px_-10px_rgba(59,130,246,0.42),0_0_35px_rgba(59,130,246,0.18)] transition-all duration-500";
   }
-  // Раунд 4 (3 фиолетовые точки)
+  // Раунд 4 (Фиолетовый / Эпический)
   return cn(
-    "shadow-[0_0_90px_-15px_rgba(168,85,247,0.25)] border border-purple-500/25 transition-shadow duration-500",
-    isArchivingPulse && "shadow-[0_0_110px_rgba(168,85,247,0.45)] animate-pulse"
+    "border border-purple-500/45 dark:border-purple-500/45 shadow-[0_0_110px_-8px_rgba(168,85,247,0.48),0_0_40px_rgba(168,85,247,0.22)] transition-all duration-500",
+    isArchivingPulse && "shadow-[0_0_130px_rgba(168,85,247,0.65),0_0_50px_rgba(168,85,247,0.35)] animate-pulse"
   );
 }
 
@@ -54,11 +51,11 @@ export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean,
  * would override the colored ambient glow shadows from getRarityCardClasses!
  */
 export const CARD_CONTAINER_SURFACE_CLASSES = cn(
-  "rounded-3xl border transition-all duration-200 select-none",
+  "rounded-3xl transition-all duration-200 select-none",
   // Light Mode (Apple Premium Glass Card)
-  "bg-white/90 text-neutral-900 border-black/5 backdrop-blur-2xl",
+  "bg-white/90 text-neutral-900 backdrop-blur-2xl",
   // Dark Mode (Apple Dark Mode clean, deep & matte)
-  "dark:bg-neutral-900/90 dark:text-neutral-100 dark:border-white/5"
+  "dark:bg-neutral-900/90 dark:text-neutral-100"
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
