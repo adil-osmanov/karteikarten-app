@@ -33,8 +33,8 @@ import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
 import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
 import { CardEditorModal } from "@/components/CardEditorModal";
-import { formatSeparableWord } from "@/lib/utils/formatSeparableWord";
-export { formatSeparableWord };
+import { formatSeparableWord, parseVerbComponents } from "@/lib/utils/formatSeparableWord";
+export { formatSeparableWord, parseVerbComponents };
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3520,6 +3520,14 @@ function RapidFlashcardMode({
     return parseTargetPhrase(currentCard?.targetWord || '');
   }, [currentCard?.targetWord]);
 
+  // Унифицированное разделение управления и ядра глагола
+  const verbComponents = useMemo(() => {
+    return parseVerbComponents(currentCard?.targetWord || '', parsedTarget.prefixContext);
+  }, [currentCard?.targetWord, parsedTarget.prefixContext]);
+
+  const effectivePrefix = verbComponents.prefix || parsedTarget.prefixContext;
+  const effectiveCoreWord = verbComponents.coreWord || parsedTarget.coreWord || currentCard?.targetWord || '';
+
   // Извлечение артикля, основного слова и множественного числа
   // Устранена ошибка повторного артикля ("die die Aushilfe"): артикль строго отделяется от слова!
   const { article, wordOnly, plural } = useMemo(() => {
@@ -3715,11 +3723,11 @@ function RapidFlashcardMode({
     setIsShaking(false);
     setLocalMastery(2); // Штраф при сдаче/ошибке: ранг сбрасывается до 3 раунда (синий)
 
-    // Записываем эталонное немецкое слово прямо внутрь поля ввода
-    const target = parsedTarget.prefixContext
-      ? (parsedTarget.cleanCoreWord || currentCard?.targetWord || '')
+    // Записываем эталонное немецкое слово прямо внутрь поля ввода (без дублирования управления)
+    const target = effectivePrefix
+      ? (verbComponents.coreWord || parsedTarget.cleanCoreWord || currentCard?.targetWord || '')
       : (currentCard?.targetWord || '');
-    setTypedValue(target);
+    setTypedValue(target.replace(/\|/g, '').trim());
 
     // Звук ошибки и озвучка правильного немецкого ответа
     playSafeAudio(() => playErrorSound());
@@ -3727,7 +3735,7 @@ function RapidFlashcardMode({
     triggerHaptic('error');
 
     // Карточка показывает правильный ответ и СПОКОЙНО ЖДЕТ, пока пользователь прочитает и нажмет «Weiter»
-  }, [locked, isAnswered, parsedTarget, currentCard?.targetWord, playCardAudio]);
+  }, [locked, isAnswered, effectivePrefix, verbComponents.coreWord, parsedTarget, currentCard?.targetWord, playCardAudio]);
 
   // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter
   const handleProceedNext = useCallback(() => {
@@ -4178,42 +4186,39 @@ function RapidFlashcardMode({
               {currentCard?.translation || currentCard?.hint}
             </h2>
 
-            {parsedTarget.prefixContext ? (
+            {effectivePrefix ? (
               <div className="w-full max-w-xl flex flex-wrap items-center justify-center gap-x-3.5 gap-y-2.5">
-                <span className="text-xl sm:text-2xl font-medium text-zinc-600 dark:text-zinc-400 tracking-normal select-none">
-                  {parsedTarget.prefixContext}
+                <span className="text-xl sm:text-2xl font-medium text-zinc-600 dark:text-zinc-400 tracking-normal select-none whitespace-nowrap">
+                  {effectivePrefix}
                 </span>
-                <div className="min-w-[200px] max-w-sm flex-1">
+                <div className="inline-flex items-center justify-center">
                   <div
                     onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
-                    className={`relative w-full min-h-[62px] text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border flex items-center justify-center cursor-text ${
-                      isMobile ? 'select-none ' : ''
-                    }${
+                    className={cn(
+                      "relative inline-flex items-center justify-center min-h-[58px] px-6 py-2.5 rounded-2xl whitespace-nowrap overflow-hidden transition-all outline-none border cursor-text min-w-[200px]",
+                      isMobile && "select-none",
                       isAnswered
                         ? (!isSurrendered
-                            ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                            : 'border-red-500/40 bg-red-500/5 text-red-500 dark:text-red-300 font-semibold text-lg text-center')
+                            ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10 font-semibold"
+                            : "border-red-500/40 text-red-400 bg-red-500/5 font-semibold")
                         : isErrorMismatch
-                          ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
-                          : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
-                    }${isShaking ? ' animate-shake' : ''}`}
+                          ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
+                          : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60 font-semibold",
+                      isShaking && "animate-shake"
+                    )}
                   >
                     {isAnswered ? (
                       <div className={cn(
-                        "flex items-center justify-center font-bold tracking-wide select-none",
+                        "inline-flex items-center justify-center font-bold tracking-wide select-none whitespace-nowrap",
                         displayParts.totalLength > 22
                           ? 'text-lg sm:text-xl'
                           : displayParts.totalLength > 14
                           ? 'text-xl sm:text-2xl'
                           : 'text-2xl sm:text-[28px]',
-                        !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-300'
+                        !isSurrendered ? 'text-emerald-400' : 'text-red-400'
                       )}>
                         {formatSeparableWord(
-                          (currentCard?.targetWord && currentCard.targetWord.includes('|'))
-                            ? currentCard.targetWord
-                            : (parsedTarget.coreWord && parsedTarget.coreWord.includes('|'))
-                            ? parsedTarget.coreWord
-                            : (typedValue || parsedTarget.cleanCoreWord || currentCard?.targetWord || ''),
+                          effectiveCoreWord,
                           currentCard?.forms,
                           !isSurrendered ? 'emerald' : 'red'
                         )}
@@ -4237,7 +4242,7 @@ function RapidFlashcardMode({
                           style={{ caretColor: 'transparent' }}
                           className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
                         />
-                        <div className={`pointer-events-none select-none flex items-baseline justify-center flex-wrap whitespace-pre ${
+                        <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap ${
                           displayParts.totalLength > 22
                             ? 'text-lg sm:text-xl'
                             : displayParts.totalLength > 14
@@ -4254,41 +4259,40 @@ function RapidFlashcardMode({
                   </div>
                 </div>
                 {parsedTarget.suffixContext && (
-                  <span className="text-xl sm:text-2xl font-medium text-zinc-400 dark:text-zinc-500 tracking-normal select-none">
+                  <span className="text-xl sm:text-2xl font-medium text-zinc-400 dark:text-zinc-500 tracking-normal select-none whitespace-nowrap">
                     {parsedTarget.suffixContext}
                   </span>
                 )}
               </div>
             ) : (
-              <div className="w-full max-w-lg">
+              <div className="w-full max-w-lg flex items-center justify-center">
                 <div
                   onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
-                  className={`relative w-full min-h-[62px] text-center font-semibold tracking-tight py-4 px-6 rounded-2xl outline-none transition-all border flex items-center justify-center cursor-text ${
-                    isMobile ? 'select-none ' : ''
-                  }${
+                  className={cn(
+                    "relative inline-flex items-center justify-center min-h-[58px] px-6 py-2.5 rounded-2xl whitespace-nowrap overflow-hidden transition-all outline-none border cursor-text min-w-[220px]",
+                    isMobile && "select-none",
                     isAnswered
                       ? (!isSurrendered
-                          ? 'text-emerald-600 dark:text-emerald-400 border-emerald-500/50 bg-emerald-500/10'
-                          : 'border-red-500/40 bg-red-500/5 text-red-500 dark:text-red-300 font-semibold text-lg text-center')
+                          ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10 font-semibold"
+                          : "border-red-500/40 text-red-400 bg-red-500/5 font-semibold")
                       : isErrorMismatch
-                        ? 'text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10'
-                        : 'text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60'
-                  }${isShaking ? ' animate-shake' : ''}`}
+                        ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
+                        : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60 font-semibold",
+                    isShaking && "animate-shake"
+                  )}
                 >
                   {isAnswered ? (
                     <div className={cn(
-                      "flex items-center justify-center font-bold tracking-wide select-none",
+                      "inline-flex items-center justify-center font-bold tracking-wide select-none whitespace-nowrap",
                       displayParts.totalLength > 22
                         ? 'text-lg sm:text-xl'
                         : displayParts.totalLength > 14
                         ? 'text-xl sm:text-2xl'
                         : 'text-2xl sm:text-[28px]',
-                      !isSurrendered ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-300'
+                      !isSurrendered ? 'text-emerald-400' : 'text-red-400'
                     )}>
                       {formatSeparableWord(
-                        (currentCard?.targetWord && currentCard.targetWord.includes('|'))
-                          ? currentCard.targetWord
-                          : (typedValue || currentCard?.targetWord || ''),
+                        effectiveCoreWord,
                         currentCard?.forms,
                         !isSurrendered ? 'emerald' : 'red'
                       )}
@@ -4312,7 +4316,7 @@ function RapidFlashcardMode({
                         style={{ caretColor: 'transparent' }}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
                       />
-                      <div className={`pointer-events-none select-none flex items-baseline justify-center flex-wrap whitespace-pre ${
+                      <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap ${
                         displayParts.totalLength > 22
                           ? 'text-lg sm:text-xl'
                           : displayParts.totalLength > 14

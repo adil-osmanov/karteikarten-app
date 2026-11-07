@@ -1,9 +1,34 @@
 import React from 'react';
 
+export const GOVERNANCE_REGEX = /^(jemanden|jemandem|etwas|sich|jdn\.|jdm\.|etw\.)\s+/i;
+
+export function parseVerbComponents(rawTarget: string, externalPrefix?: string) {
+  let cleanTarget = (rawTarget || '').trim();
+  let prefix = externalPrefix?.trim() || '';
+
+  // Если в самой строке слова уже есть управление (jemanden, jemandem и т.д.)
+  const match = cleanTarget.match(GOVERNANCE_REGEX);
+  if (match) {
+    if (!prefix) {
+      prefix = match[1]; // Выносим его в левый лейбл
+    }
+    // УДАЛЯЕМ управление из строки, которая рендерится внутри инпута!
+    cleanTarget = cleanTarget.replace(GOVERNANCE_REGEX, '').trim();
+  }
+
+  return { prefix, coreWord: cleanTarget };
+}
+
 export const GERMAN_SEPARABLE_PREFIXES = [
-  'ab', 'an', 'auf', 'aus', 'bei', 'ein', 'fest', 'fort', 'her', 'hin',
-  'los', 'mit', 'nach', 'vor', 'weg', 'weiter', 'zu', 'zurück', 'zusammen'
-];
+  'auseinander', 'gegenüber', 'zusammen', 'entgegen', 'vorüber', 'herunter', 'hinunter',
+  'hinüber', 'herüber', 'hervor', 'zurück', 'zurecht', 'entlang', 'entzwei',
+  'heraus', 'herein', 'herauf', 'herbei', 'herum', 'heran', 'herab',
+  'hinaus', 'hinein', 'hinauf', 'hinweg', 'hinzu', 'hinab',
+  'weiter', 'wieder', 'voraus', 'vorbei', 'vorweg', 'voran',
+  'ab', 'an', 'auf', 'aus', 'bei', 'dar', 'ein', 'empor', 'fest', 'fort', 'frei',
+  'heim', 'her', 'hin', 'los', 'mit', 'nach', 'nieder', 'statt', 'teil',
+  'vor', 'weg', 'zu'
+].sort((a, b) => b.length - a.length);
 
 /**
  * Автоматически находит отделяемую приставку в глаголе на основе форм глагола
@@ -14,8 +39,9 @@ export function detectAndMarkSeparable(word: string, forms?: string | null): str
   if (word.includes('|')) return word;
   if (!forms || typeof forms !== 'string') return word;
 
-  const prefixRegex = /\b(?:[a-zA-ZäöüÄÖÜß]+)\s+(ab|an|auf|aus|bei|ein|fest|fort|her|hin|los|mit|nach|vor|weg|weiter|zu|zurück|zusammen)\b/i;
-  const geRegex = /\b(ab|an|auf|aus|bei|ein|fest|fort|her|hin|los|mit|nach|vor|weg|weiter|zu|zurück|zusammen)ge[a-zA-ZäöüÄÖÜß]+\b/i;
+  const prefixPattern = GERMAN_SEPARABLE_PREFIXES.join('|');
+  const prefixRegex = new RegExp(`\\b(?:[a-zA-ZäöüÄÖÜß]+)\\s+(${prefixPattern})\\b`, 'i');
+  const geRegex = new RegExp(`\\b(${prefixPattern})ge[a-zA-ZäöüÄÖÜß]+\\b`, 'i');
 
   const match = forms.match(prefixRegex) || forms.match(geRegex);
   if (!match) return word;
@@ -36,44 +62,70 @@ export function detectAndMarkSeparable(word: string, forms?: string | null): str
   return markedTokens.join(' ');
 }
 
+export interface SeparableWordParts {
+  isSeparable: boolean;
+  prefixPart: string;
+  stemPart: string;
+  cleanWord: string;
+}
+
+export function splitSeparableWord(word: string, forms?: string | null): SeparableWordParts {
+  if (!word || typeof word !== 'string') {
+    return { isSeparable: false, prefixPart: '', stemPart: '', cleanWord: '' };
+  }
+
+  // Очищаем от возможного управления (jemanden, jemandem и т.д.)
+  const { coreWord } = parseVerbComponents(word);
+  const targetToMark = coreWord;
+
+  const markedWord = targetToMark.includes('|') ? targetToMark : detectAndMarkSeparable(targetToMark, forms);
+  if (!markedWord.includes('|')) {
+    return { isSeparable: false, prefixPart: '', stemPart: '', cleanWord: markedWord };
+  }
+
+  const cleanWord = markedWord.replace(/\s*\|\s*/g, '|');
+  const parts = cleanWord.split('|');
+  const prefixPart = parts[0];
+  const stemPart = parts.slice(1).join('');
+
+  return {
+    isSeparable: true,
+    prefixPart,
+    stemPart,
+    cleanWord: `${prefixPart}${stemPart}`
+  };
+}
+
 /**
- * Отрендерить слово с отделяемой приставкой (z.B. "auf|schrauben", "ein|holen", "ein Angebot ein|holen")
- * со стильным цветным вертикальным разделителем Apple-стиля.
+ * Отрендерить слово с отделяемой приставкой (z.B. "auf|schrauben", "ein|holen", "vor|heizen")
+ * со стильным цветным вертикальным разделителем Apple-стиля и гарантированным запретом переноса строки.
  */
 export function formatSeparableWord(
   word: string,
   forms?: string | null,
-  variant: 'emerald' | 'red' | 'neutral' = 'emerald'
+  _variant: 'emerald' | 'red' | 'neutral' = 'emerald'
 ): React.ReactNode {
   if (!word || typeof word !== 'string') {
     return word;
   }
 
-  const markedWord = word.includes('|') ? word : detectAndMarkSeparable(word, forms);
-  if (!markedWord.includes('|')) {
-    return word;
+  const parts = splitSeparableWord(word, forms);
+
+  if (parts.isSeparable) {
+    return (
+      <span className="inline-flex items-center font-medium tracking-tight whitespace-nowrap">
+        <span className="whitespace-nowrap">{parts.prefixPart}</span>
+        <span className="text-current opacity-40 mx-0.5 font-light select-none whitespace-nowrap" aria-hidden="true">
+          |
+        </span>
+        <span className="whitespace-nowrap">{parts.stemPart}</span>
+      </span>
+    );
   }
 
-  const cleanWord = markedWord.replace(/\s*\|\s*/g, '|');
-  const parts = cleanWord.split('|');
-
-  const dividerColor =
-    variant === 'red'
-      ? 'text-red-400/60 dark:text-red-300/50'
-      : variant === 'neutral'
-      ? 'text-neutral-400 dark:text-neutral-500'
-      : 'text-emerald-400/60 dark:text-emerald-300/50';
-
   return (
-    <span className="inline-flex items-baseline">
-      <span>{parts[0]}</span>
-      <span
-        className={`${dividerColor} mx-0.5 font-light select-none`}
-        aria-hidden="true"
-      >
-        |
-      </span>
-      <span>{parts.slice(1).join('')}</span>
+    <span className="whitespace-nowrap font-medium tracking-tight">
+      {parts.cleanWord}
     </span>
   );
 }
