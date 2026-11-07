@@ -24,24 +24,24 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  */
 export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean, isLegendary?: boolean): string {
   if (isSealed || isLegendary) {
-    return "border border-amber-400/50 dark:border-amber-400/50 shadow-[0_0_120px_rgba(245,158,11,0.55),0_0_45px_rgba(245,158,11,0.25)] transition-all duration-500";
+    return "border border-amber-400/55 dark:border-amber-400/55 shadow-[0_0_120px_rgba(245,158,11,0.55),0_0_45px_rgba(251,191,36,0.30)] transition-all duration-500 ease-out";
   }
   if (!round || round <= 1) {
     // Раунд 1 (Серый / Стартовый)
-    return "border border-black/10 dark:border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.8)] transition-all duration-500";
+    return "border border-black/10 dark:border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.8)] transition-all duration-500 ease-out";
   }
   if (round === 2) {
-    // Раунд 2 (Зеленый / Необычный)
-    return "border border-emerald-500/35 dark:border-emerald-500/35 shadow-[0_0_90px_-10px_rgba(16,185,129,0.38),0_0_30px_rgba(16,185,129,0.15)] transition-all duration-500";
+    // Раунд 2 (Зеленый / Необычный — минимальная насыщенность)
+    return "border border-emerald-500/20 dark:border-emerald-500/20 shadow-[0_0_50px_-10px_rgba(16,185,129,0.18)] transition-all duration-500 ease-out";
   }
   if (round === 3) {
-    // Раунд 3 (Синий / Редкий)
-    return "border border-blue-500/40 dark:border-blue-500/40 shadow-[0_0_100px_-10px_rgba(59,130,246,0.42),0_0_35px_rgba(59,130,246,0.18)] transition-all duration-500";
+    // Раунд 3 (Синий / Редкий — средняя насыщенность)
+    return "border border-blue-500/30 dark:border-blue-500/30 shadow-[0_0_75px_-8px_rgba(59,130,246,0.28),0_0_20px_rgba(59,130,246,0.12)] transition-all duration-500 ease-out";
   }
-  // Раунд 4 (Фиолетовый / Эпический)
+  // Раунд 4 (Фиолетовый / Эпический — высокая насыщенность)
   return cn(
-    "border border-purple-500/45 dark:border-purple-500/45 shadow-[0_0_110px_-8px_rgba(168,85,247,0.48),0_0_40px_rgba(168,85,247,0.22)] transition-all duration-500",
-    isArchivingPulse && "shadow-[0_0_130px_rgba(168,85,247,0.65),0_0_50px_rgba(168,85,247,0.35)] animate-pulse"
+    "border border-purple-500/40 dark:border-purple-500/40 shadow-[0_0_95px_-5px_rgba(168,85,247,0.40),0_0_30px_rgba(168,85,247,0.20)] transition-all duration-500 ease-out",
+    isArchivingPulse && "animate-pulse"
   );
 }
 
@@ -51,7 +51,7 @@ export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean,
  * would override the colored ambient glow shadows from getRarityCardClasses!
  */
 export const CARD_CONTAINER_SURFACE_CLASSES = cn(
-  "rounded-3xl transition-all duration-200 select-none",
+  "rounded-3xl select-none",
   // Light Mode (Apple Premium Glass Card)
   "bg-white/90 text-neutral-900 backdrop-blur-2xl",
   // Dark Mode (Apple Dark Mode clean, deep & matte)
@@ -143,7 +143,7 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
             ? cn("absolute inset-0 w-full min-h-[500px] h-full p-8 md:p-10 flex flex-col justify-between items-center backface-hidden group", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
-          "transition-all duration-400 ease-out will-change-transform",
+          "transition-all duration-500 ease-out will-change-transform",
           isVaporizing && "opacity-0 blur-sm scale-[1.01] -translate-y-1 transition-all duration-250 ease-out pointer-events-none",
           className
         )}
