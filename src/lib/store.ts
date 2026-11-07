@@ -15,6 +15,8 @@ export interface Flashcard {
   isLegendary?: boolean;
   mistakeCount?: number;
   linkedCardIds?: string[];
+  additionalTranslations?: string[];
+  alternateExamples?: string[];
 }
 
 export interface Deck {

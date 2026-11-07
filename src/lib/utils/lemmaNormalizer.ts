@@ -1,4 +1,4 @@
-import { getCanonicalKey } from '@/lib/vocabulary/canonical';
+import { getCanonicalKey, mergeCardContext } from '@/lib/vocabulary/canonical';
 
 const SEPARABLE_PREFIXES = new Set([
   'ab', 'an', 'auf', 'aus', 'bei', 'ein', 'empor', 'entgegen', 'entlang', 'entzwei',
@@ -111,12 +111,22 @@ export function deduplicateCardsByLemma<
       if (cardMastery < existingMastery) {
         removedDuplicates.push(`${existingInner.targetWord || existingInner.front || key} (ключ: "${key}")`);
         inner.linkedCardIds = mergedIds;
-        if ((card as any).card) (card as any).card.linkedCardIds = mergedIds;
+        const enriched = mergeCardContext(inner, existingInner);
+        Object.assign(inner, enriched);
+        if ((card as any).card) {
+          (card as any).card.linkedCardIds = mergedIds;
+          Object.assign((card as any).card, enriched);
+        }
         seen.set(key, card);
       } else {
         removedDuplicates.push(`${raw} (ключ: "${key}")`);
         existingInner.linkedCardIds = mergedIds;
-        if ((existing as any).card) (existing as any).card.linkedCardIds = mergedIds;
+        const enriched = mergeCardContext(existingInner, inner);
+        Object.assign(existingInner, enriched);
+        if ((existing as any).card) {
+          (existing as any).card.linkedCardIds = mergedIds;
+          Object.assign((existing as any).card, enriched);
+        }
       }
     }
   }

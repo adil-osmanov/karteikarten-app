@@ -26,7 +26,7 @@ import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatri
 import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma } from "@/lib/utils/lemmaNormalizer";
-import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet } from "@/lib/vocabulary/canonical";
+import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
@@ -1034,6 +1034,8 @@ export interface Flashcard {
   isLegendary?: boolean;
   mistakeCount?: number;
   linkedCardIds?: string[];
+  additionalTranslations?: string[];
+  alternateExamples?: string[];
 }
 
 export interface CardSRSUpdate {
@@ -2445,10 +2447,13 @@ export const useStore = create<DeckState>()((set, get) => ({
           const isLemmaMatch = Boolean(targetLemmaKey && targetLemmaKey.length >= 2 && cLemma === targetLemmaKey);
 
           if (isDirectMatch || isCanonicalMatch || isLemmaMatch) {
+            const enriched = mergeCardContext(c, validCard);
             const syncedSibling: Flashcard = {
               ...c,
               ...srsUpdate,
               updated_at: validCard.updated_at,
+              additionalTranslations: enriched.additionalTranslations,
+              alternateExamples: enriched.alternateExamples,
             };
             siblingUpdates.push({ id: c.id, card: syncedSibling });
             return syncedSibling;
@@ -2571,6 +2576,7 @@ export const useStore = create<DeckState>()((set, get) => ({
           const isLemmaMatch = Boolean(targetLemmaKey && targetLemmaKey.length >= 2 && cLemma === targetLemmaKey);
 
           if (isDirectMatch || isCanonicalMatch || isLemmaMatch) {
+            const enriched = mergeCardContext(c, card);
             const syncedSibling: Flashcard = {
               ...c,
               masteryLevel: card.masteryLevel,
@@ -2580,6 +2586,8 @@ export const useStore = create<DeckState>()((set, get) => ({
               repetitions: card.repetitions,
               easeFactor: card.easeFactor,
               updated_at: card.updated_at,
+              additionalTranslations: enriched.additionalTranslations,
+              alternateExamples: enriched.alternateExamples,
             };
             siblingUpdates.push({ id: c.id, card: syncedSibling });
             return syncedSibling;
@@ -4160,14 +4168,26 @@ function RapidFlashcardMode({
                   )}
                 </div>
 
-                <p className="text-lg md:text-xl text-neutral-600 dark:text-neutral-300 font-normal">
-                  {currentCard?.translation || currentCard?.hint}
-                </p>
+                <div className="space-y-1">
+                  <p className="text-lg md:text-xl text-neutral-600 dark:text-neutral-300 font-normal">
+                    {currentCard?.translation || currentCard?.hint}
+                  </p>
+                  {currentCard?.additionalTranslations && currentCard.additionalTranslations.length > 0 && (
+                    <p className="text-xs sm:text-sm text-neutral-400 dark:text-neutral-500 font-normal">
+                      auch: {currentCard.additionalTranslations.join(' • ')}
+                    </p>
+                  )}
+                </div>
 
                 {/* Чистая цитата примера */}
                 {displaySentence && (
                   <div className="text-sm text-neutral-500 dark:text-neutral-400 max-w-lg mt-2 italic font-normal leading-relaxed select-text">
                     {displaySentence}
+                  </div>
+                )}
+                {currentCard?.alternateExamples && currentCard.alternateExamples.length > 0 && (
+                  <div className="text-xs text-neutral-400 dark:text-neutral-500 max-w-lg mt-1 italic font-normal leading-relaxed select-text">
+                    {currentCard.alternateExamples[0]}
                   </div>
                 )}
               </div>
@@ -6640,6 +6660,16 @@ function StudyCard({
             <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal text-center transition-colors max-w-2xl mx-auto leading-relaxed">
               {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
             </p>
+            {card.additionalTranslations && card.additionalTranslations.length > 0 && (
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 font-normal text-center mt-1">
+                auch: {card.additionalTranslations.join(' • ')}
+              </p>
+            )}
+            {isAnswered && card.alternateExamples && card.alternateExamples.length > 0 && (
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 font-normal italic text-center mt-1">
+                {card.alternateExamples[0]}
+              </p>
+            )}
 
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
               <div className="mt-4 flex flex-col items-center gap-1.5 transition-opacity duration-200">
@@ -11229,11 +11259,13 @@ export default function App() {
             easeFactor: 2.5,
             nextReviewDate: Date.now() + 86400000,
             first_mastered_at: entry.created_at || new Date().toISOString(),
+            translation: (entry as any).translation,
+            sentence: (entry as any).sentence,
           });
         }
       }
 
-      // 2. Из всех существующих колод
+      // 2. Из всех существующих колод (обогащаем переводы и примеры при склейке дублей)
       for (const d of allDecks) {
         for (const c of d.cards || []) {
           const raw = c.targetWord || (c as any).front || (c as any).word || (c as any).missingWord;
@@ -11243,6 +11275,7 @@ export default function App() {
             const cScore = (c.isArchived ? 4 : 0) + (c.masteryLevel || 0);
             const exScore = (existing?.isArchived ? 4 : 0) + (existing?.masteryLevel || 0);
             if (!existing || cScore >= exScore) {
+              const enriched = existing ? mergeCardContext(c, existing) : c;
               globalStatusMap.set(k, {
                 masteryLevel: c.masteryLevel ?? 0,
                 isArchived: Boolean(c.isArchived),
@@ -11251,6 +11284,17 @@ export default function App() {
                 easeFactor: c.easeFactor ?? 2.5,
                 nextReviewDate: c.nextReviewDate ?? null,
                 first_mastered_at: c.first_mastered_at || existing?.first_mastered_at,
+                translation: c.translation || existing?.translation,
+                sentence: c.sentence || existing?.sentence,
+                additionalTranslations: enriched.additionalTranslations,
+                alternateExamples: enriched.alternateExamples,
+              });
+            } else {
+              const enriched = mergeCardContext(existing, c);
+              globalStatusMap.set(k, {
+                ...existing,
+                additionalTranslations: enriched.additionalTranslations,
+                alternateExamples: enriched.alternateExamples,
               });
             }
           }
@@ -11263,13 +11307,18 @@ export default function App() {
         const cKey = getCanonicalKey(cardData.targetWord);
         if (cKey) {
           if (seenDeckCanonicalKeys.has(cKey)) {
-            // Пропуск дубликата внутри одной колоды
+            // Пропуск дубликата внутри одной колоды, но обогащаем уже добавленную карточку
+            const addedCard = cards.find(c => getCanonicalKey(c.targetWord) === cKey);
+            if (addedCard) {
+              const enriched = mergeCardContext(addedCard, cardData);
+              Object.assign(addedCard, enriched);
+            }
             return;
           }
           seenDeckCanonicalKeys.add(cKey);
         }
         const inherited = cKey ? globalStatusMap.get(cKey) : undefined;
-        cards.push({
+        let baseCard: Flashcard = {
           ...cardData,
           id: ensureUuid(),
           masteryLevel: (inherited?.masteryLevel ?? 0) as any,
@@ -11279,7 +11328,11 @@ export default function App() {
           repetitions: inherited?.repetitions ?? 0,
           easeFactor: inherited?.easeFactor ?? 2.5,
           first_mastered_at: inherited?.first_mastered_at,
-        });
+        };
+        if (inherited) {
+          baseCard = mergeCardContext(baseCard, inherited);
+        }
+        cards.push(baseCard);
       };
 
       lines.forEach((line, lineIndex) => {
