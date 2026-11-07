@@ -3534,13 +3534,15 @@ function RapidFlashcardMode({
       : (currentCard.isLegendary || isReview || currentCard?.isArchived ? 4 : Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1)))
   );
   const isLegendary = currentCard.isLegendary ?? (currentRound === 4 && Boolean(isReview || currentCard?.isArchived));
+  const [visualRound, setVisualRound] = useState<number>(() => currentRound);
+  const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const effectiveMastery = isLegendary ? 4 : (currentRound - 1);
   const [localMastery, setLocalMastery] = useState(() => effectiveMastery);
   const [isAnswered, setIsAnswered] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
-  const isLegendaryActive = isLegendary && !isSurrendered;
-  const effectiveRound = isLegendaryActive ? 4 : currentRound;
-  const isTypingRecall = Boolean(isLegendary || effectiveRound >= 3);
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !isSurrendered;
+  const effectiveRound = isLegendaryActive ? 4 : visualRound;
+  const isTypingRecall = Boolean(isLegendary || visualRound >= 3);
   const [isRound1or2, setIsRound1or2] = useState(() => !isTypingRecall);
   const [isVaporizing, setIsVaporizing] = useState(false);
   const [typedValue, setTypedValue] = useState("");
@@ -3560,6 +3562,8 @@ function RapidFlashcardMode({
     );
     const isLeg = currentCard.isLegendary ?? (round === 4 && Boolean(isReview || currentCard?.isArchived));
     const mastery = isLeg ? 4 : (round - 1);
+    setVisualRound(round);
+    setIsLegendaryVisual(isLeg);
     setLocalMastery(mastery);
     const typingMode = Boolean(isLeg || round >= 3);
     setIsRound1or2(!typingMode);
@@ -3768,11 +3772,18 @@ function RapidFlashcardMode({
     setIsErrorMismatch(false);
     setIsShaking(false);
 
+    // Мгновенное повышение ранга прямо на глазах (live upgrade)
+    const nextRound = visualRound + 1;
+    setVisualRound(nextRound);
+    if (visualRound >= 4 || isLegendaryVisual) {
+      setIsLegendaryVisual(true);
+    }
+
     // Никаких авто-таймеров! Карточка ждет нажатия «Weiter» или Enter.
     playSafeAudio(() => playSuccessSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     triggerHaptic('success');
-  }, [isAnswered, playCardAudio, currentCard?.targetWord]);
+  }, [isAnswered, visualRound, isLegendaryVisual, playCardAudio, currentCard?.targetWord]);
 
   // ЭТАП 1: Фиксация ошибки на текущей карточке (без переключения и штрафов)
   const handleMistakeOrGiveUp = useCallback(() => {
@@ -3782,6 +3793,12 @@ function RapidFlashcardMode({
     setIsErrorMismatch(false);
     setIsShaking(false);
     setLocalMastery(2); // Штраф при сдаче/ошибке: ранг сбрасывается до 3 раунда (синий)
+
+    // Мгновенное понижение ранга (live downgrade)
+    if (isLegendaryVisual || visualRound >= 4) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    }
 
     // Записываем эталонное немецкое слово прямо внутрь поля ввода (без дублирования управления)
     const target = effectivePrefix
@@ -3795,7 +3812,7 @@ function RapidFlashcardMode({
     triggerHaptic('error');
 
     // Карточка показывает правильный ответ и СПОКОЙНО ЖДЕТ, пока пользователь прочитает и нажмет «Weiter»
-  }, [locked, isAnswered, effectivePrefix, verbComponents.coreWord, parsedTarget, currentCard?.targetWord, playCardAudio]);
+  }, [locked, isAnswered, isLegendaryVisual, visualRound, effectivePrefix, verbComponents.coreWord, parsedTarget, currentCard?.targetWord, playCardAudio]);
 
   // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter
   const handleProceedNext = useCallback(() => {
@@ -4025,7 +4042,7 @@ function RapidFlashcardMode({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, handleMistakeOrGiveUp, playCardAudio]);
 
-  const isMasteredGolden = isLegendaryActive && isAnswered && !isSurrendered;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered;
 
   return (
     <div key={currentCard?.id} className={`w-full flex flex-col items-center select-none animate-card-enter transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
@@ -4054,9 +4071,9 @@ function RapidFlashcardMode({
             {/* ФРОНТАЛЬНАЯ СТОРОНА (СЛОВО НА НЕМЕЦКОМ) */}
             <CardContainer 
               is3DFace 
-              rarityRound={effectiveRound}
+              rarityRound={visualRound}
               isSealed={isMasteredGolden || isVaporizing}
-              isLegendary={isLegendaryActive}
+              isLegendary={isLegendaryVisual}
               isVaporizing={isVaporizing}
               style={{
                 WebkitBackfaceVisibility: 'hidden',
@@ -4090,7 +4107,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={effectiveRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryActive} />
+                  <ProgressDots level={visualRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryVisual} />
                 </div>
               </div>
 
@@ -4114,9 +4131,9 @@ function RapidFlashcardMode({
             {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР + КНОПКА ДИНАМИКА) */}
             <CardContainer 
               is3DFace 
-              rarityRound={effectiveRound}
+              rarityRound={visualRound}
               isSealed={isMasteredGolden || isVaporizing}
-              isLegendary={isLegendaryActive}
+              isLegendary={isLegendaryVisual}
               isVaporizing={isVaporizing}
               style={{
                 WebkitBackfaceVisibility: 'hidden',
@@ -4150,7 +4167,7 @@ function RapidFlashcardMode({
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <ProgressDots level={effectiveRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryActive} />
+                  <ProgressDots level={visualRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryVisual} />
                 </div>
               </div>
 
@@ -4202,9 +4219,9 @@ function RapidFlashcardMode({
            РАУНДЫ 3-4: ЧИСТЫЙ АКТИВНЫЙ ВВОД (ACTIVE RECALL)
            ======================================================= */
         <CardContainer
-          rarityRound={effectiveRound}
+          rarityRound={visualRound}
           isSealed={isMasteredGolden || isVaporizing}
-          isLegendary={isLegendaryActive}
+          isLegendary={isLegendaryVisual}
           isVaporizing={isVaporizing}
         >
           {/* Шапка */}
@@ -4235,7 +4252,7 @@ function RapidFlashcardMode({
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
-              <ProgressDots level={effectiveRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryActive} />
+              <ProgressDots level={visualRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryVisual} />
 
               <button
                 type="button"
@@ -6131,8 +6148,10 @@ function StudyCard({
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
   );
   const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
-  const isLegendaryActive = isLegendary && !hasErrored;
-  const effectiveRound = isLegendaryActive ? 4 : currentRound;
+  const [visualRound, setVisualRound] = useState<number>(() => currentRound);
+  const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored;
+  const effectiveRound = isLegendaryActive ? 4 : visualRound;
 
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
 
@@ -6143,11 +6162,13 @@ function StudyCard({
     hasErroredRef.current = false;
     setIsVaporizing(false);
     setIsTransitionLocked(false);
+    setVisualRound(currentRound);
+    setIsLegendaryVisual(isLegendary);
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
       transitionTimerRef.current = null;
     }
-  }, [card.id, card.round, card.isLegendary]);
+  }, [card.id, card.round, card.isLegendary, currentRound, isLegendary]);
 
   useEffect(() => {
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
@@ -6319,6 +6340,11 @@ function StudyCard({
   const handleReveal = useCallback(() => {
     if (phase !== "Question") return;
     setPhase("Answer");
+    const nextRound = visualRound + 1;
+    setVisualRound(nextRound);
+    if (visualRound >= 4 || isLegendaryVisual) {
+      setIsLegendaryVisual(true);
+    }
     playSafeAudio(() => playSuccessSound());
     const fullSentenceText = fullSentence || card.sentence || (card as any).text;
     if (fullSentenceText) {
@@ -6333,7 +6359,7 @@ function StudyCard({
     setTimeout(() => {
       nextButtonRef.current?.focus();
     }, 50);
-  }, [phase, fullSentence, card, playAudio, onAnswer]);
+  }, [phase, visualRound, isLegendaryVisual, fullSentence, card, playAudio, onAnswer]);
 
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
@@ -6346,8 +6372,17 @@ function StudyCard({
       setLocalMastery(2); // Штраф при ошибке: ранг сбрасывается до 3 раунда (синий)
       setHasErrored(true);
       hasErroredRef.current = true;
+      if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+        setVisualRound(3);
+        setIsLegendaryVisual(false);
+      }
       playSafeAudio(() => playErrorSound());
     } else {
+      const nextRound = visualRound + 1;
+      setVisualRound(nextRound);
+      if (visualRound >= 4 || isLegendaryVisual) {
+        setIsLegendaryVisual(true);
+      }
       playSafeAudio(() => playSuccessSound());
       triggerHaptic('success');
     }
@@ -6379,6 +6414,10 @@ function StudyCard({
     setLocalMastery(2); // Штраф при сдаче: ранг сбрасывается до 3 раунда (синий)
     setHasErrored(true);
     hasErroredRef.current = true;
+    if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    }
     setInputText(clozeWord || card.targetWord || "");
     playSafeAudio(() => playErrorSound());
     const fullSentenceText = fullSentence || card.sentence || (card as any).text;
@@ -6412,6 +6451,12 @@ function StudyCard({
     if (isValid && isComplete) {
       // 1. Фиксируем результат: НИКАКИХ авто-таймеров перехода!
       setPhase("Answer");
+
+      const nextRound = visualRound + 1;
+      setVisualRound(nextRound);
+      if (visualRound >= 4 || isLegendaryVisual) {
+        setIsLegendaryVisual(true);
+      }
 
       playSafeAudio(() => playSuccessSound());
 
@@ -6573,17 +6618,17 @@ function StudyCard({
     ? (parseTargetNoun(displayAnswerWord) || (!isCustomCloze ? parseTargetNoun(card.targetWord) : null))
     : null;
 
-  const isArchivePulse = phase === "Answer" && !hasErrored && effectiveRound >= 4;
-  const isMasteredGolden = effectiveRound >= 4 && phase === "Answer" && !hasErrored && isLegendaryActive;
+  const isArchivePulse = phase === "Answer" && !hasErrored && visualRound >= 4;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored;
 
   return (
     <>
       <CardContainer 
         key={card.id}
-        rarityRound={effectiveRound}
+        rarityRound={visualRound}
         isArchivingPulse={isArchivePulse}
         isSealed={isMasteredGolden || isVaporizing}
-        isLegendary={isLegendaryActive}
+        isLegendary={isLegendaryVisual}
         isVaporizing={isVaporizing}
         onClick={() => {
           if (!isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
@@ -6643,9 +6688,9 @@ function StudyCard({
               <Pencil className="w-3.5 h-3.5" />
             </button>
             <ProgressDots 
-              level={effectiveRound} 
+              level={visualRound} 
               isSealed={isMasteredGolden || isVaporizing} 
-              isLegendary={isLegendaryActive} 
+              isLegendary={isLegendaryVisual} 
             />
             <button 
               type="button"
@@ -9438,15 +9483,19 @@ function PrepStudyCard({
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
   );
   const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
+  const [visualRound, setVisualRound] = useState<number>(() => currentRound);
+  const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
 
   useEffect(() => {
+    setVisualRound(currentRound);
+    setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
   }, [card.id, card.round, card.isLegendary, card.masteryLevel, card.isArchived, isReview, isLegendary, currentRound]);
 
-  const isLegendaryActive = isLegendary && !hasErrored && !isHilfe;
-  const isMasteredGolden = isSuccess && !hasErrored && !isHilfe && isLegendaryActive;
-  const effectiveRound = isLegendaryActive ? 4 : currentRound;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe;
+  const effectiveRound = isLegendaryActive ? 4 : visualRound;
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
   const originalVerb = card.targetWord;
@@ -9478,6 +9527,13 @@ function PrepStudyCard({
        const isCorrect = !isHilfe && !hasErroredRef.current;
        const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
        setLocalMastery(nextMastery);
+       if (isCorrect) {
+         const nextRound = visualRound + 1;
+         setVisualRound(nextRound);
+         if (visualRound >= 4 || isLegendaryVisual) {
+           setIsLegendaryVisual(true);
+         }
+       }
        setIsSuccess(true);
        playSafeAudio(() => playSuccessSound());
        playSafeAudio(() => playAudio());
@@ -9488,11 +9544,15 @@ function PrepStudyCard({
        hasErroredRef.current = true;
        setHasErrored(true);
        setLocalMastery(2);
+       if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+         setVisualRound(3);
+         setIsLegendaryVisual(false);
+       }
        playSafeAudio(() => playErrorSound());
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
     }
-  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio, localMastery]);
+  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio, localMastery, visualRound, isLegendaryVisual, isLegendary]);
 
   const onHilfe = useCallback(() => {
     setLocalMastery(2);
@@ -9500,11 +9560,15 @@ function PrepStudyCard({
     setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
+    if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    }
     playSafeAudio(() => playAudio());
     try {
       onAnswer(card.id, false, true);
     } catch (e) {}
-  }, [card.id, onAnswer, playAudio]);
+  }, [card.id, onAnswer, playAudio, isLegendary, isLegendaryVisual, visualRound]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -9541,8 +9605,8 @@ function PrepStudyCard({
     <>
     <CardContainer 
       key={card.id}
-      rarityRound={effectiveRound}
-      isLegendary={isLegendaryActive}
+      rarityRound={visualRound}
+      isLegendary={isLegendaryVisual}
       isSealed={isMasteredGolden}
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
@@ -9565,8 +9629,8 @@ function PrepStudyCard({
 
         <div className="flex items-center gap-3 shrink-0">
           <ProgressDots 
-            level={effectiveRound}
-            isLegendary={isLegendaryActive}
+            level={visualRound}
+            isLegendary={isLegendaryVisual}
             isSealed={isMasteredGolden}
           />
           <button 
@@ -9712,15 +9776,19 @@ function VerbStudyCard({
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
   );
   const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
+  const [visualRound, setVisualRound] = useState<number>(() => currentRound);
+  const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
 
   useEffect(() => {
+    setVisualRound(currentRound);
+    setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
   }, [card.id, card.round, card.isLegendary, card.masteryLevel, card.isArchived, isReview, isLegendary, currentRound]);
 
-  const isLegendaryActive = isLegendary && !hasErrored && !isHilfe;
-  const isMasteredGolden = isSuccess && !hasErrored && !isHilfe && isLegendaryActive;
-  const effectiveRound = isLegendaryActive ? 4 : currentRound;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe;
+  const effectiveRound = isLegendaryActive ? 4 : visualRound;
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
   const virtualBackspaceRef = useRef<(() => void) | undefined>(undefined);
@@ -9761,6 +9829,13 @@ function VerbStudyCard({
       const isCorrect = !hasErroredRef.current && !isHilfe;
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
+      if (isCorrect) {
+        const nextRound = visualRound + 1;
+        setVisualRound(nextRound);
+        if (visualRound >= 4 || isLegendaryVisual) {
+          setIsLegendaryVisual(true);
+        }
+      }
       setIsSuccess(true);
       playSafeAudio(() => playSuccessSound());
       playSafeAudio(() => playAudio());
@@ -9768,7 +9843,7 @@ function VerbStudyCard({
         onAnswer(isCorrect, false);
       } catch (e) {}
     }
-  }, [isHilfe, playAudio, onAnswer, localMastery]);
+  }, [isHilfe, playAudio, onAnswer, localMastery, visualRound, isLegendaryVisual]);
 
   const handleSlotError = useCallback(() => {
     // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
@@ -9780,19 +9855,23 @@ function VerbStudyCard({
     setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
+    if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    }
     playSafeAudio(() => playAudio());
     try {
       onAnswer(false, true);
     } catch (e) {}
-  }, [playAudio, onAnswer]);
+  }, [playAudio, onAnswer, isLegendary, isLegendaryVisual, visualRound]);
 
   const displayInfinitiv = formatSeparableWord(verbInfo.infinitiv || "", undefined, 'neutral');
 
   return (
     <CardContainer 
       key={card.id}
-      rarityRound={effectiveRound}
-      isLegendary={isLegendaryActive}
+      rarityRound={visualRound}
+      isLegendary={isLegendaryVisual}
       isSealed={isMasteredGolden}
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
@@ -9815,8 +9894,8 @@ function VerbStudyCard({
 
         <div className="flex items-center gap-3 shrink-0">
           <ProgressDots 
-            level={effectiveRound}
-            isLegendary={isLegendaryActive}
+            level={visualRound}
+            isLegendary={isLegendaryVisual}
             isSealed={isMasteredGolden}
           />
           <button 
@@ -10126,15 +10205,19 @@ export function RedemittelStudyCard({
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
   );
   const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
+  const [visualRound, setVisualRound] = useState<number>(() => currentRound);
+  const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
 
   useEffect(() => {
+    setVisualRound(currentRound);
+    setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
   }, [card.id, card.round, card.isLegendary, card.masteryLevel, card.isArchived, isReview, isLegendary, currentRound]);
 
-  const isLegendaryActive = isLegendary && status !== 'error' && status !== 'surrender';
-  const effectiveRound = isLegendaryActive ? 4 : currentRound;
-  const isMasteredGolden = status === 'success' && effectiveRound >= 4 && isLegendaryActive;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && status !== 'error' && status !== 'surrender';
+  const effectiveRound = isLegendaryActive ? 4 : visualRound;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && status === 'success';
 
   const handlePlayAudio = useCallback(() => {
     if (!data.fullText) return;
@@ -10158,6 +10241,11 @@ export function RedemittelStudyCard({
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
       if (isCorrect) {
+        const nextRound = visualRound + 1;
+        setVisualRound(nextRound);
+        if (visualRound >= 4 || isLegendaryVisual) {
+          setIsLegendaryVisual(true);
+        }
         setStatus('success');
         playSafeAudio(() => playSuccessSound());
         setIsAudioPlaying(true);
@@ -10169,6 +10257,10 @@ export function RedemittelStudyCard({
         } catch (e) {}
       } else {
         setStatus('error');
+        if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+          setVisualRound(3);
+          setIsLegendaryVisual(false);
+        }
         playSafeAudio(() => playErrorSound());
         try {
           onAnswer(false, false);
@@ -10179,7 +10271,7 @@ export function RedemittelStudyCard({
         setStatus('idle');
       }
     }
-  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery]);
+  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery, visualRound, isLegendaryVisual, isLegendary]);
 
   const handleRemoveChunk = useCallback((chunk: RedemittelChunk) => {
     if (status === 'success' || status === 'surrender') return;
@@ -10200,6 +10292,10 @@ export function RedemittelStudyCard({
   const handleSurrender = useCallback(() => {
     if (status === 'success' || status === 'surrender') return;
     setLocalMastery(2); // Штраф при сдаче: сброс до 3 раунда (синий)
+    if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    }
     const correctOrder = [...data.shuffledChunks].sort((a, b) => a.originalIndex - b.originalIndex);
     setPlacedChunks(correctOrder);
     setStatus('surrender');
@@ -10211,7 +10307,7 @@ export function RedemittelStudyCard({
     try {
       onAnswer(false, true);
     } catch (e) {}
-  }, [data.shuffledChunks, data.fullText, status, onAnswer]);
+  }, [data.shuffledChunks, data.fullText, status, onAnswer, isLegendary, isLegendaryVisual, visualRound]);
 
   // Available chunks for keyboard shortcuts and hotkey badge
   const availableChunks = useMemo(() => {
@@ -10270,8 +10366,8 @@ export function RedemittelStudyCard({
   return (
       <CardContainer
         key={card.id}
-        rarityRound={effectiveRound}
-        isLegendary={isLegendaryActive}
+        rarityRound={visualRound}
+        isLegendary={isLegendaryVisual}
         isSealed={isMasteredGolden}
         className={cn(
           status === 'error' && "!border-rose-500/40",
@@ -10313,8 +10409,8 @@ export function RedemittelStudyCard({
               <HelpCircle className="w-5 h-5" />
             </button>
             <ProgressDots 
-              level={effectiveRound}
-              isLegendary={isLegendaryActive}
+              level={visualRound}
+              isLegendary={isLegendaryVisual}
               isSealed={isMasteredGolden}
             />
           </div>

@@ -23,22 +23,22 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  * - Legendary (SRS Repeat / Sealed Mastered): Noble gold contour with golden aura.
  */
 export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean, isSealed?: boolean, isLegendary?: boolean): string {
-  if (isSealed || isLegendary) {
+  if (isSealed || isLegendary || (round !== undefined && round >= 5)) {
     return "border border-amber-400/40 shadow-[0_0_80px_-5px_rgba(245,158,11,0.28),0_0_25px_rgba(251,191,36,0.14),0_25px_60px_rgba(0,0,0,0.9)] transition-all duration-500 ease-out";
   }
   if (!round || round <= 1) {
-    // Раунд 1 (Старт / Серый / Обычный — 1 точка)
+    // Раунд 1 (Старт / 0 активных точек)
     return "border border-white/[0.08] shadow-[0_20px_50px_rgba(0,0,0,0.85)] transition-all duration-500 ease-out";
   }
   if (round === 2) {
-    // Раунд 2 (Зеленый / Необычный — 2 точки)
+    // Раунд 2 (Зеленый / 1 активная точка)
     return "border border-emerald-500/25 shadow-[0_0_40px_-5px_rgba(16,185,129,0.12),0_15px_40px_rgba(0,0,0,0.8)] transition-all duration-500 ease-out";
   }
   if (round === 3) {
-    // Раунд 3 (Синий / Редкий — 3 точки)
+    // Раунд 3 (Синий / 2 активные точки)
     return "border border-blue-500/30 shadow-[0_0_60px_-5px_rgba(59,130,246,0.20),0_0_20px_rgba(59,130,246,0.08),0_20px_50px_rgba(0,0,0,0.8)] transition-all duration-500 ease-out";
   }
-  // Раунд 4 (Фиолетовый / Эпический — 4 точки)
+  // Раунд 4 (Фиолетовый / 3 активные точки)
   return cn(
     "border border-purple-400/35 shadow-[0_0_75px_-5px_rgba(168,85,247,0.28),0_0_25px_rgba(168,85,247,0.12),0_20px_50px_rgba(0,0,0,0.85)] transition-all duration-500 ease-out",
     isArchivingPulse && "animate-pulse"
@@ -80,59 +80,49 @@ export function ProgressDots({
   isLegendary?: boolean;
   className?: string; 
 }) {
-  // If sealed / vaporizing / legendary: all 4 dots burst into pure glowing gold
-  if (isSealed || isLegendary) {
-    return (
-      <div className={cn("flex items-center gap-1.5 select-none shrink-0", className)}>
-        {Array.from({ length: max }, (_, idx) => (
-          <span
-            key={idx}
-            className="w-2 h-2 shrink-0 rounded-full transition-transform duration-200 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.7)] scale-110 border-transparent"
-          />
-        ))}
-      </div>
-    );
-  }
+  const isGold = isSealed || isLegendary || level >= 5;
 
-  const round = Math.max(1, Math.min(4, level || 1));
-  // Round 1: 1 dot (white/gray), 3 empty
-  // Round 2: 2 dots (emerald), 2 empty
-  // Round 3: 3 dots (blue), 1 empty
-  // Round 4: 4 dots (purple), 0 empty
-  const filledCount = round;
+  const getDotStyles = (index: number) => {
+    // 4 Золотые точки (Запечатано / Повторение / Ранг >= 5)
+    if (isGold) {
+      return 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.85)] scale-100';
+    }
 
-  const getDotStyle = (idx: number) => {
-    const isFilled = idx < filledCount;
-    if (!isFilled) {
-      return "w-2 h-2 rounded-full bg-neutral-200 dark:bg-neutral-800 border border-black/10 dark:border-white/[0.08] shadow-none";
+    // Раунд 4: 3 фиолетовые точки (индексы 0, 1, 2)
+    if (level === 4 && index < 3) {
+      return 'bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.7)] scale-100';
     }
-    if (round === 1) {
-      return "w-2 h-2 rounded-full bg-white/40 border-transparent";
+
+    // Раунд 3: 2 синие точки (индексы 0, 1)
+    if (level === 3 && index < 2) {
+      return 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.65)] scale-100';
     }
-    if (round === 2) {
-      return "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.4)] border-transparent";
+
+    // Раунд 2: 1 зеленая точка (индекс 0)
+    if (level === 2 && index < 1) {
+      return 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)] scale-100';
     }
-    if (round === 3) {
-      return "w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)] border-transparent";
-    }
-    // round === 4
-    return "w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)] border-transparent";
+
+    // Раунд 1 (0 точек) или неактивный слот:
+    return 'bg-white/10 dark:bg-white/[0.08] scale-90';
   };
 
   return (
-    <div className={cn("flex items-center gap-1.5 select-none shrink-0", className)}>
+    <div className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/[0.03] border border-white/5 backdrop-blur-sm select-none shrink-0", className)}>
       {Array.from({ length: max }, (_, idx) => (
-        <span
+        <div
           key={idx}
           className={cn(
-            "shrink-0 transition-all duration-300",
-            getDotStyle(idx)
+            "w-2 h-2 rounded-full transition-all duration-300 ease-out",
+            getDotStyles(idx)
           )}
         />
       ))}
     </div>
   );
 }
+
+export const RoundDots = ProgressDots;
 
 export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
   ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, isLegendary, isVaporizing = false, style, ...props }, ref) => {
