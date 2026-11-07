@@ -8,6 +8,8 @@ export interface DailyStats {
   correctCount: number;
   mistakesCountToday?: number;
   mistakesPool: any[];
+  words_learned_today?: number;
+  cards_reviewed_today?: number;
 }
 
 export interface DayRecord {
@@ -18,6 +20,8 @@ export interface DayRecord {
   accuracy: number; // процент 0..100
   mistakesCount: number;
   wordsMastered: number; // сколько слов перешло в Stufe 4
+  words_learned_today?: number;
+  cards_reviewed_today?: number;
 }
 
 export type SupportedLanguage = 'DE' | 'EN' | 'RU' | string;
@@ -204,6 +208,8 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
         cardsDone: stats.cardsDone || 0,
         correctCount: stats.correctCount || 0,
         mistakesCountToday: stats.mistakesCountToday || 0,
+        words_learned_today: stats.words_learned_today || 0,
+        cards_reviewed_today: stats.cards_reviewed_today || 0,
         mistakesPool: Array.isArray(stats.mistakesPool) ? stats.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : [],
         history
       };
@@ -552,6 +558,8 @@ export function saveDayRecord(lang: string = 'DE', record: Partial<DayRecord> & 
     accuracy: typeof record.accuracy === 'number' ? record.accuracy : current.accuracy,
     mistakesCount: typeof record.mistakesCount === 'number' ? record.mistakesCount : current.mistakesCount,
     wordsMastered: typeof record.wordsMastered === 'number' ? record.wordsMastered : current.wordsMastered,
+    words_learned_today: typeof record.words_learned_today === 'number' ? record.words_learned_today : (typeof record.wordsMastered === 'number' ? record.wordsMastered : current.words_learned_today || 0),
+    cards_reviewed_today: typeof record.cards_reviewed_today === 'number' ? record.cards_reviewed_today : (current.cards_reviewed_today || 0),
   };
 
   if (typeof window !== 'undefined') {
@@ -1110,7 +1118,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
   const recordCardResult = useCallback((
     isCorrect: boolean, 
     card: any, 
-    callOptions?: { isReviewingMistakes?: boolean; language?: string }
+    callOptions?: { isReviewingMistakes?: boolean; language?: string; isReview?: boolean; isNewMastered?: boolean }
   ) => {
     const targetLang = normalizeLanguage(callOptions?.language || lang);
     const current = getOrCreateStats(targetLang);
@@ -1167,25 +1175,40 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       ? Math.max((current.correctCount || 0) + 1, newCardsDone)
       : Math.max(current.correctCount || 0, newCardsDone);
 
+    const isReview = Boolean(callOptions?.isReview || card?.isArchived);
+    const isNewMastered = Boolean(callOptions?.isNewMastered);
+
+    const prevCardsReviewed = current.cards_reviewed_today ?? 0;
+    const newCardsReviewedToday = isReview ? prevCardsReviewed + 1 : prevCardsReviewed;
+
+    const prevWordsLearned = current.words_learned_today ?? 0;
+    const newWordsLearnedToday = isNewMastered ? prevWordsLearned + 1 : prevWordsLearned;
+
     const nextStats: DailyStats = {
       ...current,
       date: today,
       cardsDone: newCardsDone,
       correctCount: newCorrectCount,
       mistakesCountToday: newMistakesToday,
-      mistakesPool: updatedPool
+      mistakesPool: updatedPool,
+      cards_reviewed_today: newCardsReviewedToday,
+      words_learned_today: newWordsLearnedToday
     };
 
     // Keep today's entry up-to-date in multi-day history
     const totalAttempts = newCardsDone + newMistakesToday;
     const currentAcc = totalAttempts > 0 ? Math.round((newCardsDone / totalAttempts) * 100) : 100;
+    const currentRecord = getDayRecord(targetLang, today);
     saveDayRecord(targetLang, {
       date: today,
       cardsReviewed: newCardsDone,
       targetCards: 200,
       focusMinutes: Math.floor((nextStats.activeSeconds || 0) / 60),
       accuracy: currentAcc,
-      mistakesCount: newMistakesToday
+      mistakesCount: newMistakesToday,
+      wordsMastered: isNewMastered ? (currentRecord.wordsMastered || 0) + 1 : (currentRecord.wordsMastered || 0),
+      words_learned_today: newWordsLearnedToday,
+      cards_reviewed_today: newCardsReviewedToday
     });
 
     statsByLang[targetLang] = nextStats;

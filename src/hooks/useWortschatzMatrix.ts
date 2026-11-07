@@ -29,6 +29,8 @@ export interface MasteredWordEntry {
   originalWord: string;
   level: CEFRLevel;
   masteredAt: number;
+  first_mastered_at?: string;
+  created_at?: string;
   bookId?: string;
   translation?: string;
   cardId?: string;
@@ -423,25 +425,33 @@ function persistMatrixToStorage(lang: AppLang) {
  *    которая записывается в таблицу cards в момент перехода карточки на 4 этап.
  */
 export function extractCardMasteredAt(card: any, existingTs: number = 0): number {
-  const candidates: number[] = [];
-  if (existingTs && existingTs > 0) {
-    candidates.push(existingTs);
-  }
-
+  // 1. Явная дата первого освоения (first_mastered_at)
   const rawExplicit =
     card?.first_mastered_at ||
-    card?.firstMasteredAt ||
-    card?.updated_at ||
-    card?.updatedAt ||
-    card?.last_reviewed_at;
+    card?.firstMasteredAt;
 
   if (rawExplicit) {
     const parsed = new Date(rawExplicit).getTime();
     if (!isNaN(parsed) && parsed > 0) {
-      candidates.push(parsed);
+      return parsed;
     }
   }
 
+  // 2. Уже существующий исторический таймстемп первого освоения
+  if (existingTs && existingTs > 0) {
+    return existingTs;
+  }
+
+  // 3. Дата создания карточки в базе (created_at)
+  const rawCreated = card?.created_at || card?.createdAt;
+  if (rawCreated) {
+    const parsed = new Date(rawCreated).getTime();
+    if (!isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  // 4. Оценка по SRS (nextReviewDate - interval) только для исторических интервалов
   const rawNextReview = card?.nextReviewDate ?? card?.next_review_date;
   if (rawNextReview !== null && rawNextReview !== undefined) {
     const nextReviewMs =
@@ -449,24 +459,13 @@ export function extractCardMasteredAt(card: any, existingTs: number = 0): number
     const intervalDays = Number(card?.interval ?? 1) || 1;
     if (!isNaN(nextReviewMs) && nextReviewMs > 0) {
       const inferredMasteredAt = nextReviewMs - intervalDays * 86400000;
-      // Проверяем, что вычисленная дата разумна (не в будущем и после 2020 года)
       if (inferredMasteredAt > 1577836800000 && inferredMasteredAt <= Date.now() + 60000) {
-        candidates.push(inferredMasteredAt);
+        return inferredMasteredAt;
       }
     }
   }
 
-  if (candidates.length === 0) return 0;
-
-  // Если среди кандидатов есть сегодняшний таймстемп — приоритет ему, иначе максимальный валидный
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const todayEnd = todayStart + 24 * 60 * 60 * 1000;
-
-  const todayCandidate = candidates.find((ts) => ts >= todayStart && ts < todayEnd);
-  if (todayCandidate !== undefined) return todayCandidate;
-
-  return Math.max(...candidates);
+  return 0;
 }
 
 const isInitializedByLang: Record<AppLang, boolean> = {
@@ -540,13 +539,35 @@ function initMatrixStore(lang: AppLang) {
             lang
           );
           const masteredAt = Number(val?.masteredAt || legacyTimestamps[normKey] || 0);
+          const first_mastered_at = val?.first_mastered_at;
+          const created_at = val?.created_at;
           const existing = map.get(normKey);
-          if (!existing || masteredAt > existing.masteredAt) {
+          if (!existing) {
             map.set(normKey, {
               originalWord: val?.originalWord || normKey,
               level,
               masteredAt,
+              first_mastered_at,
+              created_at,
               bookId: val?.bookId,
+              translation: val?.translation,
+              cardId: val?.cardId,
+              nextReviewDate: val?.nextReviewDate,
+              sentence: val?.sentence,
+              sentenceTranslation: val?.sentenceTranslation,
+            });
+          } else {
+            const earliestTs = (masteredAt > 0 && existing.masteredAt > 0)
+              ? Math.min(masteredAt, existing.masteredAt)
+              : (existing.masteredAt || masteredAt);
+
+            map.set(normKey, {
+              originalWord: val?.originalWord || normKey,
+              level,
+              masteredAt: earliestTs,
+              first_mastered_at: existing.first_mastered_at || first_mastered_at,
+              created_at: existing.created_at || created_at,
+              bookId: val?.bookId || existing?.bookId,
               translation: val?.translation || existing?.translation,
               cardId: val?.cardId || existing?.cardId,
               nextReviewDate: val?.nextReviewDate || existing?.nextReviewDate,
@@ -582,14 +603,14 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
     const existingMap = uniqueMasteredWordsByLang[lang];
 
     // 1. Загружаем timestamps и уровни из user_mastered_words (если пользователь авторизован)
-    const remoteMetaByKey = new Map<string, { level?: string | null; masteredAt: number }>();
+    const remoteMetaByKey = new Map<string, { level?: string | null; masteredAt: number; first_mastered_at?: string; created_at?: string }>();
     try {
       const { data: authData } = await supabase.auth.getUser();
       const userId = authData?.user?.id;
       if (userId) {
         const { data } = await supabase
           .from('user_mastered_words')
-          .select('lemma, cefr_level, first_mastered_at')
+          .select('lemma, cefr_level, first_mastered_at, created_at')
           .eq('user_id', userId);
         if (Array.isArray(data)) {
           for (const row of data) {
@@ -597,9 +618,11 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
             if (!key || key.length < 2) continue;
             const ts = row.first_mastered_at ? new Date(row.first_mastered_at).getTime() : 0;
             const prev = remoteMetaByKey.get(key);
-            if (!prev || ts > prev.masteredAt) {
+            if (!prev || (ts > 0 && (prev.masteredAt === 0 || ts < prev.masteredAt))) {
               remoteMetaByKey.set(key, {
                 level: row.cefr_level,
+                first_mastered_at: row.first_mastered_at,
+                created_at: row.created_at,
                 masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
               });
             }
@@ -646,8 +669,10 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
 
         const prevEntry = existingMap.get(normalizedKey);
         const remoteMeta = remoteMetaByKey.get(normalizedKey);
-        const priorTs = Math.max(prevEntry?.masteredAt || 0, remoteMeta?.masteredAt || 0);
+        const priorTs = remoteMeta?.masteredAt || prevEntry?.masteredAt || 0;
         const masteredAt = extractCardMasteredAt(c, priorTs);
+        const firstMasteredAt = remoteMeta?.first_mastered_at || (c as any).first_mastered_at || prevEntry?.first_mastered_at || (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
+        const createdAt = (c as any).created_at || remoteMeta?.created_at || prevEntry?.created_at;
 
         const deckLevel = deckObj?.level || deckObj?.name || deckObj?.title || null;
         const cardLevel = (c as any).level || remoteMeta?.level || null;
@@ -665,6 +690,8 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
             originalWord: rawWord,
             level,
             masteredAt,
+            first_mastered_at: firstMasteredAt,
+            created_at: createdAt,
             bookId: deckObj?.book_id || prevEntry?.bookId,
             translation: cardTranslation,
             cardId: c.id || prevEntry?.cardId,
@@ -672,10 +699,17 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
             sentence: cardSentence,
             sentenceTranslation: cardSentenceTrans,
           });
-        } else if (masteredAt > alreadyInNext.masteredAt) {
+        } else {
+          // Сохраняем САМУЮ РАННЮЮ дату первого освоения (не смещаем вперед при повторах)
+          const earliestMasteredAt = (masteredAt > 0 && alreadyInNext.masteredAt > 0)
+            ? Math.min(masteredAt, alreadyInNext.masteredAt)
+            : (alreadyInNext.masteredAt || masteredAt);
+
           nextMap.set(normalizedKey, {
             ...alreadyInNext,
-            masteredAt,
+            masteredAt: earliestMasteredAt,
+            first_mastered_at: alreadyInNext.first_mastered_at || firstMasteredAt,
+            created_at: alreadyInNext.created_at || createdAt,
             translation: cardTranslation || alreadyInNext.translation,
             cardId: c.id || alreadyInNext.cardId,
             nextReviewDate: cardNextReview || alreadyInNext.nextReviewDate,
@@ -709,6 +743,9 @@ export async function recordMasteredLemma(
         cardLevel?: string | null;
         language?: string;
         timestamp?: number;
+        isReview?: boolean;
+        first_mastered_at?: string;
+        created_at?: string;
       }
     | string,
   levelOrNull?: string | null,
@@ -721,6 +758,7 @@ export async function recordMasteredLemma(
   const cardLevel = typeof paramsOrWord === 'object' ? paramsOrWord.cardLevel : null;
   const bookId = typeof paramsOrWord === 'string' ? bookIdOrNull : paramsOrWord.bookId;
   const rawLang = typeof paramsOrWord === 'string' ? langOrNull : paramsOrWord.language;
+  const isReview = typeof paramsOrWord === 'object' ? Boolean(paramsOrWord.isReview) : false;
   const timestamp =
     typeof paramsOrWord === 'object' && paramsOrWord.timestamp
       ? paramsOrWord.timestamp
@@ -747,12 +785,17 @@ export async function recordMasteredLemma(
   const map = uniqueMasteredWordsByLang[currentLanguage];
   const existing = map.get(normalizedKey);
 
-  // Если слово уже зарегистрировано и имеет валидный таймстемп — дубликат не создаем
+  // Если слово уже зарегистрировано:
   if (existing) {
+    // В режиме повторения дата первого освоения НЕ перезаписывается
+    if (isReview) {
+      return;
+    }
     if (!existing.masteredAt || existing.masteredAt <= 0) {
       map.set(normalizedKey, {
         ...existing,
         masteredAt: timestamp,
+        first_mastered_at: new Date(timestamp).toISOString(),
       });
       persistMatrixToStorage(currentLanguage);
       notifyListeners(currentLanguage);
@@ -760,10 +803,21 @@ export async function recordMasteredLemma(
     return;
   }
 
+  // Новое освоенное слово
+  const firstMasteredAt = (typeof paramsOrWord === 'object' && paramsOrWord.first_mastered_at)
+    ? paramsOrWord.first_mastered_at
+    : (isReview 
+        ? ((typeof paramsOrWord === 'object' && paramsOrWord.created_at) ? paramsOrWord.created_at : new Date(timestamp - 86400000).toISOString())
+        : new Date(timestamp).toISOString());
+
+  const effectiveTs = (isReview && firstMasteredAt) ? new Date(firstMasteredAt).getTime() : timestamp;
+
   map.set(normalizedKey, {
     originalWord: rawWord,
     level: resolvedLevel,
-    masteredAt: timestamp,
+    masteredAt: effectiveTs,
+    first_mastered_at: firstMasteredAt,
+    created_at: typeof paramsOrWord === 'object' ? paramsOrWord.created_at : undefined,
     bookId,
   });
 
@@ -786,7 +840,7 @@ export async function recordMasteredLemma(
         lemma: normalizedKey,
         cefr_level: resolvedLevel,
         source_book_id: bookId || null,
-        first_mastered_at: new Date(timestamp).toISOString(),
+        first_mastered_at: firstMasteredAt,
       },
       { onConflict: 'user_id,lemma', ignoreDuplicates: true }
     );
@@ -944,7 +998,8 @@ export async function autoBackfillMasteredWords(
         if (!normalizedKey || normalizedKey.length < 2) return;
         if (isFunctionalParticle(rawWord) || isFunctionalParticle(normalizedKey)) return;
 
-        const prevTs = existingMap.get(normalizedKey)?.masteredAt || 0;
+        const prevEntry = existingMap.get(normalizedKey);
+        const prevTs = prevEntry?.masteredAt || 0;
         const masteredAt = extractCardMasteredAt(card, prevTs);
         const cardLevel = card.level || card.cefrLevel || card.cefr_level || null;
         const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, targetLang);
@@ -956,11 +1011,16 @@ export async function autoBackfillMasteredWords(
         const cardSentence = card.sentence || card.exampleSentence || card.example || existingMap.get(normalizedKey)?.sentence;
         const cardSentenceTrans = card.sentenceTranslation || card.sentence_translation || existingMap.get(normalizedKey)?.sentenceTranslation;
 
+        const firstMasteredAt = card.first_mastered_at || prevEntry?.first_mastered_at || (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
+        const createdAt = card.created_at || prevEntry?.created_at;
+
         if (!existingEntry) {
           deduplicatedMap.set(normalizedKey, {
             originalWord: rawWord,
             level,
             masteredAt,
+            first_mastered_at: firstMasteredAt,
+            created_at: createdAt,
             bookId: dBookId,
             translation: cardTranslation,
             cardId: card.id,
@@ -968,10 +1028,17 @@ export async function autoBackfillMasteredWords(
             sentence: cardSentence,
             sentenceTranslation: cardSentenceTrans,
           });
-        } else if (masteredAt > existingEntry.masteredAt) {
+        } else {
+          // Сохраняем самый ранний таймстемп
+          const earliestMasteredAt = (masteredAt > 0 && existingEntry.masteredAt > 0)
+            ? Math.min(masteredAt, existingEntry.masteredAt)
+            : (existingEntry.masteredAt || masteredAt);
+
           deduplicatedMap.set(normalizedKey, {
             ...existingEntry,
-            masteredAt,
+            masteredAt: earliestMasteredAt,
+            first_mastered_at: existingEntry.first_mastered_at || firstMasteredAt,
+            created_at: existingEntry.created_at || createdAt,
             translation: cardTranslation || existingEntry.translation,
             cardId: card.id || existingEntry.cardId,
             nextReviewDate: cardNextReview || existingEntry.nextReviewDate,
@@ -1204,14 +1271,17 @@ export async function removeMasteredWordsByCardIds(
 }
 
 /**
- * Подсчет слов, выученных сегодня в локальном часовом поясе пользователя:
- * todayStart <= masteredAt < todayEnd
+ * Подсчет реально НОВЫХ слов, выученных сегодня.
+ * Карточка учитывается ТОЛЬКО если дата ее первого освоения (first_mastered_at или created_at)
+ * совпадает с сегодняшним днем. Повторные ревью старых карточек сюда НЕ попадают.
  */
 export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgress {
   const lang = normalizeLanguageCode(langParam);
   initMatrixStore(lang);
 
   const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const todayLocalStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const todayEnd = todayStart + 24 * 60 * 60 * 1000;
 
@@ -1220,8 +1290,29 @@ export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgres
 
   const map = uniqueMasteredWordsByLang[lang];
   map.forEach((entry) => {
-    const ts = entry.masteredAt;
-    if (ts >= todayStart && ts < todayEnd) {
+    // Фильтр строго по дате первого освоения:
+    const firstMastered = entry.first_mastered_at;
+    const createdAt = entry.created_at;
+
+    let isNewlyLearnedToday = false;
+
+    if (firstMastered || createdAt) {
+      const targetDateStr = firstMastered || createdAt;
+      try {
+        const d = new Date(targetDateStr!);
+        if (!isNaN(d.getTime())) {
+          const dIso = d.toISOString().split('T')[0];
+          const dLocal = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          if (dIso === todayStr || dLocal === todayLocalStr) {
+            isNewlyLearnedToday = true;
+          }
+        }
+      } catch {}
+    } else if (entry.masteredAt >= todayStart && entry.masteredAt < todayEnd) {
+      isNewlyLearnedToday = true;
+    }
+
+    if (isNewlyLearnedToday) {
       wordsLearnedToday++;
       const lvl = CEFR_LEVEL_KEYS.includes(entry.level) ? entry.level : 'B1';
       todayCounts[lvl] = (todayCounts[lvl] || 0) + 1;
@@ -1237,6 +1328,113 @@ export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgres
     percentLearnedToday,
     todayCounts,
   };
+}
+
+/**
+ * Миграция и сброс накрученного счетчика дневной статистики:
+ * восстанавливает истинные даты первого освоения слов из Supabase user_mastered_words
+ * и структуры карточек колод, сбрасывая ложные таймстемпы сегодняшнего дня от сессий повторения.
+ */
+export async function repairInflatedMasteredTimestamps(lang: AppLang = 'de'): Promise<void> {
+  initMatrixStore(lang);
+  const map = uniqueMasteredWordsByLang[lang];
+  if (map.size === 0) return;
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  let hasRepairs = false;
+
+  // 1. Проверяем записи в таблице user_mastered_words в Supabase (Single Source of Truth)
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData?.user?.id;
+    if (userId) {
+      const { data: remoteRows } = await supabase
+        .from('user_mastered_words')
+        .select('lemma, first_mastered_at, created_at')
+        .eq('user_id', userId);
+
+      if (Array.isArray(remoteRows)) {
+        for (const row of remoteRows) {
+          const key = normalizeLemmaKey(row.lemma || '');
+          const entry = map.get(key);
+          if (entry && row.first_mastered_at) {
+            const remoteTs = new Date(row.first_mastered_at).getTime();
+            if (!isNaN(remoteTs) && remoteTs > 0) {
+              if (remoteTs < todayStart && entry.masteredAt >= todayStart) {
+                entry.masteredAt = remoteTs;
+                entry.first_mastered_at = row.first_mastered_at;
+                if (row.created_at) entry.created_at = row.created_at;
+                hasRepairs = true;
+              } else if (!entry.first_mastered_at) {
+                entry.first_mastered_at = row.first_mastered_at;
+                entry.created_at = row.created_at || entry.created_at;
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Wortschatz-Matrix] Repair Supabase notice:', e);
+  }
+
+  // 2. Проверяем локальные карточки из IndexedDB (app_decks) или localStorage
+  try {
+    let decksList: any[] = [];
+    if (typeof window !== 'undefined') {
+      const cached = await getIDBItem<any[]>('app_decks');
+      if (Array.isArray(cached) && cached.length > 0) {
+        decksList = cached;
+      } else {
+        const raw = localStorage.getItem('cached_app_decks');
+        if (raw) decksList = JSON.parse(raw);
+      }
+    }
+
+    if (Array.isArray(decksList)) {
+      for (const d of decksList) {
+        if (!Array.isArray(d?.cards)) continue;
+        for (const c of d.cards) {
+          const rawWord = c.targetWord || c.target_word || c.missingWord || c.infinitive || c.front || '';
+          const normKey = normalizeLemmaKey(rawWord);
+          const entry = map.get(normKey);
+          if (!entry) continue;
+
+          const cardCreated = c.created_at || c.createdAt;
+          const cardCreatedTs = cardCreated ? new Date(cardCreated).getTime() : 0;
+          const reps = Number(c.repetitions || 0);
+          const interval = Number(c.interval || 0);
+
+          if (c.first_mastered_at && !entry.first_mastered_at) {
+            entry.first_mastered_at = c.first_mastered_at;
+          }
+
+          if (entry.masteredAt >= todayStart && cardCreatedTs > 0 && cardCreatedTs < todayStart) {
+            if (reps > 1 || interval > 1 || c.isArchived) {
+              const inferredTs = (c.nextReviewDate ? Number(c.nextReviewDate) : Date.now()) - (Math.max(1, interval) * 86400000);
+              const safeTs = (inferredTs > 1577836800000 && inferredTs < todayStart) ? inferredTs : cardCreatedTs;
+              entry.masteredAt = safeTs;
+              entry.first_mastered_at = c.first_mastered_at || new Date(safeTs).toISOString();
+              entry.created_at = cardCreated;
+              hasRepairs = true;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Wortschatz-Matrix] Repair decks notice:', e);
+  }
+
+  if (hasRepairs) {
+    recomputeStatsFromMap(lang);
+    persistMatrixToStorage(lang);
+    notifyListeners(lang);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: lang } }));
+    }
+  }
 }
 
 /**
@@ -1257,6 +1455,10 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
   useEffect(() => {
     initMatrixStore(normLang);
     purgeJunkExportierenWord().catch(() => {});
+    repairInflatedMasteredTimestamps(normLang).then(() => {
+      setStats({ ...globalMatrixStatsByLang[normLang] });
+      setTodayProgress(getWordsLearnedToday(normLang));
+    }).catch(() => {});
     setStats({ ...globalMatrixStatsByLang[normLang] });
     setTodayProgress(getWordsLearnedToday(normLang));
 
@@ -1315,6 +1517,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
   const wordLabel = WORD_LABELS_BY_LANG[normLang] || 'Wörter';
 
   const refreshMatrix = useCallback(async () => {
+    await repairInflatedMasteredTimestamps(normLang);
     await syncMasteredWordsFromCloud(normLang);
     setTodayProgress(getWordsLearnedToday(normLang));
   }, [normLang]);

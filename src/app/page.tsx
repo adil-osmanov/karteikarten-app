@@ -59,6 +59,8 @@ export function getLocalTodayDateString(): string {
 
 export interface LanguageDailyProgress {
   learnedToday: number;
+  words_learned_today?: number;
+  cards_reviewed_today?: number;
   focusSeconds: number;
   correctCount: number;
   totalCount: number;
@@ -351,6 +353,8 @@ async function performDailyStatsToCloudSync(cleanLang: string, count: number, cu
       ...(currentStats || {}),
       date: today,
       learnedToday: count,
+      words_learned_today: currentStats?.words_learned_today || 0,
+      cards_reviewed_today: currentStats?.cards_reviewed_today || 0,
       cards_count: count,
       updated_at: nowIso
     };
@@ -417,12 +421,24 @@ export async function syncDailyStatsFromCloud(lang: string): Promise<number> {
 }
 
 // Сохранение статистики для конкретного языка
-export function updateLanguageDailyStats(lang: string, deltaLearned: number = 0, isCorrect?: boolean, cardId?: string): LanguageDailyProgress {
+export function updateLanguageDailyStats(
+  lang: string, 
+  deltaLearned: number = 0, 
+  isCorrect?: boolean, 
+  cardId?: string,
+  options?: { isReview?: boolean; isNewMastered?: boolean }
+): LanguageDailyProgress {
   const today = getLocalTodayStr();
   const cleanLang = (lang || 'de').toLowerCase();
   const current = { ...getLanguageDailyStats(cleanLang) };
 
-  current.learnedToday = Math.max(0, current.learnedToday + deltaLearned);
+  if (options?.isReview) {
+    current.cards_reviewed_today = (current.cards_reviewed_today || 0) + 1;
+  } else if (options?.isNewMastered || deltaLearned > 0) {
+    current.learnedToday = Math.max(0, current.learnedToday + (deltaLearned > 0 ? deltaLearned : 1));
+    current.words_learned_today = (current.words_learned_today || 0) + (deltaLearned > 0 ? deltaLearned : 1);
+  }
+
   if (isCorrect !== undefined) {
     current.totalCount += 1;
     if (isCorrect) {
@@ -433,7 +449,7 @@ export function updateLanguageDailyStats(lang: string, deltaLearned: number = 0,
         current.mistakes = [...current.mistakes, cardId];
       }
     }
-  } else if (deltaLearned > 0) {
+  } else if (deltaLearned > 0 && !options?.isReview) {
     current.correctCount = Math.max(current.correctCount + deltaLearned, current.learnedToday);
     current.totalCount = Math.max(current.totalCount + deltaLearned, current.correctCount + (current.mistakesCount || 0));
   }
@@ -1010,6 +1026,8 @@ export interface Flashcard {
   explanation?: string | null;
   level?: string | null;
   cefrLevel?: string | null;
+  created_at?: string;
+  first_mastered_at?: string;
   updated_at?: string;
   round?: number;
   isLegendary?: boolean;
@@ -1023,6 +1041,7 @@ export interface CardSRSUpdate {
   interval: number;
   easeFactor: number;
   nextReviewDate: number | null;
+  first_mastered_at?: string;
 }
 
 export function isCardDueForReview(card: any): boolean {
@@ -1523,7 +1542,8 @@ export function calculateNextSRSState(
         repetitions: newReps,
         interval: nextInterval,
         easeFactor: Number(newEase.toFixed(2)),
-        nextReviewDate
+        nextReviewDate,
+        first_mastered_at: card.first_mastered_at
       };
     } else {
       // ЗАБЫВАНИЕ (Lapse): Сбой при повторении
@@ -1537,7 +1557,8 @@ export function calculateNextSRSState(
         repetitions: 0,  // сброс серии
         interval: 1,     // сброс интервала на 1 день
         easeFactor: Number(newEase.toFixed(2)),
-        nextReviewDate: Date.now() + 10 * 60 * 1000 // +10 минут
+        nextReviewDate: Date.now() + 10 * 60 * 1000, // +10 минут
+        first_mastered_at: card.first_mastered_at
       };
     }
   }
@@ -1556,7 +1577,8 @@ export function calculateNextSRSState(
         repetitions: 1,
         interval: 1,
         easeFactor: currentEase,
-        nextReviewDate: Date.now() + 1 * 86400000 // Завтра (+24ч)
+        nextReviewDate: Date.now() + 1 * 86400000, // Завтра (+24ч)
+        first_mastered_at: card.first_mastered_at || new Date().toISOString()
       };
     }
 
@@ -2467,6 +2489,9 @@ export const useStore = create<DeckState>()((set, get) => ({
             bookId: currentDeck?.bookId,
             language: cardLang,
             timestamp: Date.now(),
+            isReview: Boolean(isReviewSession || wasMasteredBefore),
+            first_mastered_at: validCard.first_mastered_at || targetCard.first_mastered_at,
+            created_at: validCard.created_at || targetCard.created_at,
           });
         }
       }
@@ -2589,6 +2614,9 @@ export const useStore = create<DeckState>()((set, get) => ({
             bookId: currentDeck?.bookId,
             language: cardLang,
             timestamp: Date.now(),
+            isReview: Boolean(wasMasteredBefore),
+            first_mastered_at: validCard.first_mastered_at || targetCard.first_mastered_at,
+            created_at: validCard.created_at || targetCard.created_at,
           });
         }
       }
@@ -4778,6 +4806,12 @@ function RapidSession({
       return;
     }
 
+    const isReviewMode = Boolean(reviewCards || liveCard.isArchived);
+    const currentScore = wordProgress[id] ?? liveCard.masteryLevel ?? 0;
+    const newScore = correct ? currentScore + 1 : Math.max(0, currentScore - 1);
+    const learned = correct && newScore >= 4;
+    const isNewMastered = learned && !isReviewMode;
+
     if (correct) {
       setSessionCorrect(prev => prev + 1);
       recordCardProgress(id, true, {
@@ -4785,10 +4819,11 @@ function RapidSession({
         card: liveCard,
         language: studyLanguage
       });
-      updateLanguageDailyStats(studyLanguage, 1, true, id);
+      updateLanguageDailyStats(studyLanguage, isReviewMode ? 0 : 1, true, id, { isReview: isReviewMode, isNewMastered });
       setLangStats(prev => ({
         ...prev,
-        learnedToday: (prev?.learnedToday || 0) + 1,
+        learnedToday: isReviewMode ? (prev?.learnedToday || 0) : (prev?.learnedToday || 0) + 1,
+        cards_reviewed_today: isReviewMode ? (prev?.cards_reviewed_today || 0) + 1 : (prev?.cards_reviewed_today || 0),
         totalCount: (prev?.totalCount || 0) + 1,
         correctCount: (prev?.correctCount || 0) + 1
       }));
@@ -4799,7 +4834,7 @@ function RapidSession({
         card: liveCard,
         language: studyLanguage
       });
-      updateLanguageDailyStats(studyLanguage, 0, false, id);
+      updateLanguageDailyStats(studyLanguage, 0, false, id, { isReview: isReviewMode });
       setLangStats(prev => ({
         ...prev,
         totalCount: (prev?.totalCount || 0) + 1,
@@ -4808,17 +4843,22 @@ function RapidSession({
       }));
     }
 
-    recordCardResult(correct, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
-
-    const currentScore = wordProgress[id] ?? liveCard.masteryLevel ?? 0;
-    const newScore = correct ? currentScore + 1 : Math.max(0, currentScore - 1);
-    const learned = correct && newScore >= 4;
+    recordCardResult(
+      correct, 
+      { deckId: current.deckId, card: liveCard, ...liveCard }, 
+      { 
+        isReviewingMistakes: isReviewingMistakesSession, 
+        language: studyLanguage, 
+        isReview: isReviewMode,
+        isNewMastered 
+      }
+    );
 
     // 1) Persist immediately (store + Supabase)
     if (liveCard.isArchived) {
       // Spaced-repetition review of an already learned word
-      if (learned) await answerCard(current.deckId, id, true, false, true, studyLanguage);
-      else if (!correct) await answerCard(current.deckId, id, false, false, true, studyLanguage);
+      if (learned) await answerCard(current.deckId, id, true, false, true, studyLanguage, isReviewMode);
+      else if (!correct) await answerCard(current.deckId, id, false, false, true, studyLanguage, isReviewMode);
     } else {
       await setCardProgress(current.deckId, id, newScore, studyLanguage);
     }
@@ -4874,14 +4914,15 @@ function RapidSession({
       card: liveCard,
       language: studyLanguage
     });
-    updateLanguageDailyStats(studyLanguage, 0, false, id);
+    const isReviewMode = Boolean(reviewCards || liveCard.isArchived);
+    updateLanguageDailyStats(studyLanguage, 0, false, id, { isReview: isReviewMode });
     setLangStats(prev => ({
       ...prev,
       totalCount: (prev?.totalCount || 0) + 1,
       mistakesCount: (prev?.mistakesCount || 0) + 1,
       mistakes: prev?.mistakes?.includes(id) ? prev.mistakes : [...(prev?.mistakes || []), id]
     }));
-    recordCardResult(false, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
+    recordCardResult(false, { deckId: current.deckId, card: liveCard, ...liveCard }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage, isReview: isReviewMode });
 
     // NO automatic timer! The user reads the word and explicitly taps «Weiter» to advance.
   }, [queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
@@ -5329,19 +5370,24 @@ function StudyInterface({
       ];
     });
 
+    const wasMasteredBefore = Boolean(currentCardSnapshot.isArchived || (currentCardSnapshot.masteryLevel && currentCardSnapshot.masteryLevel >= 4) || liveCard?.isArchived);
+    const isReviewMode = Boolean(isReviewSession || isInitialArchivedDeck || wasMasteredBefore);
+    const isNewMastered = !isReviewMode && isGraduated && !wasMasteredBefore;
+
     // 3. Запись в статистику сессии и дневной счетчик
     if (isActualCorrect) {
       setSessionCorrect(prev => prev + 1);
-      updateLanguageDailyStats(studyLanguage, 1, true, currentCardSnapshot.id);
+      updateLanguageDailyStats(studyLanguage, isReviewMode ? 0 : (isNewMastered ? 1 : 0), true, currentCardSnapshot.id, { isReview: isReviewMode, isNewMastered });
       setLangStats(prev => ({
         ...prev,
-        learnedToday: (prev?.learnedToday || 0) + 1,
+        learnedToday: isReviewMode ? (prev?.learnedToday || 0) : (prev?.learnedToday || 0) + (isNewMastered ? 1 : 0),
+        cards_reviewed_today: isReviewMode ? (prev?.cards_reviewed_today || 0) + 1 : (prev?.cards_reviewed_today || 0),
         totalCount: (prev?.totalCount || 0) + 1,
         correctCount: (prev?.correctCount || 0) + 1
       }));
     } else {
       setSessionMistakes(prev => (prev.some(c => c.id === currentCardSnapshot.id) ? prev : [...prev, currentCardSnapshot]));
-      updateLanguageDailyStats(studyLanguage, 0, false, currentCardSnapshot.id);
+      updateLanguageDailyStats(studyLanguage, 0, false, currentCardSnapshot.id, { isReview: isReviewMode });
       setLangStats(prev => ({
         ...prev,
         totalCount: (prev?.totalCount || 0) + 1,
@@ -5359,7 +5405,16 @@ function StudyInterface({
     });
 
     // 5. Запись в статистику сессии и базу Supabase через answerCard
-    recordCardResult(isActualCorrect, { deckId: currentDeckId, card: { ...liveCard, masteryLevel: nextMastery }, ...liveCard, masteryLevel: nextMastery }, { isReviewingMistakes: isReviewingMistakesSession, language: studyLanguage });
+    recordCardResult(
+      isActualCorrect, 
+      { deckId: currentDeckId, card: { ...liveCard, masteryLevel: nextMastery }, ...liveCard, masteryLevel: nextMastery }, 
+      { 
+        isReviewingMistakes: isReviewingMistakesSession, 
+        language: studyLanguage, 
+        isReview: isReviewMode,
+        isNewMastered 
+      }
+    );
     await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, isReviewSession);
 
     // 6. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
