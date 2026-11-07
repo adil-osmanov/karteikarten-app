@@ -23,9 +23,10 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma } from "@/lib/utils/lemmaNormalizer";
+import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
@@ -1032,6 +1033,7 @@ export interface Flashcard {
   round?: number;
   isLegendary?: boolean;
   mistakeCount?: number;
+  linkedCardIds?: string[];
 }
 
 export interface CardSRSUpdate {
@@ -2417,34 +2419,39 @@ export const useStore = create<DeckState>()((set, get) => ({
     // 1. ONLINE-FIRST AWAIT: Сначала сохраняем статус карточки в Supabase
     await updateCardInSupabase(cardId, validCard);
 
-    // 2. Автоматическая синхронизация карточек-близнецов (с одинаковым normalizeLemmaKey) в других колодах
+    // 2. Автоматическая синхронизация карточек-близнецов (Canonical Lemma Sync) во всех колодах
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
     const targetLemmaKey = normalizeLemmaKey(rawWord);
+    const targetCanonicalKey = getCanonicalKey(rawWord);
+    const linkedIds = new Set<string>([
+      ...((validCard as any).linkedCardIds || []),
+      ...((targetCard as any).linkedCardIds || [])
+    ]);
     const siblingUpdates: { id: string; card: Flashcard }[] = [];
 
     // 3. Обновляем Zustand-стейт и локальный IndexedDB
     set((state) => {
       const newDecks = state.decks.map((d) => {
         const updatedCards = d.cards.map((c) => {
-          if (c.id === cardId && d.id === deckId) {
+          if (c.id === cardId) {
             return validCard;
           }
-          if (
-            targetLemmaKey &&
-            targetLemmaKey.length >= 2 &&
-            (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) &&
-            c.id !== cardId
-          ) {
-            const cWord = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
-            if (normalizeLemmaKey(cWord) === targetLemmaKey) {
-              const syncedSibling: Flashcard = {
-                ...c,
-                ...srsUpdate,
-                updated_at: validCard.updated_at,
-              };
-              siblingUpdates.push({ id: c.id, card: syncedSibling });
-              return syncedSibling;
-            }
+          const cWord = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+          const cCanonical = getCanonicalKey(cWord);
+          const cLemma = normalizeLemmaKey(cWord);
+
+          const isDirectMatch = linkedIds.has(c.id);
+          const isCanonicalMatch = Boolean(targetCanonicalKey && cCanonical && cCanonical === targetCanonicalKey);
+          const isLemmaMatch = Boolean(targetLemmaKey && targetLemmaKey.length >= 2 && cLemma === targetLemmaKey);
+
+          if (isDirectMatch || isCanonicalMatch || isLemmaMatch) {
+            const syncedSibling: Flashcard = {
+              ...c,
+              ...srsUpdate,
+              updated_at: validCard.updated_at,
+            };
+            siblingUpdates.push({ id: c.id, card: syncedSibling });
+            return syncedSibling;
           }
           return c;
         });
@@ -2541,36 +2548,41 @@ export const useStore = create<DeckState>()((set, get) => ({
     const validCard = card;
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
     const targetLemmaKey = normalizeLemmaKey(rawWord);
+    const targetCanonicalKey = getCanonicalKey(rawWord);
+    const linkedIds = new Set<string>([
+      ...((validCard as any).linkedCardIds || []),
+      ...((targetCard as any).linkedCardIds || [])
+    ]);
     const siblingUpdates: { id: string; card: Flashcard }[] = [];
 
-    // 2. Обновляем состояние и IndexedDB (включая карточки-близнецы в других колодах при полном освоении)
+    // 2. Обновляем состояние и IndexedDB (включая карточки-близнецы в других колодах)
     set((state) => {
       const newDecks = state.decks.map((d) => {
         const updatedCards = d.cards.map((c) => {
-          if (c.id === cardId && d.id === deckId) {
+          if (c.id === cardId) {
             return card;
           }
-          if (
-            targetLemmaKey &&
-            targetLemmaKey.length >= 2 &&
-            (card.isArchived || (card.masteryLevel && card.masteryLevel >= 4)) &&
-            c.id !== cardId
-          ) {
-            const cWord = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
-            if (normalizeLemmaKey(cWord) === targetLemmaKey) {
-              const syncedSibling: Flashcard = {
-                ...c,
-                masteryLevel: card.masteryLevel,
-                isArchived: card.isArchived,
-                nextReviewDate: card.nextReviewDate,
-                interval: card.interval,
-                repetitions: card.repetitions,
-                easeFactor: card.easeFactor,
-                updated_at: card.updated_at,
-              };
-              siblingUpdates.push({ id: c.id, card: syncedSibling });
-              return syncedSibling;
-            }
+          const cWord = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+          const cCanonical = getCanonicalKey(cWord);
+          const cLemma = normalizeLemmaKey(cWord);
+
+          const isDirectMatch = linkedIds.has(c.id);
+          const isCanonicalMatch = Boolean(targetCanonicalKey && cCanonical && cCanonical === targetCanonicalKey);
+          const isLemmaMatch = Boolean(targetLemmaKey && targetLemmaKey.length >= 2 && cLemma === targetLemmaKey);
+
+          if (isDirectMatch || isCanonicalMatch || isLemmaMatch) {
+            const syncedSibling: Flashcard = {
+              ...c,
+              masteryLevel: card.masteryLevel,
+              isArchived: card.isArchived,
+              nextReviewDate: card.nextReviewDate,
+              interval: card.interval,
+              repetitions: card.repetitions,
+              easeFactor: card.easeFactor,
+              updated_at: card.updated_at,
+            };
+            siblingUpdates.push({ id: c.id, card: syncedSibling });
+            return syncedSibling;
           }
           return c;
         });
@@ -4735,12 +4747,17 @@ function RapidSession({
         }
       }));
     } else if (deckId) {
-      const deck = useStore.getState().decks.find(d => d.id === deckId);
+      const state = useStore.getState();
+      const deck = state.decks.find(d => d.id === deckId);
       if (deck) {
-        list = deck.cards.filter(c => !c.isArchived).map(c => ({ deckId, card: c }));
-        if (list.length === 0 && deck.cards.length > 0) {
-          list = deck.cards.map(c => ({ deckId, card: c }));
-        }
+        const masteredSet = buildMasteredCanonicalSet(
+          getMasteredWordEntries(state.appLanguage),
+          state.decks
+        );
+        const unmastered = deck.cards
+          .filter(c => !isCardCanonicalMastered(c, masteredSet))
+          .map(c => ({ deckId, card: c }));
+        list = unmastered.length > 0 ? unmastered : deck.cards.map(c => ({ deckId, card: c }));
       }
     }
     list = deduplicateCardsByLemma(list, false);
@@ -5151,13 +5168,18 @@ function StudyInterface({
       }));
     }
     if (deckId) {
-      const deck = useStore.getState().decks.find((d) => d.id === deckId);
+      const state = useStore.getState();
+      const deck = state.decks.find((d) => d.id === deckId);
       if (deck) {
-        const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
-        if (active.length > 0) {
-          return deduplicateCardsByLemma(active, false).sort(() => Math.random() - 0.5);
-        }
-        return deduplicateCardsByLemma(deck.cards.map(c => ({ deckId, card: c })), false).sort(() => Math.random() - 0.5);
+        const masteredSet = buildMasteredCanonicalSet(
+          getMasteredWordEntries(state.appLanguage),
+          state.decks
+        );
+        const unmastered = deck.cards
+          .filter((c) => !isCardCanonicalMastered(c, masteredSet))
+          .map(c => ({ deckId, card: c }));
+        const rawList = unmastered.length > 0 ? unmastered : deck.cards.map(c => ({ deckId, card: c }));
+        return deduplicateCardsByLemma(rawList, false).sort(() => Math.random() - 0.5);
       }
     }
     return [];
@@ -5166,10 +5188,15 @@ function StudyInterface({
   const [initialTotal, setInitialTotal] = useState(() => {
     if (reviewCards && reviewCards.length > 0) return deduplicateCardsByLemma(reviewCards, false).length;
     if (deckId) {
-      const deck = useStore.getState().decks.find((d) => d.id === deckId);
+      const state = useStore.getState();
+      const deck = state.decks.find((d) => d.id === deckId);
       if (deck) {
-        const active = deck.cards.filter((c) => !c.isArchived);
-        const source = active.length > 0 ? active : deck.cards;
+        const masteredSet = buildMasteredCanonicalSet(
+          getMasteredWordEntries(state.appLanguage),
+          state.decks
+        );
+        const unmastered = deck.cards.filter((c) => !isCardCanonicalMastered(c, masteredSet));
+        const source = unmastered.length > 0 ? unmastered : deck.cards;
         return deduplicateCardsByLemma(source, false).length;
       }
     }
@@ -5198,10 +5225,17 @@ function StudyInterface({
       setSessionMistakes([]);
       setTurn(t => t + 1);
     } else if (deckId) {
-      const deck = useStore.getState().decks.find((d) => d.id === deckId);
+      const state = useStore.getState();
+      const deck = state.decks.find((d) => d.id === deckId);
       if (deck) {
-        const active = deck.cards.filter((c) => !c.isArchived).map(c => ({ deckId, card: c }));
-        const rawList = active.length > 0 ? active : deck.cards.map(c => ({ deckId, card: c }));
+        const masteredSet = buildMasteredCanonicalSet(
+          getMasteredWordEntries(appLanguage || state.appLanguage),
+          decks
+        );
+        const unmastered = deck.cards
+          .filter((c) => !isCardCanonicalMastered(c, masteredSet))
+          .map(c => ({ deckId, card: c }));
+        const rawList = unmastered.length > 0 ? unmastered : deck.cards.map(c => ({ deckId, card: c }));
         const list = deduplicateCardsByLemma(rawList, false);
         setActiveCards(list.sort(() => Math.random() - 0.5));
         setInitialTotal(list.length);
@@ -7321,7 +7355,7 @@ BookCard.displayName = "BookCard";
 
 
 const DeckCard = React.memo(({ 
-  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onViewTheory, onStartDictation, onStartShadowing, onOpenStory
+  deck, isCompleted, activeTab, onCardClick, onRename, onDelete, onViewTheory, onStartDictation, onStartShadowing, onOpenStory, masteredSet
 }: { 
   deck: Deck; isCompleted: boolean; activeTab: string; 
   onCardClick: (id: string) => void; onRename?: (id: string, name: string) => void; 
@@ -7330,6 +7364,7 @@ const DeckCard = React.memo(({
   onStartDictation: (id: string) => void;
   onStartShadowing: (id: string) => void;
   onOpenStory?: (id: string) => void;
+  masteredSet?: Set<string>;
 }) => {
   const isVerbBook = deck.bookId === 'verbs-de';
   const books = useStore(state => state.books);
@@ -7350,7 +7385,7 @@ const DeckCard = React.memo(({
   const showTheoryButton = isGrammarTab && isStandardCloze;
 
   const total = deck.cards.length;
-  const mastered = deck.cards.filter(c => c.isArchived).length;
+  const mastered = deck.cards.filter(c => isCardCanonicalMastered(c, masteredSet)).length;
   const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
 
   return (
@@ -10310,6 +10345,10 @@ export default function App() {
   const [isPending, startTransition] = useTransition();
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder, dueCardsCount: _storeDueCardsCount, refreshDueCardsCount } = useStore();
   const [isMounted, setIsMounted] = useState(false);
+  const masteredCanonicalSet = useMemo(() => {
+    const entries = getMasteredWordEntries(appLanguage);
+    return buildMasteredCanonicalSet(entries, decks);
+  }, [appLanguage, decks]);
   const [isLoadingBooks, setIsLoadingBooks] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     try {
@@ -11172,6 +11211,77 @@ export default function App() {
       const isRedemittelMode = trainingMode === 'redemittel' || (activeBook?.title || '').toLowerCase().includes('redemittel');
       const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
 
+      const allDecks = useStore.getState().decks;
+      const targetLang = (activeBook?.language as any) || useStore.getState().appLanguage || 'DE';
+      const globalStatusMap = new Map<string, Partial<Flashcard>>();
+
+      // 1. Из матрицы / user_mastered_words
+      const masteredEntries = getMasteredWordEntries(targetLang);
+      for (const entry of masteredEntries) {
+        const raw = (entry as any).lemma || (entry as any).word || entry.originalWord;
+        const k = getCanonicalKey(raw);
+        if (k) {
+          globalStatusMap.set(k, {
+            masteryLevel: 4,
+            isArchived: true,
+            repetitions: 1,
+            interval: 1,
+            easeFactor: 2.5,
+            nextReviewDate: Date.now() + 86400000,
+            first_mastered_at: entry.created_at || new Date().toISOString(),
+          });
+        }
+      }
+
+      // 2. Из всех существующих колод
+      for (const d of allDecks) {
+        for (const c of d.cards || []) {
+          const raw = c.targetWord || (c as any).front || (c as any).word || (c as any).missingWord;
+          const k = getCanonicalKey(raw);
+          if (k) {
+            const existing = globalStatusMap.get(k);
+            const cScore = (c.isArchived ? 4 : 0) + (c.masteryLevel || 0);
+            const exScore = (existing?.isArchived ? 4 : 0) + (existing?.masteryLevel || 0);
+            if (!existing || cScore >= exScore) {
+              globalStatusMap.set(k, {
+                masteryLevel: c.masteryLevel ?? 0,
+                isArchived: Boolean(c.isArchived),
+                repetitions: c.repetitions ?? 0,
+                interval: c.interval ?? 0,
+                easeFactor: c.easeFactor ?? 2.5,
+                nextReviewDate: c.nextReviewDate ?? null,
+                first_mastered_at: c.first_mastered_at || existing?.first_mastered_at,
+              });
+            }
+          }
+        }
+      }
+
+      const seenDeckCanonicalKeys = new Set<string>();
+
+      const addCard = (cardData: Omit<Flashcard, 'id' | 'masteryLevel' | 'isArchived' | 'nextReviewDate' | 'interval' | 'repetitions'>) => {
+        const cKey = getCanonicalKey(cardData.targetWord);
+        if (cKey) {
+          if (seenDeckCanonicalKeys.has(cKey)) {
+            // Пропуск дубликата внутри одной колоды
+            return;
+          }
+          seenDeckCanonicalKeys.add(cKey);
+        }
+        const inherited = cKey ? globalStatusMap.get(cKey) : undefined;
+        cards.push({
+          ...cardData,
+          id: ensureUuid(),
+          masteryLevel: (inherited?.masteryLevel ?? 0) as any,
+          isArchived: Boolean(inherited?.isArchived),
+          nextReviewDate: inherited?.nextReviewDate ?? null,
+          interval: inherited?.interval ?? 0,
+          repetitions: inherited?.repetitions ?? 0,
+          easeFactor: inherited?.easeFactor ?? 2.5,
+          first_mastered_at: inherited?.first_mastered_at,
+        });
+      };
+
       lines.forEach((line, lineIndex) => {
         const delimiter = line.includes('\t') ? '\t' : (line.includes(';') ? ';' : ',');
         const parts = parseCSVLine(line, delimiter);
@@ -11188,30 +11298,18 @@ export default function App() {
         
         if (isPrepBookObj) {
           if (parts.length >= 4) {
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord: parts[0].trim(),
               sentence: `${parts[1].trim()} | ${parts[2].trim().toUpperCase()}`,
               translation: parts[3].trim(),
-              options: [parts[0].trim()],
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0
+              options: [parts[0].trim()]
             });
           } else if (parts.length >= 2) {
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord: parts[0].trim(),
               sentence: (parts[2] || parts[0]).trim(),
               translation: parts[1].trim(),
-              options: [parts[0].trim()],
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0
+              options: [parts[0].trim()]
             });
           }
         } else if (isVerbBookObj) {
@@ -11222,31 +11320,19 @@ export default function App() {
             const perfekt = parts[3].trim();
             const translation = parts[4].trim();
             
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord: infinitiv,
               sentence: "VERB_DRILL",
               translation: translation,
               options: [infinitiv],
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0,
               baseWordInfo: JSON.stringify({ infinitiv, praesens, praeteritum, perfekt })
             });
           } else if (parts.length >= 2) {
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord: parts[0].trim(),
               sentence: "VERB_DRILL",
               translation: parts[1].trim(),
-              options: [parts[0].trim()],
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0
+              options: [parts[0].trim()]
             });
           }
         } else if (isRedemittelMode) {
@@ -11316,17 +11402,11 @@ export default function App() {
             : (chunks.length > 0 ? chunks.join(' ') : (parts[0] || ''));
 
           if (fullText) {
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord: fullText,
               sentence: chunksStr || konstruktion || fullText,
               translation: translation || '—',
               options: [fullText],
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0,
               baseWordInfo: JSON.stringify({
                 chunks: chunks.length > 0 ? chunks : undefined,
                 fullText: fullText,
@@ -11344,18 +11424,12 @@ export default function App() {
              }
              
              let forms = parts.length >= 4 ? parts[3].trim() : undefined;
-             cards.push({
-                id: ensureUuid(),
+             addCard({
                 targetWord: parts[0].trim(),
                 sentence: rExample || '-',
                 translation: rTranslation || '—',
                 forms: forms,
-                options: [parts[0].trim()],
-                masteryLevel: 0,
-                isArchived: false,
-                nextReviewDate: null,
-                interval: 0,
-                repetitions: 0
+                options: [parts[0].trim()]
              });
           }
         } else {
@@ -11366,17 +11440,11 @@ export default function App() {
             const translation = parts[2].trim();
             const options = [targetWord, parts[3].trim(), parts[4].trim(), parts[5].trim()].sort(() => Math.random() - 0.5);
             const extraInfo = parts.length >= 7 && parts[6]?.trim() ? parts[6].trim() : null;
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord,
               sentence,
               translation,
               options,
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0,
               baseWordInfo: extraInfo,
               forms: extraInfo || undefined,
               hint: extraInfo || undefined
@@ -11386,34 +11454,22 @@ export default function App() {
             const sentence = parts[1].trim();
             const translation = parts[2].trim();
             const options = [targetWord, parts[3].trim(), parts[4].trim()].sort(() => Math.random() - 0.5);
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord,
               sentence,
               translation,
-              options,
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0
+              options
             });
           } else if (parts.length === 4) {
             const targetWord = parts[0].trim();
             const sentence = parts[1].trim();
             const translation = parts[2].trim();
             const extraInfo = parts[3].trim();
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord,
               sentence,
               translation,
               options: [targetWord],
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0,
               forms: extraInfo || undefined,
               hint: extraInfo || undefined
             });
@@ -11424,32 +11480,20 @@ export default function App() {
             if (cyr(sentence) && !cyr(translation)) {
               [sentence, translation] = [translation, sentence];
             }
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord,
               sentence: sentence || targetWord,
               translation: translation || '—',
-              options: [targetWord],
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0
+              options: [targetWord]
             });
           } else if (parts.length >= 2) {
             const targetWord = parts[0].trim();
             const translation = parts[1].trim();
-            cards.push({
-              id: ensureUuid(),
+            addCard({
               targetWord,
               sentence: targetWord,
               translation: translation || '—',
-              options: [targetWord],
-              masteryLevel: 0,
-              isArchived: false,
-              nextReviewDate: null,
-              interval: 0,
-              repetitions: 0
+              options: [targetWord]
             });
           }
         }
@@ -12003,13 +12047,23 @@ export default function App() {
 
                 const limit = visibleLimits[sectionKey] || 10;
                 const visibleDecks = sortedDecks.slice(0, limit);
-                const inProgressDecks = visibleDecks.filter(d => d.cards.length === 0 || d.cards.length !== d.cards.filter(c => c.isArchived).length);
-                const completedDecks = visibleDecks.filter(d => d.cards.length > 0 && d.cards.length === d.cards.filter(c => c.isArchived).length);
+                const inProgressDecks = visibleDecks.filter(d => {
+                  const total = d.cards.length;
+                  if (total === 0) return true;
+                  const masteredCount = d.cards.filter(c => isCardCanonicalMastered(c, masteredCanonicalSet)).length;
+                  return masteredCount < total;
+                });
+                const completedDecks = visibleDecks.filter(d => {
+                  const total = d.cards.length;
+                  if (total === 0) return false;
+                  const masteredCount = d.cards.filter(c => isCardCanonicalMastered(c, masteredCanonicalSet)).length;
+                  return masteredCount >= total;
+                });
                 const isExpanded = expandedCategories[sectionKey] || false;
 
                 const levelCards = sortedDecks.flatMap(d => d.cards || []);
-                const pendingLevelCards = levelCards.filter(c => (c.masteryLevel || 0) < 4 && !c.isArchived);
-                const isLevelCompleted = pendingLevelCards.length === 0;
+                const pendingLevelCards = levelCards.filter(c => !isCardCanonicalMastered(c, masteredCanonicalSet));
+                const isLevelCompleted = levelCards.length > 0 && pendingLevelCards.length === 0;
 
                 return (
                   <section key={sectionKey}>
@@ -12091,6 +12145,7 @@ export default function App() {
                                   onDelete={handleDeleteClick} 
                                   onViewTheory={handleViewTheory} 
                                   onOpenStory={handleOpenStory}
+                                  masteredSet={masteredCanonicalSet}
                                 />
                               </div>
                             ))}
@@ -12132,6 +12187,7 @@ export default function App() {
                                           onDelete={handleDeleteClick} 
                                           onViewTheory={handleViewTheory} 
                                           onOpenStory={handleOpenStory}
+                                          masteredSet={masteredCanonicalSet}
                                         />
                                       </div>
                                     ))}

@@ -14,6 +14,7 @@ export interface Flashcard {
   round?: number;
   isLegendary?: boolean;
   mistakeCount?: number;
+  linkedCardIds?: string[];
 }
 
 export interface Deck {

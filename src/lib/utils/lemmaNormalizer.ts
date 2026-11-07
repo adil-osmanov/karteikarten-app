@@ -1,3 +1,5 @@
+import { getCanonicalKey } from '@/lib/vocabulary/canonical';
+
 const SEPARABLE_PREFIXES = new Set([
   'ab', 'an', 'auf', 'aus', 'bei', 'ein', 'empor', 'entgegen', 'entlang', 'entzwei',
   'fern', 'fest', 'fort', 'frei', 'gegenüber', 'gleich', 'heim', 'her', 'herab',
@@ -56,7 +58,7 @@ export function normalizeLemmaKey(rawWord: string): string {
  * При обнаружении дубля выбирается карточка с более низким уровнем освоения (masteryLevel).
  */
 export function deduplicateCardsByLemma<
-  T extends { id?: string; targetWord?: string; front?: string; sentence?: string; card?: any }
+  T extends { id?: string; targetWord?: string; front?: string; sentence?: string; card?: any; linkedCardIds?: string[] }
 >(cards: T[], logDeduplication: boolean = true): T[] {
   if (!Array.isArray(cards) || cards.length === 0) return [];
 
@@ -66,8 +68,8 @@ export function deduplicateCardsByLemma<
   for (const card of cards) {
     if (!card) continue;
     const inner = (card as any).card ? (card as any).card : card;
-    const raw = inner.targetWord || inner.target_word || inner.front || inner.lemma || '';
-    const key = normalizeLemmaKey(raw);
+    const raw = inner.targetWord || inner.target_word || inner.front || inner.lemma || inner.word || inner.missingWord || inner.infinitive || '';
+    const key = getCanonicalKey(raw) || normalizeLemmaKey(raw);
 
     if (!key) {
       // Если по какой-то причине ключа нет, сохраняем по id
@@ -76,7 +78,19 @@ export function deduplicateCardsByLemma<
       continue;
     }
 
+    const currentId = inner.id || (card as any).id;
+
     if (!seen.has(key)) {
+      const initialIds: string[] = [];
+      if (currentId) initialIds.push(currentId);
+      if (Array.isArray(inner.linkedCardIds)) {
+        initialIds.push(...inner.linkedCardIds);
+      }
+      const uniqueIds = Array.from(new Set(initialIds));
+      inner.linkedCardIds = uniqueIds;
+      if ((card as any).card) {
+        (card as any).card.linkedCardIds = uniqueIds;
+      }
       seen.set(key, card);
     } else {
       // Если дубль уже встретился:
@@ -85,12 +99,24 @@ export function deduplicateCardsByLemma<
       const existingInner = (existing as any).card ? (existing as any).card : existing;
       const cardMastery = inner.masteryLevel ?? inner.mastery_level ?? 0;
       const existingMastery = existingInner.masteryLevel ?? existingInner.mastery_level ?? 0;
+      const existingId = existingInner.id || (existing as any).id;
+
+      const mergedIds = Array.from(new Set([
+        ...(existingInner.linkedCardIds || []),
+        ...(inner.linkedCardIds || []),
+        existingId,
+        currentId
+      ].filter(Boolean)));
 
       if (cardMastery < existingMastery) {
         removedDuplicates.push(`${existingInner.targetWord || existingInner.front || key} (ключ: "${key}")`);
+        inner.linkedCardIds = mergedIds;
+        if ((card as any).card) (card as any).card.linkedCardIds = mergedIds;
         seen.set(key, card);
       } else {
         removedDuplicates.push(`${raw} (ключ: "${key}")`);
+        existingInner.linkedCardIds = mergedIds;
+        if ((existing as any).card) (existing as any).card.linkedCardIds = mergedIds;
       }
     }
   }
