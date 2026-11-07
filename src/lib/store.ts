@@ -9,6 +9,9 @@ export interface Flashcard {
   options: string[]; 
   masteryLevel: 0 | 1 | 2 | 3 | 4;
   isArchived: boolean;
+  round?: number;
+  isLegendary?: boolean;
+  mistakeCount?: number;
 }
 
 export interface Deck {
