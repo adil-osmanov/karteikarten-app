@@ -35,7 +35,8 @@ import { AppleBookCover } from "@/components/AppleBookCover";
 import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
 import { CardEditorModal } from "@/components/CardEditorModal";
 import { formatSeparableWord, parseVerbComponents } from "@/lib/utils/formatSeparableWord";
-export { formatSeparableWord, parseVerbComponents };
+import { getCleanTranslation } from "@/lib/utils";
+export { formatSeparableWord, parseVerbComponents, getCleanTranslation };
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3549,7 +3550,7 @@ function RapidFlashcardMode({
   const [isErrorMismatch, setIsErrorMismatch] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [cardAnimClass, setCardAnimClass] = useState('opacity-100 scale-100');
+  const [cardAnimClass, setCardAnimClass] = useState('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
   const inputRef = useRef<HTMLInputElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -3574,7 +3575,7 @@ function RapidFlashcardMode({
     setTypedValue("");
     setIsErrorMismatch(false);
     setIsShaking(false);
-    setCardAnimClass('opacity-100 scale-100');
+    setCardAnimClass('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
     setIsTransitioning(false);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
   }, [currentCard?.id, currentCard?.round, currentCard?.isLegendary, progress, isReview, currentCard?.masteryLevel, currentCard?.isArchived]);
@@ -3726,11 +3727,13 @@ function RapidFlashcardMode({
       if (currentRound === 4) {
         setIsVaporizing(true);
         triggerHaptic('success');
+        setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
         setTimeout(() => {
           setIsVaporizing(false);
           setIsTransitioning(false);
+          setIsFlipped(false);
           onAnswer(true, false);
-        }, 420);
+        }, 160);
         return;
       }
 
@@ -3744,11 +3747,12 @@ function RapidFlashcardMode({
     }
 
     // Мягкое угасание (fade-out) текущей обратной стороны без обратного переворота
-    setCardAnimClass('opacity-0 scale-[0.97] transition-all duration-140 ease-out');
+    setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
 
     setTimeout(() => {
+      setIsFlipped(false);
       onAnswer(remembered, false);
-    }, 140);
+    }, 160);
   }, [locked, isTransitioning, currentRound, localMastery, onAnswer]);
 
   const toggleFlip = useCallback(() => {
@@ -3798,6 +3802,12 @@ function RapidFlashcardMode({
     if (isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
+    } else if (visualRound === 3) {
+      setVisualRound(2);
+      setIsLegendaryVisual(false);
+    } else {
+      setVisualRound(1);
+      setIsLegendaryVisual(false);
     }
 
     // Записываем эталонное немецкое слово прямо внутрь поля ввода (без дублирования управления)
@@ -3823,23 +3833,25 @@ function RapidFlashcardMode({
       setIsVaporizing(true);
       setIsTransitioning(true);
       triggerHaptic('success');
-      setCardAnimClass('opacity-0 blur-sm scale-[1.01] -translate-y-1 transition-all duration-250 ease-out');
+      setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
       setTimeout(() => {
         setIsVaporizing(false);
         setIsTransitioning(false);
+        setIsFlipped(false);
         setIsAnswered(false);
         setIsSurrendered(false);
         setTypedValue('');
         setIsErrorMismatch(false);
         onAnswer(true, false, false);
-      }, 250);
+      }, 160);
       return;
     }
 
     setIsTransitioning(true);
-    setCardAnimClass('opacity-0 scale-[0.97] transition-all duration-140 ease-out');
+    setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
 
     setTimeout(() => {
+      setIsFlipped(false);
       setIsAnswered(false);
       setIsSurrendered(false);
       setTypedValue('');
@@ -3855,7 +3867,7 @@ function RapidFlashcardMode({
       } else {
         onAnswer(true, false, false);
       }
-    }, 140);
+    }, 160);
   }, [isAnswered, isTransitioning, isSurrendered, currentRound, localMastery, onHintPenalty, onAnswer]);
 
   // Проверка совпадения ввода с целевым словом или всей фразой
@@ -4058,7 +4070,7 @@ function RapidFlashcardMode({
           <div
             onClick={handleCardClick}
             className={cn(
-              "w-full min-h-[500px] h-[500px] relative cursor-pointer transform-style-3d",
+              "w-full min-h-[480px] h-[480px] relative cursor-pointer transform-style-3d",
               isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
             style={{
@@ -4187,24 +4199,14 @@ function RapidFlashcardMode({
 
                 <div className="space-y-1">
                   <p className="text-lg md:text-xl text-neutral-600 dark:text-neutral-300 font-normal">
-                    {currentCard?.translation || currentCard?.hint}
+                    {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
                   </p>
-                  {currentCard?.additionalTranslations && currentCard.additionalTranslations.length > 0 && (
-                    <p className="text-xs sm:text-sm text-neutral-400 dark:text-neutral-500 font-normal">
-                      auch: {currentCard.additionalTranslations.join(' • ')}
-                    </p>
-                  )}
                 </div>
 
                 {/* Чистая цитата примера */}
                 {displaySentence && (
                   <div className="text-sm text-neutral-500 dark:text-neutral-400 max-w-lg mt-2 italic font-normal leading-relaxed select-text">
                     {displaySentence}
-                  </div>
-                )}
-                {currentCard?.alternateExamples && currentCard.alternateExamples.length > 0 && (
-                  <div className="text-xs text-neutral-400 dark:text-neutral-500 max-w-lg mt-1 italic font-normal leading-relaxed select-text">
-                    {currentCard.alternateExamples[0]}
                   </div>
                 )}
               </div>
@@ -4272,7 +4274,7 @@ function RapidFlashcardMode({
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
             <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white mb-8 max-w-lg">
-              {currentCard?.translation || currentCard?.hint}
+              {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
             </h2>
 
             {effectivePrefix ? (
@@ -6136,6 +6138,8 @@ function StudyCard({
   };
 
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [cardAnimClass, setCardAnimClass] = useState('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
   const [isVaporizing, setIsVaporizing] = useState(false);
@@ -6157,11 +6161,13 @@ function StudyCard({
 
   useEffect(() => {
     setPhase("Question");
+    setSelectedOption(null);
     setInputText("");
     setHasErrored(false);
     hasErroredRef.current = false;
     setIsVaporizing(false);
     setIsTransitionLocked(false);
+    setCardAnimClass('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     if (transitionTimerRef.current) {
@@ -6287,7 +6293,7 @@ function StudyCard({
   }, [card.id, card.options, card.targetWord, clozeWord]);
 
   const isRecognitionMode = !forceInputMode && !isReview && effectiveRound <= 2;
-  const isMultipleChoice = isRecognitionMode && phase === "Question";
+  const isMultipleChoice = isRecognitionMode;
 
   useEffect(() => {
     if (phase !== "Question") return;
@@ -6319,22 +6325,22 @@ function StudyCard({
 
   const handleAdvanceNext = useCallback(() => {
     if (isTransitionLocked) return;
+    setIsTransitionLocked(true);
 
     const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
     if (willBeVaporized) {
       setLocalMastery(4);
       setIsVaporizing(true);
-      setIsTransitionLocked(true);
       triggerHaptic('success');
-      transitionTimerRef.current = setTimeout(() => {
-        setIsVaporizing(false);
-        setIsTransitionLocked(false);
-        onNext();
-      }, 250);
-      return;
     }
 
-    onNext();
+    setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
+
+    transitionTimerRef.current = setTimeout(() => {
+      setIsVaporizing(false);
+      setIsTransitionLocked(false);
+      onNext();
+    }, 160);
   }, [isTransitionLocked, currentRound, onNext]);
 
   const handleReveal = useCallback(() => {
@@ -6363,17 +6369,24 @@ function StudyCard({
 
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
+    setSelectedOption(option);
     const correct = checkAnswer(option, card.targetWord) || checkAnswer(option, clozeWord);
     
     // 1. Фиксируем результат без автопереключения
     setPhase("Answer");
 
     if (!correct) {
-      setLocalMastery(2); // Штраф при ошибке: ранг сбрасывается до 3 раунда (синий)
+      setLocalMastery(2); // Штраф при ошибке: ранг сбрасывается
       setHasErrored(true);
       hasErroredRef.current = true;
       if (isLegendary || isLegendaryVisual || visualRound >= 4) {
         setVisualRound(3);
+        setIsLegendaryVisual(false);
+      } else if (visualRound === 3) {
+        setVisualRound(2);
+        setIsLegendaryVisual(false);
+      } else {
+        setVisualRound(1);
         setIsLegendaryVisual(false);
       }
       playSafeAudio(() => playErrorSound());
@@ -6411,11 +6424,18 @@ function StudyCard({
   const handleHilfe = () => {
     // 1. Показываем ответ без автопереключения
     setPhase("Answer");
-    setLocalMastery(2); // Штраф при сдаче: ранг сбрасывается до 3 раунда (синий)
+    setSelectedOption('__surrender__');
+    setLocalMastery(2); // Штраф при сдаче
     setHasErrored(true);
     hasErroredRef.current = true;
     if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
+      setIsLegendaryVisual(false);
+    } else if (visualRound === 3) {
+      setVisualRound(2);
+      setIsLegendaryVisual(false);
+    } else {
+      setVisualRound(1);
       setIsLegendaryVisual(false);
     }
     setInputText(clozeWord || card.targetWord || "");
@@ -6630,6 +6650,7 @@ function StudyCard({
         isSealed={isMasteredGolden || isVaporizing}
         isLegendary={isLegendaryVisual}
         isVaporizing={isVaporizing}
+        className={cn(cardAnimClass)}
         onClick={() => {
           if (!isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -6777,18 +6798,8 @@ function StudyCard({
 
           <div className="w-full text-center">
             <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal text-center transition-colors max-w-2xl mx-auto leading-relaxed">
-              {card.translation ? card.translation.replace(/\s+([.,!?;:])/g, '$1') : ''}
+              {getCleanTranslation(card.translation)}
             </p>
-            {card.additionalTranslations && card.additionalTranslations.length > 0 && (
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 font-normal text-center mt-1">
-                auch: {card.additionalTranslations.join(' • ')}
-              </p>
-            )}
-            {isAnswered && card.alternateExamples && card.alternateExamples.length > 0 && (
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 font-normal italic text-center mt-1">
-                {card.alternateExamples[0]}
-              </p>
-            )}
 
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
               <div className="mt-4 flex flex-col items-center gap-1.5 transition-opacity duration-200">
@@ -6828,6 +6839,47 @@ function StudyCard({
                   </button>
                 );
               })}
+            </div>
+          ) : isMultipleChoice && phase === "Answer" && selectedOption !== null ? (
+            <div className="flex flex-col items-center gap-3 w-full">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                {resolvedOptions.map((opt, idx) => {
+                  const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
+                  const isOptCorrect = checkAnswer(opt, card.targetWord) || checkAnswer(opt, clozeWord);
+                  const isOptSelected = opt === selectedOption;
+
+                  let optClasses = "w-full py-3 px-4 rounded-2xl flex items-center justify-between text-left font-medium text-sm md:text-base border shadow-sm transition-all ";
+                  if (isOptCorrect) {
+                    optClasses += "border-emerald-500/60 bg-emerald-500/15 text-emerald-400";
+                  } else if (isOptSelected) {
+                    optClasses += "border-rose-500/60 bg-rose-500/15 text-rose-300";
+                  } else {
+                    optClasses += "opacity-40 border-black/5 dark:border-white/5 text-neutral-400 dark:text-neutral-500";
+                  }
+
+                  return (
+                    <div
+                      key={`${opt}-${idx}`}
+                      className={optClasses}
+                    >
+                      <span className="truncate pr-2">{displayOpt}</span>
+                      <span className="text-xs opacity-60 px-2 py-0.5 rounded-md font-mono shrink-0">
+                        {idx + 1}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                ref={nextButtonRef}
+                type="button"
+                disabled={isTransitionLocked}
+                onClick={isTransitionLocked ? undefined : handleAdvanceNext}
+                className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center cursor-pointer border-0 select-none disabled:opacity-80"
+                style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
+              >
+                Weiter
+              </button>
             </div>
           ) : phase === "Answer" ? (
             <button
@@ -9547,6 +9599,12 @@ function PrepStudyCard({
        if (isLegendary || isLegendaryVisual || visualRound >= 4) {
          setVisualRound(3);
          setIsLegendaryVisual(false);
+       } else if (visualRound === 3) {
+         setVisualRound(2);
+         setIsLegendaryVisual(false);
+       } else {
+         setVisualRound(1);
+         setIsLegendaryVisual(false);
        }
        playSafeAudio(() => playErrorSound());
        setWrongKasus(selected);
@@ -9562,6 +9620,12 @@ function PrepStudyCard({
     setIsSuccess(true);
     if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
+      setIsLegendaryVisual(false);
+    } else if (visualRound === 3) {
+      setVisualRound(2);
+      setIsLegendaryVisual(false);
+    } else {
+      setVisualRound(1);
       setIsLegendaryVisual(false);
     }
     playSafeAudio(() => playAudio());
@@ -9652,7 +9716,7 @@ function PrepStudyCard({
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
         <div className="text-center mb-10 w-full mt-10">
           <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
-            {translation}
+            {getCleanTranslation(translation)}
           </h2>
         </div>
 
@@ -9858,6 +9922,12 @@ function VerbStudyCard({
     if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
+    } else if (visualRound === 3) {
+      setVisualRound(2);
+      setIsLegendaryVisual(false);
+    } else {
+      setVisualRound(1);
+      setIsLegendaryVisual(false);
     }
     playSafeAudio(() => playAudio());
     try {
@@ -9919,7 +9989,7 @@ function VerbStudyCard({
             {displayInfinitiv}
           </h2>
           <p className="text-[13px] sm:text-sm text-zinc-600 dark:text-zinc-400 font-medium">
-            {card.translation}
+            {getCleanTranslation(card.translation)}
           </p>
         </div>
 
@@ -10295,6 +10365,12 @@ export function RedemittelStudyCard({
     if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
+    } else if (visualRound === 3) {
+      setVisualRound(2);
+      setIsLegendaryVisual(false);
+    } else {
+      setVisualRound(1);
+      setIsLegendaryVisual(false);
     }
     const correctOrder = [...data.shuffledChunks].sort((a, b) => a.originalIndex - b.originalIndex);
     setPlacedChunks(correctOrder);
@@ -10422,7 +10498,7 @@ export function RedemittelStudyCard({
           showTranslation ? "opacity-100" : "opacity-0 pointer-events-none"
         )}>
           <h2 className="text-lg md:text-xl font-medium text-zinc-900 dark:text-white tracking-tight select-none">
-            {data.translation || "Русский перевод отсутствует"}
+            {getCleanTranslation(data.translation) || "Русский перевод отсутствует"}
           </h2>
         </div>
 
