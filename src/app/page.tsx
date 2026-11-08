@@ -35,6 +35,8 @@ import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
 import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots, getRarityShadowClasses } from "@/components/CardContainer";
 import { CardEditorModal } from "@/components/CardEditorModal";
+import { CategoryTabs, getTabsForLanguage, type TabConfig } from "@/components/CategoryTabs";
+export { CategoryTabs, getTabsForLanguage, type TabConfig };
 import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX } from "@/lib/utils/formatSeparableWord";
 import { getCleanTranslation } from "@/lib/utils";
 import {
@@ -7606,77 +7608,6 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
 
 
 
-export interface TabConfig {
-  id: 'textbooks' | 'flashcards' | 'structures';
-  label: string;
-}
-
-export const getTabsForLanguage = (lang?: string): TabConfig[] => {
-  const normalizedLang = (lang || 'de').toLowerCase();
-
-  if (normalizedLang === 'de') {
-    return [
-      { id: 'textbooks', label: 'Lehrbücher' },
-      { id: 'flashcards', label: 'Karteikarten' },
-      { id: 'structures', label: 'Strukturen & NVV' }, // Только для немецкого языка
-    ];
-  }
-
-  if (normalizedLang === 'ru') {
-    return [
-      { id: 'textbooks', label: 'Учебники' },
-      { id: 'flashcards', label: 'Флешкарты' },
-    ];
-  }
-
-  // Дефолт / English
-  return [
-    { id: 'textbooks', label: 'Textbooks' },
-    { id: 'flashcards', label: 'Flashcards' },
-  ];
-};
-
-export const CategoryTabs = React.memo(function CategoryTabs({
-  tabs,
-  activeCategory,
-  onSelectCategory,
-}: {
-  tabs: TabConfig[];
-  activeCategory: 'textbooks' | 'flashcards' | 'structures';
-  onSelectCategory: (id: 'textbooks' | 'flashcards' | 'structures') => void;
-}) {
-  return (
-    <div className="w-full flex justify-center mt-4 sm:mt-6 mb-6 sm:mb-8 px-4">
-      <div 
-        role="tablist"
-        aria-label="Kategorien"
-        className="relative inline-flex items-center p-1 rounded-full bg-neutral-900/60 dark:bg-neutral-900/60 border border-white/10 backdrop-blur-xl isolate transform-gpu select-none"
-      >
-        {tabs.map((tab) => {
-          const isActive = activeCategory === tab.id;
-          return (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={isActive}
-              type="button"
-              onClick={() => onSelectCategory(tab.id)}
-              className={cn(
-                "relative z-10 px-5 py-1.5 rounded-full text-xs font-medium transition-colors duration-150 select-none outline-none cursor-pointer",
-                isActive
-                  ? "text-white bg-white/15 shadow-[0_1px_3px_rgba(0,0,0,0.3)]"
-                  : "text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.06]"
-              )}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-});
-
 export function getBookCategory(book?: BookMeta | null): 'textbooks' | 'flashcards' | 'structures' {
   if (!book) return 'textbooks';
   if (book.category === 'textbooks' || book.category === 'coursebook') return 'textbooks';
@@ -10979,13 +10910,8 @@ export default function App() {
   }, []);
   const handleBookEdit = useCallback((id: string) => setBookModal({ id }), []);
   const handleBookDelete = useCallback((id: string, title: string) => setDeleteBookModal({ id, title }), []);
-
-  const catalogContainerRef = useRef<HTMLDivElement>(null);
-  const handleCatalogMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!catalogContainerRef.current) return;
-    const rect = catalogContainerRef.current.getBoundingClientRect();
-    catalogContainerRef.current.style.setProperty('--mouse-x', `${e.clientX - rect.left}px`);
-    catalogContainerRef.current.style.setProperty('--mouse-y', `${e.clientY - rect.top}px`);
+  const handleCategoryTabChange = useCallback((tabId: 'textbooks' | 'flashcards' | 'structures') => {
+    setActiveCategory(tabId);
   }, []);
 
   useEffect(() => {
@@ -12509,31 +12435,18 @@ export default function App() {
 
       <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-28 overflow-x-hidden">
         {!activeBookId ? (
-          <div 
-            ref={catalogContainerRef}
-            onMouseMove={handleCatalogMouseMove}
-            className="group/shelf relative pb-16"
-          >
+          <div className="relative pb-16">
             {/* Студийный свет сверху (Gallery Spotlight) */}
             <div 
               className="absolute -top-12 inset-x-0 h-[450px] pointer-events-none -z-10 bg-[radial-gradient(ellipse_60%_40%_at_50%_0%,rgba(0,0,0,0.015)_0%,transparent_100%)] dark:bg-[radial-gradient(ellipse_60%_40%_at_50%_0%,rgba(255,255,255,0.04)_0%,transparent_100%)]" 
               aria-hidden="true"
             />
-
-            {/* Интерактивный блуждающий свет за курсором */}
-            <div 
-              className="absolute inset-0 pointer-events-none opacity-0 group-hover/shelf:opacity-100 transition-opacity duration-700 -z-10"
-              style={{
-                background: `radial-gradient(600px circle at var(--mouse-x, 0px) var(--mouse-y, 0px), rgba(255, 255, 255, 0.018), transparent 70%)`
-              }}
-              aria-hidden="true"
-            />
             
-            {/* Dynamic Apple Segmented Control with i18n (Apple Glass Segment) - Memoized Anti-flicker */}
+            {/* Dynamic Apple Segmented Control with i18n - Memoized Anti-flicker */}
             <CategoryTabs
-              tabs={getTabsForLanguage(appLanguage)}
-              activeCategory={activeCategory}
-              onSelectCategory={setActiveCategory}
+              activeTab={activeCategory}
+              onTabChange={handleCategoryTabChange}
+              language={appLanguage}
             />
 
             {/* Единая абсолютно симметричная сетка книг для выбранной категории */}
