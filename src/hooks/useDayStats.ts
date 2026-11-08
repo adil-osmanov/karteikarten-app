@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase, safeUpsertUserStats } from '@/lib/supabase';
+import { supabase, safeUpsertUserStats, safeFetchUserStats, saveUserDayStats } from '@/lib/supabase';
 
 export interface DailyStats {
   date: string;
@@ -284,14 +284,7 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
 export async function fetchStatsFromSupabase(lang: string): Promise<DailyStats | null> {
   try {
     const normLang = normalizeLanguage(lang);
-    const { data, error } = await supabase
-      .from('user_stats')
-      .select('daily_activity')
-      .eq('language', `DAY_STATS_${normLang}`)
-      .maybeSingle();
-
-    if (error || !data || !data.daily_activity) return null;
-    const raw = data.daily_activity;
+    const raw = await safeFetchUserStats(`DAY_STATS_${normLang}`);
     if (raw && typeof raw === 'object') {
       return raw as DailyStats;
     }

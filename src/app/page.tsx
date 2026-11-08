@@ -17,7 +17,7 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { supabase, safeUpsertUserStats } from "@/lib/supabase";
+import { supabase, safeUpsertUserStats, safeFetchUserStats, saveUserDayStats } from "@/lib/supabase";
 import ReactMarkdown from "react-markdown";
 import { VirtualKeyboard } from "@/components/VirtualKeyboard";
 import { MobileKeyboard } from "@/components/MobileKeyboard";
@@ -264,12 +264,9 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
   let dailyRowActivity: any = null;
 
   try {
-    const { data, error } = await supabase
-      .from('user_stats')
-      .select('language, daily_activity')
-      .in('language', [`DAILY_STATS_${upperLang}`, upperLang, `DAY_STATS_${upperLang}`]);
+    const data = await safeFetchUserStats([`DAILY_STATS_${upperLang}`, upperLang, `DAY_STATS_${upperLang}`]);
 
-    if (!error && data && Array.isArray(data)) {
+    if (data && Array.isArray(data)) {
       const dailyRow = data.find(r => r.language === `DAILY_STATS_${upperLang}`);
       const histRow = data.find(r => r.language === upperLang);
       const dayRow = data.find(r => r.language === `DAY_STATS_${upperLang}`);
@@ -11114,16 +11111,12 @@ export default function App() {
       } catch (e) {}
 
       try {
-        const { data } = await supabase
-          .from('user_stats')
-          .select('daily_activity')
-          .eq('language', `STORY_${deckId}`)
-          .maybeSingle();
+        const storyActivity = await safeFetchUserStats(`STORY_${deckId}`);
 
-        if (data?.daily_activity?.dialogue || data?.daily_activity?.paragraphs) {
-          setStoryData(data.daily_activity);
+        if (storyActivity?.dialogue || storyActivity?.paragraphs) {
+          setStoryData(storyActivity);
           try {
-            localStorage.setItem(`story_${deckId}`, JSON.stringify(data.daily_activity));
+            localStorage.setItem(`story_${deckId}`, JSON.stringify(storyActivity));
           } catch (e) {}
           return;
         }
@@ -11321,8 +11314,8 @@ export default function App() {
           supabase.from('books').select('*').order('created_at', { ascending: true }),
           supabase.from('decks').select('*').order('created_at', { ascending: true }),
           fetchSupabaseCardsCount(),
-          supabase.from('user_stats').select('language, daily_activity').in('language', ['DE', 'EN', 'RU', 'DAY_STATS_DE', 'DAY_STATS_EN', 'DAY_STATS_RU', 'GLOBAL_APP_STATE'])
-        ]).then(([booksRes, decksRes, count, statsRes]) => ({ booksRes, decksRes, count, statsRes }));
+          safeFetchUserStats(['DE', 'EN', 'RU', 'DAY_STATS_DE', 'DAY_STATS_EN', 'DAY_STATS_RU', 'GLOBAL_APP_STATE'])
+        ]).then(([booksRes, decksRes, count, statsList]) => ({ booksRes, decksRes, count, statsRes: { data: statsList } }));
 
         const { booksRes, decksRes, count, statsRes } = await Promise.race([fetchPromise, timeoutPromise]);
 

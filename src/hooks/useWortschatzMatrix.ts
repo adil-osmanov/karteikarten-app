@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { supabase, safeUpsertUserStats } from '@/lib/supabase';
+import { supabase, safeUpsertUserStats, safeFetchUserStats } from '@/lib/supabase';
 import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
 import { CEFRLevel, detectWordLevel } from '@/lib/vocabulary/cefrLevelDetector';
 import { getIDBItem, setIDBItem } from '@/hooks/useDayStats';
@@ -622,14 +622,10 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
 
     // 0. Загружаем снимок слов из user_stats (работает для всех клиентов без обязательной auth-сессии)
     try {
-      const { data: statsRow } = await supabase
-        .from('user_stats')
-        .select('daily_activity')
-        .eq('language', `MASTERED_WORDS_${lang.toUpperCase()}`)
-        .maybeSingle();
+      const statsDaily = await safeFetchUserStats(`MASTERED_WORDS_${lang.toUpperCase()}`);
 
-      if (statsRow?.daily_activity?.entries && Array.isArray(statsRow.daily_activity.entries)) {
-        for (const item of statsRow.daily_activity.entries) {
+      if (statsDaily?.entries && Array.isArray(statsDaily.entries)) {
+        for (const item of statsDaily.entries) {
           if (item && item.originalWord) {
             const key = normalizeLemmaKey(item.originalWord);
             if (key && key.length >= 2 && !existingMap.has(key)) {
