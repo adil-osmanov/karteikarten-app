@@ -4217,7 +4217,7 @@ function RapidFlashcardMode({
     <div 
       key={currentCard?.id || (currentCard as any)?.front} 
       className={cn(
-        "relative w-full max-w-3xl min-h-[480px] h-[480px] rounded-3xl transition-all duration-150 ease-out flex flex-col justify-between items-center select-none",
+        "relative w-full max-w-4xl lg:max-w-5xl h-[70vh] min-h-[560px] max-h-[720px] rounded-[36px] transition-all duration-150 ease-out flex flex-col justify-between items-center select-none",
         isTransitioning
           ? 'opacity-0 scale-[0.985] blur-md pointer-events-none'
           : 'opacity-100 scale-100 blur-0'
@@ -4228,14 +4228,14 @@ function RapidFlashcardMode({
            РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
            ======================================================= */
         <div 
-          className="w-full max-w-3xl flex flex-col items-center perspective-1000"
+          className="w-full max-w-4xl lg:max-w-5xl h-full flex flex-col items-center perspective-1000"
           style={{ perspective: 1000, WebkitPerspective: 1000 }}
         >
           {/* 3D Оболочка */}
           <div
             onClick={handleCardClick}
             className={cn(
-              "w-full min-h-[480px] h-[480px] relative cursor-pointer transform-style-3d",
+              "w-full h-full relative cursor-pointer transform-style-3d",
               isTransitioning ? 'transition-none duration-0' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
             style={{
@@ -4270,7 +4270,7 @@ function RapidFlashcardMode({
                   className={AUDIO_BUTTON_CLASSES}
                   title="Aussprache anhören (R)"
                 >
-                  <Volume2 className="w-4 h-4"/>
+                  <Volume2 className="w-5 h-5"/>
                 </button>
                 <div className="flex items-center gap-2">
                   <button
@@ -4279,23 +4279,23 @@ function RapidFlashcardMode({
                       e.stopPropagation();
                       setIsEditModalOpen(true);
                     }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-2 rounded-xl text-neutral-500 hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
                     title="Karte bearbeiten"
                   >
-                    <Pencil className="w-3.5 h-3.5" />
+                    <Pencil className="w-4 h-4" />
                   </button>
                   <ProgressDots level={visualRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryVisual} />
                 </div>
               </div>
 
-              {/* Центр: Слово + Множественное число */}
+              {/* Центр: Слово + Множественное число / Формы */}
               <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto space-y-4 select-text">
-                <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+                <h2 className="text-4xl md:text-5xl lg:text-[54px] font-semibold tracking-tight text-neutral-900 dark:text-[#F5F5F7] leading-tight">
                   {article && <span className={getArticleColor(article)}>{article} </span>}
                   {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                 </h2>
                 {plural && (
-                  <p className="text-sm font-normal text-neutral-500 dark:text-neutral-400 tracking-normal">
+                  <p className="text-base md:text-lg font-normal tracking-normal text-center mt-4 opacity-60 text-neutral-500 dark:text-neutral-400">
                     {plural}
                   </p>
                 )}
@@ -4330,7 +4330,7 @@ function RapidFlashcardMode({
                   className={AUDIO_BUTTON_CLASSES}
                   title="Aussprache anhören (R)"
                 >
-                  <Volume2 className="w-4 h-4"/>
+                  <Volume2 className="w-5 h-5"/>
                 </button>
                 <div className="flex items-center gap-2">
                   <button
@@ -4339,10 +4339,10 @@ function RapidFlashcardMode({
                       e.stopPropagation();
                       setIsEditModalOpen(true);
                     }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-2 rounded-xl text-neutral-500 hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
                     title="Karte bearbeiten"
                   >
-                    <Pencil className="w-3.5 h-3.5" />
+                    <Pencil className="w-4 h-4" />
                   </button>
                   <ProgressDots level={visualRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryVisual} />
                 </div>
@@ -4350,27 +4350,27 @@ function RapidFlashcardMode({
 
               {/* Центр: Слово, перевод, чистый пример */}
               <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto space-y-4 select-text">
-                <div className="space-y-1">
-                  <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+                <div className="space-y-2">
+                  <h2 className="text-4xl md:text-5xl lg:text-[54px] font-semibold tracking-tight text-neutral-900 dark:text-[#F5F5F7] leading-tight">
                     {article && <span className={getArticleColor(article)}>{article} </span>}
                     {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                   </h2>
                   {plural && (
-                    <p className="text-sm font-normal text-neutral-500 dark:text-neutral-400 tracking-normal">
+                    <p className="text-base md:text-lg font-normal tracking-normal text-center mt-2 opacity-60 text-neutral-500 dark:text-neutral-400">
                       {plural}
                     </p>
                   )}
                 </div>
 
-                <div className="space-y-1">
-                  <p className="text-lg md:text-xl text-neutral-600 dark:text-neutral-300 font-normal">
+                <div className="pt-2">
+                  <p className="text-2xl md:text-3xl font-medium text-neutral-700 dark:text-neutral-200">
                     {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
                   </p>
                 </div>
 
                 {/* Чистая цитата примера */}
                 {displaySentence && (
-                  <div className="text-sm text-neutral-500 dark:text-neutral-400 max-w-lg mt-2 italic font-normal leading-relaxed select-text">
+                  <div className="text-base md:text-lg text-neutral-500 dark:text-neutral-400 max-w-2xl mt-4 italic font-normal leading-relaxed select-text">
                     {displaySentence}
                   </div>
                 )}
@@ -4438,20 +4438,20 @@ function RapidFlashcardMode({
             className="my-auto w-full flex flex-col items-center text-center select-text"
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
-            <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white mb-8 max-w-lg">
+            <h2 className="text-3xl md:text-4xl lg:text-[42px] font-semibold tracking-tight text-neutral-900 dark:text-[#F5F5F7] mb-8 max-w-2xl leading-tight">
               {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
             </h2>
 
             {effectivePrefix ? (
-              <div className="w-full max-w-xl flex flex-wrap items-center justify-center gap-x-3.5 gap-y-2.5">
-                <span className="text-xl sm:text-2xl font-medium text-zinc-600 dark:text-zinc-400 tracking-normal select-none whitespace-nowrap">
+              <div className="w-full max-w-2xl flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
+                <span className="text-2xl md:text-3xl font-medium text-neutral-500 dark:text-neutral-400 tracking-normal select-none whitespace-nowrap">
                   {effectivePrefix}
                 </span>
                 <div className="inline-flex items-center justify-center">
                   <div
                     onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                     className={cn(
-                      "relative inline-flex items-center justify-center min-h-[58px] px-6 py-2.5 rounded-2xl whitespace-nowrap overflow-hidden transition-all outline-none border cursor-text min-w-[200px]",
+                      "relative inline-flex items-center justify-center min-h-[64px] h-[64px] px-8 py-3 rounded-2xl md:rounded-full min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all outline-none border cursor-text",
                       isMobile && "select-none",
                       isAnswered
                         ? (!isSurrendered
@@ -4459,18 +4459,16 @@ function RapidFlashcardMode({
                             : "border-red-500/40 text-red-400 bg-red-500/5 font-semibold")
                         : isErrorMismatch
                           ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                          : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60 font-semibold",
+                          : "text-neutral-900 dark:text-white border-black/10 dark:border-white/10 bg-black/[0.03] dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60 font-semibold",
                       isShaking && "animate-shake"
                     )}
                   >
                     {isAnswered ? (
                       <div className={cn(
-                        "inline-flex items-center justify-center font-bold tracking-wide select-none whitespace-nowrap",
+                        "inline-flex items-center justify-center font-semibold tracking-wide select-none whitespace-nowrap",
                         displayParts.totalLength > 22
-                          ? 'text-lg sm:text-xl'
-                          : displayParts.totalLength > 14
                           ? 'text-xl sm:text-2xl'
-                          : 'text-2xl sm:text-[28px]',
+                          : 'text-2xl md:text-3xl',
                         !isSurrendered ? 'text-emerald-400' : 'text-red-400'
                       )}>
                         {formatSeparableWord(
@@ -4498,12 +4496,10 @@ function RapidFlashcardMode({
                           style={{ caretColor: 'transparent' }}
                           className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
                         />
-                        <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap ${
+                        <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-semibold ${
                           displayParts.totalLength > 22
-                            ? 'text-lg sm:text-xl'
-                            : displayParts.totalLength > 14
                             ? 'text-xl sm:text-2xl'
-                            : 'text-2xl sm:text-[28px]'
+                            : 'text-2xl md:text-3xl'
                         }`}>
                           {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
                           <span>{displayParts.prefix}</span>
@@ -4515,17 +4511,17 @@ function RapidFlashcardMode({
                   </div>
                 </div>
                 {parsedTarget.suffixContext && (
-                  <span className="text-xl sm:text-2xl font-medium text-zinc-400 dark:text-zinc-500 tracking-normal select-none whitespace-nowrap">
+                  <span className="text-2xl md:text-3xl font-medium text-neutral-400 dark:text-neutral-500 tracking-normal select-none whitespace-nowrap">
                     {parsedTarget.suffixContext}
                   </span>
                 )}
               </div>
             ) : (
-              <div className="w-full max-w-lg flex items-center justify-center">
+              <div className="w-full max-w-xl flex items-center justify-center">
                 <div
                   onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                   className={cn(
-                    "relative inline-flex items-center justify-center min-h-[58px] px-6 py-2.5 rounded-2xl whitespace-nowrap overflow-hidden transition-all outline-none border cursor-text min-w-[220px]",
+                    "relative inline-flex items-center justify-center min-h-[64px] h-[64px] px-8 py-3 rounded-2xl md:rounded-full min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all outline-none border cursor-text",
                     isMobile && "select-none",
                     isAnswered
                       ? (!isSurrendered
@@ -4533,18 +4529,16 @@ function RapidFlashcardMode({
                           : "border-red-500/40 text-red-400 bg-red-500/5 font-semibold")
                       : isErrorMismatch
                         ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                        : "text-zinc-900 dark:text-white border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60 font-semibold",
+                        : "text-neutral-900 dark:text-white border-black/10 dark:border-white/10 bg-black/[0.03] dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60 font-semibold",
                     isShaking && "animate-shake"
                   )}
                 >
                   {isAnswered ? (
                     <div className={cn(
-                      "inline-flex items-center justify-center font-bold tracking-wide select-none whitespace-nowrap",
+                      "inline-flex items-center justify-center font-semibold tracking-wide select-none whitespace-nowrap",
                       displayParts.totalLength > 22
-                        ? 'text-lg sm:text-xl'
-                        : displayParts.totalLength > 14
                         ? 'text-xl sm:text-2xl'
-                        : 'text-2xl sm:text-[28px]',
+                        : 'text-2xl md:text-3xl',
                       !isSurrendered ? 'text-emerald-400' : 'text-red-400'
                     )}>
                       {formatSeparableWord(
@@ -4572,12 +4566,10 @@ function RapidFlashcardMode({
                         style={{ caretColor: 'transparent' }}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
                       />
-                      <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap ${
+                      <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-semibold ${
                         displayParts.totalLength > 22
-                          ? 'text-lg sm:text-xl'
-                          : displayParts.totalLength > 14
                           ? 'text-xl sm:text-2xl'
-                          : 'text-2xl sm:text-[28px]'
+                          : 'text-2xl md:text-3xl'
                       }`}>
                         {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
                         <span>{displayParts.prefix}</span>
@@ -4592,14 +4584,14 @@ function RapidFlashcardMode({
 
             {/* Пример предложения и формы слова после ввода ответа (как в раундах 1-2) */}
             {isAnswered && (
-              <div className="w-full max-w-lg mx-auto mt-5 space-y-3 animate-in fade-in duration-300">
+              <div className="w-full max-w-xl mx-auto mt-6 space-y-3 animate-in fade-in duration-300">
                 {plural && (
-                  <p className="text-sm font-normal text-zinc-500 dark:text-zinc-400 tracking-normal">
+                  <p className="text-base md:text-lg font-normal text-neutral-500 dark:text-neutral-400 tracking-normal opacity-60">
                     {plural}
                   </p>
                 )}
                 {displaySentence && (
-                  <div className="border-l border-zinc-600/70 dark:border-zinc-700 pl-4 py-1 text-left text-zinc-500 dark:text-zinc-400 text-sm sm:text-[15px] italic font-normal leading-relaxed max-w-lg mx-auto select-text">
+                  <div className="border-l-2 border-neutral-300 dark:border-neutral-700 pl-4 py-1 text-left text-neutral-500 dark:text-neutral-400 text-base md:text-lg italic font-normal leading-relaxed max-w-xl mx-auto select-text">
                     {displaySentence}
                   </div>
                 )}
@@ -5187,7 +5179,7 @@ function RapidSession({
 
   return (
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
-      <div className="w-full max-w-3xl mx-auto px-4 mb-2.5">
+      <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-3">
         <div className="flex items-center justify-between mb-2">
           <button onClick={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
@@ -5207,7 +5199,7 @@ function RapidSession({
       </div>
 
       <div className={cn(
-        "w-full max-w-3xl mx-auto px-4 flex flex-col items-center select-none relative",
+        "w-full max-w-4xl lg:max-w-5xl mx-auto px-4 flex flex-col items-center select-none relative",
         (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[320px] md:pb-6" : ""
       )}>
         <RapidFlashcardMode
@@ -5853,7 +5845,7 @@ function StudyInterface({
 
   return (
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
-      <div className="w-full max-w-3xl mx-auto px-4 mb-2.5">
+      <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-3">
         <div className="flex items-center justify-between mb-2">
           <button onClick={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
@@ -5880,7 +5872,7 @@ function StudyInterface({
       </div>
 
       <div className={cn(
-        "w-full max-w-3xl mx-auto px-4 flex flex-col items-center select-none relative",
+        "w-full max-w-4xl lg:max-w-5xl mx-auto px-4 flex flex-col items-center select-none relative",
         isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[320px] md:pb-6" : ""
       )}>
         <AnimatePresence mode="wait">
@@ -6876,8 +6868,8 @@ function StudyCard({
           </div>
         </div>
 
-        <div className="flex flex-col items-center text-center w-full">
-          <div className="text-xl md:text-2xl font-medium tracking-tight leading-relaxed text-zinc-900 dark:text-white w-full max-w-2xl mb-4">
+        <div className="flex flex-col items-center text-center w-full my-auto">
+          <div className="text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-6">
             {parts[0]}
             
             {phase === "Answer" ? (
@@ -6945,7 +6937,7 @@ function StudyCard({
           </div>
 
           <div className="w-full text-center">
-            <p className="text-sm text-zinc-600 dark:text-zinc-300 font-normal text-center transition-colors max-w-2xl mx-auto leading-relaxed">
+            <p className="text-base md:text-lg text-zinc-600 dark:text-zinc-300 font-normal text-center transition-colors max-w-2xl mx-auto leading-relaxed">
               {getCleanTranslation(card.translation)}
             </p>
 
