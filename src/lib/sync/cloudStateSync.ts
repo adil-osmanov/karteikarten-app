@@ -226,7 +226,7 @@ export function writeThroughCardUpdate(cardId: string, card: any): void {
         .eq('id', cardId);
 
       if (error) {
-        console.warn('[CloudSync] Primary update failed, queuing retry:', error);
+        console.error('Supabase update error:', error);
         await enqueuePendingCard(cardId, primaryPayload);
         setCloudSyncStatus('error');
       } else {
@@ -235,7 +235,7 @@ export function writeThroughCardUpdate(cardId: string, card: any): void {
         broadcastStateBus('REFRESH_DUE_COUNT');
       }
     } catch (e) {
-      console.warn('[CloudSync] Network error during write-through:', e);
+      console.error('Supabase update error (network):', e);
       await enqueuePendingCard(cardId, primaryPayload);
       setCloudSyncStatus('offline');
     }
@@ -298,7 +298,7 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
       for (const d of localDecks) {
         if (!Array.isArray(d.cards)) continue;
         for (const c of d.cards) {
-          if (c.masteryLevel >= 4 || c.isArchived || c.nextReviewDate) {
+          if ((c.masteryLevel ?? 0) > 0 || c.isArchived || c.nextReviewDate) {
             cardsToUpsert.push({
               id: c.id,
               masteryLevel: c.masteryLevel ?? 0,

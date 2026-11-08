@@ -1120,9 +1120,25 @@ let lastFetchAllCardsTime = 0;
 let cachedAllCards: any[] = [];
 let pendingFetchAllCardsPromise: Promise<any[]> | null = null;
 
+export function updateCachedCardInMemory(cardId: string, updated: Partial<Flashcard>) {
+  if (!cardId || !Array.isArray(cachedAllCards) || cachedAllCards.length === 0) return;
+  const idx = cachedAllCards.findIndex((c) => c && c.id === cardId);
+  if (idx !== -1) {
+    cachedAllCards[idx] = {
+      ...cachedAllCards[idx],
+      ...updated,
+      masteryLevel: updated.masteryLevel ?? cachedAllCards[idx].masteryLevel,
+      isArchived: updated.isArchived ?? cachedAllCards[idx].isArchived,
+      nextReviewDate: updated.nextReviewDate !== undefined ? updated.nextReviewDate : cachedAllCards[idx].nextReviewDate,
+      interval: updated.interval ?? cachedAllCards[idx].interval,
+      repetitions: updated.repetitions ?? cachedAllCards[idx].repetitions,
+    };
+  }
+}
+
 export async function fetchAllUserCards(force: boolean = false): Promise<any[]> {
   const now = Date.now();
-  if (pendingFetchAllCardsPromise) {
+  if (!force && pendingFetchAllCardsPromise) {
     return pendingFetchAllCardsPromise;
   }
   if (!force && now - lastFetchAllCardsTime < 25000 && cachedAllCards.length > 0) {
@@ -1502,17 +1518,8 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       const remoteDeckCards = remoteByDeck.get(deck.id) || [];
       const currentDeckCards = Array.isArray(deck.cards) ? deck.cards : [];
 
-      // If local deck had stripped/missing cards, restore full card list from Supabase
-      if (currentDeckCards.length !== remoteDeckCards.length && remoteDeckCards.length > 0) {
-        hasChanges = true;
-        return {
-          ...deck,
-          card_count: remoteDeckCards.length,
-          cards: remoteDeckCards,
-        };
-      }
-
-      let deckChanged = false;
+      let deckChanged = currentDeckCards.length !== remoteDeckCards.length && remoteDeckCards.length > 0;
+      if (deckChanged) hasChanges = true;
       const updatedCards: Flashcard[] = [];
 
       for (const card of currentDeckCards) {
@@ -1541,7 +1548,8 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
         const localArchived = Boolean(card.isArchived);
         const localReps = card.repetitions ?? 0;
 
-        // Если локальный прогресс выше (карточка выучена локально, но еще не запушена) — локальный выигрывает и пушится в облако
+        // Защита от отката при фоновой синхронизации (Stale Overwrite Guard):
+        // Если локальный прогресс выше (карточка выучена или перешла на следующий раунд локально) — локальный выигрывает и пушится в облако
         if (localMastery > remoteMastery || (localArchived && !remoteIsArchived)) {
           cardsToPushUpward.push(card);
           updatedCards.push(card);
@@ -1555,6 +1563,7 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
           updatedCards.push({
             ...card,
             masteryLevel: remoteMastery,
+            round: remoteIsArchived ? 4 : Math.max(1, Math.min(4, remoteMastery + 1)),
             repetitions: remoteRepetitions,
             interval: remoteInterval,
             isArchived: remoteIsArchived,
@@ -1572,10 +1581,10 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
           hasChanges = true;
           updatedCards.push({
             ...card,
-            masteryLevel: remoteMastery,
+            masteryLevel: Math.max(localMastery, remoteMastery),
             repetitions: Math.max(localReps, remoteRepetitions),
             interval: remoteInterval || card.interval,
-            isArchived: remoteIsArchived,
+            isArchived: localArchived || remoteIsArchived,
             nextReviewDate: remoteNextReviewDate || card.nextReviewDate
           });
           continue;
@@ -1592,7 +1601,7 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
         }
       }
 
-      return deckChanged ? { ...deck, cards: updatedCards } : deck;
+      return deckChanged ? { ...deck, card_count: updatedCards.length, cards: updatedCards } : deck;
     });
 
     if (cardsToPushUpward.length > 0) {
@@ -1676,11 +1685,11 @@ export function calculateNextSRSState(
     } else {
       // ЗАБЫВАНИЕ (Lapse): Сбой при повторении
       // Ошибка («Не знаю / Wiederholen»):
-      // masteryLevel = 1, repetitions = 0, interval = 1
+      // Сброс на 3-й синий раунд (masteryLevel = 2, round = 3), синхронно с UI
       const newEase = Math.max(1.3, currentEase - 0.2);
 
       return {
-        masteryLevel: 1, // сброс на 1 раунд
+        masteryLevel: 2, // сброс на 3-й (синий) раунд
         isArchived: false, // вывод из архива (Demotion)
         repetitions: 0,  // сброс серии
         interval: 1,     // сброс интервала на 1 день
@@ -2660,14 +2669,22 @@ export const useStore = create<DeckState>()((set, get) => ({
     const wasDueBefore = isCardDueForReview(targetCard);
     const wasMasteredBefore = Boolean(targetCard.isArchived || (targetCard.masteryLevel && targetCard.masteryLevel >= 4));
     const srsUpdate = calculateNextSRSState(targetCard, isCorrect, isHilfe, isReviewSession);
+    const computedMastery = srsUpdate.masteryLevel ?? targetCard.masteryLevel ?? 0;
+    const computedArchived = Boolean(srsUpdate.isArchived || computedMastery >= 4);
+    const computedRound = computedArchived ? 4 : Math.max(1, Math.min(4, computedMastery + 1));
     const validCard: Flashcard = {
       ...targetCard,
       ...srsUpdate,
+      masteryLevel: computedMastery,
+      isArchived: computedArchived,
+      round: computedRound,
+      isLegendary: computedArchived,
       updated_at: new Date().toISOString(),
     };
 
     // 1. INSTANT WRITE-THROUGH (ZERO DATA LOSS): Асинхронная фоновая запись в Supabase без задержки UI
     writeThroughCardUpdate(cardId, validCard);
+    updateCachedCardInMemory(cardId, validCard);
 
     // 2. Автоматическая синхронизация карточек-близнецов (Canonical Lemma Sync) во всех колодах
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
@@ -2699,6 +2716,10 @@ export const useStore = create<DeckState>()((set, get) => ({
             const syncedSibling: Flashcard = {
               ...c,
               ...srsUpdate,
+              masteryLevel: computedMastery,
+              isArchived: computedArchived,
+              round: computedRound,
+              isLegendary: computedArchived,
               updated_at: validCard.updated_at,
               additionalTranslations: enriched.additionalTranslations,
               alternateExamples: enriched.alternateExamples,
@@ -2717,7 +2738,10 @@ export const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (siblingUpdates.length > 0) {
-      siblingUpdates.forEach((s) => writeThroughCardUpdate(s.id, s.card));
+      siblingUpdates.forEach((s) => {
+        writeThroughCardUpdate(s.id, s.card);
+        updateCachedCardInMemory(s.id, s.card);
+      });
     }
 
     const nextDecks = get().decks;
@@ -2790,14 +2814,19 @@ export const useStore = create<DeckState>()((set, get) => ({
     if (score >= 4) {
       const srsUpdate = calculateNextSRSState({ ...card, masteryLevel: 3, isArchived: false }, true, false);
       Object.assign(card, srsUpdate);
+      card.round = 4;
+      card.isLegendary = true;
     } else {
       card.masteryLevel = Math.max(0, Math.min(3, score));
       card.isArchived = false;
+      card.round = Math.max(1, Math.min(4, card.masteryLevel + 1));
+      card.isLegendary = false;
     }
     card.updated_at = new Date().toISOString();
 
     // 1. INSTANT WRITE-THROUGH (ZERO DATA LOSS): Асинхронная фоновая запись в Supabase без задержки UI
     writeThroughCardUpdate(cardId, card);
+    updateCachedCardInMemory(cardId, card);
 
     const validCard = card;
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
@@ -2830,6 +2859,8 @@ export const useStore = create<DeckState>()((set, get) => ({
               ...c,
               masteryLevel: card.masteryLevel,
               isArchived: card.isArchived,
+              round: card.round,
+              isLegendary: card.isLegendary,
               nextReviewDate: card.nextReviewDate,
               interval: card.interval,
               repetitions: card.repetitions,
@@ -2852,7 +2883,10 @@ export const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (siblingUpdates.length > 0) {
-      siblingUpdates.forEach((s) => writeThroughCardUpdate(s.id, s.card));
+      siblingUpdates.forEach((s) => {
+        writeThroughCardUpdate(s.id, s.card);
+        updateCachedCardInMemory(s.id, s.card);
+      });
     }
 
     const nextDecks = get().decks;
@@ -3788,7 +3822,7 @@ function RapidFlashcardMode({
   const [isFlipped, setIsFlipped] = useState(false);
   const currentRound = currentCard.round ?? (
     currentCard.isLegendary === false 
-      ? Math.max(1, Math.min(3, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1))
+      ? Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1))
       : (currentCard.isLegendary || isReview || currentCard?.isArchived ? 4 : Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1)))
   );
   const isLegendary = currentCard.isLegendary ?? (currentRound === 4 && Boolean(isReview || currentCard?.isArchived));
@@ -3815,7 +3849,7 @@ function RapidFlashcardMode({
   useEffect(() => {
     const round = currentCard.round ?? (
       currentCard.isLegendary === false 
-        ? Math.max(1, Math.min(3, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1))
+        ? Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1))
         : (currentCard.isLegendary || isReview || currentCard?.isArchived ? 4 : Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1)))
     );
     const isLeg = currentCard.isLegendary ?? (round === 4 && Boolean(isReview || currentCard?.isArchived));
@@ -3990,11 +4024,13 @@ function RapidFlashcardMode({
         playSafeAudio(() => playSuccessSound());
         const nextMastery = Math.min(4, (localMastery || 0) + 1);
         setLocalMastery(nextMastery);
+        setVisualRound(prev => Math.min(4, prev + 1));
       }
     } else {
       playSafeAudio(() => playErrorSound());
       const nextMastery = Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
+      setVisualRound(prev => Math.max(1, prev - 1));
     }
 
     setTimeout(() => {
@@ -4043,17 +4079,19 @@ function RapidFlashcardMode({
     setIsSurrendered(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
-    setLocalMastery(2); // Штраф при сдаче/ошибке: ранг сбрасывается до 3 раунда (синий)
 
-    // Мгновенное понижение ранга (live downgrade)
+    // Мгновенное понижение ранга (live downgrade) и синхронное вычисление нового masteryLevel
     if (isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
+      setLocalMastery(2);
       setIsLegendaryVisual(false);
     } else if (visualRound === 3) {
       setVisualRound(2);
+      setLocalMastery(1);
       setIsLegendaryVisual(false);
     } else {
       setVisualRound(1);
+      setLocalMastery(0);
       setIsLegendaryVisual(false);
     }
 
@@ -4084,9 +4122,9 @@ function RapidFlashcardMode({
 
     setTimeout(() => {
       if (isSurrendered) {
-        const updatedMastery = Math.max(0, (localMastery || 0) - 1);
+        const penalizedMastery = Math.max(0, Math.min(3, localMastery ?? 0));
         try {
-          onHintPenalty?.(updatedMastery);
+          onHintPenalty?.(penalizedMastery);
         } catch {}
         onAnswer(false, false, true);
       } else {
@@ -4969,14 +5007,23 @@ function RapidSession({
     };
   }, []);
 
+  const sessionInitKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
+    const reviewKey = reviewCards ? reviewCards.map(r => r.card.id).join(',') : '';
+    const initKey = `${deckId || ''}::${isDrillMode ? 'drill' : 'norm'}::${reviewKey}`;
+    if (sessionInitKeyRef.current === initKey) {
+      return;
+    }
+    sessionInitKeyRef.current = initKey;
+
     getRapidSounds(); // preload so Safari has decoded buffers before the first answer
     let list: { deckId: string, card: Flashcard }[] = [];
     if (reviewCards) {
       const isDrill = isDrillMode;
       list = reviewCards.map(item => {
         const initialRound = isDrill
-          ? (item.card.round ?? (item.card.masteryLevel ? Math.min(3, item.card.masteryLevel + 1) : 1))
+          ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
           : (item.card.round ?? 4);
         const isLeg = isDrill ? false : (item.card.isLegendary ?? (initialRound === 4));
         return {
@@ -5002,7 +5049,7 @@ function RapidSession({
             deckId,
             card: {
               ...c,
-              round: c.round ?? (c.masteryLevel ? Math.min(3, c.masteryLevel + 1) : 1),
+              round: c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1)),
               isLegendary: false
             }
           }));
@@ -5010,7 +5057,7 @@ function RapidSession({
           deckId,
           card: {
             ...c,
-            round: c.round ?? (c.masteryLevel ? Math.min(3, c.masteryLevel + 1) : 1),
+            round: c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1)),
             isLegendary: false
           }
         }));
@@ -5024,10 +5071,10 @@ function RapidSession({
     // Restore saved round progress (0-3) of not-yet-archived words
     const initialProgress: Record<string, number> = {};
     list.forEach(({ card }) => {
-      if (!card.isArchived) {
+      if (!card.isArchived || isDrillMode) {
         initialProgress[card.id] = isDrillMode
-          ? Math.max(0, Math.min(3, (card.round ? card.round - 1 : (card.masteryLevel || 0))))
-          : Math.max(0, Math.min(3, card.masteryLevel || 0));
+          ? Math.max(0, Math.min(3, (card.round ? card.round - 1 : (card.masteryLevel ?? 0))))
+          : Math.max(0, Math.min(3, card.masteryLevel ?? 0));
       }
     });
     setQueue(list);
@@ -5061,26 +5108,38 @@ function RapidSession({
 
     if (isSurrender) {
       // Penalty and mistake recording were already completed immediately in handleHintPenalty.
-      // Карточка уже угасла в RapidFlashcardMode за 90 мс — синхронно переставляем её в конец очереди без обратного переворота!
-      const demotedCard = {
-        ...current,
-        card: {
-          ...current.card,
-          round: 3, // Синий раунд
-          isLegendary: false,
-          masteryLevel: 2,
-          mistakeCount: ((current.card as any).mistakeCount || 0) + 1
-        }
+      // Карточка уже угасла в RapidFlashcardMode за 90 мс — синхронно переставляем её в конец очереди с актуальным пониженным рангом!
+      const startRound = current.card.round ?? Math.max(1, Math.min(4, (wordProgress[id] ?? current.card.masteryLevel ?? liveCard.masteryLevel ?? 0) + 1));
+      const demotedScore = Math.max(0, Math.min(2, startRound - 2));
+      const demotedRound = Math.max(1, Math.min(4, demotedScore + 1));
+      const updatedCard: Flashcard = {
+        ...current.card,
+        round: demotedRound,
+        isLegendary: false,
+        isArchived: false,
+        masteryLevel: demotedScore,
+        updated_at: new Date().toISOString(),
+        mistakeCount: ((current.card as any).mistakeCount || 0) + 1
       };
-      setQueue(q => (q ? [...q.filter(item => item.card.id !== id), demotedCard] : q));
-      setWordProgress(prev => ({ ...prev, [id]: 2 }));
+      const updatedItem = {
+        ...current,
+        card: updatedCard
+      };
+      setQueue(q => (q ? [...q.filter(item => item.card.id !== id), updatedItem] : q));
+      setWordProgress(prev => ({ ...prev, [id]: demotedScore }));
       setTurn(t => t + 1);
       return;
     }
 
     const isReviewMode = Boolean(!isDrillMode && (reviewCards || liveCard.isArchived));
-    const currentScore = wordProgress[id] ?? liveCard.masteryLevel ?? 0;
-    const newScore = correct ? currentScore + 1 : Math.max(0, currentScore - 1);
+    const startMastery = current.card.isLegendary
+      ? 3
+      : (typeof current.card.round === 'number'
+          ? Math.max(0, Math.min(3, current.card.round - 1))
+          : Math.max(0, Math.min(3, wordProgress[id] ?? current.card.masteryLevel ?? liveCard.masteryLevel ?? 0)));
+    const newScore = correct
+      ? startMastery + 1
+      : (current.card.isLegendary ? 2 : Math.max(0, startMastery - 1));
     const learned = correct && newScore >= 4;
     const isNewMastered = learned && !isReviewMode;
 
@@ -5126,50 +5185,59 @@ function RapidSession({
       }
     );
 
-    // 1) СРАЗУ синхронно переключаем карточку и прогресс в один тик рендера (карточка уже угасла за 90 мс)
+    // 1) СРАЗУ синхронно создаем иммутабельный updatedCard и обновляем очередь сессии
+    const nextRound = learned ? 4 : Math.max(1, Math.min(4, newScore + 1));
+    const updatedCard: Flashcard = {
+      ...current.card,
+      round: nextRound,
+      isLegendary: learned,
+      isArchived: learned,
+      masteryLevel: Math.min(4, newScore),
+      repetitions: (current.card.repetitions || 0) + (correct ? 1 : 0),
+      updated_at: new Date().toISOString(),
+      mistakeCount: correct ? (current.card as any).mistakeCount : (((current.card as any).mistakeCount || 0) + 1)
+    };
+
     setWordProgress(prev => ({ ...prev, [id]: Math.min(4, newScore) }));
     if (learned) {
       setMastered(m => m + 1);
       setQueue(q => (q ? q.filter(item => item.card.id !== id) : q));
     } else {
-      const demotedCard = {
+      const updatedItem = {
         ...current,
-        card: {
-          ...current.card,
-          round: 3, // Синий раунд
-          isLegendary: false,
-          masteryLevel: newScore,
-          mistakeCount: ((current.card as any).mistakeCount || 0) + 1
-        }
+        card: updatedCard
       };
-      setQueue(q => (q ? [...q.filter(item => item.card.id !== id), demotedCard] : q));
+      setQueue(q => (q ? [...q.filter(item => item.card.id !== id), updatedItem] : q));
     }
     setTurn(t => t + 1);
 
     // 2) Сохранение в стор и Supabase в фоне, не блокируя переключение UI
-    if (liveCard.isArchived) {
-      if (learned) void answerCard(current.deckId, id, true, false, true, studyLanguage, isReviewMode);
-      else if (!correct) void answerCard(current.deckId, id, false, false, true, studyLanguage, isReviewMode);
+    if (liveCard.isArchived && learned) {
+      void answerCard(current.deckId, id, true, false, true, studyLanguage, isReviewMode);
+    } else if (liveCard.isArchived && !correct) {
+      void answerCard(current.deckId, id, false, false, true, studyLanguage, isReviewMode);
     } else {
       void setCardProgress(current.deckId, id, newScore, studyLanguage);
     }
-  }, [locked, queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
+  }, [locked, queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage, isDrillMode, reviewCards]);
 
   const handleHintPenalty = useCallback(async (forcedScore?: number) => {
     if (!queue || queue.length === 0) return;
     const current = queue[0];
     const id = current.card.id;
     const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
-    const currentProgress = wordProgress[id] ?? liveCard.masteryLevel ?? 0;
-    const penalizedProgress = typeof forcedScore === 'number' ? forcedScore : Math.max(0, currentProgress - 1);
+    const startRound = current.card.round ?? Math.max(1, Math.min(4, (wordProgress[id] ?? current.card.masteryLevel ?? liveCard.masteryLevel ?? 0) + 1));
+    const penalizedProgress = typeof forcedScore === 'number'
+      ? Math.max(0, Math.min(3, forcedScore))
+      : Math.max(0, Math.min(2, startRound - 2));
 
-    // 1) Update progress and persist penalty immediately (store + Supabase)
+    // 1) Update local progress synchronously first, then persist to Zustand + Supabase
+    setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
     if (liveCard.isArchived) {
       await answerCard(current.deckId, id, false, true, true, studyLanguage);
     } else {
       await setCardProgress(current.deckId, id, penalizedProgress, studyLanguage);
     }
-    setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
 
     // 2) Record mistake in session and daily stats pool
     setSessionMistakes(prev => (prev.some(c => c.id === id) ? prev : [...prev, liveCard]));
@@ -5314,7 +5382,7 @@ function RapidStudyCard({
 
   const currentRound = card.round ?? (
     card.isLegendary === false 
-      ? Math.max(1, Math.min(3, (card.masteryLevel || 0) + 1))
+      ? Math.max(1, Math.min(4, (card.masteryLevel || 0) + 1))
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel || 0) + 1)))
   );
   const isCardLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
@@ -5400,7 +5468,7 @@ function StudyInterface({
   isMistakesReview?: boolean,
   trainingMode?: string
 }) {
-  const { answerCard, decks, books, appLanguage } = useStore();
+  const { answerCard, setCardProgress, decks, books, appLanguage } = useStore();
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isMistakesReviewMode, setIsMistakesReviewMode] = useState(false);
   const isReviewingMistakesSession = Boolean(isMistakesReview) || isMistakesReviewMode;
@@ -5412,7 +5480,7 @@ function StudyInterface({
       return unique.map(item => {
         const isDrill = isDrillMode;
         const initialRound = isDrill
-          ? (item.card.round ?? (item.card.masteryLevel ? Math.min(3, item.card.masteryLevel + 1) : 1))
+          ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
           : (item.card.round ?? 4);
         const isLeg = isDrill ? false : (item.card.isLegendary ?? (initialRound === 4));
         return {
@@ -5439,7 +5507,7 @@ function StudyInterface({
             deckId,
             card: {
               ...c,
-              round: c.round ?? (c.masteryLevel ? Math.min(3, c.masteryLevel + 1) : 1),
+              round: c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1)),
               isLegendary: false,
             }
           }));
@@ -5447,7 +5515,7 @@ function StudyInterface({
           deckId,
           card: {
             ...c,
-            round: c.round ?? (c.masteryLevel ? Math.min(3, c.masteryLevel + 1) : 1),
+            round: c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1)),
             isLegendary: false,
           }
         }));
@@ -5478,14 +5546,22 @@ function StudyInterface({
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
   const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean } | null>(null);
+  const sessionInitKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const reviewKey = reviewCards ? reviewCards.map(r => r.card.id).join(',') : '';
+    const initKey = `${deckId || ''}::${isDrillMode ? 'drill' : 'norm'}::${reviewKey}`;
+    if (sessionInitKeyRef.current === initKey) {
+      return;
+    }
+    sessionInitKeyRef.current = initKey;
+
     if (reviewCards) {
       const uniqueReview = deduplicateCardsByLemma([...reviewCards], false);
       const isDrill = isDrillMode;
       const list = uniqueReview.map(item => {
         const initialRound = isDrill
-          ? (item.card.round ?? (item.card.masteryLevel ? Math.min(3, item.card.masteryLevel + 1) : 1))
+          ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
           : (item.card.round ?? 4);
         const isLeg = isDrill ? false : (item.card.isLegendary ?? (initialRound === 4));
         return {
@@ -5517,7 +5593,7 @@ function StudyInterface({
             deckId,
             card: {
               ...c,
-              round: c.round ?? (c.masteryLevel ? Math.min(3, c.masteryLevel + 1) : 1),
+              round: c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1)),
               isLegendary: false,
             }
           }));
@@ -5525,7 +5601,7 @@ function StudyInterface({
           deckId,
           card: {
             ...c,
-            round: c.round ?? (c.masteryLevel ? Math.min(3, c.masteryLevel + 1) : 1),
+            round: c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1)),
             isLegendary: false,
           }
         }));
@@ -5645,38 +5721,27 @@ function StudyInterface({
     const isActualCorrect = correct && !isHilfe;
 
     // 1. Вычисляем новый уровень раунда и условие выпуска
-    const isCurrentlyLegendary = currentCardSnapshot.isLegendary ?? (currentCardSnapshot.round === 4 || liveCard?.isArchived || isReviewSession);
-    const currentRound = currentCardSnapshot.round ?? (isCurrentlyLegendary ? 4 : ((liveCard?.masteryLevel ?? 0) + 1));
+    const isCurrentlyLegendary = currentCardSnapshot.isLegendary ?? (currentCardSnapshot.round === 4 && Boolean(liveCard?.isArchived || isReviewSession || isInitialArchivedDeck));
+    const currentRound = currentCardSnapshot.round ?? (isCurrentlyLegendary ? 4 : Math.max(1, Math.min(4, (liveCard?.masteryLevel ?? 0) + 1)));
+    const startMastery = (isCurrentlyLegendary || currentRound >= 4)
+      ? 3
+      : Math.max(0, Math.min(3, currentRound - 1));
 
     let nextRound: number;
     let nextLegendary: boolean;
     let nextMastery: number;
     let isGraduated: boolean;
 
-    if (isReviewSession || isReviewingMistakesSession || isInitialArchivedDeck) {
-      if (isActualCorrect) {
-        nextRound = 4;
-        nextLegendary = isCurrentlyLegendary;
-        nextMastery = 4;
-        isGraduated = true;
-      } else {
-        nextRound = 3; // Синий раунд
-        nextLegendary = false;
-        nextMastery = 2;
-        isGraduated = false;
-      }
+    if (isActualCorrect) {
+      nextMastery = Math.min(4, startMastery + 1);
+      isGraduated = nextMastery >= 4;
+      nextRound = isGraduated ? 4 : Math.max(1, Math.min(4, nextMastery + 1));
+      nextLegendary = isGraduated;
     } else {
-      if (isActualCorrect) {
-        nextRound = Math.min(4, currentRound + 1);
-        nextLegendary = nextRound === 4;
-        nextMastery = Math.min(4, (liveCard?.masteryLevel ?? 0) + 1);
-        isGraduated = nextRound >= 4;
-      } else {
-        nextRound = Math.max(1, currentRound - 1);
-        nextLegendary = false;
-        nextMastery = Math.max(0, (liveCard?.masteryLevel ?? 0) - 1);
-        isGraduated = false;
-      }
+      nextMastery = Math.max(0, Math.min(2, currentRound - 2));
+      nextRound = Math.max(1, Math.min(4, nextMastery + 1));
+      nextLegendary = false;
+      isGraduated = false;
     }
 
     pendingAnswerRef.current = {
@@ -5687,12 +5752,12 @@ function StudyInterface({
       nextLegendary
     };
 
-    // 2. Мгновенно обновляем стейт текущей карточки в голове очереди
+    // 2. Мгновенно обновляем стейт текущей карточки в голове очереди (без перетирания round до нажатия Weiter)
     setActiveCards(prev => {
       if (prev.length === 0) return prev;
       const head = prev[0];
       return [
-        { ...head, card: { ...head.card, masteryLevel: nextMastery } },
+        { ...head, card: { ...head.card, masteryLevel: nextMastery, updated_at: new Date().toISOString() } },
         ...prev.slice(1)
       ];
     });
@@ -5731,7 +5796,7 @@ function StudyInterface({
       language: studyLanguage
     });
 
-    // 5. Запись в статистику сессии и базу Supabase через answerCard
+    // 5. Запись в статистику сессии и базу Supabase (точный ранг 0..4 без расхождения со стором)
     recordCardResult(
       isActualCorrect, 
       { deckId: currentDeckId, card: { ...liveCard, masteryLevel: nextMastery }, ...liveCard, masteryLevel: nextMastery }, 
@@ -5742,12 +5807,16 @@ function StudyInterface({
         isNewMastered 
       }
     );
-    await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, isReviewSession);
+    if (isGraduated || (wasMasteredBefore && !isActualCorrect && currentRound >= 4)) {
+      await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, isReviewSession);
+    } else {
+      await setCardProgress(currentDeckId, currentCardSnapshot.id, nextMastery, studyLanguage);
+    }
 
     // 6. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: studyLanguage.toLowerCase() } }));
     window.dispatchEvent(new Event('storage-update'));
-  }, [currentCardSnapshot, currentDeckId, liveCard, studyLanguage, isReviewSession, isReviewingMistakesSession, isInitialArchivedDeck, recordCardResult, answerCard, currentDeck?.bookId]);
+  }, [currentCardSnapshot, currentDeckId, liveCard, studyLanguage, isReviewSession, isReviewingMistakesSession, isInitialArchivedDeck, recordCardResult, answerCard, setCardProgress, currentDeck?.bookId]);
   
   const handleNext = useCallback(() => {
     const pending = pendingAnswerRef.current;
@@ -5766,17 +5835,22 @@ function StudyInterface({
         setMasteredInSession(m => m + 1);
         return rest;
       } else {
-        const demotedCard = {
-          ...current,
-          card: {
-            ...current.card,
-            round: pending ? pending.nextRound : 3,
-            isLegendary: pending ? pending.nextLegendary : false,
-            masteryLevel: pending ? pending.nextMastery : (current.card.masteryLevel ?? 2),
-            mistakeCount: ((current.card as any).mistakeCount || 0) + 1
-          }
+        const nextMastery = pending ? pending.nextMastery : (current.card.masteryLevel ?? 2);
+        const nextRound = pending?.nextRound ?? Math.max(1, Math.min(4, nextMastery + 1));
+        const updatedCard: Flashcard = {
+          ...current.card,
+          round: nextRound,
+          isLegendary: pending ? Boolean(pending.nextLegendary) : false,
+          isArchived: false,
+          masteryLevel: nextMastery,
+          updated_at: new Date().toISOString(),
+          mistakeCount: ((current.card as any).mistakeCount || 0) + (pending && pending.nextMastery > (current.card.masteryLevel ?? 0) ? 0 : 1)
         };
-        return [...rest, demotedCard];
+        const updatedItem = {
+          ...current,
+          card: updatedCard
+        };
+        return [...rest, updatedItem];
       }
     });
 
@@ -6329,7 +6403,7 @@ function StudyCard({
 
   const currentRound = card.round ?? (
     card.isLegendary === false 
-      ? Math.max(1, Math.min(3, (card.masteryLevel ?? 0) + 1))
+      ? Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1))
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
   );
   const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
@@ -9714,7 +9788,7 @@ function PrepStudyCard({
   const hasErroredRef = useRef(false);
   const currentRound = card.round ?? (
     card.isLegendary === false 
-      ? Math.max(1, Math.min(3, (card.masteryLevel ?? 0) + 1))
+      ? Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1))
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
   );
   const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
@@ -9726,7 +9800,8 @@ function PrepStudyCard({
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
-  }, [card.id, card.round, card.isLegendary, card.masteryLevel, card.isArchived, isReview, isLegendary, currentRound]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.id, card.round, card.isLegendary]);
 
   const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe;
   const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe;
@@ -10037,7 +10112,7 @@ function VerbStudyCard({
   const [isHilfe, setIsHilfe] = useState(false);
   const currentRound = card.round ?? (
     card.isLegendary === false 
-      ? Math.max(1, Math.min(3, (card.masteryLevel ?? 0) + 1))
+      ? Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1))
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
   );
   const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
@@ -10049,7 +10124,8 @@ function VerbStudyCard({
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
-  }, [card.id, card.round, card.isLegendary, card.masteryLevel, card.isArchived, isReview, isLegendary, currentRound]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.id, card.round, card.isLegendary]);
 
   const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe;
   const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe;
@@ -10490,7 +10566,7 @@ export function RedemittelStudyCard({
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const currentRound = card.round ?? (
     card.isLegendary === false 
-      ? Math.max(1, Math.min(3, (card.masteryLevel ?? 0) + 1))
+      ? Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1))
       : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
   );
   const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
@@ -10502,7 +10578,8 @@ export function RedemittelStudyCard({
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
-  }, [card.id, card.round, card.isLegendary, card.masteryLevel, card.isArchived, isReview, isLegendary, currentRound]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.id, card.round, card.isLegendary]);
 
   const isLegendaryActive = (isLegendary || isLegendaryVisual) && status !== 'error' && status !== 'surrender';
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
@@ -11559,7 +11636,7 @@ export default function App() {
       d.cards?.forEach(c => {
         const isMastered = isCardCanonicalMastered(c, masteredCanonicalSet);
         if (!isMastered) {
-          const startingRound = c.round ?? (c.masteryLevel ? Math.min(3, c.masteryLevel + 1) : 1);
+          const startingRound = c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1));
           drillCards.push({
             deckId: d.id,
             card: {
