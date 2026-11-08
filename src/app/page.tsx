@@ -42,6 +42,8 @@ import {
   syncWithCloud,
   forcePushLocalToCloud,
   subscribeCloudSyncStatus,
+  broadcastStateBus,
+  subscribeStateBus,
   type CloudSyncStatus
 } from "@/lib/sync/cloudStateSync";
 export { formatSeparableWord, parseVerbComponents, getCleanTranslation };
@@ -1057,27 +1059,33 @@ export interface CardSRSUpdate {
   first_mastered_at?: string;
 }
 
-export function isCardDueForReview(card: any): boolean {
+export function getEndOfTodayTimestamp(): number {
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+  return endOfToday.getTime();
+}
+
+export function isCardDueForReview(card: any, endOfDayTimestamp?: number): boolean {
   if (!card) return false;
 
   // Учитываем и camelCase, и snake_case
   const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
   const archived = card.isArchived ?? card.is_archived ?? false;
 
-  // 1. В глобальный повтор идут ТОЛЬКО выученные слова 4 этапа (из архива)
+  // 1. В глобальный повтор идут ТОЛЬКО выученные слова 4 этапа (из архива / mastery >= 4)
   if (mastery < 4 && !archived) {
     return false;
   }
 
-  // 2. Проверяем дату
+  // 2. Проверяем дату (стандарт Anki / SuperMemo: все карточки до конца текущих суток)
   const rawDate = card.nextReviewDate || card.next_review_date;
   if (!rawDate) return false;
 
   const reviewTime = new Date(rawDate).getTime();
   if (isNaN(reviewTime)) return false;
 
-  // Округляем до минуты во избежание микросекундных расхождений между вкладками
-  return Math.floor(reviewTime / 60000) <= Math.floor(Date.now() / 60000);
+  const limit = typeof endOfDayTimestamp === 'number' ? endOfDayTimestamp : getEndOfTodayTimestamp();
+  return reviewTime <= limit;
 }
 
 export const isCardDue = isCardDueForReview;
@@ -1204,7 +1212,7 @@ let cachedDueCount: Record<string, number> = {};
 
 export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, bookId?: string): Promise<number> {
   const cleanLang = normalizeLanguage(lang);
-  const now = Date.now();
+  const endOfDayTime = getEndOfTodayTimestamp();
 
   let inMemoryDecks = useStore.getState().decks;
   if (!inMemoryDecks || inMemoryDecks.length === 0) {
@@ -1228,7 +1236,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         if ((deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
       }
       deck.cards?.forEach(card => {
-        if (isCardDueForReview(card)) {
+        if (isCardDueForReview(card, endOfDayTime)) {
           dueList.push(card);
         }
       });
@@ -1240,6 +1248,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
 
   // 2. Only if local decks are completely empty, query Supabase with throttle & in-flight guard
   if (isFetchingDueCount) return cachedDueCount[cleanLang] || 0;
+  const now = Date.now();
   if (now - (lastDueCountFetchTime[cleanLang] || 0) < 20000) return cachedDueCount[cleanLang] || 0;
 
   isFetchingDueCount = true;
@@ -1252,7 +1261,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
           .select('id, decks!inner(book_id)', { count: 'exact', head: true })
           .or('isArchived.eq.true,masteryLevel.gte.4')
           .not('nextReviewDate', 'is', null)
-          .lte('nextReviewDate', now)
+          .lte('nextReviewDate', endOfDayTime)
           .eq('decks.book_id', bookId);
 
         if (!error && typeof count === 'number') {
@@ -1269,7 +1278,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
           .select('id, decks!inner(language)', { count: 'exact', head: true })
           .or('isArchived.eq.true,masteryLevel.gte.4')
           .not('nextReviewDate', 'is', null)
-          .lte('nextReviewDate', now)
+          .lte('nextReviewDate', endOfDayTime)
           .ilike('decks.language', cleanLang);
 
         if (!error && typeof count === 'number') {
@@ -1291,7 +1300,7 @@ let cachedDueCardsFromCloud: Record<string, { deckId: string, card: Flashcard }[
 
 export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: string): Promise<{ deckId: string, card: Flashcard }[]> {
   const cleanLang = normalizeLanguage(lang);
-  const now = Date.now();
+  const endOfDayTime = getEndOfTodayTimestamp();
 
   const inMemoryDecks = useStore.getState().decks;
   const totalCardsInMemory = Array.isArray(inMemoryDecks)
@@ -1305,7 +1314,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       if (bookId && dBookId !== bookId) return;
       if (!bookId && (deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
       deck.cards?.forEach(card => {
-        if (isCardDueForReview(card)) {
+        if (isCardDueForReview(card, endOfDayTime)) {
           // Карточки, пришедшие на повторение, стартуют в статусе Легендарных (раунд 4, mastery 4)
           list.push({ deckId: deck.id, card: { ...card, masteryLevel: 4 } });
         }
@@ -1319,6 +1328,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
   }
 
   if (isFetchingDueCardsFromCloud) return cachedDueCardsFromCloud[cleanLang] || [];
+  const now = Date.now();
   if (now - (lastDueCardsFromCloudTime[cleanLang] || 0) < 20000 && cachedDueCardsFromCloud[cleanLang]) {
     return cachedDueCardsFromCloud[cleanLang];
   }
@@ -1332,7 +1342,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
       .or('isArchived.eq.true,masteryLevel.gte.4')
       .not('nextReviewDate', 'is', null)
-      .lte('nextReviewDate', now);
+      .lte('nextReviewDate', endOfDayTime);
 
     if (bookId) {
       query = query.eq('decks.book_id', bookId);
@@ -1449,9 +1459,23 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       }
 
       let deckChanged = false;
-      const updatedCards = currentDeckCards.map(card => {
+      const updatedCards: Flashcard[] = [];
+
+      for (const card of currentDeckCards) {
+        const isPendingInsert = Boolean((card as any).pending_insert || (card as any).isPendingInsert);
         const remote = remoteMap.get(card.id);
-        if (!remote) return card;
+
+        // ЧИСТКА ЛОКАЛЬНЫХ ПРИЗРАКОВ: Если карточки нет в Supabase и это не pending_insert — удаляем призрак!
+        if (!remote && !isPendingInsert) {
+          deckChanged = true;
+          hasChanges = true;
+          continue;
+        }
+
+        if (!remote) {
+          updatedCards.push(card);
+          continue;
+        }
 
         const remoteNextReviewDate = remote.nextReviewDate;
         const remoteMastery = remote.masteryLevel ?? 0;
@@ -1466,21 +1490,23 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
         // Если локальный прогресс выше (карточка выучена локально, но еще не запушена) — локальный выигрывает и пушится в облако
         if (localMastery > remoteMastery || (localArchived && !remoteIsArchived)) {
           cardsToPushUpward.push(card);
-          return card;
+          updatedCards.push(card);
+          continue;
         }
 
         // Если в облаке прогресс выше — облачный выигрывает
         if (remoteMastery > localMastery || (remoteIsArchived && !localArchived)) {
           deckChanged = true;
           hasChanges = true;
-          return {
+          updatedCards.push({
             ...card,
             masteryLevel: remoteMastery,
             repetitions: remoteRepetitions,
             interval: remoteInterval,
             isArchived: remoteIsArchived,
             nextReviewDate: remoteNextReviewDate
-          };
+          });
+          continue;
         }
 
         const localTime = card.nextReviewDate ? new Date(card.nextReviewDate).getTime() : 0;
@@ -1490,17 +1516,27 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
         if (remoteRepetitions > localReps || datesDifferent) {
           deckChanged = true;
           hasChanges = true;
-          return {
+          updatedCards.push({
             ...card,
             masteryLevel: remoteMastery,
             repetitions: Math.max(localReps, remoteRepetitions),
             interval: remoteInterval || card.interval,
             isArchived: remoteIsArchived,
             nextReviewDate: remoteNextReviewDate || card.nextReviewDate
-          };
+          });
+          continue;
         }
-        return card;
-      });
+        updatedCards.push(card);
+      }
+
+      // Восстанавливаем карточки из Supabase, если их не было локально в этой колоде
+      for (const rCard of remoteDeckCards) {
+        if (!updatedCards.some(c => c.id === rCard.id)) {
+          updatedCards.push(rCard);
+          deckChanged = true;
+          hasChanges = true;
+        }
+      }
 
       return deckChanged ? { ...deck, cards: updatedCards } : deck;
     });
@@ -2511,6 +2547,7 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     if (wasDueBefore || isHilfe || !isCorrect || validCard.isArchived) {
       get().decrementDueCardsCount();
+      broadcastStateBus('REFRESH_DUE_COUNT');
     }
 
     // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
@@ -2645,6 +2682,7 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     if (wasDueBefore || card.isArchived) {
       get().decrementDueCardsCount();
+      broadcastStateBus('REFRESH_DUE_COUNT');
     }
 
     const singleLemma = targetLemmaKey || normalizeGermanLemma(rawWord);
@@ -10752,6 +10790,15 @@ export default function App() {
       setActiveCategory('textbooks');
     }
   }, [appLanguage, activeCategory]);
+
+  // BroadcastChannel API: Мгновенная синхронизация очереди повторений между всеми окнами/вкладками и PWA
+  useEffect(() => {
+    return subscribeStateBus((event) => {
+      if (event.type === 'REFRESH_DUE_COUNT') {
+        refreshDueCardsCount(appLanguage);
+      }
+    });
+  }, [appLanguage, refreshDueCardsCount]);
   
   const [targetLevelForUpload, setTargetLevelForUpload] = useState<CEFRLevel>('B1');
   const [isUploadingCSV, setIsUploadingCSV] = useState(false);
@@ -11423,9 +11470,10 @@ export default function App() {
 
   const dueCards = useMemo(() => {
     const list: { deckId: string, card: Flashcard }[] = [];
+    const endOfDayTime = getEndOfTodayTimestamp();
     filteredDecksList.forEach(deck => {
       deck.cards?.forEach(card => {
-        if (isCardDueForReview(card)) {
+        if (isCardDueForReview(card, endOfDayTime)) {
           // Карточки, пришедшие на повторение, стартуют в статусе Легендарных (раунд 4, mastery 4)
           list.push({ deckId: deck.id, card: { ...card, masteryLevel: 4 } });
         }
@@ -11436,6 +11484,7 @@ export default function App() {
 
   // Хедерный подсчет повторений: строго для текущего активного языка (appLanguage)
   const dueCardsCount = useMemo(() => {
+    const endOfDayTime = getEndOfTodayTimestamp();
     const rawDue = decks
       .filter(deck => {
         if (activeBookId) {
@@ -11445,7 +11494,7 @@ export default function App() {
         return !deck.language || deck.language.toLowerCase() === appLanguage.toLowerCase();
       })
       .flatMap(deck => deck.cards || [])
-      .filter(isCardDueForReview);
+      .filter(card => isCardDueForReview(card, endOfDayTime));
     return deduplicateCardsByLemma(rawDue, false).length;
   }, [decks, appLanguage, activeBookId]);
 

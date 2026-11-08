@@ -26,16 +26,19 @@ export function getCanonicalKey(rawWord?: string | null): string {
   // 4. Убираем артикли в начале строки:
   word = word.replace(/^(der|die|das|dem|den|des|ein|eine|einen|einem|einer)\s+/i, '');
 
-  // 5. Убираем маркеры управления и местоимения:
+  // 5. Убираем предлоги с управлением ("in jemanden reinschnuppern" -> "reinschnuppern", "auf jemanden wirken" -> "wirken"):
+  word = word.replace(/\b(an|auf|in|über|fuer|für|zu|mit|nach|von|vor|aus|bei|gegen|durch|um)\s+(jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.|jmdn\.|jmdm\.|jmd\.|sich)\b/gi, ' ');
+
+  // 6. Убираем маркеры управления и местоимения:
   // "jemanden vorheizen" -> "vorheizen", "etw. bestellen" -> "bestellen"
   word = word.replace(/\b(jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.|jmdn\.|jmdm\.|jmd\.)\b/gi, ' ');
   word = word.replace(/^(jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.)\s+/i, '');
 
-  // 6. Убираем разделитель отделяемых приставок и спецсимволы:
+  // 7. Убираем разделитель отделяемых приставок и спецсимволы:
   // "vor|heizen" -> "vorheizen", "ein·laden" -> "einladen"
   word = word.replace(/[|·•\u2506\u250A]/g, '');
 
-  // 7. Срезаем оставшуюся пунктуацию, пробелы и небуквенные символы:
+  // 8. Срезаем оставшуюся пунктуацию, пробелы и небуквенные символы:
   word = word.replace(/[^a-zäöüß0-9]/gi, '');
 
   return word.trim();

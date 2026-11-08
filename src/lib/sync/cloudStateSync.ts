@@ -54,6 +54,39 @@ export function subscribeCloudSyncStatus(fn: (status: CloudSyncStatus) => void):
 }
 
 // ============================================================================
+// BROADCASTCHANNEL API: INSTANT MULTI-WINDOW STATE BUS
+// ============================================================================
+
+const STATE_BUS_NAME = 'kraft_state_bus';
+
+export function broadcastStateBus(type: 'REFRESH_DUE_COUNT' | 'STATE_SYNC') {
+  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    try {
+      const channel = new BroadcastChannel(STATE_BUS_NAME);
+      channel.postMessage({ type, timestamp: Date.now() });
+      channel.close();
+    } catch {}
+  }
+}
+
+export function subscribeStateBus(handler: (event: { type: string; timestamp: number }) => void): () => void {
+  if (typeof window === 'undefined' || !('BroadcastChannel' in window)) {
+    return () => {};
+  }
+  try {
+    const channel = new BroadcastChannel(STATE_BUS_NAME);
+    channel.onmessage = (e) => {
+      if (e.data) handler(e.data);
+    };
+    return () => {
+      channel.close();
+    };
+  } catch {
+    return () => {};
+  }
+}
+
+// ============================================================================
 // OFFLINE QUEUE (INDEXEDDB / LOCALSTORAGE PERSISTENT RETRY)
 // ============================================================================
 
@@ -199,6 +232,7 @@ export function writeThroughCardUpdate(cardId: string, card: any): void {
       } else {
         // Successful write
         setCloudSyncStatus('synced');
+        broadcastStateBus('REFRESH_DUE_COUNT');
       }
     } catch (e) {
       console.warn('[CloudSync] Network error during write-through:', e);
@@ -374,6 +408,7 @@ export async function syncWithCloud(force: boolean = false): Promise<void> {
     }
 
     setCloudSyncStatus('synced');
+    broadcastStateBus('REFRESH_DUE_COUNT');
   } catch (err) {
     console.warn('[CloudSync] Sync failed:', err);
     setCloudSyncStatus('error');
