@@ -1059,13 +1059,7 @@ export interface CardSRSUpdate {
   first_mastered_at?: string;
 }
 
-export function getEndOfTodayTimestamp(): number {
-  const endOfToday = new Date();
-  endOfToday.setHours(23, 59, 59, 999);
-  return endOfToday.getTime();
-}
-
-export function isCardDueForReview(card: any, endOfDayTimestamp?: number): boolean {
+export function isCardDueForReview(card: any): boolean {
   if (!card) return false;
 
   // Учитываем и camelCase, и snake_case
@@ -1077,15 +1071,15 @@ export function isCardDueForReview(card: any, endOfDayTimestamp?: number): boole
     return false;
   }
 
-  // 2. Проверяем дату (стандарт Anki / SuperMemo: все карточки до конца текущих суток)
+  // 2. Проверяем дату (к текущему моменту времени)
   const rawDate = card.nextReviewDate || card.next_review_date;
   if (!rawDate) return false;
 
   const reviewTime = new Date(rawDate).getTime();
   if (isNaN(reviewTime)) return false;
 
-  const limit = typeof endOfDayTimestamp === 'number' ? endOfDayTimestamp : getEndOfTodayTimestamp();
-  return reviewTime <= limit;
+  // Округляем до минуты во избежание микросекундных расхождений между вкладками
+  return Math.floor(reviewTime / 60000) <= Math.floor(Date.now() / 60000);
 }
 
 export const isCardDue = isCardDueForReview;
@@ -1212,7 +1206,6 @@ let cachedDueCount: Record<string, number> = {};
 
 export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, bookId?: string): Promise<number> {
   const cleanLang = normalizeLanguage(lang);
-  const endOfDayTime = getEndOfTodayTimestamp();
 
   let inMemoryDecks = useStore.getState().decks;
   if (!inMemoryDecks || inMemoryDecks.length === 0) {
@@ -1236,7 +1229,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         if ((deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
       }
       deck.cards?.forEach(card => {
-        if (isCardDueForReview(card, endOfDayTime)) {
+        if (isCardDueForReview(card)) {
           dueList.push(card);
         }
       });
@@ -1261,7 +1254,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
           .select('id, decks!inner(book_id)', { count: 'exact', head: true })
           .or('isArchived.eq.true,masteryLevel.gte.4')
           .not('nextReviewDate', 'is', null)
-          .lte('nextReviewDate', endOfDayTime)
+          .lte('nextReviewDate', now)
           .eq('decks.book_id', bookId);
 
         if (!error && typeof count === 'number') {
@@ -1278,7 +1271,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
           .select('id, decks!inner(language)', { count: 'exact', head: true })
           .or('isArchived.eq.true,masteryLevel.gte.4')
           .not('nextReviewDate', 'is', null)
-          .lte('nextReviewDate', endOfDayTime)
+          .lte('nextReviewDate', now)
           .ilike('decks.language', cleanLang);
 
         if (!error && typeof count === 'number') {
@@ -1300,7 +1293,6 @@ let cachedDueCardsFromCloud: Record<string, { deckId: string, card: Flashcard }[
 
 export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: string): Promise<{ deckId: string, card: Flashcard }[]> {
   const cleanLang = normalizeLanguage(lang);
-  const endOfDayTime = getEndOfTodayTimestamp();
 
   const inMemoryDecks = useStore.getState().decks;
   const totalCardsInMemory = Array.isArray(inMemoryDecks)
@@ -1314,7 +1306,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       if (bookId && dBookId !== bookId) return;
       if (!bookId && (deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
       deck.cards?.forEach(card => {
-        if (isCardDueForReview(card, endOfDayTime)) {
+        if (isCardDueForReview(card)) {
           // Карточки, пришедшие на повторение, стартуют в статусе Легендарных (раунд 4, mastery 4)
           list.push({ deckId: deck.id, card: { ...card, masteryLevel: 4 } });
         }
@@ -1342,7 +1334,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
       .or('isArchived.eq.true,masteryLevel.gte.4')
       .not('nextReviewDate', 'is', null)
-      .lte('nextReviewDate', endOfDayTime);
+      .lte('nextReviewDate', now);
 
     if (bookId) {
       query = query.eq('decks.book_id', bookId);
@@ -3818,12 +3810,15 @@ function RapidFlashcardMode({
     }
 
     // Мягкое угасание (fade-out) текущей обратной стороны без обратного переворота
-    setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
+    setCardAnimClass('opacity-0 scale-[0.985] blur-md pointer-events-none transition-all duration-150 ease-out');
 
     setTimeout(() => {
-      setIsFlipped(false);
       onAnswer(remembered, false);
-    }, 160);
+      requestAnimationFrame(() => {
+        setIsFlipped(false);
+        setIsTransitioning(false);
+      });
+    }, 150);
   }, [locked, isTransitioning, currentRound, localMastery, onAnswer]);
 
   const toggleFlip = useCallback(() => {
@@ -3898,36 +3893,19 @@ function RapidFlashcardMode({
   // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter
   const handleProceedNext = useCallback(() => {
     if (!isAnswered || isTransitioning) return;
+    setIsTransitioning(true);
 
-    // На 4-м раунде при сознательном переходе запускаем оптическое растворение (если без сдачи)
-    if (currentRound === 4 && !isSurrendered) {
+    const willBeVaporized = currentRound === 4 && !isSurrendered;
+    if (willBeVaporized) {
       setIsVaporizing(true);
-      setIsTransitioning(true);
       triggerHaptic('success');
-      setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
-      setTimeout(() => {
-        setIsVaporizing(false);
-        setIsTransitioning(false);
-        setIsFlipped(false);
-        setIsAnswered(false);
-        setIsSurrendered(false);
-        setTypedValue('');
-        setIsErrorMismatch(false);
-        onAnswer(true, false, false);
-      }, 160);
-      return;
     }
 
-    setIsTransitioning(true);
-    setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
+    setCardAnimClass('opacity-0 scale-[0.985] blur-md pointer-events-none transition-all duration-150 ease-out');
 
     setTimeout(() => {
-      setIsFlipped(false);
-      setIsAnswered(false);
-      setIsSurrendered(false);
-      setTypedValue('');
-      setIsErrorMismatch(false);
-
+      // ФАЗА 2: Карточка ПОЛНОСТЬЮ СКРЫТА (opacity: 0, blur).
+      // Подменяем стейты и вызываем ответ/переход
       if (isSurrendered) {
         // Слово помечается как требующее повторного закрепления только после нажатия Weiter
         const updatedMastery = Math.max(0, (localMastery || 0) - 1);
@@ -3938,7 +3916,19 @@ function RapidFlashcardMode({
       } else {
         onAnswer(true, false, false);
       }
-    }, 160);
+
+      setIsVaporizing(false);
+      setIsFlipped(false);
+      setIsAnswered(false);
+      setIsSurrendered(false);
+      setTypedValue('');
+      setIsErrorMismatch(false);
+
+      requestAnimationFrame(() => {
+        // ФАЗА 3: Новая карточка плавно проявляется из блюра
+        setIsTransitioning(false);
+      });
+    }, 150);
   }, [isAnswered, isTransitioning, isSurrendered, currentRound, localMastery, onHintPenalty, onAnswer]);
 
   // Проверка совпадения ввода с целевым словом или всей фразой
@@ -4128,7 +4118,15 @@ function RapidFlashcardMode({
   const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered;
 
   return (
-    <div key={currentCard?.id} className={`w-full flex flex-col items-center select-none animate-card-enter transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${cardAnimClass}`}>
+    <div 
+      key={currentCard?.id || (currentCard as any)?.front} 
+      className={cn(
+        "relative w-full max-w-3xl min-h-[480px] h-[480px] rounded-3xl transition-all duration-150 ease-out flex flex-col justify-between items-center select-none",
+        isTransitioning
+          ? 'opacity-0 scale-[0.985] blur-md pointer-events-none'
+          : 'opacity-100 scale-100 blur-0'
+      )}
+    >
       {isRound1or2 ? (
         /* =======================================================
            РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
@@ -4142,7 +4140,7 @@ function RapidFlashcardMode({
             onClick={handleCardClick}
             className={cn(
               "w-full min-h-[480px] h-[480px] relative cursor-pointer transform-style-3d",
-              isTransitioning ? 'transition-none' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
+              isTransitioning ? 'transition-none duration-0' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
             style={{
               transformStyle: 'preserve-3d',
@@ -5216,11 +5214,8 @@ function RapidStudyCard({
       onAnswer(correct, false);
     }
     penaltyReportedRef.current = false;
-    const delay = wasFlipped ? 120 : 20;
-    timerRef.current = setTimeout(() => {
-      onNext();
-      setLocked(false);
-    }, delay);
+    onNext();
+    setLocked(false);
   }, [locked, onAnswer, onNext]);
 
   const handleHintPenalty = useCallback(() => {
@@ -6210,7 +6205,8 @@ function StudyCard({
 
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
-  const [cardAnimClass, setCardAnimClass] = useState('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
+  const [cardAnimClass, setCardAnimClass] = useState('opacity-100 scale-100 blur-0 transition-all duration-150 ease-out');
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
   const [isVaporizing, setIsVaporizing] = useState(false);
@@ -6238,7 +6234,8 @@ function StudyCard({
     hasErroredRef.current = false;
     setIsVaporizing(false);
     setIsTransitionLocked(false);
-    setCardAnimClass('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
+    setIsTransitioning(false);
+    setCardAnimClass('opacity-100 scale-100 blur-0 transition-all duration-150 ease-out');
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     if (transitionTimerRef.current) {
@@ -6395,8 +6392,9 @@ function StudyCard({
   }, [playbackSpeed]);
 
   const handleAdvanceNext = useCallback(() => {
-    if (isTransitionLocked) return;
+    if (isTransitionLocked || isTransitioning) return;
     setIsTransitionLocked(true);
+    setIsTransitioning(true);
 
     const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
     if (willBeVaporized) {
@@ -6405,14 +6403,23 @@ function StudyCard({
       triggerHaptic('success');
     }
 
-    setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
+    setCardAnimClass('opacity-0 scale-[0.985] blur-md pointer-events-none transition-all duration-150 ease-out');
 
     transitionTimerRef.current = setTimeout(() => {
+      // ФАЗА 2: Карточка ПОЛНОСТЬЮ СКРЫТА (opacity: 0, blur).
       setIsVaporizing(false);
       setIsTransitionLocked(false);
+      setPhase("Question");
+      setSelectedOption(null);
+      setInputText("");
       onNext();
-    }, 160);
-  }, [isTransitionLocked, currentRound, onNext]);
+
+      requestAnimationFrame(() => {
+        // ФАЗА 3: Новая карточка плавно проявляется из блюра
+        setIsTransitioning(false);
+      });
+    }, 150);
+  }, [isTransitionLocked, isTransitioning, currentRound, onNext]);
 
   const handleReveal = useCallback(() => {
     if (phase !== "Question") return;
@@ -6715,13 +6722,18 @@ function StudyCard({
   return (
     <>
       <CardContainer 
-        key={card.id}
+        key={card.id || (card as any)?.front}
         rarityRound={visualRound}
         isArchivingPulse={isArchivePulse}
         isSealed={isMasteredGolden || isVaporizing}
         isLegendary={isLegendaryVisual}
         isVaporizing={isVaporizing}
-        className={cn(cardAnimClass)}
+        className={cn(
+          "transition-all duration-150 ease-out",
+          isTransitioning
+            ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
+            : "opacity-100 scale-100 blur-0"
+        )}
         onClick={() => {
           if (!isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
             inputRef.current.focus();
@@ -9769,11 +9781,23 @@ function PrepStudyCard({
     } catch (e) {}
   }, [card.id, onAnswer, playAudio, isLegendary, isLegendaryVisual, visualRound]);
 
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const handleProceedNext = useCallback(() => {
+    if (isTransitioning) return;
+    setIsTransitioning(true);
+    setTimeout(() => {
+      onNext();
+      requestAnimationFrame(() => {
+        setIsTransitioning(false);
+      });
+    }, 150);
+  }, [isTransitioning, onNext]);
+
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if ((isSuccess || isHilfe) && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
         e.preventDefault();
-        onNext();
+        handleProceedNext();
         return;
       }
       if (activeSlot === 2 && !isSuccess && !isHilfe && e.key.length === 1) {
@@ -9787,7 +9811,7 @@ function PrepStudyCard({
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isSuccess, isHilfe, activeSlot, onNext, handleKasusSelect]);
+  }, [isSuccess, isHilfe, activeSlot, handleProceedNext, handleKasusSelect]);
 
   const handleVirtualKey = (char: string) => {
     if (activeSlot === 0 && virtualKeyRef0.current) virtualKeyRef0.current(char);
@@ -9803,10 +9827,16 @@ function PrepStudyCard({
   return (
     <>
     <CardContainer 
-      key={card.id}
+      key={card.id || (card as any)?.front}
       rarityRound={visualRound}
       isLegendary={isLegendaryVisual}
       isSealed={isMasteredGolden}
+      className={cn(
+        "transition-all duration-150 ease-out",
+        isTransitioning
+          ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
+          : "opacity-100 scale-100 blur-0"
+      )}
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -9924,7 +9954,7 @@ function PrepStudyCard({
         {(isSuccess || isHilfe) ? (
           <button
             type="button"
-            onClick={onNext}
+            onClick={handleProceedNext}
             className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center"
             style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
           >
@@ -10004,16 +10034,28 @@ function VerbStudyCard({
     playGermanSpeech(fullSentence);
   }, [targets]);
 
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const handleProceedNext = useCallback(() => {
+    if (isTransitioning) return;
+    setIsTransitioning(true);
+    setTimeout(() => {
+      onNext();
+      requestAnimationFrame(() => {
+        setIsTransitioning(false);
+      });
+    }, 150);
+  }, [isTransitioning, onNext]);
+
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if ((isSuccess || isHilfe) && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
         e.preventDefault();
-        onNext();
+        handleProceedNext();
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isSuccess, isHilfe, onNext]);
+  }, [isSuccess, isHilfe, handleProceedNext]);
 
   useEffect(() => {
     const inf = (verbInfo.infinitiv || "").replace(/\|/g, '');
@@ -10074,10 +10116,16 @@ function VerbStudyCard({
 
   return (
     <CardContainer 
-      key={card.id}
+      key={card.id || (card as any)?.front}
       rarityRound={visualRound}
       isLegendary={isLegendaryVisual}
       isSealed={isMasteredGolden}
+      className={cn(
+        "transition-all duration-150 ease-out",
+        isTransitioning
+          ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
+          : "opacity-100 scale-100 blur-0"
+      )}
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -10151,7 +10199,7 @@ function VerbStudyCard({
         {(isSuccess || isHilfe) ? (
           <button
             type="button"
-            onClick={onNext}
+            onClick={handleProceedNext}
             className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center"
             style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
           >
@@ -10527,6 +10575,18 @@ export function RedemittelStudyCard({
 
   const showTranslation = placedChunks.length === 0 || status === 'success' || status === 'surrender';
 
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const handleProceedNext = useCallback(() => {
+    if (isTransitioning) return;
+    setIsTransitioning(true);
+    setTimeout(() => {
+      onNext();
+      requestAnimationFrame(() => {
+        setIsTransitioning(false);
+      });
+    }, 150);
+  }, [isTransitioning, onNext]);
+
   // Keyboard shortcut support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -10534,7 +10594,7 @@ export function RedemittelStudyCard({
 
       if ((status === 'success' || status === 'surrender') && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
         e.preventDefault();
-        onNext();
+        handleProceedNext();
         return;
       }
 
@@ -10572,15 +10632,19 @@ export function RedemittelStudyCard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [availableChunks, placedChunks, status, onNext, handleSelectChunk, handleRemoveChunk, handleReset, handlePlayAudio, handleSurrender]);
+  }, [availableChunks, placedChunks, status, handleProceedNext, handleSelectChunk, handleRemoveChunk, handleReset, handlePlayAudio, handleSurrender]);
 
   return (
       <CardContainer
-        key={card.id}
+        key={card.id || (card as any)?.front}
         rarityRound={visualRound}
         isLegendary={isLegendaryVisual}
         isSealed={isMasteredGolden}
         className={cn(
+          "transition-all duration-150 ease-out",
+          isTransitioning
+            ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
+            : "opacity-100 scale-100 blur-0",
           status === 'error' && "!border-rose-500/40",
           status === 'surrender' && "!border-zinc-300 dark:!border-zinc-600/70"
         )}
@@ -10698,7 +10762,7 @@ export function RedemittelStudyCard({
               >
                 <button
                   type="button"
-                  onClick={onNext}
+                  onClick={handleProceedNext}
                   className="w-full max-w-sm sm:max-w-md py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base shadow-lg shadow-blue-600/25 transition-all outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0 ring-0 ring-offset-0 focus:ring-offset-0 focus-visible:ring-offset-0 border-0 border-transparent select-none cursor-pointer flex items-center justify-center"
                   style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
                 >
@@ -11470,10 +11534,9 @@ export default function App() {
 
   const dueCards = useMemo(() => {
     const list: { deckId: string, card: Flashcard }[] = [];
-    const endOfDayTime = getEndOfTodayTimestamp();
     filteredDecksList.forEach(deck => {
       deck.cards?.forEach(card => {
-        if (isCardDueForReview(card, endOfDayTime)) {
+        if (isCardDueForReview(card)) {
           // Карточки, пришедшие на повторение, стартуют в статусе Легендарных (раунд 4, mastery 4)
           list.push({ deckId: deck.id, card: { ...card, masteryLevel: 4 } });
         }
@@ -11484,7 +11547,6 @@ export default function App() {
 
   // Хедерный подсчет повторений: строго для текущего активного языка (appLanguage)
   const dueCardsCount = useMemo(() => {
-    const endOfDayTime = getEndOfTodayTimestamp();
     const rawDue = decks
       .filter(deck => {
         if (activeBookId) {
@@ -11494,7 +11556,7 @@ export default function App() {
         return !deck.language || deck.language.toLowerCase() === appLanguage.toLowerCase();
       })
       .flatMap(deck => deck.cards || [])
-      .filter(card => isCardDueForReview(card, endOfDayTime));
+      .filter(card => isCardDueForReview(card));
     return deduplicateCardsByLemma(rawDue, false).length;
   }, [decks, appLanguage, activeBookId]);
 
