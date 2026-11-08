@@ -7650,7 +7650,7 @@ export const CategoryTabs = React.memo(function CategoryTabs({
       <div 
         role="tablist"
         aria-label="Kategorien"
-        className="max-w-full overflow-x-auto no-scrollbar flex items-center p-1 rounded-full bg-black/[0.04] dark:bg-white/[0.04] border border-black/5 dark:border-white/10 backdrop-blur-xl transform-gpu [backface-visibility:hidden] will-change-transform select-none gap-1"
+        className="relative inline-flex items-center p-1 rounded-full bg-neutral-900/60 dark:bg-neutral-900/60 border border-white/10 backdrop-blur-xl isolate transform-gpu select-none"
       >
         {tabs.map((tab) => {
           const isActive = activeCategory === tab.id;
@@ -7662,10 +7662,10 @@ export const CategoryTabs = React.memo(function CategoryTabs({
               type="button"
               onClick={() => onSelectCategory(tab.id)}
               className={cn(
-                "px-5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors duration-150 cursor-pointer outline-none",
+                "relative z-10 px-5 py-1.5 rounded-full text-xs font-medium transition-colors duration-150 select-none outline-none cursor-pointer",
                 isActive
-                  ? "bg-white dark:bg-white/15 text-neutral-900 dark:text-white shadow-sm"
-                  : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+                  ? "text-white bg-white/15 shadow-[0_1px_3px_rgba(0,0,0,0.3)]"
+                  : "text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.06]"
               )}
             >
               {tab.label}
