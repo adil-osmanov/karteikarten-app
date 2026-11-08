@@ -42,39 +42,43 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
  */
 /**
  * Apple Tactile Card System (300g Bristol Paper in Light Mode / Alpine OLED in Dark Mode):
- * Separated into Border and Shadow tokens so 3D rotating faces only carry the border,
- * while the outer non-rotating CardStage carries the stable physical shadow & rarity aura.
+ * - Light Mode: Clean physical paper shadow without any colored neon halos.
+ *   Rarity is indicated via subtle border tint and enamel ProgressDots.
+ * - Dark Mode: Deep OLED shadow + atmospheric colored rarity aura.
  */
 export const getRarityBorderClasses = (round: number = 1, isSealed: boolean = false, isLegendary: boolean = false): string => {
   if (isSealed || isLegendary || round >= 5) {
-    return 'border-amber-500/50 dark:border-amber-400/40';
+    return 'border-amber-500/40 dark:border-amber-400/40';
   }
   if (round === 4) {
-    return 'border-purple-500/40 dark:border-purple-400/35';
+    return 'border-purple-500/35 dark:border-purple-400/35';
   }
   if (round === 3) {
-    return 'border-blue-500/40 dark:border-blue-500/35';
+    return 'border-blue-500/35 dark:border-blue-500/35';
   }
   if (round === 2) {
-    return 'border-emerald-500/40 dark:border-emerald-500/25';
+    return 'border-emerald-500/30 dark:border-emerald-500/25';
   }
   return 'border-black/[0.08] dark:border-white/[0.09]';
 };
 
+const LIGHT_MODE_PAPER_SHADOW =
+  'shadow-[0_1px_3px_rgba(0,0,0,0.04),0_10px_25px_-5px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.9)]';
+
 export const getRarityShadowClasses = (round: number = 1, isSealed: boolean = false, isLegendary: boolean = false): string => {
   if (isSealed || isLegendary || round >= 5) {
-    return 'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_20px_-4px_rgba(0,0,0,0.05),0_0_50px_-5px_rgba(245,158,11,0.25)] dark:shadow-[0_0_80px_-5px_rgba(245,158,11,0.28),0_0_25px_rgba(251,191,36,0.14),0_25px_60px_rgba(0,0,0,0.9)]';
+    return `${LIGHT_MODE_PAPER_SHADOW} dark:shadow-[0_0_80px_-5px_rgba(245,158,11,0.28),0_0_25px_rgba(251,191,36,0.14),0_25px_60px_rgba(0,0,0,0.9)]`;
   }
   if (round === 4) {
-    return 'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_20px_-4px_rgba(0,0,0,0.05),0_0_45px_-5px_rgba(168,85,247,0.22)] dark:shadow-[0_0_75px_-5px_rgba(168,85,247,0.28),0_0_25px_rgba(168,85,247,0.12),0_20px_50px_rgba(0,0,0,0.85)]';
+    return `${LIGHT_MODE_PAPER_SHADOW} dark:shadow-[0_0_75px_-5px_rgba(168,85,247,0.28),0_0_25px_rgba(168,85,247,0.12),0_20px_50px_rgba(0,0,0,0.85)]`;
   }
   if (round === 3) {
-    return 'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_20px_-4px_rgba(0,0,0,0.05),0_0_40px_-5px_rgba(59,130,246,0.20)] dark:shadow-[0_0_75px_-5px_rgba(59,130,246,0.28),0_0_20px_rgba(59,130,246,0.12),0_20px_50px_rgba(0,0,0,0.85)]';
+    return `${LIGHT_MODE_PAPER_SHADOW} dark:shadow-[0_0_75px_-5px_rgba(59,130,246,0.28),0_0_20px_rgba(59,130,246,0.12),0_20px_50px_rgba(0,0,0,0.85)]`;
   }
   if (round === 2) {
-    return 'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_20px_-4px_rgba(0,0,0,0.05),0_0_35px_-5px_rgba(16,185,129,0.18)] dark:shadow-[0_0_50px_-5px_rgba(16,185,129,0.16),0_15px_40px_rgba(0,0,0,0.8)]';
+    return `${LIGHT_MODE_PAPER_SHADOW} dark:shadow-[0_0_50px_-5px_rgba(16,185,129,0.16),0_15px_40px_rgba(0,0,0,0.8)]`;
   }
-  return 'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_20px_-4px_rgba(0,0,0,0.06),0_24px_48px_-8px_rgba(0,0,0,0.06)] dark:shadow-[0_25px_60px_rgba(0,0,0,0.95)]';
+  return `${LIGHT_MODE_PAPER_SHADOW} dark:shadow-[0_25px_60px_rgba(0,0,0,0.95)]`;
 };
 
 export const getCardGlowStyles = (round: number = 1, isLegendary: boolean = false): string => {
@@ -96,19 +100,19 @@ export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean,
 
 /**
  * Apple HIG Surface styling for cards:
- * Light Mode: Pure 300g Bristol Paper (bg-white).
- * Dark Mode: Deep OLED monolith (dark:bg-[#121214]/80 dark:backdrop-blur-3xl).
+ * Light Mode: Tactile 300g Bristol Paper (bg-[#FCFCFD]).
+ * Dark Mode: Deep OLED monolith (dark:bg-[#121214]/75 dark:backdrop-blur-3xl).
  */
 export const CARD_CONTAINER_SURFACE_CLASSES = cn(
-  "rounded-[36px] select-none",
+  "rounded-[32px] select-none",
   // Light Mode (300g Bristol Paper)
-  "bg-white text-[#1D1D1F]",
+  "bg-[#FCFCFD] text-[#1D1D1F]",
   // Dark Mode (Deep OLED Monolith)
-  "dark:bg-[#121214]/80 dark:text-[#F5F5F7] dark:backdrop-blur-3xl"
+  "dark:bg-[#121214]/75 dark:text-[#F5F5F7] dark:backdrop-blur-3xl"
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "relative w-full max-w-4xl lg:max-w-5xl h-[600px] min-h-[600px] max-h-[600px] mx-auto p-10 rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden",
+  "relative w-full max-w-4xl lg:max-w-5xl h-[600px] min-h-[600px] max-h-[600px] mx-auto p-10 rounded-[32px] border flex flex-col justify-between items-center group select-none overflow-hidden",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 
@@ -134,22 +138,22 @@ export function ProgressDots({
   const getDotStyles = (index: number) => {
     // 4 Золотые точки (Запечатано / Повторение / Ранг >= 5)
     if (isGold) {
-      return 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.9)] scale-100';
+      return 'bg-amber-400 dark:shadow-[0_0_10px_rgba(251,191,36,0.9)] scale-100';
     }
 
     // Раунд 4: 3 фиолетовые точки (индексы 0, 1, 2)
     if (level === 4 && index < 3) {
-      return 'bg-purple-500 dark:bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.8)] scale-100';
+      return 'bg-purple-500 dark:bg-purple-400 dark:shadow-[0_0_10px_rgba(192,132,252,0.8)] scale-100';
     }
 
     // Раунд 3: 2 синие точки (индексы 0, 1)
     if (level === 3 && index < 2) {
-      return 'bg-blue-500 dark:bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.75)] scale-100';
+      return 'bg-blue-500 dark:bg-sky-400 dark:shadow-[0_0_10px_rgba(56,189,248,0.75)] scale-100';
     }
 
     // Раунд 2: 1 зеленая точка (индекс 0)
     if (level === 2 && index < 1) {
-      return 'bg-emerald-500 dark:bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.7)] scale-100';
+      return 'bg-emerald-500 dark:bg-emerald-400 dark:shadow-[0_0_10px_rgba(52,211,153,0.7)] scale-100';
     }
 
     // Раунд 1 (0 точек) или неактивный слот:
@@ -177,17 +181,15 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
   ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, isLegendary, isVaporizing = false, style, ...props }, ref) => {
     const r = rarityRound ?? 1;
     const isSeal = Boolean(isSealed || isVaporizing);
-    // 3D faces only get border classes (shadow lives on the non-rotating CardStage)
-    const rarityClasses = is3DFace
-      ? getRarityBorderClasses(r, isSeal, isLegendary)
-      : getRarityCardClasses(r, isArchivingPulse, isSeal, isLegendary);
+    // Each 3D face carries its own background, border, and shadow so nothing remains stationary on CardStage
+    const rarityClasses = getRarityCardClasses(r, isArchivingPulse, isSeal, isLegendary);
 
     return (
       <div
         ref={ref}
         className={cn(
           is3DFace
-            ? cn("absolute inset-0 w-full h-[600px] min-h-[600px] max-h-[600px] p-10 border flex flex-col justify-between items-center backface-hidden group rounded-[36px] overflow-hidden", CARD_CONTAINER_SURFACE_CLASSES)
+            ? cn("absolute inset-0 w-full h-full p-10 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[32px] overflow-hidden", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
           isVaporizing && "opacity-0 scale-[1.01] transition-all duration-150 ease-out pointer-events-none",

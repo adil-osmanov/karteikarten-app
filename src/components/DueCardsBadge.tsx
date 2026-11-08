@@ -32,7 +32,7 @@ export function DueCardsBadge({ count = 0, language = 'DE', onClick, className, 
       className={cn(
         "inline-flex items-center gap-2.5 px-4 py-2 rounded-full select-none transition-all duration-200 border",
         hasDue
-          ? "cursor-pointer active:scale-95 group bg-white/90 hover:bg-blue-50/60 text-zinc-800 hover:text-blue-600 border-zinc-200/90 hover:border-blue-300 shadow-[0_2px_12px_rgba(0,0,0,0.04)] dark:bg-zinc-900/90 dark:hover:bg-blue-950/40 dark:text-zinc-100 dark:hover:text-blue-300 dark:border-white/10 dark:hover:border-blue-500/40 dark:shadow-[0_4px_20px_rgba(0,0,0,0.6)]"
+          ? "cursor-pointer active:scale-95 group bg-white hover:bg-neutral-50 text-neutral-800 border-black/10 shadow-[0_1px_3px_rgba(0,0,0,0.05)] dark:bg-zinc-900/90 dark:hover:bg-blue-950/40 dark:text-zinc-100 dark:hover:text-blue-300 dark:border-white/10 dark:hover:border-blue-500/40 dark:shadow-[0_4px_20px_rgba(0,0,0,0.6)]"
           : "cursor-not-allowed opacity-60 bg-zinc-100/60 dark:bg-zinc-900/40 text-zinc-400 dark:text-zinc-500 border-zinc-200/60 dark:border-white/5",
         className
       )}
@@ -45,9 +45,9 @@ export function DueCardsBadge({ count = 0, language = 'DE', onClick, className, 
           : "text-zinc-400 dark:text-zinc-600"
       )} />
       <span className={cn(
-        "px-2 py-0.5 rounded-full text-[11px] font-mono font-bold leading-none tabular-nums shadow-sm",
+        "px-2 py-0.5 rounded-full text-[11px] font-mono font-bold leading-none tabular-nums",
         hasDue
-          ? "bg-blue-600 text-white shadow-blue-500/30 dark:bg-blue-500 dark:text-white dark:shadow-[0_0_12px_rgba(59,130,246,0.5)]"
+          ? "bg-blue-600 text-white dark:bg-blue-500 dark:text-white dark:shadow-[0_0_12px_rgba(59,130,246,0.5)]"
           : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500"
       )}>
         {count || 0}
@@ -55,7 +55,7 @@ export function DueCardsBadge({ count = 0, language = 'DE', onClick, className, 
       <span className={cn(
         "text-xs font-semibold tracking-wider uppercase transition-colors font-sans",
         hasDue
-          ? "text-zinc-700 group-hover:text-zinc-950 dark:text-zinc-200 dark:group-hover:text-white"
+          ? "text-neutral-800 group-hover:text-neutral-950 dark:text-zinc-200 dark:group-hover:text-white"
           : "text-zinc-400 dark:text-zinc-500"
       )}>
         {action}
