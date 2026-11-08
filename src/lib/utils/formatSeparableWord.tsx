@@ -1,22 +1,31 @@
 import React from 'react';
 
-export const GOVERNANCE_REGEX = /^(jemanden|jemandem|etwas|sich|jdn\.|jdm\.|etw\.)\s+/i;
+// СТРОГИЙ список только для внешнего серого лейбла (КАТЕГОРИЧЕСКИ без 'sich'):
+export const EXTERNAL_GOVERNANCE_REGEX = /^(jemandem\s+etwas|jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.)\s+/i;
+export const GOVERNANCE_REGEX = EXTERNAL_GOVERNANCE_REGEX;
 
-export function parseVerbComponents(rawTarget: string, externalPrefix?: string) {
+export function parseVerbComponents(rawTarget: string, externalPrefixProp?: string) {
   let cleanTarget = (rawTarget || '').trim();
-  let prefix = externalPrefix?.trim() || '';
+  let externalPrefix = (externalPrefixProp || '').trim();
 
-  // Если в самой строке слова уже есть управление (jemanden, jemandem и т.д.)
-  const match = cleanTarget.match(GOVERNANCE_REGEX);
+  // Проверяем наличие управления ТОЛЬКО из разрешенного списка (без 'sich'):
+  const match = cleanTarget.match(EXTERNAL_GOVERNANCE_REGEX);
   if (match) {
-    if (!prefix) {
-      prefix = match[1]; // Выносим его в левый лейбл
+    if (!externalPrefix) {
+      externalPrefix = match[1]; // jemanden / jemandem / etwas
     }
-    // УДАЛЯЕМ управление из строки, которая рендерится внутри инпута!
-    cleanTarget = cleanTarget.replace(GOVERNANCE_REGEX, '').trim();
+    // Срезаем ТОЛЬКО jemanden/jemandem/etwas:
+    cleanTarget = cleanTarget.replace(EXTERNAL_GOVERNANCE_REGEX, '').trim();
   }
 
-  return { prefix, coreWord: cleanTarget };
+  // «sich» остается частью cleanTarget!
+  // cleanTarget теперь содержит: "sich entscheiden", "sich aus|ruhen" и т.д.
+  return {
+    prefix: externalPrefix,
+    externalPrefix,
+    coreWord: cleanTarget,
+    inputTarget: cleanTarget,
+  };
 }
 
 export const GERMAN_SEPARABLE_PREFIXES = [
@@ -40,7 +49,7 @@ export function detectAndMarkSeparable(word: string, forms?: string | null): str
   if (!forms || typeof forms !== 'string') return word;
 
   const prefixPattern = GERMAN_SEPARABLE_PREFIXES.join('|');
-  const prefixRegex = new RegExp(`\\b(?:[a-zA-ZäöüÄÖÜß]+)\\s+(${prefixPattern})\\b`, 'i');
+  const prefixRegex = new RegExp(`\\b(?:[a-zA-ZäöüÄÖÜß]+)\\s+(?:sich\\s+)?(${prefixPattern})\\b`, 'i');
   const geRegex = new RegExp(`\\b(${prefixPattern})ge[a-zA-ZäöüÄÖÜß]+\\b`, 'i');
 
   const match = forms.match(prefixRegex) || forms.match(geRegex);
@@ -113,12 +122,8 @@ export function formatSeparableWord(
 
   if (parts.isSeparable) {
     return (
-      <span className="inline-flex items-center font-medium tracking-tight whitespace-nowrap">
-        <span className="whitespace-nowrap">{parts.prefixPart}</span>
-        <span className="text-current opacity-40 mx-0.5 font-light select-none whitespace-nowrap" aria-hidden="true">
-          |
-        </span>
-        <span className="whitespace-nowrap">{parts.stemPart}</span>
+      <span className="whitespace-nowrap font-medium tracking-tight">
+        {parts.prefixPart}<span className="opacity-40 mx-0.5 font-light select-none" aria-hidden="true">|</span>{parts.stemPart}
       </span>
     );
   }

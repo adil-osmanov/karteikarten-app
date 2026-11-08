@@ -35,7 +35,7 @@ import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
 import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
 import { CardEditorModal } from "@/components/CardEditorModal";
-import { formatSeparableWord, parseVerbComponents } from "@/lib/utils/formatSeparableWord";
+import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX } from "@/lib/utils/formatSeparableWord";
 import { getCleanTranslation } from "@/lib/utils";
 import {
   writeThroughCardUpdate,
@@ -46,7 +46,7 @@ import {
   subscribeStateBus,
   type CloudSyncStatus
 } from "@/lib/sync/cloudStateSync";
-export { formatSeparableWord, parseVerbComponents, getCleanTranslation };
+export { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, getCleanTranslation };
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3554,6 +3554,8 @@ export interface ParsedTargetPhrase {
   splitIndex: number;
   isTrennbar: boolean;
   article: string | null;
+  externalPrefix: string;
+  inputTarget: string;
 }
 
 export function TrennbarDottedBar() {
@@ -3573,87 +3575,93 @@ export function checkAnswer(userInput: string, targetWord: string): boolean {
   return userInput.trim().toLowerCase() === targetWord.replace(/\|/g, '').trim().toLowerCase();
 }
 
-export const HELPER_TOKENS = ['jemand', 'jemanden', 'jemandem', 'etwas', 'jdn.', 'jdm.', 'etw.', 'jmd.'] as const;
+export const HELPER_TOKENS = ['jemanden', 'jemandem', 'etwas', 'jdn.', 'jdm.', 'etw.'] as const;
 const HELPER_TOKEN_SET = new Set(HELPER_TOKENS.map(t => t.toLowerCase()));
 
-// Частица 'sich' НЕ ДОЛЖНА входить в HELPER_TOKENS!
-// Если в 3 или 4 раунде слово возвратное (sich freuen, sich irren):
-// всё выражение 'sich irren' является целевым для ввода в инпут.
+// Частица 'sich' КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНА во внешнем префиксе!
+// Если слово возвратное (sich entscheiden, sich trauen, sich vor|stellen):
+// всё выражение с 'sich' является целевым для ввода в инпут.
 export function isHelperToken(token: string): boolean {
   if (!token) return false;
-  const clean = token.replace(/[().]/g, '').toLowerCase().trim();
-  const cleanWithDot = token.replace(/[()]/g, '').toLowerCase().trim();
-  return HELPER_TOKEN_SET.has(clean) || HELPER_TOKEN_SET.has(cleanWithDot) || /^(jemand(em|en|es|er)?|jdm|jdn|jmd|etwas|etw)$/i.test(clean);
+  const clean = token.replace(/[()]/g, '').toLowerCase().trim();
+  return HELPER_TOKEN_SET.has(clean) || /^(jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.)$/i.test(clean);
 }
 
-export function parseTargetPhrase(raw: string): ParsedTargetPhrase {
-  const trimmed = (raw || '').replace(/\s+/g, ' ').trim();
-  if (!trimmed) {
+export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string): ParsedTargetPhrase {
+  let cleanTarget = (rawTarget || '').replace(/\s+/g, ' ').trim();
+  let externalPrefix = (externalPrefixProp || '').trim();
+
+  if (!cleanTarget) {
     return {
-      prefixContext: '',
+      prefixContext: externalPrefix,
       coreWord: '',
       suffixContext: '',
       cleanCoreWord: '',
       splitIndex: -1,
       isTrennbar: false,
-      article: null
+      article: null,
+      externalPrefix,
+      inputTarget: ''
     };
   }
 
   // 1. Существительное с артиклем (der/die/das) — артикль и пробел обязательны для изучения и ввода!
-  const nounMatch = trimmed.match(/^(der|die|das)\s+([A-ZÄÖÜ][a-zA-ZäöüÄÖÜß-]*)$/i);
+  const nounMatch = cleanTarget.match(/^(der|die|das)\s+([A-ZÄÖÜ][a-zA-ZäöüÄÖÜß-]*)$/i);
   if (nounMatch) {
     const art = nounMatch[1].toLowerCase();
     const noun = nounMatch[2];
+    const fullNoun = `${art} ${noun}`;
     return {
       prefixContext: '',
-      coreWord: trimmed,
+      coreWord: cleanTarget,
       suffixContext: '',
-      cleanCoreWord: `${art} ${noun}`,
+      cleanCoreWord: fullNoun,
       splitIndex: -1,
       isTrennbar: false,
-      article: art
+      article: art,
+      externalPrefix: '',
+      inputTarget: fullNoun
     };
   }
 
-  // Разбиваем фразу на токены
-  const tokens = trimmed.split(' ');
-
-  // Выделяем начальные токены-подсказки (ТОЛЬКО местоименные маркеры: jemand, jemandem, jdm., etw. и т.д.)
-  // Частица 'sich', предлоги (an, auf, etc.) НЕ входят в HELPER_TOKENS и вводятся пользователем вручную!
-  let helperEndIdx = 0;
-  while (helperEndIdx < tokens.length - 1 && isHelperToken(tokens[helperEndIdx])) {
-    helperEndIdx++;
+  // 2. Проверяем наличие управления ТОЛЬКО из разрешенного списка EXTERNAL_GOVERNANCE_REGEX (без 'sich'!):
+  const match = cleanTarget.match(EXTERNAL_GOVERNANCE_REGEX);
+  if (match) {
+    if (!externalPrefix) {
+      externalPrefix = match[1]; // jemanden / jemandem / etwas / jemandem etwas
+    }
+    // Срезаем ТОЛЬКО jemanden/jemandem/etwas:
+    cleanTarget = cleanTarget.replace(EXTERNAL_GOVERNANCE_REGEX, '').trim();
   }
 
-  const helperPrefix = helperEndIdx > 0 ? tokens.slice(0, helperEndIdx).join(' ') : '';
-  const remainingTokens = tokens.slice(helperEndIdx);
-  const remainingPhrase = remainingTokens.join(' ');
-
-  // 2. Разделяемый глагол с пайпом (напр., "aus|leihen", "sich an|passen", "jdm. etwas vor|schlagen")
-  if (remainingPhrase.includes('|')) {
-    const pipeIdx = remainingPhrase.indexOf('|');
-    const cleanRemaining = remainingPhrase.replace(/\|/g, '');
+  // «sich» остается частью cleanTarget!
+  // cleanTarget теперь содержит: "sich entscheiden", "sich aus|ruhen" и т.д.
+  if (cleanTarget.includes('|')) {
+    const pipeIdx = cleanTarget.indexOf('|');
+    const cleanRemaining = cleanTarget.replace(/\|/g, '');
     return {
-      prefixContext: helperPrefix,
-      coreWord: remainingPhrase,
+      prefixContext: externalPrefix,
+      coreWord: cleanTarget,
       suffixContext: '',
       cleanCoreWord: cleanRemaining,
       splitIndex: pipeIdx,
       isTrennbar: true,
-      article: null
+      article: null,
+      externalPrefix,
+      inputTarget: cleanTarget
     };
   }
 
-  // 3. Возвратные глаголы, фразы с предлогами и обычные слова (напр., "sich irren", "sich freuen", "an jemanden denken")
   return {
-    prefixContext: helperPrefix,
-    coreWord: remainingPhrase,
+    prefixContext: externalPrefix,
+    coreWord: cleanTarget,
     suffixContext: '',
-    cleanCoreWord: remainingPhrase.replace(/\|/g, ''),
+    cleanCoreWord: cleanTarget.replace(/\|/g, ''),
     splitIndex: -1,
     isTrennbar: false,
-    article: null
+    article: null,
+    externalPrefix,
+    inputTarget: cleanTarget
   };
 }
 
@@ -4040,32 +4048,13 @@ function RapidFlashcardMode({
     const trimmedInput = (input || '').replace(/[|·\u2506\u250A]/g, '').trimStart();
     if (!trimmedInput) return { isMatch: false, isPrefix: true };
 
-    const targetCore = parsedTarget.cleanCoreWord.trim();
-    const targetFull = `${parsedTarget.prefixContext} ${parsedTarget.cleanCoreWord} ${parsedTarget.suffixContext}`.trim();
+    const inputTarget = parsedTarget.inputTarget || parsedTarget.cleanCoreWord || '';
+    const targetToMatch = inputTarget.replace(/\|/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const targetFull = `${parsedTarget.externalPrefix} ${targetToMatch}`.replace(/\s+/g, ' ').trim().toLowerCase();
 
-    const lowerInput = trimmedInput.toLowerCase();
-    const lowerCore = targetCore.toLowerCase();
-    const lowerFull = targetFull.toLowerCase();
-
-    // Прямая проверка очищенного целевого слова
-    if (checkAnswer(trimmedInput, currentCard?.targetWord || '')) {
-      return { isMatch: true, isPrefix: true };
-    }
-
-    // Для отделяемых глаголов (напр., ausleihen) сравниваем без внутренних пробелов
-    if (parsedTarget.isTrennbar) {
-      const inputNoSpace = lowerInput.replace(/\s+/g, '');
-      const coreNoSpace = lowerCore.replace(/\s+/g, '');
-      const fullNoSpace = lowerFull.replace(/\s+/g, '');
-
-      const isMatch = (inputNoSpace === coreNoSpace) || (inputNoSpace === fullNoSpace);
-      const isPrefix = coreNoSpace.startsWith(inputNoSpace) || fullNoSpace.startsWith(inputNoSpace);
-      return { isMatch, isPrefix };
-    }
-
-    // Для существительных (напр., "die Voraussetzung") и фраз пробел строго обязателен!
-    const isMatch = (lowerInput.trim() === lowerCore) || (lowerInput.trim() === lowerFull);
-    const isPrefix = lowerCore.startsWith(lowerInput) || lowerFull.startsWith(lowerInput);
+    const normalizedInput = trimmedInput.replace(/\s+/g, ' ').toLowerCase();
+    const isMatch = (normalizedInput.trim() === targetToMatch) || (normalizedInput.trim() === targetFull);
+    const isPrefix = targetToMatch.startsWith(normalizedInput) || targetFull.startsWith(normalizedInput);
 
     return { isMatch, isPrefix };
   }, [parsedTarget]);
