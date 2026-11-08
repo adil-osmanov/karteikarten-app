@@ -7546,6 +7546,47 @@ export const getTabsForLanguage = (lang?: string): TabConfig[] => {
   ];
 };
 
+export const CategoryTabs = React.memo(function CategoryTabs({
+  tabs,
+  activeCategory,
+  onSelectCategory,
+}: {
+  tabs: TabConfig[];
+  activeCategory: 'textbooks' | 'flashcards' | 'structures';
+  onSelectCategory: (id: 'textbooks' | 'flashcards' | 'structures') => void;
+}) {
+  return (
+    <div className="w-full flex justify-center mt-4 sm:mt-6 mb-6 sm:mb-8 px-4">
+      <div 
+        role="tablist"
+        aria-label="Kategorien"
+        className="max-w-full overflow-x-auto no-scrollbar inline-flex p-1 rounded-full bg-neutral-200/70 dark:bg-white/[0.05] backdrop-blur-xl border border-black/5 dark:border-white/10 items-center gap-1 shadow-inner transform-gpu [backface-visibility:hidden] will-change-transform select-none"
+      >
+        {tabs.map((tab) => {
+          const isActive = activeCategory === tab.id;
+          return (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={isActive}
+              type="button"
+              onClick={() => onSelectCategory(tab.id)}
+              className={cn(
+                "rounded-full px-5 py-1.5 text-xs whitespace-nowrap font-medium transition-colors duration-150 cursor-pointer outline-none",
+                isActive
+                  ? "bg-white dark:bg-white/15 text-neutral-900 dark:text-white shadow-sm"
+                  : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
+              )}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
 export function getBookCategory(book?: BookMeta | null): 'textbooks' | 'flashcards' | 'structures' {
   if (!book) return 'textbooks';
   if (book.category === 'textbooks' || book.category === 'coursebook') return 'textbooks';
@@ -12399,24 +12440,12 @@ export default function App() {
               aria-hidden="true"
             />
             
-            {/* Dynamic Apple Segmented Control with i18n (Apple Glass Segment) */}
-            <div className="w-full flex justify-center mt-4 sm:mt-6 mb-6 sm:mb-8 px-4">
-              <div className="max-w-full overflow-x-auto no-scrollbar inline-flex p-1 rounded-full bg-neutral-200/70 dark:bg-white/[0.05] backdrop-blur-xl border border-black/5 dark:border-white/10 items-center gap-1 shadow-inner">
-                {getTabsForLanguage(appLanguage).map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveCategory(tab.id)}
-                    className={`rounded-full px-4 py-1.5 text-xs whitespace-nowrap font-medium transition-all duration-200 cursor-pointer ${
-                      activeCategory === tab.id
-                        ? 'bg-white dark:bg-white/15 text-neutral-900 dark:text-white font-medium shadow-sm'
-                        : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Dynamic Apple Segmented Control with i18n (Apple Glass Segment) - Memoized Anti-flicker */}
+            <CategoryTabs
+              tabs={getTabsForLanguage(appLanguage)}
+              activeCategory={activeCategory}
+              onSelectCategory={setActiveCategory}
+            />
 
             {/* Единая абсолютно симметричная сетка книг для выбранной категории */}
             <div 
