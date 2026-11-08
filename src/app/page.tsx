@@ -33,7 +33,7 @@ import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
-import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/CardContainer";
+import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots, getRarityShadowClasses } from "@/components/CardContainer";
 import { CardEditorModal } from "@/components/CardEditorModal";
 import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX } from "@/lib/utils/formatSeparableWord";
 import { getCleanTranslation } from "@/lib/utils";
@@ -3731,7 +3731,7 @@ function RapidFlashcardMode({
   const inputRef = useRef<HTMLInputElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 7. Сброс стейта строго по currentCard?.id (устранение мигания инпута при переходе на раунд 3)
+  // 7. Сброс стейта строго при смене карточки (без ложного срабатывания от промежуточного обновления progress)
   useEffect(() => {
     const round = currentCard.round ?? (
       currentCard.isLegendary === false 
@@ -3755,7 +3755,8 @@ function RapidFlashcardMode({
     setCardAnimClass('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
     setIsTransitioning(false);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-  }, [currentCard?.id, currentCard?.round, currentCard?.isLegendary, progress, isReview, currentCard?.masteryLevel, currentCard?.isArchived]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCard?.id, currentCard?.round, currentCard?.isLegendary]);
 
   // Парсинг целевой конструкции (управление, отделяемая приставка, артикль)
   const parsedTarget = useMemo(() => {
@@ -3895,7 +3896,8 @@ function RapidFlashcardMode({
     }
   }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile]);
 
-  // 5. Устранение бага обратной крутки карточки: карточка просто угасает и сразу сменяется без кульбита
+  // 5. Мгновенный переход без обратного переворота (No Reverse Flip on Next):
+  // Карточка быстро гаснет по opacity за 90 мс БЕЗ вращения назад, затем синхронно сменяется новой карточкой лицом вперед
   const handleRateCard = useCallback((remembered: boolean) => {
     if (locked || isTransitioning) return;
     setIsTransitioning(true);
@@ -3915,18 +3917,9 @@ function RapidFlashcardMode({
       setLocalMastery(nextMastery);
     }
 
-    // Шаг 1: Текущая карточка НА МЕСТЕ плавно размывается и растворяется за 140 мс
-    // Шаг 2: В момент полной невидимости (через 140 мс) подменяются индекс и данные карточки, сбрасывается isFlipped = false
     setTimeout(() => {
       onAnswer(remembered, false);
-      setIsFlipped(false);
-      setIsVaporizing(false);
-
-      // Шаг 3: Новая карточка плавно проявляется из блюра за 140 мс
-      requestAnimationFrame(() => {
-        setIsTransitioning(false);
-      });
-    }, 140);
+    }, 90);
   }, [locked, isTransitioning, currentRound, localMastery, onAnswer]);
 
   const toggleFlip = useCallback(() => {
@@ -3998,7 +3991,7 @@ function RapidFlashcardMode({
     // Карточка показывает правильный ответ и СПОКОЙНО ЖДЕТ, пока пользователь прочитает и нажмет «Weiter»
   }, [locked, isAnswered, isLegendaryVisual, visualRound, effectivePrefix, verbComponents.coreWord, parsedTarget, currentCard?.targetWord, playCardAudio]);
 
-  // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter
+  // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter (мгновенное угасание за 90 мс без обратного кульбита)
   const handleProceedNext = useCallback(() => {
     if (!isAnswered || isTransitioning) return;
     setIsTransitioning(true);
@@ -4009,9 +4002,7 @@ function RapidFlashcardMode({
       triggerHaptic('success');
     }
 
-    // Шаг 1: Текущая карточка НА МЕСТЕ плавно размывается и растворяется за 140 мс
     setTimeout(() => {
-      // Шаг 2: В момент полной невидимости подменяем данные и вызываем ответ/переход
       if (isSurrendered) {
         const updatedMastery = Math.max(0, (localMastery || 0) - 1);
         try {
@@ -4021,19 +4012,7 @@ function RapidFlashcardMode({
       } else {
         onAnswer(true, false, false);
       }
-
-      setIsVaporizing(false);
-      setIsFlipped(false);
-      setIsAnswered(false);
-      setIsSurrendered(false);
-      setTypedValue('');
-      setIsErrorMismatch(false);
-
-      // Шаг 3: Новая карточка плавно проявляется из блюра за 140 мс
-      requestAnimationFrame(() => {
-        setIsTransitioning(false);
-      });
-    }, 140);
+    }, 90);
   }, [isAnswered, isTransitioning, isSurrendered, currentRound, localMastery, onHintPenalty, onAnswer]);
 
   // Проверка совпадения ввода с целевым словом или всей фразой
@@ -4225,25 +4204,26 @@ function RapidFlashcardMode({
     <div 
       key={currentCard?.id || (currentCard as any)?.front} 
       className={cn(
-        "relative w-full max-w-4xl lg:max-w-5xl h-[620px] min-h-[620px] max-h-[620px] rounded-[36px] flex flex-col justify-between items-center select-none overflow-hidden",
+        "relative w-full max-w-4xl lg:max-w-5xl h-[600px] min-h-[600px] max-h-[600px] mx-auto rounded-[36px] flex flex-col justify-between items-center select-none transition-shadow duration-300",
+        isRound1or2 && getRarityShadowClasses(visualRound, isMasteredGolden || isVaporizing, isLegendaryVisual),
         isTransitioning
-          ? 'opacity-0 filter blur-sm scale-[0.99] transition-all duration-[140ms] ease-out pointer-events-none'
-          : 'opacity-100 filter blur-0 scale-100 transition-all duration-[140ms] ease-out'
+          ? 'opacity-0 transition-opacity duration-100 ease-out pointer-events-none'
+          : 'opacity-100 transition-opacity duration-100 ease-out'
       )}
     >
       {isRound1or2 ? (
         /* =======================================================
-           РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
+           РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (СЛОЙ CardStage + CardInner)
            ======================================================= */
         <div 
-          className="w-full max-w-4xl lg:max-w-5xl h-[620px] min-h-[620px] max-h-[620px] flex flex-col items-center perspective-1000"
+          className="w-full max-w-4xl lg:max-w-5xl h-[600px] min-h-[600px] max-h-[600px] flex flex-col items-center perspective-1000"
           style={{ perspective: 1000, WebkitPerspective: 1000 }}
         >
-          {/* 3D Оболочка */}
+          {/* Внутренний вращающийся слой (CardInner) — тени вынесены наружу на CardStage */}
           <div
             onClick={handleCardClick}
             className={cn(
-              "w-full h-[620px] min-h-[620px] max-h-[620px] relative cursor-pointer transform-style-3d",
+              "w-full h-[600px] min-h-[600px] max-h-[600px] relative cursor-pointer transform-style-3d",
               isTransitioning ? 'transition-none duration-0' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
             style={{
@@ -4459,15 +4439,15 @@ function RapidFlashcardMode({
                   <div
                     onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                     className={cn(
-                      "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all duration-200 outline-none border cursor-text shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
+                      "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all duration-200 outline-none border cursor-text",
                       isMobile && "select-none",
                       isAnswered
                         ? (!isSurrendered
-                            ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10 font-semibold"
-                            : "border-red-500/40 text-red-400 bg-red-500/5 font-semibold")
+                            ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-semibold"
+                            : "border-red-500/40 text-red-600 dark:text-red-400 bg-red-500/5 font-semibold")
                         : isErrorMismatch
                           ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                          : "text-neutral-900 dark:text-white border-black/15 dark:border-white/15 bg-black/[0.04] dark:bg-white/[0.04] focus-within:border-blue-500/70 focus-within:ring-4 focus-within:ring-blue-500/15 font-medium tracking-tight",
+                          : "bg-black/[0.03] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.06] focus-within:border-blue-600 dark:focus-within:border-blue-500/70 focus-within:ring-4 focus-within:ring-blue-500/10 dark:focus-within:ring-blue-500/15",
                       isShaking && "animate-shake"
                     )}
                   >
@@ -4529,15 +4509,15 @@ function RapidFlashcardMode({
                 <div
                   onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                   className={cn(
-                    "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all duration-200 outline-none border cursor-text shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
+                    "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all duration-200 outline-none border cursor-text",
                     isMobile && "select-none",
                     isAnswered
                       ? (!isSurrendered
-                          ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10 font-semibold"
-                          : "border-red-500/40 text-red-400 bg-red-500/5 font-semibold")
+                          ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-semibold"
+                          : "border-red-500/40 text-red-600 dark:text-red-400 bg-red-500/5 font-semibold")
                       : isErrorMismatch
                         ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                        : "text-neutral-900 dark:text-white border-black/15 dark:border-white/15 bg-black/[0.04] dark:bg-white/[0.04] focus-within:border-blue-500/70 focus-within:ring-4 focus-within:ring-blue-500/15 font-medium tracking-tight",
+                        : "bg-black/[0.03] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.06] focus-within:border-blue-600 dark:focus-within:border-blue-500/70 focus-within:ring-4 focus-within:ring-blue-500/10 dark:focus-within:ring-blue-500/15",
                     isShaking && "animate-shake"
                   )}
                 >
@@ -5001,25 +4981,20 @@ function RapidSession({
 
     if (isSurrender) {
       // Penalty and mistake recording were already completed immediately in handleHintPenalty.
-      // Move card to the end of the queue for review and advance.
-      setLocked(true);
-      const advanceDelay = wasFlipped ? 380 : 60;
-      timerRef.current = setTimeout(() => {
-        const demotedCard = {
-          ...current,
-          card: {
-            ...current.card,
-            round: 3, // Синий раунд
-            isLegendary: false,
-            masteryLevel: 2,
-            mistakeCount: ((current.card as any).mistakeCount || 0) + 1
-          }
-        };
-        setQueue(q => (q ? [...q.filter(item => item.card.id !== id), demotedCard] : q));
-        setWordProgress(prev => ({ ...prev, [id]: 2 }));
-        setTurn(t => t + 1);
-        setLocked(false);
-      }, advanceDelay);
+      // Карточка уже угасла в RapidFlashcardMode за 90 мс — синхронно переставляем её в конец очереди без обратного переворота!
+      const demotedCard = {
+        ...current,
+        card: {
+          ...current.card,
+          round: 3, // Синий раунд
+          isLegendary: false,
+          masteryLevel: 2,
+          mistakeCount: ((current.card as any).mistakeCount || 0) + 1
+        }
+      };
+      setQueue(q => (q ? [...q.filter(item => item.card.id !== id), demotedCard] : q));
+      setWordProgress(prev => ({ ...prev, [id]: 2 }));
+      setTurn(t => t + 1);
       return;
     }
 
@@ -5071,41 +5046,33 @@ function RapidSession({
       }
     );
 
-    // 1) Persist immediately (store + Supabase)
-    if (liveCard.isArchived) {
-      // Spaced-repetition review of an already learned word
-      if (learned) await answerCard(current.deckId, id, true, false, true, studyLanguage, isReviewMode);
-      else if (!correct) await answerCard(current.deckId, id, false, false, true, studyLanguage, isReviewMode);
-    } else {
-      await setCardProgress(current.deckId, id, newScore, studyLanguage);
-    }
-
-    // 2) Update dots immediately
+    // 1) СРАЗУ синхронно переключаем карточку и прогресс в один тик рендера (карточка уже угасла за 90 мс)
     setWordProgress(prev => ({ ...prev, [id]: Math.min(4, newScore) }));
-    setLocked(true);
+    if (learned) {
+      setMastered(m => m + 1);
+      setQueue(q => (q ? q.filter(item => item.card.id !== id) : q));
+    } else {
+      const demotedCard = {
+        ...current,
+        card: {
+          ...current.card,
+          round: 3, // Синий раунд
+          isLegendary: false,
+          masteryLevel: newScore,
+          mistakeCount: ((current.card as any).mistakeCount || 0) + 1
+        }
+      };
+      setQueue(q => (q ? [...q.filter(item => item.card.id !== id), demotedCard] : q));
+    }
+    setTurn(t => t + 1);
 
-    // 3) Моментальный переход к следующей карточке (карточка уже плавно угасла в компоненте)
-    const advanceDelay = wasFlipped ? 120 : 20;
-    timerRef.current = setTimeout(() => {
-      if (learned) {
-        setMastered(m => m + 1);
-        setQueue(q => (q ? q.filter(item => item.card.id !== id) : q));
-      } else {
-        const demotedCard = {
-          ...current,
-          card: {
-            ...current.card,
-            round: 3, // Синий раунд
-            isLegendary: false,
-            masteryLevel: newScore,
-            mistakeCount: ((current.card as any).mistakeCount || 0) + 1
-          }
-        };
-        setQueue(q => (q ? [...q.filter(item => item.card.id !== id), demotedCard] : q));
-      }
-      setTurn(t => t + 1);
-      setLocked(false);
-    }, advanceDelay);
+    // 2) Сохранение в стор и Supabase в фоне, не блокируя переключение UI
+    if (liveCard.isArchived) {
+      if (learned) void answerCard(current.deckId, id, true, false, true, studyLanguage, isReviewMode);
+      else if (!correct) void answerCard(current.deckId, id, false, false, true, studyLanguage, isReviewMode);
+    } else {
+      void setCardProgress(current.deckId, id, newScore, studyLanguage);
+    }
   }, [locked, queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage]);
 
   const handleHintPenalty = useCallback(async (forcedScore?: number) => {
@@ -5250,6 +5217,7 @@ function RapidStudyCard({
   reverse?: boolean;
 }) {
   const [locked, setLocked] = useState(false);
+  const [stepTurn, setStepTurn] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const penaltyReportedRef = useRef(false);
 
@@ -5279,6 +5247,7 @@ function RapidStudyCard({
       onAnswer(correct, false);
     }
     penaltyReportedRef.current = false;
+    setStepTurn(t => t + 1);
     onNext();
     setLocked(false);
   }, [locked, onAnswer, onNext]);
@@ -5298,7 +5267,7 @@ function RapidStudyCard({
   return (
     <div className="w-full flex justify-center relative">
       <RapidFlashcardMode
-        key={`${card.id}-${card.round ?? 0}-${card.isLegendary ? 'leg' : 'norm'}`}
+        key={`${card.id}-${stepTurn}-${card.round ?? 0}-${card.isLegendary ? 'leg' : 'norm'}`}
         card={card}
         progress={progress}
         locked={locked}
@@ -5326,7 +5295,7 @@ function StudyEntry(props: {
     : <StudyInterface {...props} />;
 
   return (
-    <main className="min-h-screen w-full bg-[#f2f2f7] dark:bg-black text-zinc-900 dark:text-zinc-100 transition-colors duration-200">
+    <main className="min-h-screen w-full bg-[#F5F5F7] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 transition-colors duration-200">
       {content}
     </main>
   );
@@ -7741,9 +7710,9 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
-        "relative p-5 rounded-2xl flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[152px] transition-all duration-200",
-        // Светлая тема (матовая керамика Apple с мягкой многослойной тенью):
-        "bg-white/80 border border-black/[0.06] shadow-[0_4px_20px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)] hover:border-black/10 backdrop-blur-xl hover:-translate-y-0.5",
+        "relative p-5 rounded-3xl flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[152px] transition-all duration-200",
+        // Светлая тема (тактильная бумага Apple 300g с мягкой многослойной тенью на полотне #F5F5F7):
+        "bg-white border border-black/[0.07] shadow-[0_2px_8px_rgba(0,0,0,0.04),0_12px_24px_-4px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)] hover:border-black/10 hover:-translate-y-0.5",
         // Темная тема:
         "dark:bg-neutral-900/70 dark:border-white/5 dark:hover:border-blue-500/30 dark:shadow-sm dark:hover:shadow-black/40",
         isCompleted && "opacity-85 hover:opacity-100"
@@ -7754,7 +7723,7 @@ const DeckCard = React.memo(({
         {onRename && (
           <button 
             onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-            className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-[#86868B] hover:text-[#1D1D1F] dark:text-neutral-300 dark:hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
+            className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-neutral-500 hover:text-[#1D1D1F] dark:text-neutral-300 dark:hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
             title="Lektion umbenennen"
           >
             <Edit2 className="w-3.5 h-3.5" />
@@ -7762,7 +7731,7 @@ const DeckCard = React.memo(({
         )}
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
-          className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-rose-50 dark:hover:bg-rose-500/20 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-[#86868B] dark:text-neutral-300 hover:text-rose-600 dark:hover:text-rose-400 transition-all active:scale-95 shadow-sm cursor-pointer"
+          className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-rose-50 dark:hover:bg-rose-500/20 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-neutral-500 dark:text-neutral-300 hover:text-rose-600 dark:hover:text-rose-400 transition-all active:scale-95 shadow-sm cursor-pointer"
           title="Löschen"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -7793,7 +7762,7 @@ const DeckCard = React.memo(({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); initAudioCtx(); onOpenStory(deck.id); }}
-                className="p-1.5 rounded-lg text-[#86868B] hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg text-neutral-500 hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
                 title="Lesetext (Режим чтения)"
               >
                 <BookOpen className="w-3.5 h-3.5" />
@@ -7804,7 +7773,7 @@ const DeckCard = React.memo(({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
-                  className="p-1.5 rounded-lg text-[#86868B] hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg text-neutral-500 hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
                   title="Diktat / Schreiben (Письмо)"
                 >
                   <Keyboard className="w-3.5 h-3.5" />
@@ -7812,7 +7781,7 @@ const DeckCard = React.memo(({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
-                  className="p-1.5 rounded-lg text-[#86868B] hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg text-neutral-500 hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
                   title="Shadowing / Hören (Аудио)"
                 >
                   <Mic className="w-3.5 h-3.5" />
@@ -7820,7 +7789,7 @@ const DeckCard = React.memo(({
               </>
             )}
           </div>
-          <span className="text-xs font-mono font-medium text-[#86868B] dark:text-neutral-500 ml-auto tabular-nums">
+          <span className="text-xs font-mono font-medium text-neutral-500 dark:text-neutral-500 ml-auto tabular-nums">
             {mastered} / {total}
           </span>
         </div>
@@ -11645,7 +11614,7 @@ export default function App() {
     return list;
   }, [filteredDecksList]);
 
-  if (!isMounted) return <main className="min-h-screen bg-[#fbfbfd] dark:bg-black" />;
+  if (!isMounted) return <main className="min-h-screen bg-[#F5F5F7] dark:bg-black" />;
 
 
   if (activeDeckId) {
@@ -12245,7 +12214,7 @@ export default function App() {
     : ((activeBook?.accentColor && activeBook.accentColor.startsWith('#')) ? activeBook.accentColor : '#3B82F6');
 
   return (
-    <div className="min-h-screen relative w-full bg-[#fbfbfd] dark:bg-black text-zinc-900 dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
+    <div className="min-h-screen relative w-full bg-[#F5F5F7] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
       {/* Кинозерно (Аппаратный шум) */}
       <div 
         className="fixed inset-0 pointer-events-none opacity-[0.015] mix-blend-overlay z-[9999]"
