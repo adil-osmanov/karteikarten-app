@@ -85,7 +85,7 @@ export const CARD_CONTAINER_SURFACE_CLASSES = cn(
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "relative w-full max-w-4xl lg:max-w-5xl h-[70vh] min-h-[560px] max-h-[720px] mx-auto p-8 md:p-12 rounded-[36px] border flex flex-col justify-between items-center group animate-card-enter select-none overflow-hidden transition-all duration-500 ease-out",
+  "relative w-full max-w-4xl lg:max-w-5xl h-[620px] min-h-[620px] max-h-[620px] mx-auto p-10 rounded-[36px] border flex flex-col justify-between items-center group animate-card-enter select-none overflow-hidden transition-all duration-500 ease-out",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 
@@ -159,7 +159,7 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
         ref={ref}
         className={cn(
           is3DFace
-            ? cn("absolute inset-0 w-full h-full p-8 md:p-12 border flex flex-col justify-between items-center backface-hidden group rounded-[36px]", CARD_CONTAINER_SURFACE_CLASSES)
+            ? cn("absolute inset-0 w-full h-[620px] min-h-[620px] max-h-[620px] p-10 border flex flex-col justify-between items-center backface-hidden group rounded-[36px]", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
           "transition-all duration-500 ease-out will-change-transform",

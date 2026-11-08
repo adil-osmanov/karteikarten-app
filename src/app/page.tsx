@@ -3904,35 +3904,29 @@ function RapidFlashcardMode({
       if (currentRound === 4) {
         setIsVaporizing(true);
         triggerHaptic('success');
-        setCardAnimClass('opacity-0 filter blur-md scale-[0.99] transition-all duration-160 ease-out');
-        setTimeout(() => {
-          setIsVaporizing(false);
-          setIsTransitioning(false);
-          setIsFlipped(false);
-          onAnswer(true, false);
-        }, 160);
-        return;
+      } else {
+        playSafeAudio(() => playSuccessSound());
+        const nextMastery = Math.min(4, (localMastery || 0) + 1);
+        setLocalMastery(nextMastery);
       }
-
-      playSafeAudio(() => playSuccessSound());
-      const nextMastery = Math.min(4, (localMastery || 0) + 1);
-      setLocalMastery(nextMastery);
     } else {
       playSafeAudio(() => playErrorSound());
       const nextMastery = Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
     }
 
-    // Мягкое угасание (fade-out) текущей обратной стороны без обратного переворота
-    setCardAnimClass('opacity-0 scale-[0.985] blur-md pointer-events-none transition-all duration-150 ease-out');
-
+    // Шаг 1: Текущая карточка НА МЕСТЕ плавно размывается и растворяется за 140 мс
+    // Шаг 2: В момент полной невидимости (через 140 мс) подменяются индекс и данные карточки, сбрасывается isFlipped = false
     setTimeout(() => {
       onAnswer(remembered, false);
+      setIsFlipped(false);
+      setIsVaporizing(false);
+
+      // Шаг 3: Новая карточка плавно проявляется из блюра за 140 мс
       requestAnimationFrame(() => {
-        setIsFlipped(false);
         setIsTransitioning(false);
       });
-    }, 150);
+    }, 140);
   }, [locked, isTransitioning, currentRound, localMastery, onAnswer]);
 
   const toggleFlip = useCallback(() => {
@@ -4015,13 +4009,10 @@ function RapidFlashcardMode({
       triggerHaptic('success');
     }
 
-    setCardAnimClass('opacity-0 scale-[0.985] blur-md pointer-events-none transition-all duration-150 ease-out');
-
+    // Шаг 1: Текущая карточка НА МЕСТЕ плавно размывается и растворяется за 140 мс
     setTimeout(() => {
-      // ФАЗА 2: Карточка ПОЛНОСТЬЮ СКРЫТА (opacity: 0, blur).
-      // Подменяем стейты и вызываем ответ/переход
+      // Шаг 2: В момент полной невидимости подменяем данные и вызываем ответ/переход
       if (isSurrendered) {
-        // Слово помечается как требующее повторного закрепления только после нажатия Weiter
         const updatedMastery = Math.max(0, (localMastery || 0) - 1);
         try {
           onHintPenalty?.(updatedMastery);
@@ -4038,11 +4029,11 @@ function RapidFlashcardMode({
       setTypedValue('');
       setIsErrorMismatch(false);
 
+      // Шаг 3: Новая карточка плавно проявляется из блюра за 140 мс
       requestAnimationFrame(() => {
-        // ФАЗА 3: Новая карточка плавно проявляется из блюра
         setIsTransitioning(false);
       });
-    }, 150);
+    }, 140);
   }, [isAnswered, isTransitioning, isSurrendered, currentRound, localMastery, onHintPenalty, onAnswer]);
 
   // Проверка совпадения ввода с целевым словом или всей фразой
@@ -4162,54 +4153,71 @@ function RapidFlashcardMode({
     }
   }, [isRound1or2]);
 
-  // 3. Двухшаговое управление стрелками, Space для бесконечного флипа туда-обратно, Enter/Space для Weiter
+  // 3. Детерминированное управление клавиатурой (Apple Key Controller)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isEditModalOpen) return;
-      if (isAnswered) {
-        if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
+      // Игнорируем нажатия, если открыты модалки редактирования или идет фаза перехода
+      if (isEditModalOpen || isTransitioning) return;
+
+      // РЕЖИМ 1: Раунды 3-4 (Active Recall / Текстовый ввод)
+      if (!isRound1or2) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (isAnswered) {
+            handleProceedNext();
+          } else {
+            handleEnterSubmit();
+          }
+          return;
+        }
+        if (isAnswered && (e.code === 'Space' || e.key === ' ')) {
           e.preventDefault();
           handleProceedNext();
+          return;
+        }
+        if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
+          if (!isAnswered) return;
+          playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+          return;
         }
         return;
       }
 
-      if (isRound1or2) {
-        if (e.code === 'Space' || e.key === ' ') {
-          e.preventDefault();
-          setIsFlipped(prev => !prev);
-        } else if (e.key === 'Enter' || e.key === 'ArrowRight') {
-          e.preventDefault();
-          if (!isFlipped) {
-            setIsFlipped(true);
-          } else {
-            handleRateCard(true);
-          }
-        } else if (e.key === 'ArrowLeft') {
-          e.preventDefault();
-          if (!isFlipped) {
-            setIsFlipped(true);
-          } else {
-            handleRateCard(false);
-          }
-        }
-      } else {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          handleEnterSubmit();
-        }
+      // РЕЖИМ 2: Раунды 1-2 (Флип-карты)
+      // 1. ПОВЕДЕНИЕ ENTER И ПРОБЕЛА: ВСЕГДА циклично переворачивает карточку (Toggle Flip)
+      if (e.code === 'Enter' || e.key === 'Enter' || e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        setIsFlipped(prev => !prev);
+        return;
       }
 
-      // Озвучка по клавише R (в раундах 1-2 с обеих сторон карточки, или в раундах 3-4 ТОЛЬКО ПОСЛЕ ответа)
+      // 2. ПОВЕДЕНИЕ СТРЕЛОЧЕК (СТРОГО ПО ТРЕБОВАНИЮ):
+      if (e.code === 'ArrowRight' || e.code === 'ArrowLeft' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+        e.preventDefault();
+        if (!isFlipped) {
+          // Случай А: Карточка НЕ перевернута — любая стрелка просто переворачивает рубашкой
+          setIsFlipped(true);
+        } else {
+          // Случай Б: Карточка УЖЕ перевернута — ставим оценку
+          if (e.code === 'ArrowRight' || e.code === 'ArrowUp') {
+            handleRateCard(true); // Знаю / Richtig
+          } else {
+            handleRateCard(false); // Не знаю / Falsch
+          }
+        }
+        return;
+      }
+
+      // 3. Озвучка по клавише R
       if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
-        if (!isRound1or2 && !isAnswered) return;
         playSafeAudio(() => playCardAudio(currentCard?.targetWord));
+        return;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditModalOpen, isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, handleMistakeOrGiveUp, playCardAudio]);
+  }, [isEditModalOpen, isTransitioning, isRound1or2, isFlipped, isAnswered, handleProceedNext, handleEnterSubmit, handleRateCard, playCardAudio, currentCard?.targetWord]);
 
   const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered;
 
@@ -4217,10 +4225,10 @@ function RapidFlashcardMode({
     <div 
       key={currentCard?.id || (currentCard as any)?.front} 
       className={cn(
-        "relative w-full max-w-4xl lg:max-w-5xl h-[70vh] min-h-[560px] max-h-[720px] rounded-[36px] transition-all duration-150 ease-out flex flex-col justify-between items-center select-none",
+        "relative w-full max-w-4xl lg:max-w-5xl h-[620px] min-h-[620px] max-h-[620px] rounded-[36px] flex flex-col justify-between items-center select-none overflow-hidden",
         isTransitioning
-          ? 'opacity-0 scale-[0.985] blur-md pointer-events-none'
-          : 'opacity-100 scale-100 blur-0'
+          ? 'opacity-0 filter blur-sm scale-[0.99] transition-all duration-[140ms] ease-out pointer-events-none'
+          : 'opacity-100 filter blur-0 scale-100 transition-all duration-[140ms] ease-out'
       )}
     >
       {isRound1or2 ? (
@@ -4228,14 +4236,14 @@ function RapidFlashcardMode({
            РАУНДЫ 1-2: НАСТОЯЩАЯ 3D ФЛИП-КАРТА APPLE (ЭТАЛОН СКРИНШОТ 3)
            ======================================================= */
         <div 
-          className="w-full max-w-4xl lg:max-w-5xl h-full flex flex-col items-center perspective-1000"
+          className="w-full max-w-4xl lg:max-w-5xl h-[620px] min-h-[620px] max-h-[620px] flex flex-col items-center perspective-1000"
           style={{ perspective: 1000, WebkitPerspective: 1000 }}
         >
           {/* 3D Оболочка */}
           <div
             onClick={handleCardClick}
             className={cn(
-              "w-full h-full relative cursor-pointer transform-style-3d",
+              "w-full h-[620px] min-h-[620px] max-h-[620px] relative cursor-pointer transform-style-3d",
               isTransitioning ? 'transition-none duration-0' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
             )}
             style={{

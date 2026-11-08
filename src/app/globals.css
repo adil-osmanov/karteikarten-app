@@ -7,6 +7,12 @@
   --color-zinc-150: #ededf0;
   --color-zinc-450: #8e8e93;
   --color-zinc-850: #1f1f23;
+  --duration-140: 140ms;
+}
+
+html {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
 }
 
 html:not(.dark), body:not(.dark) {
