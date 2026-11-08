@@ -24,39 +24,39 @@ export const rawSupabase = createClient(supabaseUrl, supabaseKey);
 export const supabase = rawSupabase;
 
 /**
- * Загрузка прогресса через нейтральный серверный шлюз /api/learning-progress
- * (100% защита от блокировщиков AdGuard / uBlock / EasyPrivacy, не содержит подстроку 'stats' в URL).
+ * Загрузка прогресса через нейтральный серверный шлюз /api/sync
+ * (100% защита от блокировщиков AdGuard / uBlock / EasyPrivacy, не содержит подстроку 'stats' или 'track' в URL).
  */
 export async function loadDayProgress(lang: string = 'DAY_STATS_DE'): Promise<any> {
   if (typeof window === 'undefined') return null;
   try {
-    const res = await fetch(`/api/learning-progress?lang=${encodeURIComponent(lang)}`, {
+    const res = await fetch(`/api/sync?lang=${encodeURIComponent(lang)}`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
     });
     if (!res.ok) return null;
     const json = await res.json();
     return json?.daily_activity !== undefined ? json.daily_activity : json;
-  } catch (e) {
-    // Тихий фоллбэк на localStorage / IndexedDB при отсутствии сети
+  } catch {
+    // Тихий fallback: AdGuard заблокировал сетевой вызов, данные остаются в IndexedDB
     return null;
   }
 }
 
 /**
- * Сохранение прогресса через нейтральный серверный шлюз /api/learning-progress
+ * Сохранение прогресса через нейтральный серверный шлюз /api/sync
  */
 export async function saveDayProgress(payload: any): Promise<boolean> {
   if (typeof window === 'undefined' || !payload) return false;
   try {
-    const res = await fetch('/api/learning-progress', {
+    const res = await fetch('/api/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     return res.ok;
-  } catch (e) {
-    // Мягкий перехват: работа приложения не прерывается
+  } catch {
+    // Тихий fallback: AdGuard заблокировал сетевой вызов, данные остаются в IndexedDB
     return false;
   }
 }
@@ -85,8 +85,8 @@ export async function safeFetchUserStats(param: string | string[]): Promise<any>
   if (typeof window === 'undefined') return Array.isArray(param) ? [] : null;
   try {
     const url = Array.isArray(param)
-      ? `/api/learning-progress?langs=${encodeURIComponent(param.join(','))}`
-      : `/api/learning-progress?lang=${encodeURIComponent(param)}`;
+      ? `/api/sync?langs=${encodeURIComponent(param.join(','))}`
+      : `/api/sync?lang=${encodeURIComponent(param)}`;
 
     const res = await fetch(url, {
       method: 'GET',
@@ -100,7 +100,8 @@ export async function safeFetchUserStats(param: string | string[]): Promise<any>
     } else {
       return json?.daily_activity !== undefined ? json.daily_activity : json;
     }
-  } catch (err) {
+  } catch {
+    // Тихий fallback: AdGuard заблокировал сетевой вызов, данные остаются в IndexedDB
     return Array.isArray(param) ? [] : null;
   }
 }

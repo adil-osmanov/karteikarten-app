@@ -263,8 +263,8 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
       } catch {}
 
       await saveDayProgress(syncPayload);
-    } catch (e) {
-      console.warn('Supabase stats sync notice:', e);
+    } catch {
+      // Тихий fallback: AdGuard заблокировал сетевой вызов, данные остаются в IndexedDB
     }
   };
 

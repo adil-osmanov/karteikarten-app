@@ -406,8 +406,8 @@ async function performDailyStatsToCloudSync(cleanLang: string, count: number, cu
       language: upperLang,
       daily_activity: progress
     });
-  } catch (e) {
-    console.error('Ошибка синхронизации дневной статистики в Supabase user_stats:', e);
+  } catch {
+    // Тихий fallback: AdGuard заблокировал сетевой вызов, данные остаются в кэше
   }
 }
 
