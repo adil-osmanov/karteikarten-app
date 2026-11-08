@@ -172,7 +172,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
     setCloudSyncStatus('idle');
     flushPendingQueue().catch(() => {});
-    syncWithCloud().catch(() => {});
   });
 
   window.addEventListener('offline', () => {
@@ -181,10 +180,10 @@ if (typeof window !== 'undefined') {
 }
 
 // ============================================================================
-// INSTANT NON-BLOCKING WRITE-THROUGH
+// INSTANT NON-BLOCKING WRITE-THROUGH (COMPACT SRS PAYLOAD, ZERO SELECT('*'))
 // ============================================================================
 
-export function writeThroughCardUpdate(cardId: string, card: any): void {
+export function writeThroughCardUpdate(cardId: string, card: any, includeContent: boolean = false): void {
   const nextMastery = card.masteryLevel ?? card.mastery_level ?? 0;
   const isArchived = Boolean(card.isArchived ?? card.is_archived);
   const nextInterval = card.interval ?? 0;
@@ -205,13 +204,15 @@ export function writeThroughCardUpdate(cardId: string, card: any): void {
     nextReviewDate: numericReviewDate,
   };
 
-  if (card.sentence !== undefined) primaryPayload.sentence = card.sentence;
-  if (card.targetWord !== undefined) primaryPayload.targetWord = card.targetWord;
-  if (card.translation !== undefined) primaryPayload.translation = card.translation;
-  if (card.baseWordInfo !== undefined) primaryPayload.baseWordInfo = card.baseWordInfo;
-  if (card.forms !== undefined) primaryPayload.forms = card.forms;
+  if (includeContent) {
+    if (card.sentence !== undefined) primaryPayload.sentence = card.sentence;
+    if (card.targetWord !== undefined) primaryPayload.targetWord = card.targetWord;
+    if (card.translation !== undefined) primaryPayload.translation = card.translation;
+    if (card.baseWordInfo !== undefined) primaryPayload.baseWordInfo = card.baseWordInfo;
+    if (card.forms !== undefined) primaryPayload.forms = card.forms;
+  }
 
-  // Background non-blocking execution (zero delay for user UI)
+  // Background non-blocking execution (zero delay for user UI, zero .select('*'))
   (async () => {
     if (typeof window !== 'undefined' && !navigator.onLine) {
       await enqueuePendingCard(cardId, primaryPayload);
@@ -230,9 +231,7 @@ export function writeThroughCardUpdate(cardId: string, card: any): void {
         await enqueuePendingCard(cardId, primaryPayload);
         setCloudSyncStatus('error');
       } else {
-        // Successful write
         setCloudSyncStatus('synced');
-        broadcastStateBus('REFRESH_DUE_COUNT');
       }
     } catch (e) {
       console.error('Supabase update error (network):', e);
@@ -342,14 +341,15 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
 }
 
 // ============================================================================
-// FULL SEAMLESS CLOUD RECONCILIATION (PULL + MERGE + REHYDRATE)
+// DELTA CLOUD RECONCILIATION (10-MINUTE COOLDOWN UNLESS EXPLICITLY FORCED)
 // ============================================================================
+
+const FOCUS_COOLDOWN_MS = 10 * 60 * 1000; // НЕ чаще 1 раза в 10 минут!
 
 export async function syncWithCloud(force: boolean = false): Promise<void> {
   const now = Date.now();
   if (isSyncInProgress) return;
-  // Throttle to once every 3 seconds unless forced
-  if (!force && now - lastSyncTimestamp < 3000) return;
+  if (!force && now - lastSyncTimestamp < FOCUS_COOLDOWN_MS) return;
 
   if (typeof window !== 'undefined' && !navigator.onLine) {
     setCloudSyncStatus('offline');
@@ -364,30 +364,16 @@ export async function syncWithCloud(force: boolean = false): Promise<void> {
     // Step 1: Flush any offline pending mutations first
     await flushPendingQueue();
 
-    // Step 2: Trigger authoritative card & deck sync via custom event -> syncCardsFromSupabase(true) + autoBackfillMasteredWords
+    // Step 2: Trigger delta sync only (or full if explicitly forced by user button)
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('trigger-supabase-card-sync'));
+      window.dispatchEvent(new CustomEvent('trigger-supabase-card-sync', { detail: { force } }));
     }
 
     setCloudSyncStatus('synced');
-    broadcastStateBus('REFRESH_DUE_COUNT');
   } catch (err) {
     console.warn('[CloudSync] Sync failed:', err);
     setCloudSyncStatus('error');
   } finally {
     isSyncInProgress = false;
   }
-}
-
-// Auto-sync on visibility change (tab focus, reopening PWA) — debounced by 2000ms
-if (typeof window !== 'undefined') {
-  let visibilitySyncTimeout: ReturnType<typeof setTimeout> | null = null;
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      if (visibilitySyncTimeout) clearTimeout(visibilitySyncTimeout);
-      visibilitySyncTimeout = setTimeout(() => {
-        syncWithCloud().catch(() => {});
-      }, 2000);
-    }
-  });
 }

@@ -584,6 +584,11 @@ function initMatrixStore(lang: AppLang) {
   }
 }
 
+// Local-first in-memory cooldown guards to eliminate egress spikes
+let lastRepairTimestampByLang: Record<string, number> = {};
+const MATRIX_CLOUD_SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+const REPAIR_TIMESTAMPS_COOLDOWN_MS = 60 * 60 * 1000; // 60 minutes
+
 /**
  * Синхронизация выученных слов из Supabase:
  * Собирает реально выученные карточки пользователя (masteryLevel >= 4 || isArchived === true)
@@ -593,13 +598,26 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
   initMatrixStore(lang);
   if (isSyncingByLang[lang]) return;
   const now = Date.now();
-  if (now - (lastCloudSyncByLang[lang] || 0) < 30000) return; // Защита от частых запросов (минимум 30 сек)
+  if (now - (lastCloudSyncByLang[lang] || 0) < MATRIX_CLOUD_SYNC_COOLDOWN_MS) return;
 
   isSyncingByLang[lang] = true;
   lastCloudSyncByLang[lang] = now;
   hasAttemptedCloudSyncByLang[lang] = true;
 
   try {
+    // 0. Strict Local-First: если в локальной памяти/IndexedDB уже есть колоды с карточками,
+    // матрица строится локально через autoBackfillMasteredWords без единого байта сетевого egress!
+    try {
+      const localDecks = await getIDBItem<any[]>('app_decks');
+      if (Array.isArray(localDecks) && localDecks.length > 0) {
+        const totalCards = localDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
+        if (totalCards > 0) {
+          await autoBackfillMasteredWords(localDecks, undefined, lang);
+          return;
+        }
+      }
+    } catch {}
+
     const existingMap = uniqueMasteredWordsByLang[lang];
 
     // 0. Загружаем снимок слов из user_stats (работает для всех клиентов без обязательной auth-сессии)
@@ -1467,8 +1485,14 @@ export async function repairInflatedMasteredTimestamps(lang: AppLang = 'de'): Pr
   const map = uniqueMasteredWordsByLang[lang];
   if (map.size === 0) return;
 
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const now = Date.now();
+  if (lastRepairTimestampByLang[lang] && now - lastRepairTimestampByLang[lang] < REPAIR_TIMESTAMPS_COOLDOWN_MS) {
+    return;
+  }
+  lastRepairTimestampByLang[lang] = now;
+
+  const nowDate = new Date();
+  const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
   let hasRepairs = false;
 
   // 1. Проверяем записи в таблице user_mastered_words в Supabase (Single Source of Truth)

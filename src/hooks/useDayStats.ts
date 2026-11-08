@@ -1076,6 +1076,9 @@ function areDailyStatsEqual(a: DailyStats, b: DailyStats): boolean {
   );
 }
 
+const lastCloudStatsFetchTimeByLang: Record<string, number> = {};
+const STATS_FETCH_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
 export function useDayStats(options?: { isStudying?: boolean; language?: string }) {
   const isStudying = options?.isStudying ?? false;
   const lang = normalizeLanguage(options?.language || (typeof window !== 'undefined' ? (localStorage.getItem('selected_language') || 'DE') : 'DE'));
@@ -1114,11 +1117,15 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     return () => { isCancelled = true; };
   }, [lang, updateLocalStatsIfChanged]);
 
-  // Supabase Cloud recovery: fetch canonical database stats on mount, tab visibility (debounced 2000ms), and live Realtime
+  // Supabase Cloud recovery: fetch canonical database stats on mount (with 10-minute cooldown) and live Realtime
   useEffect(() => {
     let isCancelled = false;
-    let visibilityDebounce: ReturnType<typeof setTimeout> | null = null;
-    const syncFromCloud = () => {
+    const syncFromCloud = (force: boolean = false) => {
+      const now = Date.now();
+      if (!force && lastCloudStatsFetchTimeByLang[lang] && now - lastCloudStatsFetchTimeByLang[lang] < STATS_FETCH_COOLDOWN_MS) {
+        return;
+      }
+      lastCloudStatsFetchTimeByLang[lang] = now;
       fetchStatsFromSupabase(lang).then(cloudStats => {
         if (isCancelled || !cloudStats) return;
         const updated = reconcileStatsFromCloud(lang, cloudStats);
@@ -1128,8 +1135,13 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
 
     syncFromCloud();
 
+    let visibilityDebounce: ReturnType<typeof setTimeout> | null = null;
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        if (lastCloudStatsFetchTimeByLang[lang] && now - lastCloudStatsFetchTimeByLang[lang] < STATS_FETCH_COOLDOWN_MS) {
+          return;
+        }
         if (visibilityDebounce) clearTimeout(visibilityDebounce);
         visibilityDebounce = setTimeout(() => {
           syncFromCloud();
