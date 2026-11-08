@@ -20,7 +20,7 @@ interface WortschatzMatrixPopoverProps {
 
 const DISPLAY_LEVELS: CEFRLevel[] = ['C1', 'B2', 'B1', 'A2', 'A1'];
 
-export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = ({
+export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = React.memo(({
   className = '',
   language,
 }) => {
@@ -112,7 +112,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
         ref={buttonRef}
         type="button"
         onClick={() => setIsMatrixOpen(!isMatrixOpen)}
-        className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-white/[0.05] border border-black/5 dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-sm hover:border-black/10 dark:hover:border-white/20 transition-all select-none active:scale-95 cursor-pointer"
+        className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-sm transition-colors duration-150 select-none active:scale-95 cursor-pointer"
         title="Wortschatz-Matrix öffnen"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
@@ -239,4 +239,5 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = (
       />
     </div>
   );
-};
+});
+WortschatzMatrixPopover.displayName = 'WortschatzMatrixPopover';

@@ -1953,39 +1953,59 @@ export const useStore = create<DeckState>()((set, get) => ({
     reconcileMasteredWords(get().decks, norm);
   },
   dueCardsCount: 0,
-  setDueCardsCount: (count: number) => set({ dueCardsCount: Math.max(0, count) }),
+  setDueCardsCount: (count: number) => {
+    const next = Math.max(0, count);
+    if (get().dueCardsCount !== next) {
+      set({ dueCardsCount: next });
+    }
+  },
   decrementDueCardsCount: () => set((state) => ({ dueCardsCount: Math.max(0, state.dueCardsCount - 1) })),
   refreshDueCardsCount: async (targetLang?: string) => {
     const lang = targetLang || get().appLanguage || 'DE';
     const count = await fetchDueCardsCount(lang);
-    set({ dueCardsCount: count });
-    return count;
+    const next = Math.max(0, count);
+    if (get().dueCardsCount !== next) {
+      set({ dueCardsCount: next });
+    }
+    return next;
   },
   dailyProgress: {},
   syncError: null,
-  setSyncError: (msg) => set({ syncError: msg }),
+  setSyncError: (msg) => {
+    if (get().syncError !== msg) set({ syncError: msg });
+  },
   deckOrder: getInitialDeckOrder(),
   setDeckOrder: (order, skipCloudSync = false) => {
+    const prev = get().deckOrder;
+    const isSame = prev.length === order.length && prev.every((id, idx) => id === order[idx]);
     if (typeof window !== 'undefined') {
       safeSetStorage('deck_order', JSON.stringify(order));
-      if (!skipCloudSync) syncAppStateToCloud({ deckOrder: order });
+      if (!skipCloudSync && !isSame) syncAppStateToCloud({ deckOrder: order });
     }
-    set({ deckOrder: order });
+    if (!isSame) {
+      set({ deckOrder: order });
+    }
   },
   bookOrder: getInitialBookOrder(),
   setBookOrder: (order, skipCloudSync = false) => {
+    const prev = get().bookOrder;
+    const isSame = prev.length === order.length && prev.every((id, idx) => id === order[idx]);
     if (typeof window !== 'undefined') {
       const now = Date.now();
       safeSetStorage('book_order', JSON.stringify(order));
-      safeSetStorage('book_order_timestamp', String(now));
-      if (!skipCloudSync) syncAppStateToCloud({ bookOrder: order, bookOrderTimestamp: now });
+      if (!skipCloudSync && !isSame) {
+        safeSetStorage('book_order_timestamp', String(now));
+        syncAppStateToCloud({ bookOrder: order, bookOrderTimestamp: now });
+      }
     }
-    set({ bookOrder: order });
+    if (!isSame) {
+      set({ bookOrder: order });
+    }
   },
   playbackSpeed: 1,
   setPlaybackSpeed: (speed) => {
     if (typeof window !== 'undefined') localStorage.setItem('playback_speed', speed.toString());
-    set({ playbackSpeed: speed });
+    if (get().playbackSpeed !== speed) set({ playbackSpeed: speed });
   },
   
   books: initialBooks,
@@ -1993,7 +2013,27 @@ export const useStore = create<DeckState>()((set, get) => ({
     if (typeof window !== 'undefined') {
       safeSetStorage('cached_app_books', JSON.stringify(books));
     }
-    set({ books, isLoaded: true });
+    const prev = get().books;
+    const wasLoaded = get().isLoaded;
+    const isSame =
+      wasLoaded &&
+      prev.length === books.length &&
+      prev.every((b, idx) => {
+        const nb = books[idx];
+        return (
+          b.id === nb.id &&
+          b.title === nb.title &&
+          (b.subtitle || '') === (nb.subtitle || '') &&
+          (b.tintColor || '') === (nb.tintColor || '') &&
+          (b.coverImage || '') === (nb.coverImage || '') &&
+          (b.category || '') === (nb.category || '') &&
+          (b.training_mode || '') === (nb.training_mode || '') &&
+          (b.language || '') === (nb.language || '')
+        );
+      });
+    if (!isSame) {
+      set({ books, isLoaded: true });
+    }
   },
   addBook: async (book) => {
     const previousBooks = get().books;
@@ -2203,7 +2243,45 @@ export const useStore = create<DeckState>()((set, get) => ({
         localStorage.removeItem('cache_decks_v2');
       } catch {}
     }
-    set({ decks: valid, isLoaded: true });
+    const prev = get().decks;
+    const wasLoaded = get().isLoaded;
+    const isSame =
+      wasLoaded &&
+      prev.length === valid.length &&
+      prev.every((d, idx) => {
+        const nd = valid[idx];
+        if (
+          d.id !== nd.id ||
+          d.name !== nd.name ||
+          d.category !== nd.category ||
+          d.level !== nd.level ||
+          d.bookId !== nd.bookId ||
+          (d.cards?.length || 0) !== (nd.cards?.length || 0)
+        ) {
+          return false;
+        }
+        const cardsA = d.cards || [];
+        const cardsB = nd.cards || [];
+        for (let i = 0; i < cardsA.length; i++) {
+          const ca = cardsA[i];
+          const cb = cardsB[i];
+          if (
+            ca.id !== cb.id ||
+            (ca.masteryLevel ?? 0) !== (cb.masteryLevel ?? 0) ||
+            Boolean(ca.isArchived) !== Boolean(cb.isArchived) ||
+            (ca.nextReviewDate || '') !== (cb.nextReviewDate || '') ||
+            ca.targetWord !== cb.targetWord ||
+            ca.translation !== cb.translation ||
+            ca.sentence !== cb.sentence
+          ) {
+            return false;
+          }
+        }
+        return true;
+      });
+    if (!isSame) {
+      set({ decks: valid, isLoaded: true });
+    }
   },
   
   addDeck: async (deck) => {
@@ -7211,7 +7289,7 @@ function getRepeatButtonLabel(lang?: string): string {
   return 'KARTEN WIEDERHOLEN';
 }
 
-function HeaderWidgets({ 
+const HeaderWidgets = React.memo(function HeaderWidgets({ 
   activeBook, 
   onBack, 
   onReviewMistakes,
@@ -7235,7 +7313,8 @@ function HeaderWidgets({
 
   useEffect(() => {
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 12);
+      const nextScrolled = window.scrollY > 12;
+      setIsScrolled((prev) => (prev === nextScrolled ? prev : nextScrolled));
     };
     handleScroll();
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -7275,20 +7354,35 @@ function HeaderWidgets({
 
   const [langStats, setLangStats] = useState<LanguageDailyProgress>(() => getLanguageDailyStats(effectiveLang));
 
+  const updateLangStatsIfChanged = useCallback((next: LanguageDailyProgress) => {
+    setLangStats((prev) => {
+      if (
+        prev.learnedToday === next.learnedToday &&
+        prev.focusSeconds === next.focusSeconds &&
+        prev.correctCount === next.correctCount &&
+        prev.totalCount === next.totalCount &&
+        prev.mistakesCount === next.mistakesCount
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, []);
+
   const fetchCloudTodayStats = useCallback(async (lang: string) => {
     try {
       await syncCloudDailyStats(undefined, lang);
       const updated = getLanguageDailyStats(lang);
-      setLangStats(updated);
+      updateLangStatsIfChanged(updated);
     } catch (err) {
       console.error('Failed to sync daily stats:', err);
     }
-  }, []);
+  }, [updateLangStatsIfChanged]);
 
   useEffect(() => {
     fixAndIsolateDailyStats();
     checkAndResetDailyProgress();
-    setLangStats(getLanguageDailyStats(effectiveLang));
+    updateLangStatsIfChanged(getLanguageDailyStats(effectiveLang));
 
     // 1. Немедленная загрузка из Supabase user_stats для текущего языка
     fetchCloudTodayStats(effectiveLang);
@@ -7307,39 +7401,35 @@ function HeaderWidgets({
       })
       .subscribe();
 
-    // 3. Синхронизация при фокусе окна и смене видимости (возврат в Safari с другого устройства)
-    const handleSync = () => {
-      checkAndResetDailyProgress();
-      fetchCloudTodayStats(effectiveLang);
-    };
-
     const handleStorageUpdate = () => {
-      setLangStats(getLanguageDailyStats(effectiveLang));
+      updateLangStatsIfChanged(getLanguageDailyStats(effectiveLang));
     };
 
-    window.addEventListener('focus', handleSync);
-    window.addEventListener('pageshow', handleSync);
     window.addEventListener('stats-update', handleStorageUpdate);
     window.addEventListener('storage-update', handleStorageUpdate);
     window.addEventListener('storage', handleStorageUpdate);
 
+    let visibilityDebounce: ReturnType<typeof setTimeout> | null = null;
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        handleSync();
+        if (visibilityDebounce) clearTimeout(visibilityDebounce);
+        visibilityDebounce = setTimeout(() => {
+          checkAndResetDailyProgress();
+          fetchCloudTodayStats(effectiveLang);
+        }, 2000);
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      if (visibilityDebounce) clearTimeout(visibilityDebounce);
       supabase.removeChannel(channel);
-      window.removeEventListener('focus', handleSync);
-      window.removeEventListener('pageshow', handleSync);
       window.removeEventListener('stats-update', handleStorageUpdate);
       window.removeEventListener('storage-update', handleStorageUpdate);
       window.removeEventListener('storage', handleStorageUpdate);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [effectiveLang, fetchCloudTodayStats]);
+  }, [effectiveLang, fetchCloudTodayStats, updateLangStatsIfChanged]);
 
   const currentLang = LANGUAGES.find(l => l.code === appLanguage) || LANGUAGES[0];
   const currentTranslations = UI_TRANSLATIONS[appLanguage] || UI_TRANSLATIONS.DE;
@@ -7352,7 +7442,7 @@ function HeaderWidgets({
 
       <header 
         className={cn(
-          "sticky top-0 z-50 w-full select-none backdrop-blur-xl transition-all duration-300 border-b",
+          "sticky top-0 z-50 w-full select-none backdrop-blur-xl transition-colors duration-200 border-b transform-gpu [backface-visibility:hidden]",
           "bg-[#ECECEF]/80 dark:bg-black/80 border-black/[0.05] dark:border-white/[0.08]"
         )}
       >
@@ -7363,7 +7453,7 @@ function HeaderWidgets({
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="px-3.5 py-1.5 rounded-full bg-white dark:bg-white/[0.05] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:bg-neutral-50 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
                 title="Zurück zur Übersicht"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
@@ -7374,7 +7464,7 @@ function HeaderWidgets({
                 <button
                   type="button"
                   onClick={() => setIsLangOpen(prev => !prev)}
-                  className="px-3.5 py-1.5 rounded-full bg-white dark:bg-white/[0.05] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:bg-neutral-50 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                  className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
                   title="Sprache wählen"
                 >
                   <span className="text-base leading-none select-none">{currentLang.flag}</span>
@@ -7434,7 +7524,7 @@ function HeaderWidgets({
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-white border border-black/10 text-neutral-800 shadow-[0_1px_3px_rgba(0,0,0,0.05)] hover:bg-neutral-50 dark:bg-blue-950/40 dark:text-white dark:border-blue-400/40 dark:shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-300 active:scale-[0.98] cursor-pointer"
+                  className="relative px-5 py-2.5 rounded-full bg-white hover:bg-black/[0.04] border border-black/10 text-neutral-800 shadow-[0_1px_3px_rgba(0,0,0,0.05)] dark:bg-blue-950/40 dark:text-white dark:border-blue-400/40 dark:shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-colors duration-150 active:scale-[0.98] cursor-pointer"
                 >
                   <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
                   <span className="font-semibold text-neutral-800 dark:text-white">
@@ -7471,7 +7561,7 @@ function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="px-3.5 py-1.5 rounded-full bg-white dark:bg-white/[0.05] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 dark:text-neutral-300 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:bg-neutral-50 dark:hover:border-white/20 transition-all flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+              className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
               title="Статистика дня"
             >
               <svg className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -7488,7 +7578,7 @@ function HeaderWidgets({
             <button 
               type="button"
               onClick={toggleTheme}
-              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white dark:bg-white/[0.05] border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 dark:text-neutral-300 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:bg-neutral-50 dark:hover:border-white/20 transition-all active:scale-95 cursor-pointer"
+              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 active:scale-95 cursor-pointer"
               aria-label="Toggle theme"
               title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
@@ -7512,7 +7602,7 @@ function HeaderWidgets({
       />
     </>
   );
-}
+});
 
 
 
@@ -7560,7 +7650,7 @@ export const CategoryTabs = React.memo(function CategoryTabs({
       <div 
         role="tablist"
         aria-label="Kategorien"
-        className="max-w-full overflow-x-auto no-scrollbar inline-flex p-1 rounded-full bg-neutral-200/70 dark:bg-white/[0.05] backdrop-blur-xl border border-black/5 dark:border-white/10 items-center gap-1 shadow-inner transform-gpu [backface-visibility:hidden] will-change-transform select-none"
+        className="max-w-full overflow-x-auto no-scrollbar flex items-center p-1 rounded-full bg-black/[0.04] dark:bg-white/[0.04] border border-black/5 dark:border-white/10 backdrop-blur-xl transform-gpu [backface-visibility:hidden] will-change-transform select-none gap-1"
       >
         {tabs.map((tab) => {
           const isActive = activeCategory === tab.id;
@@ -7572,10 +7662,10 @@ export const CategoryTabs = React.memo(function CategoryTabs({
               type="button"
               onClick={() => onSelectCategory(tab.id)}
               className={cn(
-                "rounded-full px-5 py-1.5 text-xs whitespace-nowrap font-medium transition-colors duration-150 cursor-pointer outline-none",
+                "px-5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors duration-150 cursor-pointer outline-none",
                 isActive
                   ? "bg-white dark:bg-white/15 text-neutral-900 dark:text-white shadow-sm"
-                  : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
+                  : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
               )}
             >
               {tab.label}
@@ -7743,7 +7833,7 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
-        "relative p-5 rounded-3xl flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[152px] transition-all duration-200",
+        "relative p-5 rounded-3xl flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[152px] transition-[opacity,background-color,border-color,transform] duration-150 ease-out transform-gpu [backface-visibility:hidden]",
         // Светлая тема (тактильная бумага Apple 300g с мягкой многослойной тенью на полотне #F5F5F7):
         "bg-white border border-black/[0.07] shadow-[0_2px_8px_rgba(0,0,0,0.04),0_12px_24px_-4px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)] hover:border-black/10 hover:-translate-y-0.5",
         // Темная тема:
@@ -7752,11 +7842,11 @@ const DeckCard = React.memo(({
       )}
     >
       {/* Action Buttons: Rename (Pencil) & Delete */}
-      <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">
+      <div className="absolute top-4 right-4 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10">
         {onRename && (
           <button 
             onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-            className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-neutral-500 hover:text-[#1D1D1F] dark:text-neutral-300 dark:hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
+            className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-neutral-500 hover:text-[#1D1D1F] dark:text-neutral-300 dark:hover:text-white transition-colors duration-150 active:scale-95 shadow-sm cursor-pointer"
             title="Lektion umbenennen"
           >
             <Edit2 className="w-3.5 h-3.5" />
@@ -7764,7 +7854,7 @@ const DeckCard = React.memo(({
         )}
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
-          className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-rose-50 dark:hover:bg-rose-500/20 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-neutral-500 dark:text-neutral-300 hover:text-rose-600 dark:hover:text-rose-400 transition-all active:scale-95 shadow-sm cursor-pointer"
+          className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-rose-50 dark:hover:bg-rose-500/20 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-neutral-500 dark:text-neutral-300 hover:text-rose-600 dark:hover:text-rose-400 transition-colors duration-150 active:scale-95 shadow-sm cursor-pointer"
           title="Löschen"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -10921,7 +11011,7 @@ export default function App() {
         lastSyncTime = now;
         checkAndResetDailyProgress();
         useStore.getState().refreshDueCardsCount(appLanguage);
-      }, 500);
+      }, 2000);
     };
 
     const handleVisibility = () => {
@@ -10930,8 +11020,6 @@ export default function App() {
       }
     };
 
-    window.addEventListener('focus', handleSync);
-    window.addEventListener('pageshow', handleSync);
     document.addEventListener('visibilitychange', handleVisibility);
 
     // Supabase Realtime subscription on cards table for cross-browser sync
@@ -10950,8 +11038,6 @@ export default function App() {
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(cardsChannel);
-      window.removeEventListener('focus', handleSync);
-      window.removeEventListener('pageshow', handleSync);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [appLanguage]);
@@ -11411,25 +11497,29 @@ export default function App() {
       })
       .subscribe();
 
-    // 2. Refetch on focus, visibilitychange, and online (e.g. switching between Safari and Chrome tabs/windows/PWA)
+    // 2. Refetch on visibilitychange and online (debounced by 2000ms)
+    let visibilityTimer: ReturnType<typeof setTimeout> | null = null;
     let lastFocusSyncTime = 0;
-    const handleSyncOnFocus = async () => {
+    const handleSyncOnVisibility = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        const now = Date.now();
-        if (now - lastFocusSyncTime < 1500) return; // 1.5 сек дебаунс между фокус-синхронизациями
-        lastFocusSyncTime = now;
-        try {
-          await syncWithCloud();
-          await syncCardsFromSupabase(true);
-          const { data } = await supabase
-            .from('user_stats')
-            .select('daily_activity')
-            .eq('language', 'GLOBAL_APP_STATE')
-            .maybeSingle();
-          if (data?.daily_activity) {
-            applyCloudAppState(data.daily_activity);
-          }
-        } catch (e) {}
+        if (visibilityTimer) clearTimeout(visibilityTimer);
+        visibilityTimer = setTimeout(async () => {
+          const now = Date.now();
+          if (now - lastFocusSyncTime < 2000) return;
+          lastFocusSyncTime = now;
+          try {
+            await syncWithCloud();
+            await syncCardsFromSupabase(true);
+            const { data } = await supabase
+              .from('user_stats')
+              .select('daily_activity')
+              .eq('language', 'GLOBAL_APP_STATE')
+              .maybeSingle();
+            if (data?.daily_activity) {
+              applyCloudAppState(data.daily_activity);
+            }
+          } catch (e) {}
+        }, 2000);
       }
     };
 
@@ -11445,16 +11535,15 @@ export default function App() {
     });
 
     window.addEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
-    window.addEventListener('focus', handleSyncOnFocus);
-    window.addEventListener('online', handleSyncOnFocus);
-    document.addEventListener('visibilitychange', handleSyncOnFocus);
+    window.addEventListener('online', handleSyncOnVisibility);
+    document.addEventListener('visibilitychange', handleSyncOnVisibility);
 
     return () => {
+      if (visibilityTimer) clearTimeout(visibilityTimer);
       unsubscribeStateBus();
       window.removeEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
-      window.removeEventListener('focus', handleSyncOnFocus);
-      window.removeEventListener('online', handleSyncOnFocus);
-      document.removeEventListener('visibilitychange', handleSyncOnFocus);
+      window.removeEventListener('online', handleSyncOnVisibility);
+      document.removeEventListener('visibilitychange', handleSyncOnVisibility);
       supabase.removeChannel(globalStateChannel);
     };
   }, [setDecks]);
@@ -12340,7 +12429,7 @@ export default function App() {
                 placeholder="Neuer Name"
               />
               <div className="flex gap-3">
-                <button onClick={() => setRenameModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
+                <button onClick={() => setRenameModal(null)} className="flex-1 py-4 font-semibold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] rounded-2xl transition-colors active:scale-[0.98]">
                   Abbrechen
                 </button>
                 <button onClick={() => { if (renameInput.trim()) { renameDeck(renameModal.id, renameInput.trim()); setRenameModal(null); } }} className="flex-1 py-4 font-semibold text-white bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-400 rounded-2xl transition-colors active:scale-[0.98]">
@@ -12362,13 +12451,13 @@ export default function App() {
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} transition={{ duration: 0.1, ease: "easeOut" }}
               className="bg-white dark:bg-[#1C1C1E] rounded-[32px] p-8 w-full max-w-sm shadow-[0_20px_60px_rgb(0,0,0,0.1)] relative z-10 text-center"
             >
-              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <div className="w-16 h-16 bg-red-50 dark:bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
-              <h3 className="text-xl font-bold tracking-tight text-gray-900  mb-3">Deck löschen?</h3>
-              <p className="text-sm text-gray-500 font-medium mb-8">Bist du sicher, dass du "{deleteModal.name}" löschen möchtest? Dieser Vorgang kann nicht rückgängig gemacht werden.</p>
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white mb-3">Deck löschen?</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-8">Bist du sicher, dass du "{deleteModal.name}" löschen möchtest? Dieser Vorgang kann nicht rückgängig gemacht werden.</p>
               <div className="flex gap-3">
-                <button onClick={() => setDeleteModal(null)} className="flex-1 py-4 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-2xl transition-colors active:scale-[0.98]">
+                <button onClick={() => setDeleteModal(null)} className="flex-1 py-4 font-semibold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#2C2C2E] hover:bg-gray-200 dark:hover:bg-[#3A3A3C] rounded-2xl transition-colors active:scale-[0.98]">
                   Abbrechen
                 </button>
                 <button onClick={() => { deleteDeck(deleteModal.id); setDeleteModal(null); }} className="flex-1 py-4 font-semibold text-white bg-red-500 hover:bg-red-600 rounded-2xl transition-colors active:scale-[0.98]">
@@ -12423,7 +12512,7 @@ export default function App() {
           <div 
             ref={catalogContainerRef}
             onMouseMove={handleCatalogMouseMove}
-            className="group/shelf relative animate-in fade-in slide-in-from-bottom-4 duration-500 pb-16"
+            className="group/shelf relative pb-16"
           >
             {/* Студийный свет сверху (Gallery Spotlight) */}
             <div 
@@ -12449,8 +12538,7 @@ export default function App() {
 
             {/* Единая абсолютно симметричная сетка книг для выбранной категории */}
             <div 
-              key={activeCategory}
-              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 transition-opacity duration-200 animate-in fade-in"
+              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 transform-gpu [backface-visibility:hidden]"
             >
               {isLoadingBooks && filteredCategoryBooks.length === 0 ? (
                 [1, 2, 3, 4].map((i) => (
@@ -12465,13 +12553,13 @@ export default function App() {
               ) : (
                 filteredCategoryBooks.map((book, idx) => (
                   <div
-                    key={book.id}
+                    key={book.id || book.title}
                     draggable
                     onDragStart={(e) => { e.dataTransfer.setData('bookId', book.id); e.dataTransfer.effectAllowed = 'move'; setDraggedBookId(book.id); }}
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverBookId !== book.id) setDragOverBookId(book.id); }}
                     onDrop={(e) => { e.preventDefault(); handleBookDrop(book.id, e); }}
                     onDragEnd={() => { setDraggedBookId(null); setDragOverBookId(null); }}
-                    className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-all duration-200", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
+                    className={cn("w-full h-full relative cursor-grab active:cursor-grabbing transition-[opacity,transform] duration-150 ease-out transform-gpu [backface-visibility:hidden]", draggedBookId === book.id ? "opacity-30 scale-95" : "opacity-100", dragOverBookId === book.id && draggedBookId !== book.id ? "scale-[1.03]" : "")}
                   >
                     <BookCard 
                       book={book} 
@@ -12498,7 +12586,7 @@ export default function App() {
                     />
 
                     {/* Обложка-форзац с книжными пропорциями и корешком */}
-                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_15px_30px_-6px_rgba(0,0,0,0.18),0_3px_8px_-1px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.9)] hover:shadow-[0_25px_60px_-10px_rgba(255,255,255,0.06)] hover:-translate-y-1.5 transition-all duration-300 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu will-change-transform">
+                    <div className="relative aspect-[2/3] w-full rounded-r-[5px] rounded-l-[3px] overflow-hidden border-2 border-dashed border-zinc-300 dark:border-white/15 bg-zinc-50/60 dark:bg-white/[0.02] hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] hover:border-blue-500/60 dark:hover:border-blue-400/60 shadow-[0_15px_30px_-6px_rgba(0,0,0,0.18),0_3px_8px_-1px_rgba(0,0,0,0.08)] dark:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.9)] hover:shadow-[0_25px_60px_-10px_rgba(255,255,255,0.06)] hover:-translate-y-1.5 transition-[background-color,border-color,transform] duration-200 ease-out flex flex-col items-center justify-center p-6 text-center transform-gpu [backface-visibility:hidden] will-change-transform">
                       {/* КОНТЕЙНЕР КОРЕШКА И ЖЕЛОБКА (SPINE & HINGE GROOVE) */}
                       <div className="absolute inset-y-0 left-0 pointer-events-none z-10 select-none overflow-hidden rounded-l-[3px] w-[6%] min-w-[7px] max-w-[14px]">
                         {/* 1. Объемное скругление самого левого ребра корешка (мягкий цилиндрический свет) */}
@@ -12520,7 +12608,7 @@ export default function App() {
                       {/* Деликатный скользящий блик при наведении */}
                       <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 pointer-events-none z-10" />
 
-                      <div className="w-12 h-12 rounded-full bg-white dark:bg-white/10 border border-black/[0.05] dark:border-white/10 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 group-hover:border-blue-500/30 transition-all duration-300">
+                      <div className="w-12 h-12 rounded-full bg-white dark:bg-white/10 border border-black/[0.05] dark:border-white/10 flex items-center justify-center mb-3 shadow-sm group-hover:scale-110 group-hover:border-blue-500/30 transition-[border-color,transform] duration-200">
                         <Plus className="w-6 h-6 text-zinc-400 group-hover:text-blue-600 dark:text-zinc-400 dark:group-hover:text-blue-400 transition-colors" />
                       </div>
                       <span className="font-semibold text-[13px] text-zinc-600 dark:text-zinc-300 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
@@ -12550,7 +12638,7 @@ export default function App() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="w-full">
           <div className="flex flex-wrap items-center justify-center gap-3 mb-8 pt-2">
             {(!activeBook?.training_mode || activeBook.training_mode === 'standard_cloze') && (
-            <div className="h-9 p-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/5 dark:border-white/10 flex items-center shadow-inner">
+            <div className="h-9 p-1 rounded-full bg-black/[0.04] dark:bg-white/[0.04] border border-black/5 dark:border-white/10 backdrop-blur-xl flex items-center transform-gpu [backface-visibility:hidden] select-none">
               {(["Grammatik", "Wörter"] as const).map((tab) => {
                 const isActive = activeTab === tab;
                 return (
@@ -12558,10 +12646,10 @@ export default function App() {
                     key={tab}
                     onClick={() => startTransition(() => setActiveTab(tab))}
                     className={cn(
-                      "rounded-full px-4 py-1 text-xs font-medium transition-all select-none cursor-pointer",
+                      "rounded-full px-4 py-1 text-xs font-medium transition-colors duration-150 select-none cursor-pointer outline-none",
                       isActive
-                        ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm"
-                        : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+                        ? "bg-white dark:bg-white/15 text-neutral-900 dark:text-white shadow-sm"
+                        : "text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
                     )}
                   >
                     {tab}
@@ -12628,7 +12716,7 @@ export default function App() {
                           }}
                           disabled={isLevelCompleted}
                           className={cn(
-                            "w-6 h-6 rounded-full flex items-center justify-center transition-all",
+                            "w-6 h-6 rounded-full flex items-center justify-center transition-colors duration-150",
                             isLevelCompleted
                               ? "opacity-25 pointer-events-none cursor-not-allowed text-zinc-400 dark:text-zinc-600"
                               : "hover:bg-black/5 dark:hover:bg-white/10 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white cursor-pointer"
@@ -12639,7 +12727,7 @@ export default function App() {
                         </button>
                         <label 
                           className={cn(
-                            "w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-all cursor-pointer relative",
+                            "w-6 h-6 rounded-full hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors duration-150 cursor-pointer relative",
                             isUploadingCSV && "opacity-50 pointer-events-none"
                           )}
                           title="CSV / TXT importieren"
@@ -12670,7 +12758,7 @@ export default function App() {
                     ) : (
                       <div className="space-y-6">
                         {inProgressDecks.length > 0 && (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch transform-gpu [backface-visibility:hidden]">
                             {inProgressDecks.map(deck => (
                               <div
                                 key={deck.id}
@@ -12679,7 +12767,7 @@ export default function App() {
                                 onDragOver={handleDragOver}
                                 onDrop={(e) => handleDrop(e, deck.id)}
                                 onDragEnd={handleDragEnd}
-                                className={cn("h-full transition-all duration-300", draggedDeckId === deck.id ? "opacity-30 scale-95" : "opacity-100")}
+                                className={cn("h-full transition-[opacity,transform] duration-150", draggedDeckId === deck.id ? "opacity-30 scale-95" : "opacity-100")}
                               >
                                 <DeckCard 
                                   deck={deck} 
@@ -12722,7 +12810,7 @@ export default function App() {
                                 >
                                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch pt-2 pb-4">
                                     {completedDecks.map(deck => (
-                                      <div key={deck.id} className="h-full opacity-70 hover:opacity-100 transition-opacity">
+                                      <div key={deck.id} className="h-full opacity-70 hover:opacity-100 transition-opacity duration-150">
                                         <DeckCard 
                                           deck={deck} 
                                           isCompleted={true} 
@@ -12749,7 +12837,7 @@ export default function App() {
                     {sortedDecks.length > limit && (
                       <button 
                         onClick={() => handleLoadMore(sectionKey)}
-                        className="mt-6 mx-auto block px-6 py-2 bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-zinc-700 dark:text-zinc-200 font-semibold text-xs rounded-full transition-all cursor-pointer active:scale-95"
+                        className="mt-6 mx-auto block px-6 py-2 bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 text-zinc-700 dark:text-zinc-200 font-semibold text-xs rounded-full transition-colors duration-150 cursor-pointer active:scale-95"
                       >
                         Weitere {Math.min(10, sortedDecks.length - limit)} laden
                       </button>

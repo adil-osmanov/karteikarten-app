@@ -379,15 +379,15 @@ export async function syncWithCloud(force: boolean = false): Promise<void> {
   }
 }
 
-// Auto-sync on visibility change (tab focus, reopening PWA)
+// Auto-sync on visibility change (tab focus, reopening PWA) — debounced by 2000ms
 if (typeof window !== 'undefined') {
+  let visibilitySyncTimeout: ReturnType<typeof setTimeout> | null = null;
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      syncWithCloud().catch(() => {});
+      if (visibilitySyncTimeout) clearTimeout(visibilitySyncTimeout);
+      visibilitySyncTimeout = setTimeout(() => {
+        syncWithCloud().catch(() => {});
+      }, 2000);
     }
-  });
-
-  window.addEventListener('focus', () => {
-    syncWithCloud().catch(() => {});
   });
 }

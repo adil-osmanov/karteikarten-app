@@ -1061,6 +1061,21 @@ function initGlobalTimer() {
   window.addEventListener('beforeunload', flushAll);
 }
 
+function areDailyStatsEqual(a: DailyStats, b: DailyStats): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.date === b.date &&
+    a.cardsDone === b.cardsDone &&
+    a.activeSeconds === b.activeSeconds &&
+    a.correctCount === b.correctCount &&
+    a.mistakesCountToday === b.mistakesCountToday &&
+    (a.mistakesPool?.length || 0) === (b.mistakesPool?.length || 0) &&
+    (a.cards_reviewed_today ?? 0) === (b.cards_reviewed_today ?? 0) &&
+    (a.words_learned_today ?? 0) === (b.words_learned_today ?? 0)
+  );
+}
+
 export function useDayStats(options?: { isStudying?: boolean; language?: string }) {
   const isStudying = options?.isStudying ?? false;
   const lang = normalizeLanguage(options?.language || (typeof window !== 'undefined' ? (localStorage.getItem('selected_language') || 'DE') : 'DE'));
@@ -1069,10 +1084,14 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     return getOrCreateStats(lang);
   });
 
+  const updateLocalStatsIfChanged = useCallback((next: DailyStats) => {
+    setLocalStats((prev) => (areDailyStatsEqual(prev, next) ? prev : next));
+  }, []);
+
   // Synchronize on language change
   useEffect(() => {
-    setLocalStats(getOrCreateStats(lang));
-  }, [lang]);
+    updateLocalStatsIfChanged(getOrCreateStats(lang));
+  }, [lang, updateLocalStatsIfChanged]);
 
   // Safari recovery: background check from IndexedDB
   useEffect(() => {
@@ -1089,33 +1108,36 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
         };
         statsByLang[lang] = mergedStats;
         notifyLang(lang, { skipCloudSync: true });
-        setLocalStats(mergedStats);
+        updateLocalStatsIfChanged(mergedStats);
       }
     });
     return () => { isCancelled = true; };
-  }, [lang]);
+  }, [lang, updateLocalStatsIfChanged]);
 
-  // Supabase Cloud recovery: fetch canonical database stats on mount, tab focus/visibility, and live Realtime
+  // Supabase Cloud recovery: fetch canonical database stats on mount, tab visibility (debounced 2000ms), and live Realtime
   useEffect(() => {
     let isCancelled = false;
+    let visibilityDebounce: ReturnType<typeof setTimeout> | null = null;
     const syncFromCloud = () => {
       fetchStatsFromSupabase(lang).then(cloudStats => {
         if (isCancelled || !cloudStats) return;
         const updated = reconcileStatsFromCloud(lang, cloudStats);
-        setLocalStats(updated);
+        updateLocalStatsIfChanged(updated);
       });
     };
 
     syncFromCloud();
 
-    const handleFocus = () => {
+    const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        syncFromCloud();
+        if (visibilityDebounce) clearTimeout(visibilityDebounce);
+        visibilityDebounce = setTimeout(() => {
+          syncFromCloud();
+        }, 2000);
       }
     };
 
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
 
     // Supabase Realtime channel for instant cross-browser and cross-device sync
     const channel = supabase
@@ -1128,18 +1150,18 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       }, (payload: any) => {
         if (payload?.new?.daily_activity && !isCancelled) {
           const updated = reconcileStatsFromCloud(lang, payload.new.daily_activity);
-          setLocalStats(updated);
+          updateLocalStatsIfChanged(updated);
         }
       })
       .subscribe();
 
     return () => {
       isCancelled = true;
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleFocus);
+      if (visibilityDebounce) clearTimeout(visibilityDebounce);
+      document.removeEventListener('visibilitychange', handleVisibility);
       supabase.removeChannel(channel);
     };
-  }, [lang]);
+  }, [lang, updateLocalStatsIfChanged]);
 
   // Manage study activity timer & listener subscriptions
   useEffect(() => {
@@ -1155,13 +1177,13 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       listenersByLang[lang] = new Set();
     }
 
-    const listener = (newStats: DailyStats) => setLocalStats(newStats);
+    const listener = (newStats: DailyStats) => updateLocalStatsIfChanged(newStats);
     listenersByLang[lang].add(listener);
 
     const handleCustomUpdate = (e: any) => {
       const target = normalizeLanguage(e?.detail?.language);
       if (!target || target === lang) {
-        setLocalStats(getOrCreateStats(lang));
+        updateLocalStatsIfChanged(getOrCreateStats(lang));
       }
     };
     window.addEventListener('stats-update', handleCustomUpdate);

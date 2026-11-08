@@ -741,10 +741,23 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
 
       // Строго сохраняем ТОЛЬКО слова, подтвержденные реальными выученными карточками в активных колодах (без карточек-призраков)
       const hadOrphans = existingMap.size !== nextMap.size;
+      let hasChanged = hadOrphans;
+      if (!hasChanged) {
+        for (const [k, v] of nextMap.entries()) {
+          const prev = existingMap.get(k);
+          if (!prev || prev.level !== v.level || prev.masteredAt !== v.masteredAt || prev.translation !== v.translation) {
+            hasChanged = true;
+            break;
+          }
+        }
+      }
+
       uniqueMasteredWordsByLang[lang] = nextMap;
       recomputeStatsFromMap(lang);
-      persistMatrixToStorage(lang);
-      notifyListeners(lang);
+      if (hasChanged) {
+        persistMatrixToStorage(lang);
+        notifyListeners(lang);
+      }
 
       if (hadOrphans) {
         const cleanEntries = Array.from(nextMap.values());
@@ -1107,27 +1120,41 @@ export async function autoBackfillMasteredWords(
       });
     });
 
+    const prevMap = uniqueMasteredWordsByLang[targetLang];
+    let mapChanged = prevMap.size !== deduplicatedMap.size;
+    if (!mapChanged) {
+      for (const [k, v] of deduplicatedMap.entries()) {
+        const p = prevMap.get(k);
+        if (!p || p.level !== v.level || p.masteredAt !== v.masteredAt || p.translation !== v.translation) {
+          mapChanged = true;
+          break;
+        }
+      }
+    }
+
     uniqueMasteredWordsByLang[targetLang] = deduplicatedMap;
     recomputeStatsFromMap(targetLang);
-    persistMatrixToStorage(targetLang);
-    notifyListeners(targetLang);
+    if (mapChanged) {
+      persistMatrixToStorage(targetLang);
+      notifyListeners(targetLang);
 
-    // Синхронизируем очищенный эталонный снимок выученных слов в user_stats (убирает удаленные слова из облака)
-    try {
-      const cleanEntries = Array.from(deduplicatedMap.values());
-      supabase
-        .from('user_stats')
-        .upsert({
-          language: `MASTERED_WORDS_${targetLang.toUpperCase()}`,
-          daily_activity: {
-            entries: cleanEntries,
-            counts: globalMatrixStatsByLang[targetLang]?.counts,
-            totalWords: globalMatrixStatsByLang[targetLang]?.totalWords || cleanEntries.length,
-            updatedAt: Date.now(),
-          },
-        })
-        .then(() => {});
-    } catch {}
+      // Синхронизируем очищенный эталонный снимок выученных слов в user_stats (убирает удаленные слова из облака)
+      try {
+        const cleanEntries = Array.from(deduplicatedMap.values());
+        supabase
+          .from('user_stats')
+          .upsert({
+            language: `MASTERED_WORDS_${targetLang.toUpperCase()}`,
+            daily_activity: {
+              entries: cleanEntries,
+              counts: globalMatrixStatsByLang[targetLang]?.counts,
+              totalWords: globalMatrixStatsByLang[targetLang]?.totalWords || cleanEntries.length,
+              updatedAt: Date.now(),
+            },
+          })
+          .then(() => {});
+      } catch {}
+    }
 
     if (targetLang === normalizeLanguageCode(targetLangParam)) {
       primaryCount = deduplicatedMap.size;
@@ -1537,6 +1564,26 @@ export async function repairInflatedMasteredTimestamps(lang: AppLang = 'de'): Pr
   }
 }
 
+function areMatrixStatsEqual(a: CEFRMatrixStats, b: CEFRMatrixStats): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.totalWords !== b.totalWords || a.activeLevel !== b.activeLevel) return false;
+  for (const lvl of CEFR_LEVEL_KEYS) {
+    if ((a.counts?.[lvl] ?? 0) !== (b.counts?.[lvl] ?? 0)) return false;
+  }
+  return true;
+}
+
+function areTodayProgressEqual(a: TodayProgress, b: TodayProgress): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.wordsLearnedToday !== b.wordsLearnedToday || a.percentLearnedToday !== b.percentLearnedToday) return false;
+  for (const lvl of CEFR_LEVEL_KEYS) {
+    if ((a.todayCounts?.[lvl] ?? 0) !== (b.todayCounts?.[lvl] ?? 0)) return false;
+  }
+  return true;
+}
+
 /**
  * React-хук для отображения матрицы Wortschatz-Matrix и суточного прогресса.
  */
@@ -1555,12 +1602,20 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
   useEffect(() => {
     initMatrixStore(normLang);
     purgeJunkExportierenWord().catch(() => {});
-    repairInflatedMasteredTimestamps(normLang).then(() => {
-      setStats({ ...globalMatrixStatsByLang[normLang] });
-      setTodayProgress(getWordsLearnedToday(normLang));
-    }).catch(() => {});
-    setStats({ ...globalMatrixStatsByLang[normLang] });
-    setTodayProgress(getWordsLearnedToday(normLang));
+
+    const applyLatestStats = () => {
+      const nextStats = { ...globalMatrixStatsByLang[normLang] };
+      setStats((prev) => (areMatrixStatsEqual(prev, nextStats) ? prev : nextStats));
+      const nextProgress = getWordsLearnedToday(normLang);
+      setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
+    };
+
+    repairInflatedMasteredTimestamps(normLang)
+      .then(() => {
+        applyLatestStats();
+      })
+      .catch(() => {});
+    applyLatestStats();
 
     // Синхронизируем из облака не более 1 раза на старте при абсолютно пустом сторе
     if (!hasAttemptedCloudSyncByLang[normLang] && uniqueMasteredWordsByLang[normLang].size === 0) {
@@ -1569,16 +1624,17 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
 
     const handleUpdate = (changedLang: AppLang, updated: CEFRMatrixStats) => {
       if (changedLang === normLang) {
-        setStats({ ...updated });
-        setTodayProgress(getWordsLearnedToday(normLang));
+        const nextStats = { ...updated };
+        setStats((prev) => (areMatrixStatsEqual(prev, nextStats) ? prev : nextStats));
+        const nextProgress = getWordsLearnedToday(normLang);
+        setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
       }
     };
 
     listeners.add(handleUpdate);
 
     const handleRefreshDaily = () => {
-      setStats({ ...globalMatrixStatsByLang[normLang] });
-      setTodayProgress(getWordsLearnedToday(normLang));
+      applyLatestStats();
     };
 
     if (typeof window !== 'undefined') {
@@ -1587,25 +1643,26 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       window.addEventListener('storage-update', handleRefreshDaily);
     }
 
-    const handleFocus = () => {
-      setTodayProgress(getWordsLearnedToday(normLang));
-    };
+    let visibilityDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        setTodayProgress(getWordsLearnedToday(normLang));
+        if (visibilityDebounceTimer) clearTimeout(visibilityDebounceTimer);
+        visibilityDebounceTimer = setTimeout(() => {
+          const nextProgress = getWordsLearnedToday(normLang);
+          setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
+        }, 2000);
       }
     };
 
     if (typeof window !== 'undefined') {
-      window.addEventListener('focus', handleFocus);
       document.addEventListener('visibilitychange', handleVisibilityChange);
     }
 
     return () => {
+      if (visibilityDebounceTimer) clearTimeout(visibilityDebounceTimer);
       listeners.delete(handleUpdate);
       if (typeof window !== 'undefined') {
-        window.removeEventListener('focus', handleFocus);
-        window.removeEventListener('visibilitychange', handleVisibilityChange);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         window.removeEventListener('stats-update', handleRefreshDaily);
         window.removeEventListener('storage', handleRefreshDaily);
         window.removeEventListener('storage-update', handleRefreshDaily);
@@ -1619,7 +1676,8 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
   const refreshMatrix = useCallback(async () => {
     await repairInflatedMasteredTimestamps(normLang);
     await syncMasteredWordsFromCloud(normLang);
-    setTodayProgress(getWordsLearnedToday(normLang));
+    const nextProgress = getWordsLearnedToday(normLang);
+    setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
   }, [normLang]);
 
   return {
