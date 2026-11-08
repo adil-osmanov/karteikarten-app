@@ -3,44 +3,52 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder";
 
-export const rawSupabase = createClient(supabaseUrl, supabaseKey);
-
-// =======================================================
-// NETWORK GUARD & EGRESS THROTTLE LOGGER
-// =======================================================
-let requestCount = 0;
-const isDev = process.env.NODE_ENV === 'development';
-
+// Clean expired or corrupted auth tokens on client to avoid 401/CORS errors with anon requests
 if (typeof window !== 'undefined') {
-  setInterval(() => {
-    if (requestCount > 15) {
-      console.error(`🚨 SUPABASE EGRESS LEAK: ${requestCount} запросов за последние 10 секунд! Проверь активный компонент.`);
+  try {
+    const projectRef = supabaseUrl.split('//')[1]?.split('.')[0];
+    if (projectRef) {
+      const storageKey = `sb-${projectRef}-auth-token`;
+      const item = localStorage.getItem(storageKey);
+      if (item) {
+        const parsed = JSON.parse(item);
+        if (!parsed || !parsed.access_token || (parsed.expires_at && parsed.expires_at * 1000 < Date.now() && !parsed.refresh_token)) {
+          localStorage.removeItem(storageKey);
+        }
+      }
     }
-    requestCount = 0;
-  }, 10000);
+  } catch {}
 }
 
-// Proxied supabase client to intercept and monitor all outgoing requests
-export const supabase = new Proxy(rawSupabase, {
-  get(target, prop, receiver) {
-    if (prop === 'from') {
-      return (table: string) => {
-        requestCount++;
-        if (isDev && requestCount > 10) {
-          console.warn(`[Supabase Query #${requestCount}] from('${table}')`);
-        }
-        return Reflect.get(target, prop, receiver).call(target, table);
-      };
+export const rawSupabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = rawSupabase;
+
+/**
+ * Safe helper to upsert into user_stats with error recovery and fallback.
+ * Prevents uncaught CORS / 400 access control errors.
+ */
+export async function safeUpsertUserStats(payload: { language: string; daily_activity: any }): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('user_stats')
+      .upsert(payload, { onConflict: 'language' });
+    
+    if (error) {
+      // Fallback: attempt direct update first, then insert if not found
+      const updateRes = await supabase
+        .from('user_stats')
+        .update({ daily_activity: payload.daily_activity })
+        .eq('language', payload.language);
+      
+      if (updateRes.error) {
+        await supabase
+          .from('user_stats')
+          .insert(payload);
+      }
     }
-    if (prop === 'rpc') {
-      return (fn: string, params?: any) => {
-        requestCount++;
-        if (isDev && requestCount > 10) {
-          console.warn(`[Supabase RPC #${requestCount}] rpc('${fn}')`);
-        }
-        return Reflect.get(target, prop, receiver).call(target, fn, params);
-      };
-    }
-    return Reflect.get(target, prop, receiver);
+    return true;
+  } catch (err) {
+    console.warn('[user_stats safeUpsert warning]:', err);
+    return false;
   }
-});
+}

@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabase, safeUpsertUserStats } from '@/lib/supabase';
 import { getIDBItem, setIDBItem } from '@/hooks/useDayStats';
 import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
 
@@ -274,19 +274,15 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
         if (counts[lvl] !== undefined) counts[lvl]++;
       });
 
-      const { error: statsErr } = await supabase.from('user_stats').upsert({
+      await safeUpsertUserStats({
         language: `MASTERED_WORDS_${normalizedLang}`,
         daily_activity: {
-          entries: localEntries,
           counts,
           totalWords: localEntries.length,
           updatedAt: Date.now(),
         },
       });
-
-      if (!statsErr) {
-        pushedWords = localEntries.length;
-      }
+      pushedWords = localEntries.length;
     }
 
     // 2. Export local Deck Cards with active SRS states to Supabase

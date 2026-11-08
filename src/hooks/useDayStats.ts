@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, safeUpsertUserStats } from '@/lib/supabase';
 
 export interface DailyStats {
   date: string;
@@ -237,10 +237,10 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
         mistakesPool: Array.isArray(stats.mistakesPool) ? stats.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : [],
         history
       };
-      await supabase.from('user_stats').upsert({
+      await safeUpsertUserStats({
         language: `DAY_STATS_${normLang}`,
         daily_activity: payload
-      }, { onConflict: 'language' });
+      });
 
       // Synchronize with user_daily_stats if authenticated
       try {

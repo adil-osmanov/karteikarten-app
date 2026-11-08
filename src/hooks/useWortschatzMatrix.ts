@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, safeUpsertUserStats } from '@/lib/supabase';
 import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
 import { CEFRLevel, detectWordLevel } from '@/lib/vocabulary/cefrLevelDetector';
 import { getIDBItem, setIDBItem } from '@/hooks/useDayStats';
@@ -641,14 +641,14 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
     } catch {}
 
     // 1. Загружаем timestamps и уровни из user_mastered_words (если пользователь авторизован)
-    const remoteMetaByKey = new Map<string, { level?: string | null; masteredAt: number; first_mastered_at?: string; created_at?: string }>();
+    const remoteMetaByKey = new Map<string, { level?: string | null; masteredAt: number; first_mastered_at?: string }>();
     try {
       const { data: authData } = await supabase.auth.getUser();
       const userId = authData?.user?.id;
       if (userId) {
         const { data } = await supabase
           .from('user_mastered_words')
-          .select('lemma, cefr_level, first_mastered_at, created_at')
+          .select('lemma, cefr_level, first_mastered_at')
           .eq('user_id', userId);
         if (Array.isArray(data)) {
           for (const row of data) {
@@ -660,7 +660,6 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
               remoteMetaByKey.set(key, {
                 level: row.cefr_level,
                 first_mastered_at: row.first_mastered_at,
-                created_at: row.created_at,
                 masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
               });
             }
@@ -710,7 +709,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
         const priorTs = remoteMeta?.masteredAt || prevEntry?.masteredAt || 0;
         const masteredAt = extractCardMasteredAt(c, priorTs);
         const firstMasteredAt = remoteMeta?.first_mastered_at || (c as any).first_mastered_at || prevEntry?.first_mastered_at || (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
-        const createdAt = (c as any).created_at || remoteMeta?.created_at || prevEntry?.created_at;
+        const createdAt = (c as any).created_at || (remoteMeta as any)?.created_at || prevEntry?.created_at;
 
         const deckLevel = deckObj?.level || deckObj?.name || deckObj?.title || null;
         const cardLevel = (c as any).level || remoteMeta?.level || null;
@@ -778,19 +777,14 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
       }
 
       if (hadOrphans) {
-        const cleanEntries = Array.from(nextMap.values());
-        supabase
-          .from('user_stats')
-          .upsert({
-            language: `MASTERED_WORDS_${lang.toUpperCase()}`,
-            daily_activity: {
-              entries: cleanEntries,
-              counts: globalMatrixStatsByLang[lang]?.counts,
-              totalWords: globalMatrixStatsByLang[lang]?.totalWords || cleanEntries.length,
-              updatedAt: Date.now(),
-            },
-          })
-          .then(() => {});
+        safeUpsertUserStats({
+          language: `MASTERED_WORDS_${lang.toUpperCase()}`,
+          daily_activity: {
+            counts: globalMatrixStatsByLang[lang]?.counts,
+            totalWords: globalMatrixStatsByLang[lang]?.totalWords || nextMap.size,
+            updatedAt: Date.now(),
+          },
+        }).catch(() => {});
       }
     }
   } catch (err) {
@@ -898,24 +892,18 @@ export async function recordMasteredLemma(
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: currentLanguage } }));
   }
 
-  // Всегда сохраняем глобальный снимок в user_stats (синхронизация PWA, браузера и мобильных)
+  // Всегда сохраняем компактную статистику в user_stats (без передачи сотен килобайт entries)
   try {
-    const entries = Array.from(map.values());
     const counts = globalMatrixStatsByLang[currentLanguage].counts;
     const totalWords = globalMatrixStatsByLang[currentLanguage].totalWords;
-    Promise.resolve(
-      supabase
-        .from('user_stats')
-        .upsert({
-          language: `MASTERED_WORDS_${currentLanguage.toUpperCase()}`,
-          daily_activity: {
-            entries,
-            counts,
-            totalWords,
-            updatedAt: Date.now(),
-          },
-        })
-    ).catch(() => {});
+    safeUpsertUserStats({
+      language: `MASTERED_WORDS_${currentLanguage.toUpperCase()}`,
+      daily_activity: {
+        counts,
+        totalWords,
+        updatedAt: Date.now(),
+      },
+    }).catch(() => {});
   } catch {}
 
   // Сохраняем в Supabase user_mastered_words (при наличии авторизованного пользователя)
@@ -923,16 +911,21 @@ export async function recordMasteredLemma(
     const userId = await getMatrixAuthUserId();
     if (!userId) return;
 
-    await supabase.from('user_mastered_words').upsert(
-      {
-        user_id: userId,
-        lemma: normalizedKey,
-        cefr_level: resolvedLevel,
-        source_book_id: bookId || null,
-        first_mastered_at: firstMasteredAt,
-      },
-      { onConflict: 'user_id,lemma', ignoreDuplicates: true }
-    );
+    const payload: any = {
+      user_id: userId,
+      lemma: normalizedKey,
+      cefr_level: resolvedLevel,
+      source_book_id: bookId || null,
+      first_mastered_at: firstMasteredAt ? new Date(firstMasteredAt).toISOString() : new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('user_mastered_words')
+      .upsert(payload, { onConflict: 'user_id,lemma' });
+
+    if (error) {
+      console.error('[CRITICAL user_mastered_words 400]:', error.message, error.details, payload);
+    }
   } catch (err) {
     console.warn('[Wortschatz-Matrix] Remote upsert notice:', err);
   }
@@ -1156,21 +1149,16 @@ export async function autoBackfillMasteredWords(
       persistMatrixToStorage(targetLang);
       notifyListeners(targetLang);
 
-      // Синхронизируем очищенный эталонный снимок выученных слов в user_stats (убирает удаленные слова из облака)
+      // Синхронизируем очищенную статистику выученных слов в user_stats (компактный payload)
       try {
-        const cleanEntries = Array.from(deduplicatedMap.values());
-        supabase
-          .from('user_stats')
-          .upsert({
-            language: `MASTERED_WORDS_${targetLang.toUpperCase()}`,
-            daily_activity: {
-              entries: cleanEntries,
-              counts: globalMatrixStatsByLang[targetLang]?.counts,
-              totalWords: globalMatrixStatsByLang[targetLang]?.totalWords || cleanEntries.length,
-              updatedAt: Date.now(),
-            },
-          })
-          .then(() => {});
+        safeUpsertUserStats({
+          language: `MASTERED_WORDS_${targetLang.toUpperCase()}`,
+          daily_activity: {
+            counts: globalMatrixStatsByLang[targetLang]?.counts,
+            totalWords: globalMatrixStatsByLang[targetLang]?.totalWords || deduplicatedMap.size,
+            updatedAt: Date.now(),
+          },
+        }).catch(() => {});
       } catch {}
     }
 
@@ -1240,19 +1228,14 @@ export async function purgeOrphanedMasteredWords(
     notifyListeners(normLang);
 
     try {
-      const cleanEntries = Array.from(currentMap.values());
-      supabase
-        .from('user_stats')
-        .upsert({
-          language: `MASTERED_WORDS_${normLang.toUpperCase()}`,
-          daily_activity: {
-            entries: cleanEntries,
-            counts: globalMatrixStatsByLang[normLang]?.counts,
-            totalWords: globalMatrixStatsByLang[normLang]?.totalWords || cleanEntries.length,
-            updatedAt: Date.now(),
-          },
-        })
-        .then(() => {});
+      safeUpsertUserStats({
+        language: `MASTERED_WORDS_${normLang.toUpperCase()}`,
+        daily_activity: {
+          counts: globalMatrixStatsByLang[normLang]?.counts,
+          totalWords: globalMatrixStatsByLang[normLang]?.totalWords || currentMap.size,
+          updatedAt: Date.now(),
+        },
+      }).catch(() => {});
     } catch {}
 
     if (typeof window !== 'undefined') {
@@ -1302,7 +1285,7 @@ export async function purgeJunkExportierenWord(): Promise<void> {
       await supabase
         .from('user_mastered_words')
         .delete()
-        .or('lemma.ilike.%exportieren%,translation.ilike.%деяние%');
+        .ilike('lemma', '%exportieren%');
     } catch {}
 
     // Удаление из IndexedDB app_decks
@@ -1388,13 +1371,6 @@ export async function removeMasteredWordsByCardIds(
     const { data: authData } = await supabase.auth.getUser();
     const userId = authData?.user?.id;
     if (userId) {
-      if (cardIds.length > 0) {
-        await supabase
-          .from('user_mastered_words')
-          .delete()
-          .eq('user_id', userId)
-          .in('card_id', cardIds);
-      }
       if (bookId) {
         await supabase
           .from('user_mastered_words')
