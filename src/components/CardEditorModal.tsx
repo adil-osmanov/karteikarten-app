@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Check, Pencil } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Flashcard } from '@/app/page';
 import type { CEFRLevel } from '@/lib/vocabulary/cefrLevelDetector';
 
@@ -12,6 +13,8 @@ export interface CardEditorModalProps {
   onSave: (updatedCard: Flashcard) => Promise<void> | void;
 }
 
+const LEVELS: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1'];
+
 export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   card,
   isOpen,
@@ -19,34 +22,71 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   onSave,
 }) => {
   const [sentence, setSentence] = useState(card?.sentence || '');
-  const [targetWord, setTargetWord] = useState(card?.targetWord || '');
-  const [translation, setTranslation] = useState(card?.translation || '');
-  const [baseWordInfo, setBaseWordInfo] = useState(card?.baseWordInfo || '');
+  const [targetWord, setTargetWord] = useState(card?.targetWord || (card as any)?.front || '');
+  const [translation, setTranslation] = useState(card?.translation || (card as any)?.back || '');
+  const [selectedLevel, setSelectedLevel] = useState<CEFRLevel | null>((card?.level as CEFRLevel) || null);
   const [forms, setForms] = useState(card?.forms || card?.hint || '');
-  const [level, setLevel] = useState<CEFRLevel | null>((card?.level as CEFRLevel) || null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [grammaticalTag, setGrammaticalTag] = useState(card?.baseWordInfo || '');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const sentenceTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const targetInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync internal form state whenever card or isOpen changes
   useEffect(() => {
     if (isOpen && card) {
       setSentence(card.sentence || '');
-      setTargetWord(card.targetWord || '');
-      setTranslation(card.translation || '');
-      setBaseWordInfo(card.baseWordInfo || '');
+      setTargetWord(card.targetWord || (card as any)?.front || '');
+      setTranslation(card.translation || (card as any)?.back || '');
+      setSelectedLevel((card.level as CEFRLevel) || null);
       setForms(card.forms || card.hint || '');
-      setLevel((card.level as CEFRLevel) || null);
-      setIsSaving(false);
-      
-      // Auto-focus sentence input after opening
+      setGrammaticalTag(card.baseWordInfo || '');
+      setShowAdvanced(Boolean(card.baseWordInfo && card.baseWordInfo.trim().length > 0));
+
       setTimeout(() => {
-        sentenceTextareaRef.current?.focus();
-      }, 50);
+        targetInputRef.current?.focus();
+      }, 40);
     }
   }, [card, isOpen]);
 
-  // Handle ESC and Cmd+Enter shortcuts
+  const handleSave = useCallback(() => {
+    if (!card) return;
+    const cleanTarget = targetWord.trim();
+    const cleanSentence = sentence.trim();
+    if (!cleanTarget && !cleanSentence) return;
+
+    const cleanTranslation = translation.trim();
+    const cleanForms = forms.trim();
+    const cleanGrammar = grammaticalTag.trim();
+
+    const updatedCardPayload: Flashcard = {
+      ...card,
+      sentence: cleanSentence,
+      targetWord: cleanTarget || card.targetWord,
+      translation: cleanTranslation,
+      level: selectedLevel || null,
+      forms: cleanForms || null,
+      hint: cleanForms || null,
+      baseWordInfo: cleanGrammar || null,
+      updated_at: new Date().toISOString(),
+      ...({
+        front: cleanTarget || card.targetWord,
+        back: cleanTranslation,
+        grammaticalTag: cleanGrammar || undefined,
+      } as any),
+    };
+
+    try {
+      // 1. Мгновенно обновляем стейт в родительском компоненте и Zustand (плюс фоновый Write-Through в Supabase)
+      Promise.resolve(onSave(updatedCardPayload)).catch((err) => {
+        console.error('Failed to save card:', err);
+      });
+
+      // 2. Мгновенно закрываем модалку без блокировки интерфейса
+      onClose();
+    } catch (error) {
+      console.error('Failed to save card:', error);
+    }
+  }, [card, sentence, targetWord, translation, selectedLevel, forms, grammaticalTag, onSave, onClose]);
+
   useEffect(() => {
     if (!isOpen || !card) return;
 
@@ -58,243 +98,209 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
       } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
-        handleSubmit();
+        handleSave();
+      } else {
+        // Изолируем нажатия клавиш внутри модалки от глобальных хоткеев карточки (Space, Enter, R)
+        e.stopPropagation();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, card, sentence, targetWord, translation, baseWordInfo, forms, level]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, card, handleSave, onClose]);
 
   if (!isOpen || !card) return null;
 
-  const handleSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (isSaving || !card) return;
-
-    const trimmedSentence = sentence.trim();
-    const trimmedTargetWord = targetWord.trim();
-    const trimmedTranslation = translation.trim();
-    const trimmedBaseWordInfo = baseWordInfo.trim();
-    const trimmedForms = forms.trim();
-
-    if (!trimmedTargetWord && !trimmedSentence) {
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      const updatedCard: Flashcard = {
-        ...card,
-        sentence: trimmedSentence || card.sentence,
-        targetWord: trimmedTargetWord || card.targetWord,
-        translation: trimmedTranslation || card.translation,
-        baseWordInfo: trimmedBaseWordInfo || null,
-        forms: trimmedForms || null,
-        hint: trimmedForms || null,
-        level: level || null,
-        updated_at: new Date().toISOString(),
-      };
-
-      await onSave(updatedCard);
-      onClose();
-    } catch (err) {
-      console.error('Error saving card:', err);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xl animate-in fade-in duration-200 select-none"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xl animate-in fade-in duration-150 select-none"
       onClick={(e) => {
         e.stopPropagation();
         onClose();
       }}
     >
       <div
-        className="rounded-3xl bg-white/95 dark:bg-neutral-900/95 border border-neutral-200/60 dark:border-neutral-800 shadow-2xl p-6 max-w-lg w-full scale-100 animate-in zoom-in-95 duration-150 select-text text-left"
+        className="relative w-full max-w-lg p-7 rounded-3xl bg-neutral-900/95 border border-white/10 backdrop-blur-2xl shadow-[0_30px_90px_rgba(0,0,0,0.85)] flex flex-col gap-5 text-left select-text animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="card-editor-title"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 mb-4 border-b border-neutral-100 dark:border-neutral-800">
+        {/* Лаконичная шапка */}
+        <div className="flex items-center justify-between pb-3 border-b border-white/5">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+            <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
               <Pencil className="w-4 h-4" />
             </div>
-            <div>
-              <h3 id="card-editor-title" className="text-base font-semibold text-zinc-900 dark:text-white tracking-tight">
-                Karte bearbeiten
-              </h3>
-              <p className="text-xs text-neutral-400 dark:text-neutral-500">
-                Sofortige Aktualisierung in der Sitzung und der Datenbank
-              </p>
-            </div>
+            <h3 id="card-editor-title" className="text-lg font-semibold tracking-tight text-white">
+              Karte bearbeiten
+            </h3>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-full text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             title="Schließen (Esc)"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="space-y-3.5">
-          {/* 1. Sentence / Front Text */}
-          <div>
-            <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
-              Satz / Text des Beispiels (Sentence)
+        {/* Поля ввода */}
+        <div className="flex flex-col gap-4">
+          {/* Zielwort & Übersetzung в 2 компактные колонки */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-neutral-400 tracking-wide block">
+                Zielwort
+              </label>
+              <input
+                ref={targetInputRef}
+                type="text"
+                value={targetWord}
+                onChange={(e) => setTargetWord(e.target.value)}
+                placeholder="z.B. sich entscheiden, aus|ruhen"
+                className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-neutral-400 tracking-wide block">
+                Übersetzung
+              </label>
+              <input
+                type="text"
+                value={translation}
+                onChange={(e) => setTranslation(e.target.value)}
+                placeholder="Übersetzung..."
+                className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
+              />
+            </div>
+          </div>
+
+          {/* Beispielsatz */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-neutral-400 tracking-wide block">
+              Beispielsatz
             </label>
             <textarea
-              ref={sentenceTextareaRef}
-              rows={3}
               value={sentence}
               onChange={(e) => setSentence(e.target.value)}
-              placeholder="Beispielsatz mit Lücke oder Wort..."
-              className="w-full bg-neutral-100 dark:bg-neutral-800/60 border-0 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/30 outline-none text-zinc-900 dark:text-zinc-100 placeholder:text-neutral-400 font-sans transition-all resize-y min-h-[72px]"
+              rows={2}
+              placeholder="Beispielsatz..."
+              className="w-full px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 resize-none transition-colors"
             />
           </div>
 
-          {/* 2. Target Word / Gap */}
-          <div>
-            <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
-              Zielwort / Lücke (Target Word)
-            </label>
-            <input
-              type="text"
-              value={targetWord}
-              onChange={(e) => setTargetWord(e.target.value)}
-              placeholder="z.B. aus|probieren, aus|statten, die Bestätigung..."
-              className="w-full bg-neutral-100 dark:bg-neutral-800/60 border-0 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/30 outline-none text-zinc-900 dark:text-zinc-100 placeholder:text-neutral-400 font-sans transition-all"
-            />
-          </div>
-
-          {/* 3. CEFR Level Selector */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                CEFR-Niveau (Level)
+          {/* Сегментированный переключатель уровня (Apple Segmented Control) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-neutral-400 tracking-wide">
+                Niveau
               </label>
-              {level && (
+              {selectedLevel && (
                 <button
                   type="button"
-                  onClick={() => setLevel(null)}
-                  className="text-[11px] text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 underline cursor-pointer"
+                  onClick={() => setSelectedLevel(null)}
+                  className="text-[11px] text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
                 >
-                  Zurücksetzen (Auto)
+                  Auto
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-5 gap-1.5">
-              {(['A1', 'A2', 'B1', 'B2', 'C1'] as const).map((lvl) => {
-                const isSelected = level === lvl;
-                return (
-                  <button
-                    key={lvl}
-                    type="button"
-                    onClick={() => setLevel(isSelected ? null : lvl)}
-                    className={`py-1.5 px-2 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer border ${
-                      isSelected
-                        ? lvl === 'A1'
-                          ? 'bg-emerald-500 text-white border-emerald-600 shadow-sm shadow-emerald-500/20'
-                          : lvl === 'A2'
-                          ? 'bg-teal-500 text-white border-teal-600 shadow-sm shadow-teal-500/20'
-                          : lvl === 'B1'
-                          ? 'bg-blue-600 text-white border-blue-700 shadow-sm shadow-blue-500/20'
-                          : lvl === 'B2'
-                          ? 'bg-amber-500 text-white border-amber-600 shadow-sm shadow-amber-500/20'
-                          : 'bg-purple-600 text-white border-purple-700 shadow-sm shadow-purple-500/20'
-                        : 'bg-neutral-100 dark:bg-neutral-800/60 text-neutral-600 dark:text-neutral-300 border-transparent hover:bg-neutral-200/70 dark:hover:bg-neutral-700/60'
-                    }`}
-                  >
-                    {lvl}
-                  </button>
-                );
-              })}
+            <div className="grid grid-cols-5 p-1 rounded-xl bg-white/[0.03] border border-white/5">
+              {LEVELS.map((lvl) => (
+                <button
+                  key={lvl}
+                  type="button"
+                  onClick={() => setSelectedLevel(selectedLevel === lvl ? null : lvl)}
+                  className={`py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                    selectedLevel === lvl
+                      ? 'bg-white/15 text-white shadow-sm border border-white/10'
+                      : 'text-neutral-400 hover:text-neutral-200 border border-transparent'
+                  }`}
+                >
+                  {lvl}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* 4. Translation */}
-          <div>
-            <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
-              Übersetzung (Back / Russian Translation)
-            </label>
-            <input
-              type="text"
-              value={translation}
-              onChange={(e) => setTranslation(e.target.value)}
-              placeholder="Russische Übersetzung..."
-              className="w-full bg-neutral-100 dark:bg-neutral-800/60 border-0 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/30 outline-none text-zinc-900 dark:text-zinc-100 placeholder:text-neutral-400 font-sans transition-all"
-            />
-          </div>
-
-          {/* 4. Grammar Badge / Tag */}
-          <div>
-            <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
-              Grammatischer Tag / Badge (z.B. Futur I, Präposition + Dativ)
-            </label>
-            <input
-              type="text"
-              value={baseWordInfo}
-              onChange={(e) => setBaseWordInfo(e.target.value)}
-              placeholder="z.B. Futur I -> ausprobieren, sich gewöhnen an + Akk..."
-              className="w-full bg-neutral-100 dark:bg-neutral-800/60 border-0 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/30 outline-none text-zinc-900 dark:text-zinc-100 placeholder:text-neutral-400 font-sans transition-all"
-            />
-          </div>
-
-          {/* 5. Hint / Explanation / Forms */}
-          <div>
-            <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
-              Hinweis / Formen / Erklärung (Hint & Forms)
+          {/* Formen */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-neutral-400 tracking-wide block">
+              Formen
             </label>
             <input
               type="text"
               value={forms}
               onChange={(e) => setForms(e.target.value)}
-              placeholder="z.B. probiert aus, probierte aus, hat ausprobiert..."
-              className="w-full bg-neutral-100 dark:bg-neutral-800/60 border-0 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/30 outline-none text-zinc-900 dark:text-zinc-100 placeholder:text-neutral-400 font-sans transition-all"
+              placeholder="z.B. übergibt · übergab · hat übergeben"
+              className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
             />
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center justify-between pt-3 mt-4 border-t border-neutral-100 dark:border-neutral-800">
-            <span className="text-[11px] text-neutral-400">
-              Tipp: <kbd className="px-1.5 py-0.5 rounded bg-neutral-200/60 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 font-mono text-[10px]">⌘</kbd> + <kbd className="px-1.5 py-0.5 rounded bg-neutral-200/60 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 font-mono text-[10px]">Enter</kbd> zum Speichern
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={isSaving}
-                className="px-4 py-2 text-sm font-medium text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors cursor-pointer rounded-xl"
-              >
-                Abbrechen
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl px-5 py-2 text-sm shadow-sm active:scale-98 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {isSaving ? (
-                  <span>Speichert...</span>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4 stroke-[2.5]" />
-                    <span>Speichern</span>
-                  </>
-                )}
-              </button>
-            </div>
+          {/* Спойлер + Erweiterte Optionen для Grammatischer Tag */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((prev) => !prev)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-neutral-500 hover:text-neutral-300 transition-colors cursor-pointer"
+            >
+              {showAdvanced ? (
+                <>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                  <span>Erweiterte Optionen ausblenden</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                  <span>+ Erweiterte Optionen</span>
+                </>
+              )}
+            </button>
+            {showAdvanced && (
+              <div className="mt-2 space-y-1.5">
+                <label className="text-xs font-medium text-neutral-400 tracking-wide block">
+                  Grammatischer Tag
+                </label>
+                <input
+                  type="text"
+                  value={grammaticalTag}
+                  onChange={(e) => setGrammaticalTag(e.target.value)}
+                  placeholder="z.B. Präposition + Akkusativ"
+                  className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
+                />
+              </div>
+            )}
           </div>
-        </form>
+        </div>
+
+        {/* Футер действий */}
+        <div className="flex items-center justify-between pt-3 border-t border-white/5 mt-1">
+          <span className="text-[11px] text-neutral-400">⌘ + Enter zum Speichern</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl text-xs font-medium text-neutral-300 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              Abbrechen
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-xs font-medium text-white transition-all shadow-[0_0_20px_rgba(37,99,235,0.35)] cursor-pointer"
+            >
+              Speichern
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 };

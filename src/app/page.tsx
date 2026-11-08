@@ -2492,9 +2492,10 @@ export const useStore = create<DeckState>()((set, get) => ({
       return { decks: newDecks };
     });
 
-    // 2. Persist to local IndexedDB
+    // 2. Persist to local IndexedDB and clear in-memory card cache
+    cachedAllCards = [];
     const nextDecks = get().decks;
-    await setIDBItem('app_decks', nextDecks);
+    setIDBItem('app_decks', nextDecks).catch(() => {});
 
     // 3. Persist to Supabase cards table
     try {
@@ -3695,9 +3696,9 @@ function RapidFlashcardMode({
     setCurrentCard(initialCard);
   }, [initialCard]);
 
-  const handleSaveEditedCard = async (updatedCard: Flashcard) => {
+  const handleSaveEditedCard = (updatedCard: Flashcard) => {
     setCurrentCard(updatedCard);
-    await useStore.getState().updateCardContent(updatedCard.id, updatedCard);
+    useStore.getState().updateCardContent(updatedCard.id, updatedCard).catch(() => {});
     triggerHaptic('success');
     toast.success('Gespeichert');
   };
@@ -4164,6 +4165,7 @@ function RapidFlashcardMode({
   // 3. Двухшаговое управление стрелками, Space для бесконечного флипа туда-обратно, Enter/Space для Weiter
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isEditModalOpen) return;
       if (isAnswered) {
         if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
@@ -4207,7 +4209,7 @@ function RapidFlashcardMode({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, handleMistakeOrGiveUp, playCardAudio]);
+  }, [isEditModalOpen, isAnswered, isRound1or2, isFlipped, currentCard?.targetWord, handleProceedNext, handleRateCard, handleEnterSubmit, handleMistakeOrGiveUp, playCardAudio]);
 
   const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered;
 
@@ -4793,6 +4795,7 @@ function RapidSession({
   const answerCard = useStore(state => state.answerCard);
   const setCardProgress = useStore(state => state.setCardProgress);
   const appLanguage = useStore(state => state.appLanguage);
+  const decks = useStore(state => state.decks);
   const studyLanguage = useMemo(() => {
     const d = useStore.getState().decks.find(item => item.id === deckId);
     let raw = d?.language;
@@ -5170,11 +5173,11 @@ function RapidSession({
   }
 
   const current = queue[0];
-  const storeCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === current.card.id);
+  const storeCard = decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === current.card.id);
   const liveCard = storeCard
     ? {
-        ...storeCard,
         ...current.card,
+        ...storeCard,
         round: current.card.round,
         isLegendary: current.card.isLegendary,
         mistakeCount: (current.card as any).mistakeCount,
@@ -5516,8 +5519,8 @@ function StudyInterface({
     const storeCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id);
     if (!storeCard) return currentCardSnapshot;
     return {
-      ...storeCard,
       ...currentCardSnapshot,
+      ...storeCard,
       round: currentCardSnapshot.round,
       isLegendary: currentCardSnapshot.isLegendary,
       mistakeCount: (currentCardSnapshot as any).mistakeCount,
@@ -6258,9 +6261,9 @@ function StudyCard({
     setCard(initialCard);
   }, [initialCard]);
 
-  const handleSaveEditedCard = async (updatedCard: Flashcard) => {
+  const handleSaveEditedCard = (updatedCard: Flashcard) => {
     setCard(updatedCard);
-    await useStore.getState().updateCardContent(updatedCard.id, updatedCard);
+    useStore.getState().updateCardContent(updatedCard.id, updatedCard).catch(() => {});
     triggerHaptic('success');
     toast.success('Gespeichert');
   };
