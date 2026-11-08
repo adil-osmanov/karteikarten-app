@@ -8,26 +8,35 @@ export interface TabConfig {
 }
 
 export const TABS_DE: readonly TabConfig[] = [
-  { id: 'textbooks', label: 'Lehrbücher' },
+  { id: 'textbooks', label: 'Bücher' },
   { id: 'flashcards', label: 'Karteikarten' },
-  { id: 'structures', label: 'Strukturen & NVV' },
+  { id: 'structures', label: 'Grammatik' },
 ] as const;
 
 export const TABS_RU: readonly TabConfig[] = [
-  { id: 'textbooks', label: 'Учебники' },
-  { id: 'flashcards', label: 'Флешкарты' },
+  { id: 'textbooks', label: 'Книги' },
+  { id: 'flashcards', label: 'Карточки' },
+  { id: 'structures', label: 'Грамматика' },
 ] as const;
 
 export const TABS_EN: readonly TabConfig[] = [
-  { id: 'textbooks', label: 'Textbooks' },
-  { id: 'flashcards', label: 'Flashcards' },
+  { id: 'textbooks', label: 'Books' },
+  { id: 'flashcards', label: 'Cards' },
+  { id: 'structures', label: 'Grammar' },
+] as const;
+
+export const TABS_UK: readonly TabConfig[] = [
+  { id: 'textbooks', label: 'Книги' },
+  { id: 'flashcards', label: 'Картки' },
+  { id: 'structures', label: 'Граматика' },
 ] as const;
 
 export const getTabsForLanguage = (lang?: string): readonly TabConfig[] => {
   const normalizedLang = (lang || 'de').toLowerCase();
-  if (normalizedLang === 'de') return TABS_DE;
-  if (normalizedLang === 'ru') return TABS_RU;
-  return TABS_EN;
+  if (normalizedLang.startsWith('ru')) return TABS_RU;
+  if (normalizedLang.startsWith('en')) return TABS_EN;
+  if (normalizedLang.startsWith('uk')) return TABS_UK;
+  return TABS_DE;
 };
 
 interface CategoryTabsProps {
@@ -59,14 +68,10 @@ export const CategoryTabs = React.memo(function CategoryTabs({
               aria-selected={isActive}
               type="button"
               onClick={() => onTabChange(tab.id)}
-              // ЖЕСТКИЕ ПРАВИЛА ПРОТИВ МИГАНИЯ:
-              // 1. Никаких смен font-weight, padding, border при hover!
-              // 2. Только transition-colors для цвета текста и фонового стекла.
-              // 3. Отключен outline и любое изменение масштаба (scale).
-              className={`relative px-5 py-1.5 rounded-full text-xs font-medium tracking-tight transition-colors duration-150 outline-none cursor-pointer ${
+              className={`relative px-5 py-1.5 rounded-full text-xs font-medium tracking-tight transition-all duration-150 outline-none cursor-pointer ${
                 isActive
-                  ? 'bg-white text-neutral-900 dark:bg-white/15 dark:text-white shadow-sm'
-                  : 'text-neutral-600 hover:text-neutral-900 hover:bg-black/[0.04] dark:text-neutral-400 dark:hover:text-neutral-100 dark:hover:bg-white/[0.06]'
+                  ? 'bg-white text-neutral-900 shadow-sm dark:bg-white/15 dark:text-white'
+                  : 'text-neutral-600 hover:text-black hover:bg-white hover:shadow-xs dark:text-neutral-400 dark:hover:text-neutral-100 dark:hover:bg-white/[0.06]'
               }`}
             >
               {tab.label}

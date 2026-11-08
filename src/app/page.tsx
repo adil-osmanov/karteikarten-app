@@ -7398,7 +7398,7 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
 export const UI_TRANSLATIONS = {
   DE: {
     libraryKicker: "Deine Bibliothek",
-    libraryTitle: "Lehrbücher",
+    libraryTitle: "Bücher",
     dueCardsBadge: (count: number) => `${count} zu wiederholen`,
     dueCardsTitle: (count: number) => `${count} Karten zu wiederholen`,
     today: "heute",
@@ -7410,7 +7410,7 @@ export const UI_TRANSLATIONS = {
   },
   EN: {
     libraryKicker: "Your Library",
-    libraryTitle: "Textbooks",
+    libraryTitle: "Books",
     dueCardsBadge: (count: number) => `${count} to review`,
     dueCardsTitle: (count: number) => `${count} cards to review`,
     today: "today",
@@ -7422,7 +7422,7 @@ export const UI_TRANSLATIONS = {
   },
   RU: {
     libraryKicker: "Ваша библиотека",
-    libraryTitle: "Учебники",
+    libraryTitle: "Книги",
     dueCardsBadge: (count: number) => `${count} к повторению`,
     dueCardsTitle: (count: number) => `${count} карточек ждут повторения`,
     today: "сегодня",
@@ -7580,7 +7580,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                className="px-3.5 py-1.5 rounded-full backdrop-blur-md text-xs font-medium shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none bg-white/70 border border-black/[0.06] text-neutral-800 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.06] dark:border-white/[0.08] dark:text-neutral-200 dark:hover:bg-white/10 dark:hover:border-white/15"
                 title="Zurück zur Übersicht"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
@@ -7591,7 +7591,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                 <button
                   type="button"
                   onClick={() => setIsLangOpen(prev => !prev)}
-                  className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                  className="px-3.5 py-1.5 rounded-full backdrop-blur-md text-xs font-medium shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none bg-white/70 border border-black/[0.06] text-neutral-800 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.06] dark:border-white/[0.08] dark:text-neutral-200 dark:hover:bg-white/10 dark:hover:border-white/15"
                   title="Sprache wählen"
                 >
                   <span className="text-base leading-none select-none">{currentLang.flag}</span>
@@ -7644,28 +7644,22 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
               <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная переливающаяся аура ТОЛЬКО в темной теме */}
-                <div className="hidden dark:block absolute -inset-[1.5px] rounded-full opacity-0 dark:opacity-70 dark:bg-gradient-to-r dark:from-blue-500 dark:via-indigo-500 dark:to-cyan-400 dark:group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
-
-                {/* Сама кнопка: чистая белая пилюля без синего свечения в Light Mode, глубокий неон в Dark Mode */}
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-white hover:bg-black/[0.04] border border-black/10 text-neutral-800 shadow-[0_1px_3px_rgba(0,0,0,0.05)] dark:bg-blue-950/40 dark:text-white dark:border-blue-400/40 dark:shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-colors duration-150 active:scale-[0.98] cursor-pointer"
+                  className="h-10 px-6 rounded-full text-sm font-semibold inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none tracking-wider uppercase bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.45)] hover:shadow-[0_0_28px_rgba(37,99,235,0.6)] active:scale-[0.98]"
                 >
-                  <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
-                  <span className="font-semibold text-neutral-800 dark:text-white">
-                    {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
-                  </span>
+                  <RotateCw className="w-4 h-4 text-white group-hover:rotate-180 transition-transform duration-500 shrink-0" />
+                  <span>{dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}</span>
                 </button>
               </div>
             ) : (
               <button
                 type="button"
                 disabled
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none text-xs font-medium tracking-wider uppercase"
+                className="h-10 px-6 rounded-full text-sm font-semibold inline-flex items-center gap-2.5 border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none tracking-wider uppercase"
               >
-                <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
+                <RotateCw className="w-4 h-4 text-zinc-400 shrink-0" />
                 <span>
                   0 {getRepeatButtonLabel(effectiveLang || appLanguage)}
                 </span>
@@ -7688,7 +7682,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+              className="px-3.5 py-1.5 rounded-full backdrop-blur-md text-xs font-medium shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none bg-white/70 border border-black/[0.06] text-neutral-800 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.06] dark:border-white/[0.08] dark:text-neutral-200 dark:hover:bg-white/10 dark:hover:border-white/15"
               title="Статистика дня"
             >
               <svg className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -7705,7 +7699,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             <button 
               type="button"
               onClick={toggleTheme}
-              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 active:scale-95 cursor-pointer"
+              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full backdrop-blur-md flex items-center justify-center shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 active:scale-95 cursor-pointer bg-white/70 border border-black/[0.06] text-neutral-800 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.06] dark:border-white/[0.08] dark:text-neutral-200 dark:hover:bg-white/10 dark:hover:border-white/15"
               aria-label="Toggle theme"
               title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
@@ -8199,11 +8193,9 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | { catego
                 }
               }
             }} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:border-blue-500 transition-colors font-medium appearance-none cursor-pointer">
-              <option value="textbooks">{appLanguage === 'RU' ? 'Учебники' : appLanguage === 'EN' ? 'Textbooks' : 'Lehrbücher'}</option>
-              <option value="flashcards">{appLanguage === 'RU' ? 'Флешкарты' : appLanguage === 'EN' ? 'Flashcards' : 'Karteikarten'}</option>
-              {(appLanguage === 'DE' || category === 'structures') && (
-                <option value="structures">{appLanguage === 'DE' ? 'Strukturen & NVV' : 'Structures & NVV'}</option>
-              )}
+              <option value="textbooks">{(appLanguage as string) === 'RU' || (appLanguage as string) === 'UK' ? 'Книги' : appLanguage === 'EN' ? 'Books' : 'Bücher'}</option>
+              <option value="flashcards">{(appLanguage as string) === 'RU' ? 'Карточки' : (appLanguage as string) === 'UK' ? 'Картки' : appLanguage === 'EN' ? 'Cards' : 'Karteikarten'}</option>
+              <option value="structures">{(appLanguage as string) === 'RU' ? 'Грамматика' : (appLanguage as string) === 'UK' ? 'Граматика' : appLanguage === 'EN' ? 'Grammar' : 'Grammatik'}</option>
             </select>
           </div>
           
