@@ -1060,7 +1060,7 @@ export interface CardSRSUpdate {
 }
 
 export function isCardDueForReview(card: any): boolean {
-  if (!card) return false;
+  if (!card || card.isDeleted) return false;
 
   // Учитываем и camelCase, и snake_case
   const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
@@ -1084,18 +1084,45 @@ export function isCardDueForReview(card: any): boolean {
 
 export const isCardDue = isCardDueForReview;
 
+export function filterValidActiveDecks(decks: Deck[], books: BookMeta[]): Deck[] {
+  if (!Array.isArray(decks) || decks.length === 0) return [];
+  const hasBooks = Array.isArray(books) && books.length > 0;
+  const activeBookMap = new Map<string, BookMeta>();
+  if (hasBooks) {
+    books.forEach(b => {
+      if (b && b.id) activeBookMap.set(b.id, b);
+    });
+  }
+
+  return decks.filter(d => {
+    if (!d || !d.id) return false;
+    if (d.name === 'проба' || d.name?.includes('Praepositionen_B1_B2_Test') || d.name?.startsWith('Rapid_Flashcards_')) {
+      return false;
+    }
+    if (hasBooks) {
+      const bId = d.bookId || (d as any).book_id;
+      const parentBook = bId ? activeBookMap.get(bId) : undefined;
+      if (!parentBook) return false;
+      if (Array.isArray(parentBook.activeLevels) && parentBook.activeLevels.length > 0 && d.level) {
+        if (!parentBook.activeLevels.includes(d.level as any)) return false;
+      }
+    }
+    return true;
+  });
+}
+
 let lastSupabaseCardsCount = 0;
 let isFetchingAllCards = false;
 let lastFetchAllCardsTime = 0;
 let cachedAllCards: any[] = [];
 let pendingFetchAllCardsPromise: Promise<any[]> | null = null;
 
-export async function fetchAllUserCards(userId?: string): Promise<any[]> {
+export async function fetchAllUserCards(force: boolean = false): Promise<any[]> {
   const now = Date.now();
   if (pendingFetchAllCardsPromise) {
     return pendingFetchAllCardsPromise;
   }
-  if (now - lastFetchAllCardsTime < 25000 && cachedAllCards.length > 0) {
+  if (!force && now - lastFetchAllCardsTime < 25000 && cachedAllCards.length > 0) {
     return cachedAllCards;
   }
 
@@ -1126,7 +1153,7 @@ export async function fetchAllUserCards(userId?: string): Promise<any[]> {
           hasMore = false;
         }
       }
-      if (allCards.length > 0) {
+      if (allCards.length > 0 || force) {
         lastSupabaseCardsCount = allCards.length;
         cachedAllCards = allCards;
         lastFetchAllCardsTime = Date.now();
@@ -1208,6 +1235,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
   const cleanLang = normalizeLanguage(lang);
 
   let inMemoryDecks = useStore.getState().decks;
+  const inMemoryBooks = useStore.getState().books;
   if (!inMemoryDecks || inMemoryDecks.length === 0) {
     try {
       const idb = await getIDBItem<Deck[]>('app_decks');
@@ -1215,13 +1243,15 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
     } catch {}
   }
 
-  const totalCardsInMemory = Array.isArray(inMemoryDecks)
-    ? inMemoryDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0)
-    : 0;
+  const validDecks = filterValidActiveDecks(inMemoryDecks || [], inMemoryBooks || []);
+  const activeDeckIds = new Set(validDecks.map(d => d.id));
 
-  if (inMemoryDecks && inMemoryDecks.length > 0 && totalCardsInMemory > 0) {
+  const totalCardsInMemory = validDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
+
+  if (validDecks.length > 0 && totalCardsInMemory > 0) {
     const dueList: Flashcard[] = [];
-    inMemoryDecks.forEach(deck => {
+    validDecks.forEach(deck => {
+      if (!activeDeckIds.has(deck.id)) return;
       if (bookId) {
         const dBookId = deck.bookId || (deck as any).book_id;
         if (dBookId !== bookId) return;
@@ -1229,6 +1259,9 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         if ((deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
       }
       deck.cards?.forEach(card => {
+        if (!card || (card as any).isDeleted) return;
+        const cDeckId = (card as any).deck_id || (card as any).deckId || deck.id;
+        if (!activeDeckIds.has(cDeckId)) return;
         if (isCardDueForReview(card)) {
           dueList.push(card);
         }
@@ -1247,44 +1280,13 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
   isFetchingDueCount = true;
   lastDueCountFetchTime[cleanLang] = now;
   try {
-    if (bookId) {
-      try {
-        const { count, error } = await supabase
-          .from('cards')
-          .select('id, decks!inner(book_id)', { count: 'exact', head: true })
-          .or('isArchived.eq.true,masteryLevel.gte.4')
-          .not('nextReviewDate', 'is', null)
-          .lte('nextReviewDate', now)
-          .eq('decks.book_id', bookId);
-
-        if (!error && typeof count === 'number') {
-          cachedDueCount[cleanLang] = count;
-          return count;
-        }
-      } catch (e) {
-        console.warn('Direct query on cards count for book error:', e);
-      }
-    } else {
-      try {
-        const { count, error } = await supabase
-          .from('cards')
-          .select('id, decks!inner(language)', { count: 'exact', head: true })
-          .or('isArchived.eq.true,masteryLevel.gte.4')
-          .not('nextReviewDate', 'is', null)
-          .lte('nextReviewDate', now)
-          .ilike('decks.language', cleanLang);
-
-        if (!error && typeof count === 'number') {
-          cachedDueCount[cleanLang] = count;
-          return count;
-        }
-      } catch (e) {}
-    }
+    const freshDue = await fetchDueCardsFromCloud(cleanLang, bookId);
+    const count = freshDue.length;
+    cachedDueCount[cleanLang] = count;
+    return count;
   } finally {
     isFetchingDueCount = false;
   }
-
-  return cachedDueCount[cleanLang] || 0;
 }
 
 let isFetchingDueCardsFromCloud = false;
@@ -1295,28 +1297,31 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
   const cleanLang = normalizeLanguage(lang);
 
   const inMemoryDecks = useStore.getState().decks;
-  const totalCardsInMemory = Array.isArray(inMemoryDecks)
-    ? inMemoryDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0)
-    : 0;
+  const inMemoryBooks = useStore.getState().books;
+  const validDecks = filterValidActiveDecks(inMemoryDecks || [], inMemoryBooks || []);
+  const activeDeckIds = new Set(validDecks.map(d => d.id));
+  const totalCardsInMemory = validDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
 
-  if (inMemoryDecks && inMemoryDecks.length > 0 && totalCardsInMemory > 0) {
+  if (validDecks.length > 0 && totalCardsInMemory > 0) {
     const list: { deckId: string, card: Flashcard }[] = [];
-    inMemoryDecks.forEach(deck => {
+    validDecks.forEach(deck => {
+      if (!activeDeckIds.has(deck.id)) return;
       const dBookId = deck.bookId || (deck as any).book_id;
       if (bookId && dBookId !== bookId) return;
       if (!bookId && (deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
       deck.cards?.forEach(card => {
+        if (!card || (card as any).isDeleted) return;
+        const cDeckId = (card as any).deck_id || (card as any).deckId || deck.id;
+        if (!activeDeckIds.has(cDeckId)) return;
         if (isCardDueForReview(card)) {
           // Карточки, пришедшие на повторение, стартуют в статусе Легендарных (раунд 4, mastery 4)
           list.push({ deckId: deck.id, card: { ...card, masteryLevel: 4 } });
         }
       });
     });
-    if (list.length > 0) {
-      const result = deduplicateCardsByLemma(list, false);
-      cachedDueCardsFromCloud[cleanLang] = result;
-      return result;
-    }
+    const result = deduplicateCardsByLemma(list, false);
+    cachedDueCardsFromCloud[cleanLang] = result;
+    return result;
   }
 
   if (isFetchingDueCardsFromCloud) return cachedDueCardsFromCloud[cleanLang] || [];
@@ -1348,7 +1353,12 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
 
     if (!error && Array.isArray(data) && data.length > 0) {
       const mapped = data
-        .filter((row: any) => isCardDueForReview(row))
+        .filter((row: any) => {
+          const dId = row.deck_id || row.decks?.id;
+          if (!dId) return false;
+          if (activeDeckIds.size > 0 && !activeDeckIds.has(dId)) return false;
+          return isCardDueForReview(row);
+        })
         .map((row: any) => ({
           deckId: row.deck_id || row.decks?.id || '',
           card: {
@@ -1391,11 +1401,49 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
   lastSyncCardsFromSupabaseTime = now;
 
   try {
-    const remoteCards = await fetchAllUserCards();
+    const [remoteCards, remoteDecksRes] = await Promise.all([
+      fetchAllUserCards(force),
+      force ? supabase.from('decks').select('*').order('created_at', { ascending: true }) : Promise.resolve({ data: null, error: null })
+    ]);
     if (!remoteCards || remoteCards.length === 0) return;
+
+    const currentBooks = useStore.getState().books;
+    let baseDecks = useStore.getState().decks;
+
+    // Если force=true и мы получили свежий список колод из Supabase — удаляем локальные колоды-призраки, которых больше нет в БД
+    let decksListChanged = false;
+    if (remoteDecksRes?.data && Array.isArray(remoteDecksRes.data)) {
+      const remoteDeckIds = new Set(remoteDecksRes.data.map((d: any) => d.id));
+      const filteredLocalDecks = baseDecks.filter(d => remoteDeckIds.has(d.id));
+      if (filteredLocalDecks.length !== baseDecks.length) {
+        baseDecks = filteredLocalDecks;
+        decksListChanged = true;
+      }
+      const existingLocalIds = new Set(baseDecks.map(d => d.id));
+      for (const rd of remoteDecksRes.data) {
+        if (!existingLocalIds.has(rd.id)) {
+          baseDecks.push({
+            ...rd,
+            cards: [],
+            language: rd.language || 'DE',
+            bookId: rd.book_id || 'default-de'
+          });
+          decksListChanged = true;
+        }
+      }
+    }
+
+    const validCurrentDecks = filterValidActiveDecks(baseDecks, currentBooks);
+    if (validCurrentDecks.length !== baseDecks.length) {
+      decksListChanged = true;
+    }
+    if (validCurrentDecks.length === 0) return;
+
+    const activeDeckIds = new Set(validCurrentDecks.map(d => d.id));
 
     const remoteMap = new Map<string, any>();
     const remoteByDeck = new Map<string, any[]>();
+    const orphanCardIds: string[] = [];
     let easeMap: Record<string, number> = {};
     if (typeof window !== 'undefined') {
       try {
@@ -1404,11 +1452,19 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
     }
 
     for (const c of remoteCards) {
+      const dId = c.deck_id || c.deckId;
+      if (!dId || !activeDeckIds.has(dId)) {
+        if (c.id && remoteDecksRes?.data) {
+          orphanCardIds.push(c.id);
+        }
+        continue;
+      }
+      if (c.isDeleted) continue;
       const normalizedCard = {
         ...c,
         id: c.id,
-        deckId: c.deck_id || c.deckId,
-        deck_id: c.deck_id || c.deckId,
+        deckId: dId,
+        deck_id: dId,
         targetWord: c.targetWord ?? c.target_word ?? '',
         sentence: c.sentence ?? '',
         translation: c.translation ?? '',
@@ -1423,20 +1479,23 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
         easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : (easeMap[c.id] ?? 2.2),
       };
       remoteMap.set(c.id, normalizedCard);
-      const dId = normalizedCard.deck_id;
-      if (dId) {
-        if (!remoteByDeck.has(dId)) remoteByDeck.set(dId, []);
-        remoteByDeck.get(dId)!.push(normalizedCard);
-      }
+      if (!remoteByDeck.has(dId)) remoteByDeck.set(dId, []);
+      remoteByDeck.get(dId)!.push(normalizedCard);
     }
 
-    const currentDecks = useStore.getState().decks;
-    if (!currentDecks || currentDecks.length === 0) return;
+    // Фоновая санитария осиротевших карточек в Supabase
+    if (orphanCardIds.length > 0 && activeDeckIds.size > 0) {
+      supabase
+        .from('cards')
+        .delete()
+        .not('deck_id', 'in', `(${Array.from(activeDeckIds).map(id => `'${id}'`).join(',')})`)
+        .then(() => {});
+    }
 
-    let hasChanges = false;
+    let hasChanges = decksListChanged;
     const cardsToPushUpward: any[] = [];
 
-    const nextDecks = currentDecks.map(deck => {
+    const nextDecks = validCurrentDecks.map(deck => {
       const remoteDeckCards = remoteByDeck.get(deck.id) || [];
       const currentDeckCards = Array.isArray(deck.cards) ? deck.cards : [];
 
@@ -1549,7 +1608,7 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       window.dispatchEvent(new Event('storage-update'));
       useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
     }
-    await autoBackfillMasteredWords(hasChanges ? nextDecks : currentDecks, useStore.getState().books, useStore.getState().appLanguage);
+    await autoBackfillMasteredWords(hasChanges ? nextDecks : validCurrentDecks, useStore.getState().books, useStore.getState().appLanguage);
   } catch (err) {
     console.warn("syncCardsFromSupabase failed:", err);
   } finally {
@@ -2044,28 +2103,50 @@ export const useStore = create<DeckState>()((set, get) => ({
   },
   deleteBook: async (id) => {
     const previousBooks = get().books;
-    const bookDecks = get().decks.filter(d => (d.bookId || (d as any).book_id) === id);
+    const previousDecks = get().decks;
+    const bookDecks = previousDecks.filter(d => (d.bookId || (d as any).book_id) === id);
+    const bookDeckIds = bookDecks.map(d => d.id).filter(Boolean);
     const deletedCardIds = bookDecks.flatMap(d => (d.cards || []).map(c => c.id)).filter(Boolean);
-    const remainingDecks = get().decks.filter(d => (d.bookId || (d as any).book_id) !== id);
+    const remainingBooks = previousBooks.filter(b => b.id !== id);
+    const remainingDecks = previousDecks.filter(d => (d.bookId || (d as any).book_id) !== id);
+
+    cachedAllCards = [];
+    lastFetchAllCardsTime = 0;
 
     set({ 
-      books: previousBooks.filter(b => b.id !== id),
+      books: remainingBooks,
       decks: remainingDecks
     });
+    await setIDBItem('app_books', remainingBooks);
+    await setIDBItem('app_decks', remainingDecks);
+    if (typeof window !== 'undefined') {
+      safeSetStorage('cached_app_books', JSON.stringify(remainingBooks));
+    }
 
     await removeMasteredWordsByCardIds(deletedCardIds, id, get().appLanguage);
     await reconcileMasteredWords(remainingDecks, get().appLanguage, true);
+    get().refreshDueCardsCount(get().appLanguage);
+    broadcastStateBus('REFRESH_DUE_COUNT');
     
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('stats-update'));
     }
     
+    try {
+      if (bookDeckIds.length > 0) {
+        await supabase.from('cards').delete().in('deck_id', bookDeckIds);
+      }
+      await supabase.from('decks').delete().eq('book_id', id);
+    } catch (e) {}
+
     const { error } = await supabase.from('books').delete().eq('id', id);
     
     if (error) {
       console.error("SUPABASE ERROR:", error);
       if (typeof window !== 'undefined') toast.error("Fehler: Buch konnte nicht gespeichert werden. (RLS oder ID fehlt)");
-      set({ books: previousBooks });
+      set({ books: previousBooks, decks: previousDecks });
+      await setIDBItem('app_books', previousBooks);
+      await setIDBItem('app_decks', previousDecks);
       reconcileMasteredWords(get().decks, get().appLanguage, false);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('stats-update'));
@@ -2113,10 +2194,15 @@ export const useStore = create<DeckState>()((set, get) => ({
   },
   
   setDecks: (decks) => {
+    const valid = filterValidActiveDecks(decks, get().books);
     if (typeof window !== 'undefined') {
-      safeSetStorage('cached_app_decks', JSON.stringify(decks));
+      setIDBItem('app_decks', valid).catch(() => {});
+      try {
+        localStorage.removeItem('cached_app_decks');
+        localStorage.removeItem('cache_decks_v2');
+      } catch {}
     }
-    set({ decks, isLoaded: true });
+    set({ decks: valid, isLoaded: true });
   },
   
   addDeck: async (deck) => {
@@ -2189,6 +2275,8 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
     
     console.log('Saved to DB successfully:', deckId);
+    cachedAllCards = [];
+    lastFetchAllCardsTime = 0;
 
     // Обновляем локальный стейт только ПОСЛЕ успешного сохранения в БД
     const savedDeck: Deck = {
@@ -2198,13 +2286,10 @@ export const useStore = create<DeckState>()((set, get) => ({
       card_count: cardsToInsert.length,
       cards: cardsToInsert
     };
-    set({ decks: [...get().decks.filter(d => d.id !== deckId), savedDeck] });
-
-    if (typeof window !== 'undefined') {
-      try {
-        safeSetStorage('cached_app_decks', JSON.stringify([...get().decks]));
-      } catch (e) {}
-    }
+    const nextDecks = [...get().decks.filter(d => d.id !== deckId), savedDeck];
+    set({ decks: nextDecks });
+    await setIDBItem('app_decks', nextDecks);
+    broadcastStateBus('REFRESH_DUE_COUNT');
   },
   
   updateDeck: async (deckId, updates, replaceCards) => {
@@ -2276,6 +2361,8 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
 
     console.log('Saved to DB successfully:', validDeckId);
+    cachedAllCards = [];
+    lastFetchAllCardsTime = 0;
 
     // Обновляем локальный стейт только после успешного обновления БД
     const previousDecks = get().decks;
@@ -2290,16 +2377,8 @@ export const useStore = create<DeckState>()((set, get) => ({
       set({
         decks: newDecks
       });
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('cache_decks_v2', JSON.stringify(newDecks));
-        } catch (e) {
-          try {
-            const lightweight = newDecks.map(d => ({ ...d, cards: [] }));
-            localStorage.setItem('cache_decks_v2', JSON.stringify(lightweight));
-          } catch (e2) {}
-        }
-      }
+      await setIDBItem('app_decks', newDecks);
+      broadcastStateBus('REFRESH_DUE_COUNT');
     }
   },
 
@@ -2309,10 +2388,26 @@ export const useStore = create<DeckState>()((set, get) => ({
     const deckCardIds = (deckToDelete?.cards || []).map(c => c.id).filter(Boolean);
     const remainingDecks = previousDecks.filter(d => d.id !== deckId);
 
-    // 1. Optimistic local state update in Zustand
-    set({ decks: remainingDecks });
+    cachedAllCards = [];
+    lastFetchAllCardsTime = 0;
 
-    // 2. Cascade delete from Supabase database
+    // 1. Optimistic local state update in Zustand + IndexedDB
+    set({ decks: remainingDecks });
+    await setIDBItem('app_decks', remainingDecks);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('cached_app_decks');
+        localStorage.removeItem('cache_decks_v2');
+      } catch {}
+    }
+
+    // 2. Cascade delete from Supabase database (cards + user_mastered_words)
+    try {
+      await supabase.from('cards').delete().eq('deck_id', deckId);
+    } catch (e) {
+      console.warn('Supabase cascade delete cards notice:', e);
+    }
+
     if (deckCardIds.length > 0) {
       try {
         await supabase.from('user_mastered_words').delete().in('card_id', deckCardIds);
@@ -2326,6 +2421,8 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     // 4. Reconcile matrix and dispatch stats updates
     await reconcileMasteredWords(remainingDecks, get().appLanguage, true);
+    get().refreshDueCardsCount(get().appLanguage);
+    broadcastStateBus('REFRESH_DUE_COUNT');
     
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('stats-update'));
@@ -2336,6 +2433,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     if (error) {
       console.error("Supabase Delete Deck Error:", error.message);
       set({ decks: previousDecks });
+      await setIDBItem('app_decks', previousDecks);
       reconcileMasteredWords(previousDecks, get().appLanguage, false);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('stats-update'));
@@ -2353,9 +2451,15 @@ export const useStore = create<DeckState>()((set, get) => ({
         cards: deck.cards.filter(c => c.id !== cardId)
       };
     });
+    cachedAllCards = [];
+    lastFetchAllCardsTime = 0;
+
     set({ decks: nextDecks });
+    await setIDBItem('app_decks', nextDecks);
     await removeMasteredWordsByCardIds([cardId], undefined, get().appLanguage);
     await reconcileMasteredWords(nextDecks, get().appLanguage, true);
+    get().refreshDueCardsCount(get().appLanguage);
+    broadcastStateBus('REFRESH_DUE_COUNT');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('stats-update'));
     }
@@ -7185,67 +7289,6 @@ function getRepeatButtonLabel(lang?: string): string {
   return 'KARTEN WIEDERHOLEN';
 }
 
-function CloudSyncButton({ language }: { language?: string }) {
-  const [status, setStatus] = useState<CloudSyncStatus>('idle');
-
-  useEffect(() => {
-    return subscribeCloudSyncStatus((newStatus) => {
-      setStatus(newStatus);
-    });
-  }, []);
-
-  const handleClick = () => {
-    syncWithCloud(true);
-    toast.dismiss();
-    if (status === 'offline') {
-      toast.info('Offline: Änderungen sind lokal gesichert');
-    } else {
-      toast.success('Mit Cloud synchronisiert');
-    }
-  };
-
-  const title =
-    status === 'syncing'
-      ? 'Synchronisiere mit Cloud...'
-      : status === 'offline'
-      ? 'Offline (Änderungen lokal gespeichert)'
-      : status === 'error'
-      ? 'Sync-Fehler (Klick zum Wiederholen)'
-      : 'Mit Cloud synchronisiert (Klick zum Aktualisieren)';
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className={cn(
-        "relative w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full border backdrop-blur-md flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-sm select-none",
-        status === 'syncing'
-          ? "bg-sky-500/10 border-sky-500/30 text-sky-400"
-          : status === 'offline'
-          ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
-          : status === 'error'
-          ? "bg-red-500/10 border-red-500/30 text-red-400"
-          : "bg-white/80 dark:bg-white/[0.05] border-black/5 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:border-black/10 dark:hover:border-white/20 hover:text-neutral-900 dark:hover:text-white"
-      )}
-      title={title}
-      aria-label={title}
-    >
-      {status === 'syncing' ? (
-        <RotateCw className="w-3.5 h-3.5 animate-spin text-sky-400" />
-      ) : status === 'offline' ? (
-        <CloudOff className="w-3.5 h-3.5 text-amber-400" />
-      ) : status === 'error' ? (
-        <AlertCircle className="w-3.5 h-3.5 text-red-400" />
-      ) : (
-        <div className="relative flex items-center justify-center">
-          <Cloud className="w-3.5 h-3.5" />
-          <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-black/40" />
-        </div>
-      )}
-    </button>
-  );
-}
-
 function HeaderWidgets({ 
   activeBook, 
   onBack, 
@@ -7518,9 +7561,6 @@ function HeaderWidgets({
                 {Math.max(langStats.learnedToday || 0, stats?.cardsDone || 0)} <span className="text-neutral-400 dark:text-neutral-500 font-normal">/ 200</span>
               </span>
             </button>
-
-            {/* Apple-style Cloud Sync Indicator */}
-            <CloudSyncButton language={effectiveLang} />
 
             {/* Кнопка переключения темы */}
             <button 
@@ -11164,8 +11204,8 @@ export default function App() {
         );
 
         const fetchPromise = Promise.all([
-          supabase.from('books').select('id, language, title, subtitle, tintColor, coverImage, activeLevels, category, training_mode, cover_url_light, created_at, updated_at').order('created_at', { ascending: true }),
-          supabase.from('decks').select('id, book_id, bookId, name, category, level, language, card_count, created_at, updated_at').order('created_at', { ascending: true }),
+          supabase.from('books').select('*').order('created_at', { ascending: true }),
+          supabase.from('decks').select('*').order('created_at', { ascending: true }),
           fetchAllUserCards(),
           supabase.from('user_stats').select('language, daily_activity')
         ]).then(([booksRes, decksRes, allCards, statsRes]) => ({ booksRes, decksRes, allCards, statsRes }));
@@ -11359,9 +11399,22 @@ export default function App() {
               bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
             };
           });
-          setDecks(enhancedDecks as Deck[]);
-          await setIDBItem('app_decks', enhancedDecks);
-          await autoBackfillMasteredWords(enhancedDecks as Deck[], useStore.getState().books, useStore.getState().appLanguage);
+          const validDecks = filterValidActiveDecks(enhancedDecks as Deck[], useStore.getState().books);
+          const activeDeckIds = new Set(validDecks.map(d => d.id));
+          if (Array.isArray(allCards) && activeDeckIds.size > 0) {
+            const hasOrphans = allCards.some((c: any) => {
+              const dId = c.deck_id || c.deckId;
+              return !dId || !activeDeckIds.has(dId);
+            });
+            if (hasOrphans) {
+              const validIdsStr = `(${Array.from(activeDeckIds).map(id => `'${id}'`).join(',')})`;
+              supabase.from('cards').delete().not('deck_id', 'in', validIdsStr).then(() => {});
+            }
+          }
+          setDecks(validDecks);
+          await setIDBItem('app_decks', validDecks);
+          await autoBackfillMasteredWords(validDecks, useStore.getState().books, useStore.getState().appLanguage);
+          await purgeOrphanedMasteredWords(validDecks, useStore.getState().books, useStore.getState().appLanguage);
           if (typeof window !== 'undefined') {
             localStorage.setItem('last_library_cloud_sync', String(Date.now()));
           }
@@ -11391,12 +11444,12 @@ export default function App() {
       })
       .subscribe();
 
-    // 2. Refetch on focus and visibilitychange (e.g. switching between Safari and Chrome tabs/windows/PWA)
+    // 2. Refetch on focus, visibilitychange, and online (e.g. switching between Safari and Chrome tabs/windows/PWA)
     let lastFocusSyncTime = 0;
     const handleSyncOnFocus = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         const now = Date.now();
-        if (now - lastFocusSyncTime < 3000) return; // 3 сек между фокус-синхронизациями
+        if (now - lastFocusSyncTime < 1500) return; // 1.5 сек дебаунс между фокус-синхронизациями
         lastFocusSyncTime = now;
         try {
           await syncWithCloud();
@@ -11417,25 +11470,36 @@ export default function App() {
       syncCardsFromSupabase(true).catch(() => {});
     };
 
+    const unsubscribeStateBus = subscribeStateBus((msg) => {
+      if (msg.type === 'REFRESH_DUE_COUNT' || msg.type === 'STATE_SYNC') {
+        syncCardsFromSupabase(true).catch(() => {});
+        useStore.getState().refreshDueCardsCount().catch(() => {});
+      }
+    });
+
     window.addEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
     window.addEventListener('focus', handleSyncOnFocus);
+    window.addEventListener('online', handleSyncOnFocus);
     document.addEventListener('visibilitychange', handleSyncOnFocus);
 
     return () => {
+      unsubscribeStateBus();
       window.removeEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
       window.removeEventListener('focus', handleSyncOnFocus);
+      window.removeEventListener('online', handleSyncOnFocus);
       document.removeEventListener('visibilitychange', handleSyncOnFocus);
       supabase.removeChannel(globalStateChannel);
     };
   }, [setDecks]);
 
   const filteredDecksList = useMemo(() => {
-    return decks.filter(d => {
+    const validDecks = filterValidActiveDecks(decks, books);
+    return validDecks.filter(d => {
       const deckBookId = d.bookId || (d as any).book_id;
       if (activeBookId) return deckBookId === activeBookId;
       return !d.language || d.language.toLowerCase() === appLanguage.toLowerCase();
     });
-  }, [decks, activeBookId, appLanguage]);
+  }, [decks, books, activeBookId, appLanguage]);
 
   // If a book has only vocabulary decks and 0 grammar decks, auto-switch to "Wörter" so decks are visible immediately
   useEffect(() => {
@@ -11533,9 +11597,14 @@ export default function App() {
   }, [filteredDecksList, activeBook, groupedDecks, masteredCanonicalSet]);
 
   const dueCards = useMemo(() => {
+    const activeDeckIds = new Set(filteredDecksList.map(d => d.id));
     const list: { deckId: string, card: Flashcard }[] = [];
     filteredDecksList.forEach(deck => {
+      if (!activeDeckIds.has(deck.id)) return;
       deck.cards?.forEach(card => {
+        if ((card as any).isDeleted) return;
+        const cardDeckId = (card as any).deckId || (card as any).deck_id || deck.id;
+        if (!activeDeckIds.has(cardDeckId)) return;
         if (isCardDueForReview(card)) {
           // Карточки, пришедшие на повторение, стартуют в статусе Легендарных (раунд 4, mastery 4)
           list.push({ deckId: deck.id, card: { ...card, masteryLevel: 4 } });
@@ -11545,9 +11614,11 @@ export default function App() {
     return deduplicateCardsByLemma(list, false);
   }, [filteredDecksList]);
 
-  // Хедерный подсчет повторений: строго для текущего активного языка (appLanguage)
+  // Хедерный подсчет повторений: строго для текущего активного языка (appLanguage) и только существующих колод
   const dueCardsCount = useMemo(() => {
-    const rawDue = decks
+    const validDecks = filterValidActiveDecks(decks, books);
+    const activeDeckIds = new Set(validDecks.map(d => d.id));
+    const rawDue = validDecks
       .filter(deck => {
         if (activeBookId) {
           const dBookId = deck.bookId || (deck as any).book_id;
@@ -11555,10 +11626,14 @@ export default function App() {
         }
         return !deck.language || deck.language.toLowerCase() === appLanguage.toLowerCase();
       })
-      .flatMap(deck => deck.cards || [])
+      .flatMap(deck => (deck.cards || []).filter(c => {
+        if ((c as any).isDeleted) return false;
+        const cDeckId = (c as any).deckId || (c as any).deck_id || deck.id;
+        return activeDeckIds.has(cDeckId);
+      }))
       .filter(card => isCardDueForReview(card));
     return deduplicateCardsByLemma(rawDue, false).length;
-  }, [decks, appLanguage, activeBookId]);
+  }, [decks, books, appLanguage, activeBookId]);
 
   // ДИАГНОСТИЧЕСКИЙ ЛОГ В КОНСОЛЬ (ПРОВЕРКА ТОЧНОСТИ)
   const decksLength = decks.length;

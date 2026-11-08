@@ -739,17 +739,28 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
         }
       }
 
-      // Сохраняем ранее освоенные слова из локального снимка и снимка user_stats
-      for (const [k, v] of existingMap.entries()) {
-        if (!nextMap.has(k)) {
-          nextMap.set(k, v);
-        }
-      }
-
+      // Строго сохраняем ТОЛЬКО слова, подтвержденные реальными выученными карточками в активных колодах (без карточек-призраков)
+      const hadOrphans = existingMap.size !== nextMap.size;
       uniqueMasteredWordsByLang[lang] = nextMap;
       recomputeStatsFromMap(lang);
       persistMatrixToStorage(lang);
       notifyListeners(lang);
+
+      if (hadOrphans) {
+        const cleanEntries = Array.from(nextMap.values());
+        supabase
+          .from('user_stats')
+          .upsert({
+            language: `MASTERED_WORDS_${lang.toUpperCase()}`,
+            daily_activity: {
+              entries: cleanEntries,
+              counts: globalMatrixStatsByLang[lang]?.counts,
+              totalWords: globalMatrixStatsByLang[lang]?.totalWords || cleanEntries.length,
+              updatedAt: Date.now(),
+            },
+          })
+          .then(() => {});
+      }
     }
   } catch (err) {
     console.warn('[Wortschatz-Matrix] syncMasteredWordsFromCloud notice:', err);
@@ -1101,6 +1112,23 @@ export async function autoBackfillMasteredWords(
     persistMatrixToStorage(targetLang);
     notifyListeners(targetLang);
 
+    // Синхронизируем очищенный эталонный снимок выученных слов в user_stats (убирает удаленные слова из облака)
+    try {
+      const cleanEntries = Array.from(deduplicatedMap.values());
+      supabase
+        .from('user_stats')
+        .upsert({
+          language: `MASTERED_WORDS_${targetLang.toUpperCase()}`,
+          daily_activity: {
+            entries: cleanEntries,
+            counts: globalMatrixStatsByLang[targetLang]?.counts,
+            totalWords: globalMatrixStatsByLang[targetLang]?.totalWords || cleanEntries.length,
+            updatedAt: Date.now(),
+          },
+        })
+        .then(() => {});
+    } catch {}
+
     if (targetLang === normalizeLanguageCode(targetLangParam)) {
       primaryCount = deduplicatedMap.size;
     }
@@ -1120,18 +1148,26 @@ export async function purgeOrphanedMasteredWords(
   const normLang = normalizeLanguageCode(langParam);
   initMatrixStore(normLang);
 
-  // 1. Собираем ID всех актуальных существующих карточек
+  // 1. Собираем ID всех актуальных существующих карточек и их канонические леммы
   const validCardIds = new Set<string>();
+  const validLemmaKeys = new Set<string>();
+  const collectCard = (c: any) => {
+    if (!c || c.isDeleted) return;
+    if (c.id) validCardIds.add(c.id);
+    const rawWord = c.targetWord || c.word || c.front || '';
+    const key = normalizeLemmaKey(rawWord);
+    if (key) validLemmaKeys.add(key);
+  };
+
   (currentDecks || []).forEach((d: any) => {
-    (d.cards || []).forEach((c: any) => {
-      if (c && c.id) validCardIds.add(c.id);
-    });
+    if (!d || d.isDeleted) return;
+    (d.cards || []).forEach(collectCard);
   });
   (currentBooks || []).forEach((b: any) => {
+    if (!b || b.isDeleted) return;
     (b.decks || []).forEach((d: any) => {
-      (d.cards || []).forEach((c: any) => {
-        if (c && c.id) validCardIds.add(c.id);
-      });
+      if (!d || d.isDeleted) return;
+      (d.cards || []).forEach(collectCard);
     });
   });
 
@@ -1143,7 +1179,9 @@ export async function purgeOrphanedMasteredWords(
   const removedKeys: string[] = [];
 
   currentMap.forEach((entry, key) => {
-    if (entry.cardId && !validCardIds.has(entry.cardId)) {
+    const missingCardId = Boolean(entry.cardId && !validCardIds.has(entry.cardId));
+    const missingLemma = !validLemmaKeys.has(key);
+    if (missingCardId || missingLemma) {
       removedKeys.push(key);
       changed = true;
     }
@@ -1156,13 +1194,28 @@ export async function purgeOrphanedMasteredWords(
     persistMatrixToStorage(normLang);
     notifyListeners(normLang);
 
+    try {
+      const cleanEntries = Array.from(currentMap.values());
+      supabase
+        .from('user_stats')
+        .upsert({
+          language: `MASTERED_WORDS_${normLang.toUpperCase()}`,
+          daily_activity: {
+            entries: cleanEntries,
+            counts: globalMatrixStatsByLang[normLang]?.counts,
+            totalWords: globalMatrixStatsByLang[normLang]?.totalWords || cleanEntries.length,
+            updatedAt: Date.now(),
+          },
+        })
+        .then(() => {});
+    } catch {}
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
       window.dispatchEvent(new Event('stats-update'));
     }
   }
 
-  // Сиротские записи очищены строго в локальной памяти JavaScript без опасных сетевых запросов
   return removedKeys.length;
 }
 

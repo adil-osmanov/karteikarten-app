@@ -260,7 +260,8 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
       if (rawV4) {
         const parsed = JSON.parse(rawV4);
         if (parsed && typeof parsed === 'object') {
-          localEntries = Object.values(parsed);
+          const entriesMap = parsed.entries && typeof parsed.entries === 'object' ? parsed.entries : parsed;
+          localEntries = Object.values(entriesMap).filter((e: any) => e && typeof e === 'object' && e.originalWord);
         }
       }
     } catch {}
@@ -363,46 +364,7 @@ export async function syncWithCloud(force: boolean = false): Promise<void> {
     // Step 1: Flush any offline pending mutations first
     await flushPendingQueue();
 
-    // Step 2: Fetch Cloud Mastered Words snapshot from user_stats
-    const { data: statsRow } = await supabase
-      .from('user_stats')
-      .select('daily_activity')
-      .eq('language', 'MASTERED_WORDS_DE')
-      .maybeSingle();
-
-    const cloudSnapshot = statsRow?.daily_activity;
-    const cloudEntries: any[] = Array.isArray(cloudSnapshot?.entries) ? cloudSnapshot.entries : [];
-
-    // Check local snapshot
-    let localEntries: any[] = [];
-    try {
-      const rawV4 = localStorage.getItem('wortschatz_matrix_v4_de');
-      if (rawV4) {
-        const parsed = JSON.parse(rawV4);
-        if (parsed && typeof parsed === 'object') {
-          localEntries = Object.values(parsed);
-        }
-      }
-    } catch {}
-
-    // Bidirectional sync for Mastered Words:
-    if (cloudEntries.length > localEntries.length) {
-      // Cloud has more mastered words -> Hydrate local storage
-      const nextMap: Record<string, any> = {};
-      for (const e of cloudEntries) {
-        const key = normalizeLemmaKey(e.originalWord || '');
-        if (key) nextMap[key] = e;
-      }
-      localStorage.setItem('wortschatz_matrix_v4_de', JSON.stringify(nextMap));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: 'de' } }));
-      }
-    } else if (localEntries.length > cloudEntries.length) {
-      // Local has more mastered words -> Push to cloud
-      await forcePushLocalToCloud('DE');
-    }
-
-    // Step 3: Trigger card sync via custom event or global syncCardsFromSupabase
+    // Step 2: Trigger authoritative card & deck sync via custom event -> syncCardsFromSupabase(true) + autoBackfillMasteredWords
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('trigger-supabase-card-sync'));
     }
