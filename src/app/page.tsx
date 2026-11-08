@@ -6,7 +6,8 @@ import {
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, AlertTriangle,
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers,
-  ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders, Camera, Pencil
+  ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders, Camera, Pencil,
+  Cloud, CloudOff
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from 'sonner';
@@ -36,6 +37,13 @@ import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots } from "@/components/
 import { CardEditorModal } from "@/components/CardEditorModal";
 import { formatSeparableWord, parseVerbComponents } from "@/lib/utils/formatSeparableWord";
 import { getCleanTranslation } from "@/lib/utils";
+import {
+  writeThroughCardUpdate,
+  syncWithCloud,
+  forcePushLocalToCloud,
+  subscribeCloudSyncStatus,
+  type CloudSyncStatus
+} from "@/lib/sync/cloudStateSync";
 export { formatSeparableWord, parseVerbComponents, getCleanTranslation };
 
 function cn(...inputs: ClassValue[]) {
@@ -1100,7 +1108,7 @@ export async function fetchAllUserCards(userId?: string): Promise<any[]> {
       while (hasMore) {
         const { data, error } = await supabase
           .from('cards')
-          .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, created_at, updated_at')
+          .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms')
           .order('id', { ascending: true })
           .range(from, from + PAGE_SIZE - 1);
 
@@ -1372,10 +1380,10 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
 let isSyncingCardsFromSupabase = false;
 let lastSyncCardsFromSupabaseTime = 0;
 
-export async function syncCardsFromSupabase(): Promise<void> {
+export async function syncCardsFromSupabase(force: boolean = false): Promise<void> {
   const now = Date.now();
   if (isSyncingCardsFromSupabase) return;
-  if (now - lastSyncCardsFromSupabaseTime < 25000) return;
+  if (!force && now - lastSyncCardsFromSupabaseTime < 2500) return;
 
   isSyncingCardsFromSupabase = true;
   lastSyncCardsFromSupabaseTime = now;
@@ -1424,6 +1432,8 @@ export async function syncCardsFromSupabase(): Promise<void> {
     if (!currentDecks || currentDecks.length === 0) return;
 
     let hasChanges = false;
+    const cardsToPushUpward: any[] = [];
+
     const nextDecks = currentDecks.map(deck => {
       const remoteDeckCards = remoteByDeck.get(deck.id) || [];
       const currentDeckCards = Array.isArray(deck.cards) ? deck.cards : [];
@@ -1444,22 +1454,23 @@ export async function syncCardsFromSupabase(): Promise<void> {
         if (!remote) return card;
 
         const remoteNextReviewDate = remote.nextReviewDate;
-        const remoteMastery = remote.masteryLevel;
-        const remoteRepetitions = remote.repetitions;
-        const remoteInterval = remote.interval;
+        const remoteMastery = remote.masteryLevel ?? 0;
+        const remoteRepetitions = remote.repetitions ?? 0;
+        const remoteInterval = remote.interval ?? 0;
         const remoteIsArchived = Boolean(remote.isArchived);
 
-        const localTime = card.nextReviewDate ? new Date(card.nextReviewDate).getTime() : 0;
-        const remoteTime = remoteNextReviewDate ? new Date(remoteNextReviewDate).getTime() : 0;
-        const datesDifferent = Math.abs(localTime - remoteTime) > 1000;
+        const localMastery = card.masteryLevel ?? 0;
+        const localArchived = Boolean(card.isArchived);
+        const localReps = card.repetitions ?? 0;
 
-        if (
-          (card.masteryLevel ?? 0) !== remoteMastery ||
-          (card.repetitions ?? 0) !== remoteRepetitions ||
-          (card.interval ?? 0) !== remoteInterval ||
-          Boolean(card.isArchived) !== remoteIsArchived ||
-          datesDifferent
-        ) {
+        // Если локальный прогресс выше (карточка выучена локально, но еще не запушена) — локальный выигрывает и пушится в облако
+        if (localMastery > remoteMastery || (localArchived && !remoteIsArchived)) {
+          cardsToPushUpward.push(card);
+          return card;
+        }
+
+        // Если в облаке прогресс выше — облачный выигрывает
+        if (remoteMastery > localMastery || (remoteIsArchived && !localArchived)) {
           deckChanged = true;
           hasChanges = true;
           return {
@@ -1471,11 +1482,32 @@ export async function syncCardsFromSupabase(): Promise<void> {
             nextReviewDate: remoteNextReviewDate
           };
         }
+
+        const localTime = card.nextReviewDate ? new Date(card.nextReviewDate).getTime() : 0;
+        const remoteTime = remoteNextReviewDate ? new Date(remoteNextReviewDate).getTime() : 0;
+        const datesDifferent = Math.abs(localTime - remoteTime) > 1000;
+
+        if (remoteRepetitions > localReps || datesDifferent) {
+          deckChanged = true;
+          hasChanges = true;
+          return {
+            ...card,
+            masteryLevel: remoteMastery,
+            repetitions: Math.max(localReps, remoteRepetitions),
+            interval: remoteInterval || card.interval,
+            isArchived: remoteIsArchived,
+            nextReviewDate: remoteNextReviewDate || card.nextReviewDate
+          };
+        }
         return card;
       });
 
       return deckChanged ? { ...deck, cards: updatedCards } : deck;
     });
+
+    if (cardsToPushUpward.length > 0) {
+      cardsToPushUpward.forEach(c => writeThroughCardUpdate(c.id, c));
+    }
 
     if (hasChanges) {
       useStore.setState({ decks: nextDecks });
@@ -1487,6 +1519,7 @@ export async function syncCardsFromSupabase(): Promise<void> {
         } catch {}
       }
       window.dispatchEvent(new Event('storage-update'));
+      useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
     }
     await autoBackfillMasteredWords(hasChanges ? nextDecks : currentDecks, useStore.getState().books, useStore.getState().appLanguage);
   } catch (err) {
@@ -2419,8 +2452,8 @@ export const useStore = create<DeckState>()((set, get) => ({
       updated_at: new Date().toISOString(),
     };
 
-    // 1. ONLINE-FIRST AWAIT: Сначала сохраняем статус карточки в Supabase
-    await updateCardInSupabase(cardId, validCard);
+    // 1. INSTANT WRITE-THROUGH (ZERO DATA LOSS): Асинхронная фоновая запись в Supabase без задержки UI
+    writeThroughCardUpdate(cardId, validCard);
 
     // 2. Автоматическая синхронизация карточек-близнецов (Canonical Lemma Sync) во всех колодах
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
@@ -2470,7 +2503,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (siblingUpdates.length > 0) {
-      Promise.allSettled(siblingUpdates.map((s) => updateCardInSupabase(s.id, s.card))).catch(() => {});
+      siblingUpdates.forEach((s) => writeThroughCardUpdate(s.id, s.card));
     }
 
     const nextDecks = get().decks;
@@ -2548,8 +2581,8 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
     card.updated_at = new Date().toISOString();
 
-    // 1. ONLINE-FIRST AWAIT: Сначала сохраняем статус карточки в Supabase
-    await updateCardInSupabase(cardId, card);
+    // 1. INSTANT WRITE-THROUGH (ZERO DATA LOSS): Асинхронная фоновая запись в Supabase без задержки UI
+    writeThroughCardUpdate(cardId, card);
 
     const validCard = card;
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
@@ -2604,7 +2637,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     });
 
     if (siblingUpdates.length > 0) {
-      Promise.allSettled(siblingUpdates.map((s) => updateCardInSupabase(s.id, s.card))).catch(() => {});
+      siblingUpdates.forEach((s) => writeThroughCardUpdate(s.id, s.card));
     }
 
     const nextDecks = get().decks;
@@ -7102,6 +7135,67 @@ function getRepeatButtonLabel(lang?: string): string {
   return 'KARTEN WIEDERHOLEN';
 }
 
+function CloudSyncButton({ language }: { language?: string }) {
+  const [status, setStatus] = useState<CloudSyncStatus>('idle');
+
+  useEffect(() => {
+    return subscribeCloudSyncStatus((newStatus) => {
+      setStatus(newStatus);
+    });
+  }, []);
+
+  const handleClick = () => {
+    syncWithCloud(true);
+    toast.dismiss();
+    if (status === 'offline') {
+      toast.info('Offline: Änderungen sind lokal gesichert');
+    } else {
+      toast.success('Mit Cloud synchronisiert');
+    }
+  };
+
+  const title =
+    status === 'syncing'
+      ? 'Synchronisiere mit Cloud...'
+      : status === 'offline'
+      ? 'Offline (Änderungen lokal gespeichert)'
+      : status === 'error'
+      ? 'Sync-Fehler (Klick zum Wiederholen)'
+      : 'Mit Cloud synchronisiert (Klick zum Aktualisieren)';
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className={cn(
+        "relative w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full border backdrop-blur-md flex items-center justify-center transition-all active:scale-95 cursor-pointer shadow-sm select-none",
+        status === 'syncing'
+          ? "bg-sky-500/10 border-sky-500/30 text-sky-400"
+          : status === 'offline'
+          ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
+          : status === 'error'
+          ? "bg-red-500/10 border-red-500/30 text-red-400"
+          : "bg-white/80 dark:bg-white/[0.05] border-black/5 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:border-black/10 dark:hover:border-white/20 hover:text-neutral-900 dark:hover:text-white"
+      )}
+      title={title}
+      aria-label={title}
+    >
+      {status === 'syncing' ? (
+        <RotateCw className="w-3.5 h-3.5 animate-spin text-sky-400" />
+      ) : status === 'offline' ? (
+        <CloudOff className="w-3.5 h-3.5 text-amber-400" />
+      ) : status === 'error' ? (
+        <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+      ) : (
+        <div className="relative flex items-center justify-center">
+          <Cloud className="w-3.5 h-3.5" />
+          <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-black/40" />
+        </div>
+      )}
+    </button>
+  );
+}
+
 function HeaderWidgets({ 
   activeBook, 
   onBack, 
@@ -7374,6 +7468,9 @@ function HeaderWidgets({
                 {Math.max(langStats.learnedToday || 0, stats?.cardsDone || 0)} <span className="text-neutral-400 dark:text-neutral-500 font-normal">/ 200</span>
               </span>
             </button>
+
+            {/* Apple-style Cloud Sync Indicator */}
+            <CloudSyncButton language={effectiveLang} />
 
             {/* Кнопка переключения темы */}
             <button 
@@ -11183,15 +11280,16 @@ export default function App() {
       })
       .subscribe();
 
-    // 2. Refetch on focus and visibilitychange (e.g. switching between Safari and Chrome tabs/windows)
+    // 2. Refetch on focus and visibilitychange (e.g. switching between Safari and Chrome tabs/windows/PWA)
     let lastFocusSyncTime = 0;
     const handleSyncOnFocus = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         const now = Date.now();
-        if (now - lastFocusSyncTime < 30000) return; // Минимум 30 сек между фокус-синхронизациями
+        if (now - lastFocusSyncTime < 3000) return; // 3 сек между фокус-синхронизациями
         lastFocusSyncTime = now;
         try {
-          await syncCardsFromSupabase();
+          await syncWithCloud();
+          await syncCardsFromSupabase(true);
           const { data } = await supabase
             .from('user_stats')
             .select('daily_activity')
@@ -11204,10 +11302,16 @@ export default function App() {
       }
     };
 
+    const handleTriggerCardSync = () => {
+      syncCardsFromSupabase(true).catch(() => {});
+    };
+
+    window.addEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
     window.addEventListener('focus', handleSyncOnFocus);
     document.addEventListener('visibilitychange', handleSyncOnFocus);
 
     return () => {
+      window.removeEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
       window.removeEventListener('focus', handleSyncOnFocus);
       document.removeEventListener('visibilitychange', handleSyncOnFocus);
       supabase.removeChannel(globalStateChannel);

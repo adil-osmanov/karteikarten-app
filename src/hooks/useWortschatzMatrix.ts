@@ -602,6 +602,26 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
   try {
     const existingMap = uniqueMasteredWordsByLang[lang];
 
+    // 0. Загружаем снимок слов из user_stats (работает для всех клиентов без обязательной auth-сессии)
+    try {
+      const { data: statsRow } = await supabase
+        .from('user_stats')
+        .select('daily_activity')
+        .eq('language', `MASTERED_WORDS_${lang.toUpperCase()}`)
+        .maybeSingle();
+
+      if (statsRow?.daily_activity?.entries && Array.isArray(statsRow.daily_activity.entries)) {
+        for (const item of statsRow.daily_activity.entries) {
+          if (item && item.originalWord) {
+            const key = normalizeLemmaKey(item.originalWord);
+            if (key && key.length >= 2 && !existingMap.has(key)) {
+              existingMap.set(key, item);
+            }
+          }
+        }
+      }
+    } catch {}
+
     // 1. Загружаем timestamps и уровни из user_mastered_words (если пользователь авторизован)
     const remoteMetaByKey = new Map<string, { level?: string | null; masteredAt: number; first_mastered_at?: string; created_at?: string }>();
     try {
@@ -719,6 +739,13 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
         }
       }
 
+      // Сохраняем ранее освоенные слова из локального снимка и снимка user_stats
+      for (const [k, v] of existingMap.entries()) {
+        if (!nextMap.has(k)) {
+          nextMap.set(k, v);
+        }
+      }
+
       uniqueMasteredWordsByLang[lang] = nextMap;
       recomputeStatsFromMap(lang);
       persistMatrixToStorage(lang);
@@ -828,6 +855,26 @@ export async function recordMasteredLemma(
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: currentLanguage } }));
   }
+
+  // Всегда сохраняем глобальный снимок в user_stats (синхронизация PWA, браузера и мобильных)
+  try {
+    const entries = Array.from(map.values());
+    const counts = globalMatrixStatsByLang[currentLanguage].counts;
+    const totalWords = globalMatrixStatsByLang[currentLanguage].totalWords;
+    Promise.resolve(
+      supabase
+        .from('user_stats')
+        .upsert({
+          language: `MASTERED_WORDS_${currentLanguage.toUpperCase()}`,
+          daily_activity: {
+            entries,
+            counts,
+            totalWords,
+            updatedAt: Date.now(),
+          },
+        })
+    ).catch(() => {});
+  } catch {}
 
   // Сохраняем в Supabase user_mastered_words (при наличии авторизованного пользователя)
   try {
