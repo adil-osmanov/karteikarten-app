@@ -5300,6 +5300,10 @@ function RapidSession({
       }
     : current.card;
 
+  const safeTotal = Math.max(total || 0, 1);
+  const safeCompleted = Math.max(mastered || 0, 0);
+  const progressPercentage = safeCompleted === 0 ? 0 : Math.min(100, (safeCompleted / safeTotal) * 100);
+
   return (
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
       <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-3">
@@ -5310,13 +5314,16 @@ function RapidSession({
           <span
             className="text-xs font-mono font-medium text-zinc-500 dark:text-zinc-400 select-none cursor-default py-1 px-2"
           >
-            {mastered} / {total}
+            {safeCompleted} / {total}
           </span>
         </div>
-        <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
+        <div className="relative w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div
-            className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
-            style={{ width: `${Math.max(5, total > 0 ? (mastered / total) * 100 : 0)}%` }}
+            className="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-[width,opacity] duration-300 ease-out"
+            style={{
+              width: `${progressPercentage}%`,
+              opacity: progressPercentage === 0 ? 0 : 1,
+            }}
           />
         </div>
       </div>
@@ -5974,6 +5981,10 @@ function StudyInterface({
     );
   }
 
+  const safeSessionTotal = Math.max(initialTotal || 0, 1);
+  const safeSessionCompleted = Math.max(masteredInSession || 0, 0);
+  const sessionProgressPercentage = safeSessionCompleted === 0 ? 0 : Math.min(100, (safeSessionCompleted / safeSessionTotal) * 100);
+
   return (
     <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
       <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-3">
@@ -5990,14 +6001,17 @@ function StudyInterface({
             <span
               className="text-xs font-mono font-medium text-zinc-500 dark:text-zinc-400 select-none cursor-default py-1 px-2"
             >
-              {masteredInSession} / {initialTotal}
+              {safeSessionCompleted} / {initialTotal}
             </span>
           </div>
         </div>
-        <div className="w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
+        <div className="relative w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
           <div 
-            className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300 ease-out rounded-full"
-            style={{ width: `${initialTotal > 0 ? Math.min(100, (masteredInSession / initialTotal) * 100) : 0}%` }}
+            className="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-[width,opacity] duration-300 ease-out"
+            style={{
+              width: `${sessionProgressPercentage}%`,
+              opacity: sessionProgressPercentage === 0 ? 0 : 1,
+            }}
           />
         </div>
       </div>
