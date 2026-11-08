@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase, safeUpsertUserStats, safeFetchUserStats, saveUserDayStats } from '@/lib/supabase';
+import { supabase, safeUpsertUserStats, safeFetchUserStats, saveUserDayStats, loadDayProgress, saveDayProgress } from '@/lib/supabase';
 
 export interface DailyStats {
   date: string;
@@ -237,17 +237,17 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
         mistakesPool: Array.isArray(stats.mistakesPool) ? stats.mistakesPool.map(cleanCardSnapshot).filter(Boolean) : [],
         history
       };
-      await safeUpsertUserStats({
+      const syncPayload: any = {
         language: `DAY_STATS_${normLang}`,
         daily_activity: payload
-      });
+      };
 
-      // Synchronize with user_daily_stats if authenticated
       try {
         const userId = await getDayStatsUserId();
         if (userId) {
           const todayRecord = getDayRecord(normLang, stats.date);
-          await supabase.from('user_daily_stats').upsert({
+          syncPayload.user_id = userId;
+          syncPayload.user_daily_stats = {
             user_id: userId,
             language: normLang,
             date: stats.date,
@@ -258,9 +258,11 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
             mistakes_count: todayRecord.mistakesCount,
             words_mastered: todayRecord.wordsMastered,
             updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id,language,date' });
+          };
         }
       } catch {}
+
+      await saveDayProgress(syncPayload);
     } catch (e) {
       console.warn('Supabase stats sync notice:', e);
     }
@@ -284,7 +286,7 @@ export async function syncStatsToSupabase(lang: string, stats: DailyStats, immed
 export async function fetchStatsFromSupabase(lang: string): Promise<DailyStats | null> {
   try {
     const normLang = normalizeLanguage(lang);
-    const raw = await safeFetchUserStats(`DAY_STATS_${normLang}`);
+    const raw = await loadDayProgress(`DAY_STATS_${normLang}`);
     if (raw && typeof raw === 'object') {
       return raw as DailyStats;
     }
