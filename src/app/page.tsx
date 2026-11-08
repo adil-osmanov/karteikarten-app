@@ -4431,8 +4431,12 @@ function RapidFlashcardMode({
 
               {/* Чистая цитата примера */}
               {displaySentence && (
-                <div className="text-sm text-neutral-600 dark:text-neutral-400 max-w-2xl mt-3 italic font-normal leading-relaxed select-text">
-                  {displaySentence}
+                <div className="w-full max-w-lg mx-auto my-3 flex justify-center">
+                  <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
+                    <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-neutral-600 dark:text-neutral-400 select-text">
+                      {displaySentence}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -4498,7 +4502,7 @@ function RapidFlashcardMode({
             className="my-auto w-full flex flex-col items-center text-center select-text"
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
-            <h2 className="text-3xl md:text-4xl lg:text-[42px] font-semibold tracking-tight text-neutral-900 dark:text-[#F5F5F7] mb-8 max-w-2xl leading-tight">
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-white mb-6 max-w-2xl leading-tight">
               {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
             </h2>
 
@@ -4644,15 +4648,19 @@ function RapidFlashcardMode({
 
             {/* Пример предложения и формы слова после ввода ответа (как в раундах 1-2) */}
             {isAnswered && (
-              <div className="w-full max-w-xl mx-auto mt-6 space-y-3 animate-in fade-in duration-300">
+              <div className="w-full max-w-xl mx-auto mt-3 animate-in fade-in duration-300">
                 {plural && (
-                  <p className="text-base md:text-lg font-normal text-neutral-500 dark:text-neutral-400 tracking-normal opacity-60">
+                  <p className="text-xs md:text-sm font-medium text-neutral-500 dark:text-neutral-500 text-center mt-3 mb-1">
                     {plural}
                   </p>
                 )}
                 {displaySentence && (
-                  <div className="border-l-2 border-neutral-300 dark:border-neutral-700 pl-4 py-1 text-left text-neutral-500 dark:text-neutral-400 text-base md:text-lg italic font-normal leading-relaxed max-w-xl mx-auto select-text">
-                    {displaySentence}
+                  <div className="w-full max-w-lg mx-auto my-3 flex justify-center">
+                    <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
+                      <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-neutral-600 dark:text-neutral-400 select-text">
+                        {displaySentence}
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
