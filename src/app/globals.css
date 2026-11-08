@@ -16,12 +16,12 @@ html {
 }
 
 html:not(.dark), body:not(.dark) {
-  background-color: #F5F5F7;
+  background-color: #ECECEF;
   color: #1D1D1F;
 }
 
 :root {
-  background-color: #F5F5F7;
+  background-color: #ECECEF;
   color: #1D1D1F;
 }
 

@@ -51,19 +51,19 @@ export const getRarityBorderClasses = (round: number = 1, isSealed: boolean = fa
     return 'border-amber-500/40 dark:border-amber-400/40';
   }
   if (round === 4) {
-    return 'border-purple-500/35 dark:border-purple-400/35';
+    return 'border-purple-600/30 dark:border-purple-400/35';
   }
   if (round === 3) {
-    return 'border-blue-500/35 dark:border-blue-500/35';
+    return 'border-blue-600/30 dark:border-blue-500/35';
   }
   if (round === 2) {
-    return 'border-emerald-500/30 dark:border-emerald-500/25';
+    return 'border-emerald-600/25 dark:border-emerald-500/25';
   }
   return 'border-black/[0.08] dark:border-white/[0.09]';
 };
 
 const LIGHT_MODE_PAPER_SHADOW =
-  'shadow-[0_1px_3px_rgba(0,0,0,0.04),0_10px_25px_-5px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.9)]';
+  'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_16px_-4px_rgba(0,0,0,0.06),0_20px_40px_-10px_rgba(0,0,0,0.07),inset_0_1px_0_rgba(255,255,255,0.95)]';
 
 export const getRarityShadowClasses = (round: number = 1, isSealed: boolean = false, isLegendary: boolean = false): string => {
   if (isSealed || isLegendary || round >= 5) {
@@ -100,19 +100,19 @@ export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean,
 
 /**
  * Apple HIG Surface styling for cards:
- * Light Mode: Tactile 300g Bristol Paper (bg-[#FCFCFD]).
- * Dark Mode: Deep OLED monolith (dark:bg-[#121214]/75 dark:backdrop-blur-3xl).
+ * Light Mode: Tactile 300g Bristol Cardstock (bg-[#FAF9F6]).
+ * Dark Mode: Deep OLED monolith (dark:bg-[#121214]/80 dark:backdrop-blur-3xl).
  */
 export const CARD_CONTAINER_SURFACE_CLASSES = cn(
-  "rounded-[32px] select-none",
-  // Light Mode (300g Bristol Paper)
-  "bg-[#FCFCFD] text-[#1D1D1F]",
+  "rounded-[36px] select-none",
+  // Light Mode (300g Bristol Cardstock)
+  "bg-[#FAF9F6] text-[#1D1D1F]",
   // Dark Mode (Deep OLED Monolith)
-  "dark:bg-[#121214]/75 dark:text-[#F5F5F7] dark:backdrop-blur-3xl"
+  "dark:bg-[#121214]/80 dark:text-[#F5F5F7] dark:backdrop-blur-3xl"
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "relative w-full max-w-4xl lg:max-w-5xl h-[600px] min-h-[600px] max-h-[600px] mx-auto p-10 rounded-[32px] border flex flex-col justify-between items-center group select-none overflow-hidden",
+  "relative w-full max-w-4xl lg:max-w-5xl h-[600px] min-h-[600px] max-h-[600px] mx-auto p-10 rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 
@@ -189,7 +189,7 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
         ref={ref}
         className={cn(
           is3DFace
-            ? cn("absolute inset-0 w-full h-full p-10 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[32px] overflow-hidden", CARD_CONTAINER_SURFACE_CLASSES)
+            ? cn("absolute inset-0 w-full h-full p-10 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[36px] overflow-hidden", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
           isVaporizing && "opacity-0 scale-[1.01] transition-all duration-150 ease-out pointer-events-none",

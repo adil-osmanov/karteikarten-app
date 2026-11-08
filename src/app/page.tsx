@@ -4439,7 +4439,7 @@ function RapidFlashcardMode({
                             : "border-red-500/40 text-red-600 dark:text-red-400 bg-red-500/5 font-semibold")
                         : isErrorMismatch
                           ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                          : "bg-black/[0.03] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.06] focus-within:border-blue-600 dark:focus-within:border-blue-500/70 focus-within:ring-2 focus-within:ring-blue-500/15 shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)] dark:shadow-none",
+                          : "bg-black/[0.035] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.07] focus-within:border-blue-600 dark:focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
                       isShaking && "animate-shake"
                     )}
                   >
@@ -4509,7 +4509,7 @@ function RapidFlashcardMode({
                           : "border-red-500/40 text-red-600 dark:text-red-400 bg-red-500/5 font-semibold")
                       : isErrorMismatch
                         ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                        : "bg-black/[0.03] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.06] focus-within:border-blue-600 dark:focus-within:border-blue-500/70 focus-within:ring-2 focus-within:ring-blue-500/15 shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)] dark:shadow-none",
+                        : "bg-black/[0.035] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.07] focus-within:border-blue-600 dark:focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
                     isShaking && "animate-shake"
                   )}
                 >
@@ -5287,7 +5287,7 @@ function StudyEntry(props: {
     : <StudyInterface {...props} />;
 
   return (
-    <main className="min-h-screen w-full bg-[#F5F5F7] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 transition-colors duration-200">
+    <main className="min-h-screen w-full bg-[#ECECEF] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 transition-colors duration-200">
       {content}
     </main>
   );
@@ -7353,7 +7353,7 @@ function HeaderWidgets({
       <header 
         className={cn(
           "sticky top-0 z-50 w-full select-none backdrop-blur-xl transition-all duration-300 border-b",
-          "bg-[#F5F5F7]/80 dark:bg-black/80 border-black/[0.05] dark:border-white/[0.08]"
+          "bg-[#ECECEF]/80 dark:bg-black/80 border-black/[0.05] dark:border-white/[0.08]"
         )}
       >
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-2.5 sm:py-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-y-2.5 sm:gap-y-0">
@@ -11606,7 +11606,7 @@ export default function App() {
     return list;
   }, [filteredDecksList]);
 
-  if (!isMounted) return <main className="min-h-screen bg-[#F5F5F7] dark:bg-black" />;
+  if (!isMounted) return <main className="min-h-screen bg-[#ECECEF] dark:bg-black" />;
 
 
   if (activeDeckId) {
@@ -12206,7 +12206,7 @@ export default function App() {
     : ((activeBook?.accentColor && activeBook.accentColor.startsWith('#')) ? activeBook.accentColor : '#3B82F6');
 
   return (
-    <div className="min-h-screen relative w-full bg-[#F5F5F7] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
+    <div className="min-h-screen relative w-full bg-[#ECECEF] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
       {/* Кинозерно (Аппаратный шум) */}
       <div 
         className="fixed inset-0 pointer-events-none opacity-[0.015] mix-blend-overlay z-[9999]"
