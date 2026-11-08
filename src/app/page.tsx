@@ -4451,7 +4451,7 @@ function RapidFlashcardMode({
                   <div
                     onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                     className={cn(
-                      "relative inline-flex items-center justify-center min-h-[64px] h-[64px] px-8 py-3 rounded-2xl md:rounded-full min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all outline-none border cursor-text",
+                      "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all duration-200 outline-none border cursor-text shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
                       isMobile && "select-none",
                       isAnswered
                         ? (!isSurrendered
@@ -4459,13 +4459,13 @@ function RapidFlashcardMode({
                             : "border-red-500/40 text-red-400 bg-red-500/5 font-semibold")
                         : isErrorMismatch
                           ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                          : "text-neutral-900 dark:text-white border-black/10 dark:border-white/10 bg-black/[0.03] dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60 font-semibold",
+                          : "text-neutral-900 dark:text-white border-black/15 dark:border-white/15 bg-black/[0.04] dark:bg-white/[0.04] focus-within:border-blue-500/70 focus-within:ring-4 focus-within:ring-blue-500/15 font-medium tracking-tight",
                       isShaking && "animate-shake"
                     )}
                   >
                     {isAnswered ? (
                       <div className={cn(
-                        "inline-flex items-center justify-center font-semibold tracking-wide select-none whitespace-nowrap",
+                        "inline-flex items-center justify-center font-medium tracking-tight select-none whitespace-nowrap",
                         displayParts.totalLength > 22
                           ? 'text-xl sm:text-2xl'
                           : 'text-2xl md:text-3xl',
@@ -4496,7 +4496,7 @@ function RapidFlashcardMode({
                           style={{ caretColor: 'transparent' }}
                           className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
                         />
-                        <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-semibold ${
+                        <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
                           displayParts.totalLength > 22
                             ? 'text-xl sm:text-2xl'
                             : 'text-2xl md:text-3xl'
@@ -4521,7 +4521,7 @@ function RapidFlashcardMode({
                 <div
                   onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                   className={cn(
-                    "relative inline-flex items-center justify-center min-h-[64px] h-[64px] px-8 py-3 rounded-2xl md:rounded-full min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all outline-none border cursor-text",
+                    "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all duration-200 outline-none border cursor-text shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
                     isMobile && "select-none",
                     isAnswered
                       ? (!isSurrendered
@@ -4529,13 +4529,13 @@ function RapidFlashcardMode({
                           : "border-red-500/40 text-red-400 bg-red-500/5 font-semibold")
                       : isErrorMismatch
                         ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                        : "text-neutral-900 dark:text-white border-black/10 dark:border-white/10 bg-black/[0.03] dark:bg-white/[0.04] focus-within:border-sky-500/60 dark:focus-within:border-sky-400/60 font-semibold",
+                        : "text-neutral-900 dark:text-white border-black/15 dark:border-white/15 bg-black/[0.04] dark:bg-white/[0.04] focus-within:border-blue-500/70 focus-within:ring-4 focus-within:ring-blue-500/15 font-medium tracking-tight",
                     isShaking && "animate-shake"
                   )}
                 >
                   {isAnswered ? (
                     <div className={cn(
-                      "inline-flex items-center justify-center font-semibold tracking-wide select-none whitespace-nowrap",
+                      "inline-flex items-center justify-center font-medium tracking-tight select-none whitespace-nowrap",
                       displayParts.totalLength > 22
                         ? 'text-xl sm:text-2xl'
                         : 'text-2xl md:text-3xl',
@@ -4566,7 +4566,7 @@ function RapidFlashcardMode({
                         style={{ caretColor: 'transparent' }}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
                       />
-                      <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-semibold ${
+                      <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
                         displayParts.totalLength > 22
                           ? 'text-xl sm:text-2xl'
                           : 'text-2xl md:text-3xl'
@@ -7458,17 +7458,17 @@ function HeaderWidgets({
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
               <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная переливающаяся аура */}
-                <div className="absolute -inset-[1.5px] rounded-full opacity-40 blur-lg bg-gradient-to-r from-blue-400 via-indigo-300 to-cyan-300 dark:opacity-70 dark:bg-gradient-to-r dark:from-blue-500 dark:via-indigo-500 dark:to-cyan-400 group-hover:opacity-70 dark:group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
+                {/* Анимированная переливающаяся аура в темной теме */}
+                <div className="absolute -inset-[1.5px] rounded-full opacity-0 dark:opacity-70 dark:bg-gradient-to-r dark:from-blue-500 dark:via-indigo-500 dark:to-cyan-400 dark:group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
 
-                {/* Сама кнопка в стиле Apple Frosted Glass */}
+                {/* Сама кнопка в стиле Apple Frosted Glass / Ceramic Capsule */}
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-white/85 text-neutral-900 border border-neutral-200/80 shadow-md shadow-blue-500/10 backdrop-blur-xl dark:bg-blue-950/40 dark:text-white dark:border-blue-400/40 dark:shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] font-medium text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-300 active:scale-[0.98] cursor-pointer"
+                  className="relative px-5 py-2.5 rounded-full bg-white/90 border border-blue-500/25 text-blue-600 shadow-[0_4px_16px_rgba(37,99,235,0.12)] hover:bg-blue-50/50 backdrop-blur-xl dark:bg-blue-950/40 dark:text-white dark:border-blue-400/40 dark:shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-300 active:scale-[0.98] cursor-pointer"
                 >
                   <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
-                  <span className="font-medium text-neutral-900 dark:text-white">
+                  <span className="font-semibold text-blue-600 dark:text-white">
                     {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
                   </span>
                 </button>
@@ -7733,7 +7733,11 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
-        "relative p-5 rounded-2xl bg-white dark:bg-neutral-900/70 border border-neutral-200/80 dark:border-white/5 hover:border-blue-500/40 dark:hover:border-blue-500/30 shadow-sm hover:shadow-xl hover:shadow-black/5 dark:hover:shadow-black/40 hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[152px]",
+        "relative p-5 rounded-2xl flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[152px] transition-all duration-200",
+        // Светлая тема (матовая керамика Apple с мягкой многослойной тенью):
+        "bg-white/80 border border-black/[0.06] shadow-[0_4px_20px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)] hover:border-black/10 backdrop-blur-xl hover:-translate-y-0.5",
+        // Темная тема:
+        "dark:bg-neutral-900/70 dark:border-white/5 dark:hover:border-blue-500/30 dark:shadow-sm dark:hover:shadow-black/40",
         isCompleted && "opacity-85 hover:opacity-100"
       )}
     >
@@ -7742,7 +7746,7 @@ const DeckCard = React.memo(({
         {onRename && (
           <button 
             onClick={(e) => { e.stopPropagation(); onRename(deck.id, deck.name); }}
-            className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800/90 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200/60 dark:border-white/10 flex items-center justify-center text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
+            className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-[#86868B] hover:text-[#1D1D1F] dark:text-neutral-300 dark:hover:text-white transition-all active:scale-95 shadow-sm cursor-pointer"
             title="Lektion umbenennen"
           >
             <Edit2 className="w-3.5 h-3.5" />
@@ -7750,16 +7754,16 @@ const DeckCard = React.memo(({
         )}
         <button 
           onClick={(e) => { e.stopPropagation(); onDelete(deck.id, deck.name); }}
-          className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800/90 hover:bg-rose-50 dark:hover:bg-rose-500/20 border border-neutral-200/60 dark:border-white/10 flex items-center justify-center text-neutral-600 dark:text-neutral-300 hover:text-rose-600 dark:hover:text-rose-400 transition-all active:scale-95 shadow-sm cursor-pointer"
+          className="w-7 h-7 rounded-full bg-white/90 dark:bg-neutral-800/90 hover:bg-rose-50 dark:hover:bg-rose-500/20 border border-black/[0.06] dark:border-white/10 flex items-center justify-center text-[#86868B] dark:text-neutral-300 hover:text-rose-600 dark:hover:text-rose-400 transition-all active:scale-95 shadow-sm cursor-pointer"
           title="Löschen"
         >
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      {/* Header / Title */}
+      {/* Header / Title (графитовый черный в светлой теме) */}
       <div className="min-h-[3rem] flex items-start pr-14 mb-2">
-        <h3 className="text-neutral-900 dark:text-neutral-100 font-semibold text-base tracking-tight truncate group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors flex items-center gap-1.5 w-full">
+        <h3 className="text-[#1D1D1F] dark:text-neutral-100 font-semibold text-base tracking-tight truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors flex items-center gap-1.5 w-full">
           <span className="truncate">{deck.name}</span>
           {isCompleted && (
             <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 inline-block ml-1" />
@@ -7770,7 +7774,7 @@ const DeckCard = React.memo(({
       {/* Footer / Controls & Status */}
       <div className="mt-auto pt-4 flex flex-col w-full">
         <div className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-1 bg-neutral-100/60 dark:bg-neutral-800/60 p-0.5 rounded-xl border border-neutral-200/50 dark:border-white/5">
+          <div className="flex items-center gap-1 bg-black/[0.03] dark:bg-neutral-800/60 p-0.5 rounded-xl border border-black/[0.04] dark:border-white/5">
             {showTheoryButton && (
               <DeckTheoryIndicator 
                 deckId={deck.id} 
@@ -7781,7 +7785,7 @@ const DeckCard = React.memo(({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); initAudioCtx(); onOpenStory(deck.id); }}
-                className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                className="p-1.5 rounded-lg text-[#86868B] hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
                 title="Lesetext (Режим чтения)"
               >
                 <BookOpen className="w-3.5 h-3.5" />
@@ -7792,7 +7796,7 @@ const DeckCard = React.memo(({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartDictation(deck.id); }}
-                  className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg text-[#86868B] hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
                   title="Diktat / Schreiben (Письмо)"
                 >
                   <Keyboard className="w-3.5 h-3.5" />
@@ -7800,7 +7804,7 @@ const DeckCard = React.memo(({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); initAudioCtx(); onStartShadowing(deck.id); }}
-                  className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg text-[#86868B] hover:text-[#1D1D1F] dark:text-neutral-400 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
                   title="Shadowing / Hören (Аудио)"
                 >
                   <Mic className="w-3.5 h-3.5" />
@@ -7808,19 +7812,19 @@ const DeckCard = React.memo(({
               </>
             )}
           </div>
-          <span className="text-xs font-mono font-medium text-neutral-400 dark:text-neutral-500 ml-auto tabular-nums">
+          <span className="text-xs font-mono font-medium text-[#86868B] dark:text-neutral-500 ml-auto tabular-nums">
             {mastered} / {total}
           </span>
         </div>
 
         {/* Apple Progress Bar */}
-        <div className="h-1.5 w-full bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden mt-3">
+        <div className="h-1.5 w-full bg-neutral-200/80 dark:bg-white/10 rounded-full overflow-hidden mt-3">
           <div
             className={cn(
               "h-full rounded-full transition-all duration-500",
               progressPercentage >= 100 
                 ? "bg-gradient-to-r from-emerald-500 to-teal-400" 
-                : "bg-gradient-to-r from-blue-500 to-indigo-500"
+                : "bg-gradient-to-r from-blue-600 to-indigo-600"
             )}
             style={{ width: `${progressPercentage}%` }}
           />

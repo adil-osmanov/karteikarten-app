@@ -9,6 +9,11 @@
   --color-zinc-850: #1f1f23;
 }
 
+html:not(.dark), body:not(.dark) {
+  background-color: #F5F5F7;
+  color: #1D1D1F;
+}
+
 :root {
   background-color: #F5F5F7;
   color: #1D1D1F;
@@ -17,8 +22,6 @@
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #F5F5F7;
-  color: #1D1D1F;
 }
 
 :root.dark,
@@ -31,18 +34,6 @@ body.dark,
 html.dark {
   background-color: #000000 !important;
   color-scheme: dark;
-}
-
-.kraft-card-surface {
-  background-color: rgba(255, 255, 255, 0.82);
-  border-color: rgba(0, 0, 0, 0.06);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.05);
-}
-
-.dark .kraft-card-surface {
-  background-color: rgba(18, 18, 20, 0.45);
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.9);
 }
 
 /* Eradicate any browser focus rings, outlines, or parasitic borders on buttons and clickable controls */
