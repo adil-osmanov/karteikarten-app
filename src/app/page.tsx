@@ -4675,138 +4675,106 @@ function SessionResultScreen({
   const mistakesCount = sessionMistakes.length;
 
   return (
-    <div className="flex-1 flex flex-col justify-center items-center max-w-xl mx-auto px-4 py-8 text-center select-none w-full animate-in fade-in zoom-in-95 duration-200">
-      <CardContainer className="w-full p-6 sm:p-8 flex flex-col items-center">
-        {/* Icon / Top Hero Badge */}
-        <div className={cn(
-          "w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 border shadow-sm",
-          accuracy >= 80
-            ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-            : accuracy >= 50
-              ? "bg-amber-50 dark:bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400"
-              : "bg-rose-50 dark:bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400"
-        )}>
-          {accuracy >= 80 ? (
-            <CheckCircle2 className="w-10 h-10 stroke-[2.2]" />
-          ) : (
-            <RotateCcw className="w-10 h-10 stroke-[2.2]" />
-          )}
+    <div className="flex-1 min-h-[calc(100vh-120px)] flex items-center justify-center px-4 py-8 w-full select-none">
+      <div className="relative w-full max-w-xl mx-auto my-auto p-8 rounded-3xl bg-white dark:bg-neutral-900/90 border border-black/[0.08] dark:border-white/10 backdrop-blur-2xl shadow-[0_20px_60px_rgba(0,0,0,0.12)] dark:shadow-[0_30px_90px_rgba(0,0,0,0.85)] flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
+        {/* Иконка успеха (Apple Status Badge) */}
+        <div className="w-14 h-14 shrink-0 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 dark:text-emerald-400 mb-5 shadow-[0_0_25px_rgba(16,185,129,0.2)]">
+          <Check className="w-7 h-7 stroke-[2.5]" />
         </div>
 
-        <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white mb-2">
+        <h2 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white mb-2">
           {title}
-        </h1>
-        <p className="text-[15px] text-zinc-500 dark:text-zinc-400 mb-8 max-w-md mx-auto">
-          {subtitle || (mistakesCount === 0 
-            ? "Du hast alle Karten dieser Session gemeistert!" 
-            : `Session beendet. Du hast ${mistakesCount} ${mistakesCount === 1 ? 'Karte' : 'Karten'} zum Vertiefen.`)}
+        </h2>
+        <p className="text-sm text-zinc-500 dark:text-neutral-400 mb-7">
+          {subtitle || "Alle fälligen Karten wurden erfolgreich wiederholt."}
         </p>
 
-        {/* 3 Metric Cards (Genauigkeit, Richtig, Fehler) */}
-        <div className="grid grid-cols-3 gap-3 w-full mb-8">
-          <div className="p-4 rounded-2xl bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
-            <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+        {/* Метрики сессии (Apple Stats Tiles) */}
+        <div className="grid grid-cols-3 gap-3 w-full mb-6">
+          {/* Точность */}
+          <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/5 flex flex-col items-center">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-400 dark:text-neutral-400 mb-1">
               Genauigkeit
             </span>
             <span className={cn(
-              "text-2xl font-bold tabular-nums tracking-tight",
-              accuracy >= 80 
-                ? "text-emerald-600 dark:text-emerald-400" 
-                : accuracy >= 50 
-                  ? "text-amber-600 dark:text-amber-400" 
-                  : "text-rose-600 dark:text-rose-400"
+              "text-2xl font-bold tracking-tight tabular-nums",
+              accuracy >= 80 ? "text-emerald-500 dark:text-emerald-400" : "text-amber-500 dark:text-amber-400"
             )}>
               {accuracy}%
             </span>
           </div>
 
-          <div className="p-4 rounded-2xl bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
-            <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+          {/* Правильно */}
+          <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/5 flex flex-col items-center">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-400 dark:text-neutral-400 mb-1">
               Richtig
             </span>
-            <span className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
+            <span className="text-2xl font-bold tracking-tight tabular-nums text-zinc-900 dark:text-white">
               {sessionCorrect}
             </span>
           </div>
 
-          <div className="p-4 rounded-2xl bg-zinc-50/80 dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/10 flex flex-col items-center justify-center">
-            <span className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+          {/* Ошибки */}
+          <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-white/[0.03] border border-black/[0.06] dark:border-white/5 flex flex-col items-center">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-400 dark:text-neutral-400 mb-1">
               Fehler
             </span>
             <span className={cn(
-              "text-2xl font-bold tabular-nums tracking-tight",
-              mistakesCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-zinc-400 dark:text-zinc-500"
+              "text-2xl font-bold tracking-tight tabular-nums",
+              mistakesCount > 0 ? "text-rose-500 dark:text-rose-400" : "text-zinc-400 dark:text-neutral-500"
             )}>
               {mistakesCount}
             </span>
           </div>
         </div>
 
-        {/* Mistakes Block */}
-        {mistakesCount > 0 ? (
-          <div className="w-full mb-8 text-left bg-zinc-50/70 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/10 rounded-2xl p-4 sm:p-5">
-            <div className="flex items-center justify-between mb-3 px-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                Fehler ({mistakesCount})
-              </span>
-              <button
-                onClick={onReviewMistakes}
-                type="button"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition active:scale-95 cursor-pointer shadow-sm shadow-blue-500/20"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Fehler wiederholen
-              </button>
+        {/* Блок ошибок (Mistakes List) */}
+        {mistakesCount > 0 && (
+          <div className="w-full rounded-2xl bg-zinc-50/70 dark:bg-white/[0.02] border border-black/[0.06] dark:border-white/5 p-4 mb-6 text-left">
+            <div className="text-xs font-semibold text-zinc-500 dark:text-neutral-400 uppercase tracking-wider mb-3">
+              Fehler zur Wiederholung ({mistakesCount})
             </div>
-
-            <div className="divide-y divide-zinc-200/60 dark:divide-white/[0.06] max-h-60 overflow-y-auto overscroll-contain pr-1">
-              {sessionMistakes.map((card, idx) => {
-                const germanWord = card.targetWord || (card.sentence ? card.sentence.replace(/\|/g, '') : '—');
-                const translation = card.translation || card.hint || '—';
+            <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar pr-1">
+              {sessionMistakes.map((card, i) => {
+                const frontText = (card as any).front || card.targetWord || (card.sentence ? card.sentence.replace(/\|/g, '') : '—');
+                const backText = getCleanTranslation((card as any).back || card.translation || card.hint || '—');
                 return (
-                  <div key={card.id || idx} className="py-2.5 flex items-center justify-between text-sm gap-3">
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100 truncate max-w-[50%]">
-                      {germanWord}
+                  <div key={card.id || i} className="flex items-center justify-between gap-3 text-xs py-2 px-3 rounded-xl bg-white dark:bg-white/[0.02] border border-black/[0.04] dark:border-white/[0.03]">
+                    <span className="font-medium text-zinc-800 dark:text-neutral-200">
+                      {formatSeparableWord(frontText, card.forms, 'neutral')}
                     </span>
-                    <div className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 text-xs shrink-0">
-                      <span>→</span>
-                      <span className="text-zinc-600 dark:text-zinc-300 font-normal truncate max-w-[180px]">
-                        {translation}
-                      </span>
-                    </div>
+                    <span className="text-zinc-500 dark:text-neutral-400 truncate max-w-[200px] text-right">
+                      {backText}
+                    </span>
                   </div>
                 );
               })}
             </div>
           </div>
-        ) : (
-          <div className="mb-8 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-sm font-semibold">
-            <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
-            Keine Fehler! Perfekt!
-          </div>
         )}
 
-        {/* Buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full">
+        {/* Группа действий (Primary & Secondary Actions) */}
+        <div className="flex items-center gap-3 w-full">
           {mistakesCount > 0 && (
             <button
               onClick={onReviewMistakes}
               type="button"
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition active:scale-95 cursor-pointer shadow-md shadow-blue-600/20"
+              className="flex-1 py-3.5 px-4 rounded-2xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/15 active:scale-[0.98] text-zinc-900 dark:text-white text-sm font-medium transition-all duration-150 flex items-center justify-center gap-2 border border-black/[0.08] dark:border-white/10 cursor-pointer"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-4 h-4 text-zinc-600 dark:text-neutral-300" />
               Fehler wiederholen
             </button>
           )}
+
           <button
             onClick={onBack}
             type="button"
-            className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3.5 rounded-xl bg-zinc-200/80 hover:bg-zinc-300/80 dark:bg-white/10 dark:hover:bg-white/15 text-zinc-800 dark:text-zinc-100 font-semibold text-sm transition active:scale-95 cursor-pointer"
+            className="flex-1 py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white text-sm font-medium transition-all duration-150 shadow-[0_0_25px_rgba(37,99,235,0.35)] cursor-pointer"
           >
-            Zurück zur Bibliothek
+            Zur Übersicht
           </button>
         </div>
-      </CardContainer>
+      </div>
     </div>
   );
 }
@@ -5194,7 +5162,7 @@ function RapidSession({
         }}
         subtitle={
           reviewCards 
-            ? (isDrillMode ? "Du hast das Level-Training erfolgreich abgeschlossen!" : "Alle fälligen Karten wurden wiederholt.")
+            ? (isDrillMode ? "Du hast das Level-Training erfolgreich abgeschlossen!" : "Alle fälligen Karten wurden erfolgreich wiederholt.")
             : "Du hast alle Karten in diesem Deck gemeistert."
         }
       />
@@ -5869,7 +5837,7 @@ function StudyInterface({
         }}
         subtitle={
           isReviewSession 
-            ? "Alle fälligen Karten wurden wiederholt." 
+            ? "Alle fälligen Karten wurden erfolgreich wiederholt." 
             : isDrillMode
               ? "Du hast das Level-Training erfolgreich abgeschlossen!"
               : isInitialArchivedDeck 
