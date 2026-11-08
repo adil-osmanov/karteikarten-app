@@ -5,6 +5,21 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
 const serverSupabase = createClient(supabaseUrl, supabaseKey);
 
+const corsHeaders: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-client-info, apikey',
+  'Access-Control-Max-Age': '86400',
+};
+
+// OPTIONS: Preflight requests for WebKit/Safari & cross-origin callers
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
+}
+
 // GET: Получить дневной прогресс или список состояний
 export async function GET(req: NextRequest) {
   try {
@@ -20,10 +35,10 @@ export async function GET(req: NextRequest) {
         .maybeSingle();
 
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
       }
 
-      return NextResponse.json(data || null);
+      return NextResponse.json(data || null, { headers: corsHeaders });
     }
 
     if (multiLangs) {
@@ -34,10 +49,10 @@ export async function GET(req: NextRequest) {
         .in('language', langArray);
 
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
       }
 
-      return NextResponse.json(data || []);
+      return NextResponse.json(data || [], { headers: corsHeaders });
     }
 
     const { data, error } = await serverSupabase
@@ -45,12 +60,12 @@ export async function GET(req: NextRequest) {
       .select('language, daily_activity');
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders });
     }
 
-    return NextResponse.json(data || []);
+    return NextResponse.json(data || [], { headers: corsHeaders });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500, headers: corsHeaders });
   }
 }
 
@@ -78,10 +93,10 @@ export async function POST(req: NextRequest) {
         });
 
       if (insertErr) {
-        return NextResponse.json({ error: insertErr.message }, { status: 500 });
+        return NextResponse.json({ error: insertErr.message }, { status: 500, headers: corsHeaders });
       }
     } else if (updateErr) {
-      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+      return NextResponse.json({ error: updateErr.message }, { status: 500, headers: corsHeaders });
     }
 
     // 3. Синхронизация user_daily_stats на стороне сервера при наличии
@@ -93,8 +108,8 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true }, { headers: corsHeaders });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500, headers: corsHeaders });
   }
 }

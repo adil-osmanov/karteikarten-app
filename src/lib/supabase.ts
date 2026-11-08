@@ -32,7 +32,7 @@ export async function loadDayProgress(lang: string = 'DAY_STATS_DE'): Promise<an
   try {
     const res = await fetch(`/api/learning-progress?lang=${encodeURIComponent(lang)}`, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Accept': 'application/json' },
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -90,7 +90,7 @@ export async function safeFetchUserStats(param: string | string[]): Promise<any>
 
     const res = await fetch(url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Accept': 'application/json' },
     });
     if (!res.ok) return Array.isArray(param) ? [] : null;
     const json = await res.json();
