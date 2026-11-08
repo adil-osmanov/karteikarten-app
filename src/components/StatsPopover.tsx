@@ -5,6 +5,8 @@ import {
   normalizeLanguage, 
   getCurrentWeekDailyStats, 
   getTodayKey, 
+  normalizeFocusSeconds,
+  normalizeFocusMinutes,
   DayRecord 
 } from '@/hooks/useDayStats';
 
@@ -229,10 +231,11 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     getTodayCompletedCardsCount(currentLang)
   );
 
-  const todayLiveSeconds = Math.max(
+  const rawTodaySeconds = Math.max(
     typeof currentLangStats?.focusSeconds === 'number' ? currentLangStats.focusSeconds : 0,
     typeof stats?.activeSeconds === 'number' ? stats.activeSeconds : 0
   );
+  const todayLiveSeconds = normalizeFocusSeconds(rawTodaySeconds, todayLiveCards, true);
 
   const todayMistakesCount = typeof currentLangStats?.mistakesCount === 'number'
     ? currentLangStats.mistakesCount
@@ -267,13 +270,14 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const displayProgressPercent = Math.min(Math.round((displayCardsDone / displayTarget) * 100), 100);
 
   const rawRecordMinutes = selectedRecord.focusMinutes || 0;
-  const effectiveRecordMinutes = Math.max(
+  const effectiveRecordMinutes = normalizeFocusMinutes(
     rawRecordMinutes,
-    (selectedRecord.cardsReviewed || 0) > 0 ? Math.max(1, Math.round(((selectedRecord.cardsReviewed || 0) * 4.5) / 60)) : 0
+    selectedRecord.cardsReviewed || 0,
+    isSelectedToday
   );
 
   const displaySeconds = isSelectedToday 
-    ? Math.max(todayLiveSeconds, todayLiveCards > 0 ? Math.round(todayLiveCards * 4.5) : 0) 
+    ? todayLiveSeconds 
     : (effectiveRecordMinutes * 60);
   const displayMinutes = Math.floor(displaySeconds / 60);
   const displayHours = Math.floor(displayMinutes / 60);

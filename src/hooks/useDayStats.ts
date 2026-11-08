@@ -53,6 +53,30 @@ export const getTodayKey = (): string => {
 
 export const getStorageKey = (lang: string) => `app_daily_stats_${normalizeLanguage(lang)}`;
 
+export const MAX_CARD_SECONDS = 30; // Максимальный лимит на 1 карточку (Anki Timebox Standard)
+export const MEDIAN_CARD_SECONDS = 14; // Реалистичный медианный темп ввода карточки для коррекции аномалий
+
+/**
+ * Нормализует накрученное время фокуса:
+ * - Если карточек 0 -> 0 секунд.
+ * - Если среднее время на карточку > 60 секунд (или больше потолка 30 сек для сегодняшней миграции) -> cardsCount * 14 сек.
+ */
+export function normalizeFocusSeconds(rawSeconds: number, cardsCount: number, forceCap30: boolean = false): number {
+  if (!rawSeconds || rawSeconds <= 0 || cardsCount <= 0) return 0;
+  const threshold = forceCap30 ? MAX_CARD_SECONDS : 60;
+  if (rawSeconds / cardsCount > threshold) {
+    return Math.round(cardsCount * MEDIAN_CARD_SECONDS);
+  }
+  return Math.round(rawSeconds);
+}
+
+export function normalizeFocusMinutes(rawMinutes: number, cardsCount: number, forceCap30: boolean = false): number {
+  if (!rawMinutes || rawMinutes <= 0 || cardsCount <= 0) return 0;
+  const rawSeconds = rawMinutes * 60;
+  const normSec = normalizeFocusSeconds(rawSeconds, cardsCount, forceCap30);
+  return Math.floor(normSec / 60);
+}
+
 // --- CLEAN CARD SNAPSHOT ---
 export function cleanCardSnapshot(card: any): any {
   if (!card) return null;
@@ -304,11 +328,13 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
   let maxMistakesToday = current.date === todayKey ? (current.mistakesCountToday || 0) : 0;
 
   if (isCloudToday) {
-    if (typeof cloudRaw.activeSeconds === 'number' && cloudRaw.activeSeconds > maxActiveSeconds) {
-      maxActiveSeconds = cloudRaw.activeSeconds;
-    }
     const cloudDone = typeof cloudRaw.cardsDone === 'number' ? cloudRaw.cardsDone : 0;
     maxCardsDone = Math.max(maxCardsDone, cloudDone, todayActual);
+
+    const normalizedLocalSecs = normalizeFocusSeconds(maxActiveSeconds, maxCardsDone, true);
+    const rawCloudSecs = typeof cloudRaw.activeSeconds === 'number' ? cloudRaw.activeSeconds : 0;
+    const normalizedCloudSecs = normalizeFocusSeconds(rawCloudSecs, maxCardsDone, true);
+    maxActiveSeconds = Math.max(normalizedLocalSecs, normalizedCloudSecs);
 
     if (typeof cloudRaw.correctCount === 'number') {
       maxCorrectCount = Math.min(maxCardsDone, Math.max(maxCorrectCount, cloudRaw.correctCount));
@@ -318,6 +344,7 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
     const cloudMistakes = typeof cloudRaw.mistakesCountToday === 'number' ? cloudRaw.mistakesCountToday : cloudPool.length;
     maxMistakesToday = Math.max(maxMistakesToday, cloudMistakes, mergedPool.length);
   } else {
+    maxActiveSeconds = normalizeFocusSeconds(maxActiveSeconds, maxCardsDone, true);
     maxMistakesToday = Math.max(maxMistakesToday, mergedPool.length);
   }
 
@@ -483,7 +510,13 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
       if (histRaw) {
         const histMap: Record<string, DayRecord> = JSON.parse(histRaw);
         if (histMap && histMap[dateStr]) {
-          return histMap[dateStr];
+          const rec = histMap[dateStr];
+          const isToday = dateStr === getTodayKey();
+          const normMins = normalizeFocusMinutes(rec.focusMinutes || 0, rec.cardsReviewed || 0, isToday);
+          return {
+            ...rec,
+            focusMinutes: normMins
+          };
         }
       }
     } catch {}
@@ -503,7 +536,10 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
       if (scopedRaw) {
         const parsed = JSON.parse(scopedRaw);
         if (typeof parsed?.learnedToday === 'number') cardsReviewed = parsed.learnedToday;
-        if (typeof parsed?.focusSeconds === 'number') focusMinutes = Math.floor(parsed.focusSeconds / 60);
+        if (typeof parsed?.focusSeconds === 'number') {
+          const normSecs = normalizeFocusSeconds(parsed.focusSeconds, cardsReviewed, dateStr === getTodayKey());
+          focusMinutes = Math.floor(normSecs / 60);
+        }
         if (typeof parsed?.accuracy === 'number') accuracy = parsed.accuracy;
         if (typeof parsed?.mistakesCount === 'number') mistakesCount = parsed.mistakesCount;
       }
@@ -523,11 +559,7 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
     }
   }
 
-  // Fallback for focus minutes: ~4.5 seconds per card reviewed
-  const effectiveFocusMinutes = Math.max(
-    focusMinutes || 0,
-    cardsReviewed > 0 ? Math.max(1, Math.round((cardsReviewed * 4.5) / 60)) : 0
-  );
+  const effectiveFocusMinutes = normalizeFocusMinutes(focusMinutes || 0, cardsReviewed, dateStr === getTodayKey());
 
   return {
     date: dateStr,
@@ -545,10 +577,8 @@ export function saveDayRecord(lang: string = 'DE', record: Partial<DayRecord> & 
   const current = getDayRecord(normLang, record.date);
   const reviewed = typeof record.cardsReviewed === 'number' ? record.cardsReviewed : current.cardsReviewed;
   const rawMinutes = typeof record.focusMinutes === 'number' ? record.focusMinutes : current.focusMinutes;
-  const effectiveMinutes = Math.max(
-    rawMinutes || 0,
-    reviewed > 0 ? Math.max(1, Math.round((reviewed * 4.5) / 60)) : 0
-  );
+  const isToday = record.date === getTodayKey();
+  const effectiveMinutes = normalizeFocusMinutes(rawMinutes || 0, reviewed, isToday);
 
   const updated: DayRecord = {
     date: record.date,
@@ -577,15 +607,22 @@ export function saveDayRecord(lang: string = 'DE', record: Partial<DayRecord> & 
       actMap[record.date] = Math.max(actMap[record.date] || 0, updated.cardsReviewed);
       safeSetStorage(actKey, JSON.stringify(actMap));
 
-      // Synchronize with daily_stats_{lang}_{date}
+      // Synchronize with daily_stats_{lang}_{date} preserving sub-minute activeSeconds
       const scopedKey = `daily_stats_${normLang.toLowerCase()}_${record.date}`;
       const existingScoped = localStorage.getItem(scopedKey);
       const scopedParsed = existingScoped ? JSON.parse(existingScoped) : {};
+      const existingSecs = typeof scopedParsed?.focusSeconds === 'number'
+        ? normalizeFocusSeconds(scopedParsed.focusSeconds, updated.cardsReviewed, isToday)
+        : 0;
+      const syncedFocusSeconds = isToday && statsByLang[normLang]?.date === record.date
+        ? normalizeFocusSeconds(statsByLang[normLang].activeSeconds || 0, updated.cardsReviewed, true)
+        : (Math.floor(existingSecs / 60) === updated.focusMinutes ? existingSecs : updated.focusMinutes * 60);
       safeSetStorage(scopedKey, JSON.stringify({
         ...scopedParsed,
         date: record.date,
         learnedToday: updated.cardsReviewed,
-        focusSeconds: updated.focusMinutes * 60,
+        focusSeconds: syncedFocusSeconds,
+        focusMinutes: Math.floor(syncedFocusSeconds / 60),
         accuracy: updated.accuracy,
         mistakesCount: updated.mistakesCount
       }));
@@ -610,8 +647,8 @@ export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7)
 
     if (dateStr === todayKey && currentToday) {
       const liveCards = Math.max(record.cardsReviewed, currentToday.cardsDone || 0, getTodayCompletedCardsCount(normLang));
-      const liveSeconds = currentToday.activeSeconds || 0;
-      const liveMinutes = Math.max(record.focusMinutes, Math.floor(liveSeconds / 60));
+      const liveSeconds = normalizeFocusSeconds(currentToday.activeSeconds || 0, liveCards, true);
+      const liveMinutes = Math.floor(liveSeconds / 60);
       const liveMistakes = typeof currentToday.mistakesCountToday === 'number'
         ? currentToday.mistakesCountToday
         : (currentToday.mistakesPool?.length || 0);
@@ -628,10 +665,7 @@ export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7)
       saveDayRecord(normLang, record);
     }
 
-    const effectiveMinutes = Math.max(
-      record.focusMinutes || 0,
-      (record.cardsReviewed || 0) > 0 ? Math.max(1, Math.round(((record.cardsReviewed || 0) * 4.5) / 60)) : 0
-    );
+    const effectiveMinutes = normalizeFocusMinutes(record.focusMinutes || 0, record.cardsReviewed || 0, dateStr === todayKey);
 
     result.push({
       ...record,
@@ -665,8 +699,8 @@ export function getCurrentWeekDailyStats(lang: string = 'DE'): DayRecord[] {
 
     if (dateStr === todayKey && currentToday) {
       const liveCards = Math.max(record.cardsReviewed, currentToday.cardsDone || 0, getTodayCompletedCardsCount(normLang));
-      const liveSeconds = currentToday.activeSeconds || 0;
-      const liveMinutes = Math.max(record.focusMinutes, Math.floor(liveSeconds / 60));
+      const liveSeconds = normalizeFocusSeconds(currentToday.activeSeconds || 0, liveCards, true);
+      const liveMinutes = Math.floor(liveSeconds / 60);
       const liveMistakes = typeof currentToday.mistakesCountToday === 'number'
         ? currentToday.mistakesCountToday
         : (currentToday.mistakesPool?.length || 0);
@@ -683,10 +717,7 @@ export function getCurrentWeekDailyStats(lang: string = 'DE'): DayRecord[] {
       saveDayRecord(normLang, record);
     }
 
-    const effectiveMinutes = Math.max(
-      record.focusMinutes || 0,
-      (record.cardsReviewed || 0) > 0 ? Math.max(1, Math.round(((record.cardsReviewed || 0) * 4.5) / 60)) : 0
-    );
+    const effectiveMinutes = normalizeFocusMinutes(record.focusMinutes || 0, record.cardsReviewed || 0, dateStr === todayKey);
 
     result.push({
       ...record,
@@ -775,9 +806,23 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
     finalCorrectCount = Math.max(0, finalCardsDone - finalMistakesToday);
   }
 
+  // Разовая нормализация сегодняшнего накрученного времени (52 мин за 22 карточки -> ~5 мин)
+  let finalActiveSeconds = foundTodaySaved ? normalizeFocusSeconds(maxActiveSeconds, finalCardsDone, true) : 0;
+  try {
+    const migKey = `focus_time_v2_normalized_${normLang}_${todayKey}`;
+    if (!localStorage.getItem(migKey)) {
+      if (finalCardsDone > 0 && finalActiveSeconds > finalCardsDone * MEDIAN_CARD_SECONDS) {
+        finalActiveSeconds = Math.round(finalCardsDone * MEDIAN_CARD_SECONDS);
+      } else if (finalCardsDone === 0) {
+        finalActiveSeconds = 0;
+      }
+      localStorage.setItem(migKey, '1');
+    }
+  } catch {}
+
   const result: DailyStats = {
     date: todayKey,
-    activeSeconds: foundTodaySaved ? maxActiveSeconds : 0,
+    activeSeconds: finalActiveSeconds,
     cardsDone: finalCardsDone,
     correctCount: finalCorrectCount,
     mistakesCountToday: foundTodaySaved ? maxMistakesToday : 0,
@@ -796,6 +841,93 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
 const statsByLang: Record<string, DailyStats> = {};
 const listenersByLang: Record<string, Set<(stats: DailyStats) => void>> = {};
 const activeStudyCounts: Record<string, number> = {};
+
+// --- SMART PER-CARD FOCUS TIME TRACKER (ANKI TIMEBOX STANDARD, MAX 30s/CARD) ---
+interface CardFocusTimerState {
+  cardStartTime: number;
+  accumulatedMs: number;
+  isPaused: boolean;
+}
+const cardTimerByLang: Record<string, CardFocusTimerState> = {};
+
+export function startCardFocusTimer(lang: string = 'DE'): void {
+  const normLang = normalizeLanguage(lang);
+  const isHidden = typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible');
+  cardTimerByLang[normLang] = {
+    cardStartTime: isHidden ? 0 : Date.now(),
+    accumulatedMs: 0,
+    isPaused: isHidden,
+  };
+}
+
+export function pauseCardFocusTimer(lang?: string): void {
+  const now = Date.now();
+  const keys = lang ? [normalizeLanguage(lang)] : Object.keys(cardTimerByLang);
+  keys.forEach((k) => {
+    const t = cardTimerByLang[k];
+    if (t && !t.isPaused && t.cardStartTime > 0) {
+      t.accumulatedMs += Math.max(0, now - t.cardStartTime);
+      t.cardStartTime = 0;
+      t.isPaused = true;
+    }
+  });
+}
+
+export function resumeCardFocusTimer(lang?: string): void {
+  if (typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible')) return;
+  const now = Date.now();
+  const keys = lang ? [normalizeLanguage(lang)] : Object.keys(cardTimerByLang);
+  keys.forEach((k) => {
+    if ((activeStudyCounts[k] || 0) <= 0) return;
+    const t = cardTimerByLang[k];
+    if (t && t.isPaused) {
+      t.cardStartTime = now;
+      t.isPaused = false;
+    } else if (!t) {
+      cardTimerByLang[k] = { cardStartTime: now, accumulatedMs: 0, isPaused: false };
+    }
+  });
+}
+
+export function consumeCardFocusSeconds(lang: string = 'DE'): number {
+  const normLang = normalizeLanguage(lang);
+  const now = Date.now();
+  const t = cardTimerByLang[normLang];
+  let rawSeconds = 0;
+  if (t) {
+    const liveMs = !t.isPaused && t.cardStartTime > 0 ? Math.max(0, now - t.cardStartTime) : 0;
+    rawSeconds = (t.accumulatedMs + liveMs) / 1000;
+  }
+  const isHidden = typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible');
+  cardTimerByLang[normLang] = {
+    cardStartTime: isHidden ? 0 : now,
+    accumulatedMs: 0,
+    isPaused: isHidden,
+  };
+  if (rawSeconds <= 0) return 0;
+  return Math.min(Math.max(1, Math.round(rawSeconds)), MAX_CARD_SECONDS);
+}
+
+export function recordCardFocusTime(activeSeconds: number, lang: string = 'DE'): number {
+  if (activeSeconds <= 0) return 0;
+  const clamped = Math.min(Math.round(activeSeconds), MAX_CARD_SECONDS);
+  const normLang = normalizeLanguage(lang);
+  const current = getOrCreateStats(normLang);
+  const today = getTodayKey();
+  const nextSeconds = (current.activeSeconds || 0) + clamped;
+  const nextStats: DailyStats = {
+    ...current,
+    date: today,
+    activeSeconds: nextSeconds,
+  };
+  statsByLang[normLang] = nextStats;
+  saveDayRecord(normLang, {
+    date: today,
+    focusMinutes: Math.floor(nextSeconds / 60),
+  });
+  notifyLang(normLang);
+  return clamped;
+}
 
 let timerInitialized = false;
 let lastActivityTime = Date.now();
@@ -892,8 +1024,24 @@ function initGlobalTimer() {
   window.addEventListener('touchstart', onActivity, { passive: true });
   window.addEventListener('scroll', onActivity, { passive: true });
 
+  // Visibility & Window Focus Watchdog: мгновенная пауза таймера карточки при уходе со вкладки или потере фокуса окна
+  const handleVisibilityWatchdog = () => {
+    if (typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible')) {
+      pauseCardFocusTimer();
+    } else {
+      resumeCardFocusTimer();
+    }
+  };
+  const handleWindowBlur = () => pauseCardFocusTimer();
+  const handleWindowFocus = () => resumeCardFocusTimer();
+
+  document.addEventListener('visibilitychange', handleVisibilityWatchdog);
+  window.addEventListener('blur', handleWindowBlur);
+  window.addEventListener('focus', handleWindowFocus);
+
   // Safari unload/pagehide flush to local & Supabase
   const flushAll = () => {
+    pauseCardFocusTimer();
     Object.keys(statsByLang).forEach(l => {
       const s = statsByLang[l];
       if (s) {
@@ -911,74 +1059,6 @@ function initGlobalTimer() {
   };
   window.addEventListener('pagehide', flushAll);
   window.addEventListener('beforeunload', flushAll);
-
-  setInterval(() => {
-    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-
-    const today = getTodayKey();
-
-    Object.keys(activeStudyCounts).forEach(rawLang => {
-      const lang = normalizeLanguage(rawLang);
-      if ((activeStudyCounts[lang] || 0) <= 0) return;
-
-      const current = getOrCreateStats(lang);
-      if (current.date !== today) {
-        try {
-          const prevCards = current.cardsDone || 0;
-          const prevMistakes = current.mistakesCountToday || 0;
-          const prevAttempts = prevCards + prevMistakes;
-          saveDayRecord(lang, {
-            date: current.date,
-            cardsReviewed: prevCards,
-            targetCards: 200,
-            focusMinutes: Math.floor((current.activeSeconds || 0) / 60),
-            accuracy: prevAttempts > 0 ? Math.round((prevCards / prevAttempts) * 100) : 100,
-            mistakesCount: prevMistakes,
-            wordsMastered: 0
-          });
-        } catch {}
-
-        const realCards = getTodayCompletedCardsCount(lang);
-        const newStats = {
-          date: today,
-          activeSeconds: 1,
-          cardsDone: realCards,
-          correctCount: realCards,
-          mistakesCountToday: 0,
-          mistakesPool: current.mistakesPool || []
-        };
-        statsByLang[lang] = newStats;
-        notifyLang(lang);
-      } else {
-        const nextSeconds = (current.activeSeconds || 0) + 1;
-        const updated = {
-          ...current,
-          activeSeconds: nextSeconds
-        };
-        statsByLang[lang] = updated;
-
-        // Update local React subscribers smoothly without heavy storage / network overhead
-        if (listenersByLang[lang]) {
-          listenersByLang[lang].forEach(fn => fn(updated));
-        }
-
-        // Periodically persist focus minutes to local IndexedDB every 30 seconds
-        if (nextSeconds % 30 === 0) {
-          const focusMins = Math.floor(nextSeconds / 60);
-          saveDayRecord(lang, {
-            date: today,
-            focusMinutes: focusMins
-          });
-          setStatsInIDB(lang, updated);
-        }
-
-        // In Supabase send at most once every 10 minutes (600s) during ongoing study
-        if (nextSeconds % 600 === 0) {
-          syncStatsToSupabase(lang, updated, false);
-        }
-      }
-    });
-  }, 1000);
 }
 
 export function useDayStats(options?: { isStudying?: boolean; language?: string }) {
@@ -1068,6 +1148,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     if (isStudying) {
       activeStudyCounts[lang] = (activeStudyCounts[lang] || 0) + 1;
       lastActivityTime = Date.now();
+      startCardFocusTimer(lang);
     }
 
     if (!listenersByLang[lang]) {
@@ -1092,6 +1173,9 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       window.removeEventListener('stats-update', handleCustomUpdate);
       if (isStudying) {
         activeStudyCounts[lang] = Math.max(0, (activeStudyCounts[lang] || 0) - 1);
+        if ((activeStudyCounts[lang] || 0) === 0) {
+          pauseCardFocusTimer(lang);
+        }
         const current = statsByLang[lang];
         if (current) {
           const today = getTodayKey();
@@ -1184,9 +1268,15 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     const prevWordsLearned = current.words_learned_today ?? 0;
     const newWordsLearnedToday = isNewMastered ? prevWordsLearned + 1 : prevWordsLearned;
 
+    // Чистое время фокуса на карточку с жестким потолком простоя (MAX_CARD_SECONDS = 30 сек)
+    const activeCardSeconds = consumeCardFocusSeconds(targetLang);
+    const baseActiveSeconds = normalizeFocusSeconds(current.activeSeconds || 0, Math.max(1, newCardsDone), true);
+    const nextActiveSeconds = baseActiveSeconds + activeCardSeconds;
+
     const nextStats: DailyStats = {
       ...current,
       date: today,
+      activeSeconds: nextActiveSeconds,
       cardsDone: newCardsDone,
       correctCount: newCorrectCount,
       mistakesCountToday: newMistakesToday,

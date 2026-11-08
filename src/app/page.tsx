@@ -28,7 +28,7 @@ import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, remov
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
-import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
@@ -137,10 +137,11 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
     typeof parsed?.learnedToday === 'number' ? parsed.learnedToday : 0,
     fallbackCompleted
   );
-  const focusSeconds = Math.max(
+  const rawFocusSeconds = Math.max(
     typeof mem?.focusSeconds === 'number' ? mem.focusSeconds : 0,
     typeof parsed?.focusSeconds === 'number' ? parsed.focusSeconds : 0
   );
+  const focusSeconds = normalizeFocusSeconds(rawFocusSeconds, learnedToday, true);
   const mistakes = Array.isArray(mem?.mistakes) && mem.mistakes.length > 0
     ? mem.mistakes
     : (Array.isArray(parsed?.mistakes) ? parsed.mistakes : []);
@@ -320,9 +321,9 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de')
       accuracy: cloudAccuracy,
       mistakes: Array.isArray(dailyRowActivity?.mistakes) ? dailyRowActivity.mistakes : (current.mistakes || []),
       focusSeconds: Math.max(
-        current.focusSeconds || 0,
-        typeof dailyRowActivity?.focusSeconds === 'number' ? dailyRowActivity.focusSeconds : 0,
-        typeof dayRowActivity?.activeSeconds === 'number' ? dayRowActivity.activeSeconds : 0
+        normalizeFocusSeconds(current.focusSeconds || 0, finalCount, true),
+        normalizeFocusSeconds(typeof dailyRowActivity?.focusSeconds === 'number' ? dailyRowActivity.focusSeconds : 0, finalCount, true),
+        normalizeFocusSeconds(typeof dayRowActivity?.activeSeconds === 'number' ? dayRowActivity.activeSeconds : 0, finalCount, true)
       )
     };
     updated.focusMinutes = Math.floor(updated.focusSeconds / 60);
