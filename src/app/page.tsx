@@ -26,7 +26,7 @@ import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
 import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
-import { normalizeLemmaKey, deduplicateCardsByLemma, getWordKey, sortReviewCardsPedagogically, getDueReviewCards } from "@/lib/utils/lemmaNormalizer";
+import { normalizeLemmaKey, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -58,7 +58,7 @@ function cn(...inputs: ClassValue[]) {
 // Получение локальной даты пользователя YYYY-MM-DD
 export function getDeviceLocalDate(): string {
   try {
-    return new Date().toLocaleDateString('sv');
+    return new Date().toLocaleDateString('en-CA');
   } catch {
     const now = new Date();
     const year = now.getFullYear();
@@ -139,11 +139,7 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
     if (raw) parsed = JSON.parse(raw);
   } catch {}
 
-  const learnedToday = Math.max(
-    typeof mem?.learnedToday === 'number' ? mem.learnedToday : 0,
-    typeof parsed?.learnedToday === 'number' ? parsed.learnedToday : 0,
-    fallbackCompleted
-  );
+  const learnedToday = fallbackCompleted;
   const rawFocusSeconds = Math.max(
     typeof mem?.focusSeconds === 'number' ? mem.focusSeconds : 0,
     typeof parsed?.focusSeconds === 'number' ? parsed.focusSeconds : 0
@@ -156,11 +152,7 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
     typeof mem?.mistakesCount === 'number' ? mem.mistakesCount : 0,
     typeof parsed?.mistakesCount === 'number' ? parsed.mistakesCount : mistakes.length
   );
-  const correctCount = Math.max(
-    typeof mem?.correctCount === 'number' ? mem.correctCount : 0,
-    typeof parsed?.correctCount === 'number' ? parsed.correctCount : 0,
-    learnedToday
-  );
+  const correctCount = learnedToday;
   const totalCount = Math.max(
     typeof mem?.totalCount === 'number' ? mem.totalCount : 0,
     typeof parsed?.totalCount === 'number' ? parsed.totalCount : 0,
@@ -306,7 +298,7 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
   }
 
   const current = getLanguageDailyStats(cleanLang);
-  const finalCount = countFromDb !== null ? Math.max(countFromDb, current.learnedToday) : current.learnedToday;
+  const finalCount = current.learnedToday;
 
   // Single Source of Truth from Supabase:
   // If Supabase has dailyRowActivity / dayRowActivity, use its canonical mistakes and correct counts!
@@ -460,17 +452,20 @@ export function updateLanguageDailyStats(
 ): LanguageDailyProgress {
   const today = getLocalTodayStr();
   const cleanLang = (lang || 'de').toLowerCase();
+  const upperLang = cleanLang.toUpperCase();
   const current = { ...getLanguageDailyStats(cleanLang) };
 
   // Strict: increment day counter by at least +1 on every card answer
-  const inc = deltaLearned > 0 ? deltaLearned : (isCorrect ? 1 : 0);
-  current.learnedToday = (current.learnedToday || 0) + inc;
+  const currentCount = getTodayCompletedCardsCount(upperLang);
+  const inc = deltaLearned > 0 ? deltaLearned : (isCorrect !== false ? 1 : 0);
+  const newCount = currentCount + inc;
 
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(`kraft_day_count_${today}`, String(current.learnedToday));
+      localStorage.setItem(`kraft_cards_learned_${today}`, String(newCount));
     } catch {}
   }
+  current.learnedToday = newCount;
 
   if (options?.isReview) {
     current.cards_reviewed_today = (current.cards_reviewed_today || 0) + 1;
@@ -556,7 +551,8 @@ export const checkAndResetDailyProgress = () => {
       safeSetStorage('app_daily_counter_date', todayStr);
       safeSetStorage('last_active_date', todayStr);
       try {
-        localStorage.setItem(`kraft_day_count_${todayStr}`, '0');
+        localStorage.setItem(`kraft_cards_learned_${todayStr}`, '0');
+        localStorage.removeItem(`kraft_day_count_${todayStr}`);
       } catch {}
 
       ['de', 'en', 'ru'].forEach(lang => {
@@ -4454,9 +4450,8 @@ function RapidFlashcardMode({
 
   return (
     <div 
-      key={currentCard?.id || (currentCard as any)?.front} 
       className={cn(
-        "relative w-full max-w-4xl lg:max-w-5xl h-[600px] min-h-[600px] max-h-[600px] mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
+        "relative w-full max-w-4xl lg:max-w-5xl min-h-[500px] md:min-h-[540px] h-[600px] max-h-[600px] mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
         isTransitioning
           ? 'opacity-0 transition-opacity duration-100 ease-out pointer-events-none'
           : 'opacity-100 transition-opacity duration-100 ease-out'
@@ -4671,7 +4666,7 @@ function RapidFlashcardMode({
 
           {/* Центр: Русский перевод и Cloze поле ввода */}
           <div 
-            className="my-auto w-full flex flex-col items-center text-center select-text"
+            className="flex-1 w-full flex flex-col justify-center items-center text-center my-auto select-text transition-all duration-200 ease-out animate-in fade-in duration-150"
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-white mb-6 max-w-2xl leading-tight">
@@ -5141,7 +5136,7 @@ function RapidSession({
     if (reviewCards) {
       const isDrill = isDrillMode;
       // Сессия повторений: умная сортировка и строгая дедупликация (без перемешивания!)
-      const uniqueReview = deduplicateCardsByLemma([...reviewCards], true);
+      const uniqueReview = deduplicateReviewSession([...reviewCards]);
       list = uniqueReview.map(item => {
         const initialRound = isDrill
           ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
@@ -5448,11 +5443,10 @@ function RapidSession({
       </div>
 
       <div className={cn(
-        "w-full max-w-4xl lg:max-w-5xl mx-auto px-4 flex flex-col items-center select-none relative",
+        "w-full max-w-4xl lg:max-w-5xl mx-auto px-4 flex flex-col items-center select-none relative min-h-[500px] md:min-h-[540px]",
         (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[320px] md:pb-6" : ""
       )}>
         <RapidFlashcardMode
-          key={`${current.card.id}-${turn}`}
           card={liveCard}
           progress={wordProgress[current.card.id] ?? liveCard.masteryLevel ?? 0}
           locked={locked}
@@ -5539,9 +5533,8 @@ function RapidStudyCard({
     : (isReview || card.isArchived);
 
   return (
-    <div className="w-full flex justify-center relative">
+    <div className="w-full flex justify-center relative min-h-[500px] md:min-h-[540px]">
       <RapidFlashcardMode
-        key={`${card.id}-${stepTurn}`}
         card={card}
         progress={progress}
         locked={locked}
@@ -5603,7 +5596,7 @@ function StudyInterface({
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
       // Сессия повторений: умная сортировка и строгая дедупликация (без перемешивания!)
-      const unique = deduplicateCardsByLemma([...reviewCards], true);
+      const unique = deduplicateReviewSession([...reviewCards]);
       return unique.map(item => {
         const isDrill = isDrillMode;
         const initialRound = isDrill
@@ -6111,72 +6104,65 @@ function StudyInterface({
       </div>
 
       <div className={cn(
-        "w-full max-w-4xl lg:max-w-5xl mx-auto px-4 flex flex-col items-center select-none relative",
+        "w-full max-w-4xl lg:max-w-5xl mx-auto px-4 flex flex-col items-center select-none relative min-h-[500px] md:min-h-[540px]",
         isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[320px] md:pb-6" : ""
       )}>
-        <AnimatePresence mode="wait">
-          {currentCardTrainingMode === 'preposition_drill' ? (
-            <PrepStudyCard
-              key={`${currentCardSnapshot.id}-${turn}`}
-              card={liveCard}
-              deckTitle={currentDeck?.name}
-              isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
-              onAnswer={(id, correct, isHilfe) => {
-                handleSessionAnswer(correct, isHilfe);
-              }}
-              onNext={handleNext}
-            />
-          ) : currentCardTrainingMode === 'starke_verben' ? (
-            <VerbStudyCard
-              key={`${currentCardSnapshot.id}-${turn}`}
-              card={liveCard}
-              deckTitle={currentDeck?.name}
-              isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
-              onAnswer={(correct, isHilfe) => {
-                handleSessionAnswer(correct, isHilfe);
-              }}
-              onNext={handleNext}
-            />
-          ) : currentCardTrainingMode === 'redemittel' ? (
-            <RedemittelStudyCard
-              key={`${currentCardSnapshot.id}-${turn}`}
-              card={liveCard}
-              deckTitle={decks.find(d => d.id === currentDeckId)?.name || currentDeck?.name}
-              cardIndex={masteredInSession + 1}
-              totalCards={initialTotal}
-              isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
-              onAnswer={(correct, isHilfe) => {
-                handleSessionAnswer(correct, isHilfe);
-              }}
-              onNext={handleNext}
-            />
-          ) : currentCardTrainingMode === 'rapid_flashcards' ? (
-            <RapidStudyCard
-              key={`${currentCardSnapshot.id}-${turn}`}
-              card={liveCard}
-              deckTitle={currentDeck?.name}
-              isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && (liveCard.isLegendary ?? (liveCard.round === 4)))}
-              reverse={isReviewSession || isReviewingMistakesSession ? true : undefined}
-              onAnswer={(correct, isHilfe) => {
-                handleSessionAnswer(correct, isHilfe);
-              }}
-              onNext={handleNext}
-            />
-          ) : (
-            <StudyCard
-              key={`${currentCardSnapshot.id}-${turn}`}
-              card={liveCard}
-              deckTitle={currentDeck?.name}
-              isGrammar={isGrammarDeck}
-              forceInputMode={isReviewSession || isReviewingMistakesSession}
-              isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
-              onAnswer={(correct, isHilfe) => {
-                handleSessionAnswer(correct, isHilfe);
-              }}
-              onNext={handleNext}
-            />
-          )}
-        </AnimatePresence>
+        {currentCardTrainingMode === 'preposition_drill' ? (
+          <PrepStudyCard
+            card={liveCard}
+            deckTitle={currentDeck?.name}
+            isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            onAnswer={(id, correct, isHilfe) => {
+              handleSessionAnswer(correct, isHilfe);
+            }}
+            onNext={handleNext}
+          />
+        ) : currentCardTrainingMode === 'starke_verben' ? (
+          <VerbStudyCard
+            card={liveCard}
+            deckTitle={currentDeck?.name}
+            isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            onAnswer={(correct, isHilfe) => {
+              handleSessionAnswer(correct, isHilfe);
+            }}
+            onNext={handleNext}
+          />
+        ) : currentCardTrainingMode === 'redemittel' ? (
+          <RedemittelStudyCard
+            card={liveCard}
+            deckTitle={decks.find(d => d.id === currentDeckId)?.name || currentDeck?.name}
+            cardIndex={masteredInSession + 1}
+            totalCards={initialTotal}
+            isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            onAnswer={(correct, isHilfe) => {
+              handleSessionAnswer(correct, isHilfe);
+            }}
+            onNext={handleNext}
+          />
+        ) : currentCardTrainingMode === 'rapid_flashcards' ? (
+          <RapidStudyCard
+            card={liveCard}
+            deckTitle={currentDeck?.name}
+            isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            reverse={isReviewSession || isReviewingMistakesSession ? true : undefined}
+            onAnswer={(correct, isHilfe) => {
+              handleSessionAnswer(correct, isHilfe);
+            }}
+            onNext={handleNext}
+          />
+        ) : (
+          <StudyCard
+            card={liveCard}
+            deckTitle={currentDeck?.name}
+            isGrammar={isGrammarDeck}
+            forceInputMode={isReviewSession || isReviewingMistakesSession}
+            isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            onAnswer={(correct, isHilfe) => {
+              handleSessionAnswer(correct, isHilfe);
+            }}
+            onNext={handleNext}
+          />
+        )}
       </div>
 
       <StatsPopover
@@ -7018,14 +7004,13 @@ function StudyCard({
   return (
     <>
       <CardContainer 
-        key={card.id || (card as any)?.front}
         rarityRound={visualRound}
         isArchivingPulse={isArchivePulse}
         isSealed={isMasteredGolden || isVaporizing}
         isLegendary={isLegendaryVisual}
         isVaporizing={isVaporizing}
         className={cn(
-          "transition-all duration-150 ease-out",
+          "min-h-[500px] md:min-h-[540px] transition-all duration-150 ease-out",
           isTransitioning
             ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
             : "opacity-100 scale-100 blur-0"
@@ -7107,7 +7092,7 @@ function StudyCard({
           </div>
         </div>
 
-        <div className="flex flex-col items-center text-center w-full my-auto">
+        <div className="flex-1 w-full flex flex-col justify-center items-center text-center my-auto transition-all duration-200 ease-out animate-in fade-in duration-150">
           <div className="text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-6">
             {parts[0]}
             
@@ -7680,9 +7665,9 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
               <button
                 type="button"
                 onClick={onStartReview}
-                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white shadow-[0_0_24px_rgba(37,99,235,0.65)] hover:shadow-[0_0_32px_rgba(37,99,235,0.85)] border border-blue-400/40"
+                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none bg-[#13355c]/90 hover:bg-[#184273] border border-sky-400/60 hover:border-sky-300 shadow-[0_0_24px_rgba(14,165,233,0.5)] hover:shadow-[0_0_32px_rgba(14,165,233,0.7)] text-sky-100 hover:text-white active:scale-[0.98]"
               >
-                <RotateCcw className="w-4 h-4 text-white shrink-0" />
+                <RotateCcw className="w-4 h-4 text-sky-300 shrink-0"/>
                 <span>{dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}</span>
               </button>
             ) : (
@@ -7723,7 +7708,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                 <path d="m3 17 9 5 9-5" />
               </svg>
               <span suppressHydrationWarning className="text-xs font-semibold tabular-nums tracking-tight font-sans">
-                {Math.max(langStats.learnedToday || 0, stats?.cardsDone || 0)} <span className="text-neutral-400 dark:text-neutral-500 font-normal">/ 200</span>
+                {getTodayCompletedCardsCount(effectiveLang || appLanguage)} <span className="text-neutral-400 dark:text-neutral-500 font-normal">/ 200</span>
               </span>
             </button>
 
@@ -11711,7 +11696,7 @@ export default function App() {
         }
       });
     });
-    return deduplicateCardsByLemma(list, false);
+    return deduplicateReviewSession(list);
   }, [filteredDecksList]);
 
   // Хедерный подсчет повторений: строго для текущего активного языка (appLanguage) и только существующих колод
@@ -11732,7 +11717,7 @@ export default function App() {
         return activeDeckIds.has(cDeckId);
       }))
       .filter(card => isCardDueForReview(card));
-    return deduplicateCardsByLemma(rawDue, false).length;
+    return deduplicateReviewSession(rawDue).length;
   }, [decks, books, appLanguage, activeBookId]);
 
   // ДИАГНОСТИЧЕСКИЙ ЛОГ В КОНСОЛЬ (СТРОГО ОДИН РАЗ, 0 БАЙТ EGRESS)
@@ -11761,7 +11746,7 @@ export default function App() {
 
     // 1. FAST IN-MEMORY PATH: Use local dueCards immediately (0 network requests)
     if (dueCards.length > 0) {
-      setReviewCards(deduplicateCardsByLemma(dueCards, true));
+      setReviewCards(deduplicateReviewSession(dueCards));
       return;
     }
 
@@ -11769,7 +11754,7 @@ export default function App() {
       const targetLang = activeBook?.language || appLanguage;
       const freshCards = await fetchDueCardsFromCloud(targetLang, activeBookId || undefined);
       if (freshCards.length > 0) {
-        setReviewCards(deduplicateCardsByLemma(freshCards, true));
+        setReviewCards(deduplicateReviewSession(freshCards));
         return;
       }
     } catch (e) {

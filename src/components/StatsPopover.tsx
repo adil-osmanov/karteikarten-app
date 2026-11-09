@@ -225,11 +225,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     }
   })();
 
-  const todayLiveCards = Math.max(
-    typeof currentLangStats?.learnedToday === 'number' ? currentLangStats.learnedToday : 0,
-    typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0,
-    getTodayCompletedCardsCount(currentLang)
-  );
+  const todayLiveCards = getTodayCompletedCardsCount(currentLang);
 
   const rawTodaySeconds = Math.max(
     typeof currentLangStats?.focusSeconds === 'number' ? currentLangStats.focusSeconds : 0,

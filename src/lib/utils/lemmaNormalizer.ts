@@ -54,18 +54,33 @@ export function normalizeLemmaKey(rawWord: string): string {
 }
 
 /**
+ * 1. Агрессивная нормализация до корня слова (леммы) по строгому стандарту дедупликации SRS:
+ */
+export function getStrictLemmaKey(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .toLowerCase()
+    .trim()
+    // Убираем маркер отделяемой приставки mit|teilen -> mitteilen
+    .replace(/\|/g, '')
+    // Убираем артикли
+    .replace(/^(der|die|das|dem|den|des|ein|eine|einen|einem|einer)\s+/gi, '')
+    // Убираем возвратную частицу sich
+    .replace(/^sich\s+/gi, '')
+    // Убираем паттерны управления глаголов
+    .replace(/^(jemanden|jemandem|jemand|etwas)\s+/gi, '')
+    // Убираем скобки и всё внутри них: "отвечать (на запрос)" -> "отвечать"
+    .replace(/\(.*?\)/g, '')
+    // Убираем знаки препинания и лишние пробелы
+    .replace(/[.,/#!$%^&*;:{}=\-_`~]/g, '')
+    .trim();
+}
+
+/**
  * Нормализация ключа слова (Lemma Key) для строгой дедупликации в сессии повторений
  */
 export function getWordKey(word: string): string {
-  if (!word) return '';
-  return word
-    .toLowerCase()
-    .replace(/^(der|die|das|dem|den|des)\s+/i, '') // убираем артикли
-    .replace(/^sich\s+/i, '')                      // убираем sich
-    .replace(/^(jemanden|jemandem|etwas)\s+/i, '') // убираем местоимения управления
-    .replace(/\|/g, '')                           // убираем маркер отделяемой приставки mit|teilen -> mitteilen
-    .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, '')     // убираем знаки препинания
-    .trim();
+  return getStrictLemmaKey(word);
 }
 
 /**
@@ -182,4 +197,32 @@ export function deduplicateCardsByLemma<
   return sessionQueue;
 }
 
-export const getDueReviewCards = deduplicateCardsByLemma;
+/**
+ * 2. Гарантированный фильтр дублей (одно слово/корень = строго 1 карточка за сессию):
+ */
+export function deduplicateReviewSession<
+  T extends { id?: string; targetWord?: string; front?: string; lemma?: string; word?: string; card?: any }
+>(rawCards: T[]): T[] {
+  if (!Array.isArray(rawCards) || rawCards.length === 0) return [];
+  const seenRoots = new Set<string>();
+  const cleanQueue: T[] = [];
+
+  for (const item of rawCards) {
+    if (!item) continue;
+    const card = (item as any).card || item;
+    const word = card.targetWord || card.target_word || card.front || card.lemma || card.word || card.missingWord || card.infinitive || '';
+    const rootKey = getStrictLemmaKey(word);
+    
+    // Если корень уже был сегодня в сессии — ПРОПУСКАЕМ НА СЕГОДНЯ:
+    if (!rootKey || seenRoots.has(rootKey)) {
+      continue;
+    }
+
+    seenRoots.add(rootKey);
+    cleanQueue.push(item);
+  }
+
+  return cleanQueue;
+}
+
+export const getDueReviewCards = deduplicateReviewSession;

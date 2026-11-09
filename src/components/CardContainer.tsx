@@ -111,7 +111,7 @@ export const CARD_CONTAINER_SURFACE_CLASSES = cn(
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "relative w-full max-w-4xl lg:max-w-5xl h-[600px] min-h-[600px] max-h-[600px] mx-auto p-10 rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden",
+  "relative w-full max-w-4xl lg:max-w-5xl min-h-[500px] md:min-h-[540px] h-[600px] max-h-[600px] mx-auto p-10 rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 

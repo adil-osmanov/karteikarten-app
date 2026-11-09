@@ -37,7 +37,7 @@ export const normalizeLanguage = (lang?: string | null): SupportedLanguage => {
 
 export function getLocalTodayDateString(): string {
   try {
-    return new Date().toLocaleDateString('sv');
+    return new Date().toLocaleDateString('en-CA');
   } catch {
     const now = new Date();
     const year = now.getFullYear();
@@ -322,24 +322,16 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
   const todayActual = getTodayCompletedCardsCount(normLang);
 
   let maxActiveSeconds = current.date === todayKey ? (current.activeSeconds || 0) : 0;
-  let maxCardsDone = current.date === todayKey ? (current.cardsDone || 0) : todayActual;
-  let maxCorrectCount = current.date === todayKey ? (current.correctCount || 0) : todayActual;
+  let maxCardsDone = todayActual;
+  let maxCorrectCount = todayActual;
   let maxMistakesToday = current.date === todayKey ? (current.mistakesCountToday || 0) : 0;
 
   if (isCloudToday) {
-    const cloudDone = typeof cloudRaw.cardsDone === 'number' ? cloudRaw.cardsDone : 0;
-    maxCardsDone = Math.max(maxCardsDone, cloudDone, todayActual);
-
     const normalizedLocalSecs = normalizeFocusSeconds(maxActiveSeconds, maxCardsDone, true);
     const rawCloudSecs = typeof cloudRaw.activeSeconds === 'number' ? cloudRaw.activeSeconds : 0;
     const normalizedCloudSecs = normalizeFocusSeconds(rawCloudSecs, maxCardsDone, true);
     maxActiveSeconds = Math.max(normalizedLocalSecs, normalizedCloudSecs);
 
-    if (typeof cloudRaw.correctCount === 'number') {
-      maxCorrectCount = Math.min(maxCardsDone, Math.max(maxCorrectCount, cloudRaw.correctCount));
-    } else {
-      maxCorrectCount = Math.max(maxCorrectCount, maxCardsDone);
-    }
     const cloudMistakes = typeof cloudRaw.mistakesCountToday === 'number' ? cloudRaw.mistakesCountToday : cloudPool.length;
     maxMistakesToday = Math.max(maxMistakesToday, cloudMistakes, mergedPool.length);
   } else {
@@ -444,60 +436,15 @@ export const mergeMistakesPools = (poolA: any[] = [], poolB: any[] = []): any[] 
 export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
   if (typeof window === 'undefined') return 0;
   try {
-    const normLang = normalizeLanguage(lang);
     const todayStr = getTodayKey();
-
-    let maxFound = 0;
-    const kraftRaw = localStorage.getItem(`kraft_day_count_${todayStr}`);
-    if (kraftRaw) {
-      const parsed = parseInt(kraftRaw, 10);
-      if (!isNaN(parsed) && parsed > maxFound) maxFound = parsed;
+    const stored = localStorage.getItem(`kraft_cards_learned_${todayStr}`);
+    if (stored !== null) {
+      const parsed = parseInt(stored, 10);
+      return !isNaN(parsed) && parsed >= 0 ? parsed : 0;
     }
-
-    const activityKeys = [
-      `daily_activity_${normLang}`,
-      `daily_activity_${normLang.toLowerCase()}`
-    ];
-    for (const aKey of activityKeys) {
-      const stored = localStorage.getItem(aKey);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed && typeof parsed === 'object') {
-          const raw = parsed[todayStr];
-          const count = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
-          if (count > maxFound) maxFound = count;
-        }
-      }
-    }
-
-    const scopedKey = `daily_stats_${normLang.toLowerCase()}_${todayStr}`;
-    const scopedRaw = localStorage.getItem(scopedKey);
-    if (scopedRaw) {
-      try {
-        const parsed = JSON.parse(scopedRaw);
-        if (typeof parsed?.learnedToday === 'number' && parsed.learnedToday > maxFound) {
-          maxFound = parsed.learnedToday;
-        }
-      } catch {}
-    }
-
-    const appKeys = [
-      getStorageKey(normLang),
-      `app_daily_stats_${normLang.toLowerCase()}`
-    ];
-    for (const sKey of appKeys) {
-      const savedAppStats = localStorage.getItem(sKey);
-      if (savedAppStats) {
-        const parsed = JSON.parse(savedAppStats);
-        const isToday = parsed && parsed.date === todayStr;
-        if (isToday && typeof parsed?.cardsDone === 'number' && parsed.cardsDone > maxFound) {
-          maxFound = parsed.cardsDone;
-        }
-      }
-    }
-
-    return maxFound;
-  } catch (e) {
+    // Если в localStorage по ключу сегодняшнего дня нет записи — значение строго равно 0!
+    return 0;
+  } catch {
     return 0;
   }
 }
@@ -805,11 +752,9 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
   } catch (e) {}
 
   const finalMistakesToday = foundTodaySaved ? Math.max(maxMistakesToday, mergedPool.length) : mergedPool.length;
-  const finalCardsDone = foundTodaySaved ? Math.max(maxCardsDone, realTodayCards) : realTodayCards;
-  let finalCorrectCount = foundTodaySaved ? Math.max(maxCorrectCount, finalCardsDone - finalMistakesToday) : realTodayCards;
-  if (finalCardsDone > 0 && finalCorrectCount + finalMistakesToday < finalCardsDone) {
-    finalCorrectCount = Math.max(0, finalCardsDone - finalMistakesToday);
-  }
+  // Сегодняшний счетчик берется строго из getTodayCompletedCardsCount (ключ kraft_cards_learned_{today})
+  const finalCardsDone = realTodayCards;
+  let finalCorrectCount = realTodayCards;
 
   // Разовая нормализация сегодняшнего накрученного времени (52 мин за 22 карточки -> ~5 мин)
   let finalActiveSeconds = foundTodaySaved ? normalizeFocusSeconds(maxActiveSeconds, finalCardsDone, true) : 0;
@@ -941,7 +886,8 @@ export function resetDayStatsToZero(lang?: string) {
   if (typeof window === 'undefined') return;
   const todayKey = getTodayKey();
   try {
-    localStorage.setItem(`kraft_day_count_${todayKey}`, '0');
+    localStorage.setItem(`kraft_cards_learned_${todayKey}`, '0');
+    localStorage.removeItem(`kraft_day_count_${todayKey}`);
   } catch {}
   const langs = lang ? [normalizeLanguage(lang)] : ['DE', 'EN', 'RU'];
   langs.forEach(l => {
@@ -1289,12 +1235,12 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     const today = getTodayKey();
     const currentActivityCards = getTodayCompletedCardsCount(targetLang);
     const newCardsDone = isCorrect
-      ? Math.max((current.cardsDone || 0) + 1, currentActivityCards + 1)
-      : Math.max(current.cardsDone || 0, currentActivityCards);
+      ? (currentActivityCards + 1)
+      : currentActivityCards;
 
-    if (typeof window !== 'undefined') {
+    if (isCorrect && typeof window !== 'undefined') {
       try {
-        localStorage.setItem(`kraft_day_count_${today}`, String(newCardsDone));
+        localStorage.setItem(`kraft_cards_learned_${today}`, String(newCardsDone));
       } catch {}
     }
 
