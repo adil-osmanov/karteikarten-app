@@ -60,7 +60,7 @@ export const getStorageKey = (lang: string) => `app_daily_stats_${normalizeLangu
 export function purgeOldStaleActivityCounters(): void {
   if (typeof window === 'undefined') return;
   try {
-    const purgeFlag = 'kraft_clean_week_20261109_v3';
+    const purgeFlag = 'kraft_purge_reset_zero_v5';
     if (!localStorage.getItem(purgeFlag)) {
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
@@ -70,28 +70,31 @@ export function purgeOldStaleActivityCounters(): void {
           key.startsWith('kraft_day_count_') ||
           key.startsWith('daily_stats_') ||
           key.startsWith('day_stats_') ||
+          key.startsWith('user_stats_') ||
           key.startsWith('app_daily_stats_') ||
-          key.startsWith('kraft_cards_learned_')
+          key.startsWith('kraft_cards_learned_') ||
+          key.startsWith('daily_activity_') ||
+          key === 'daily_learned_count' ||
+          key === 'app_daily_counter_date' ||
+          key === 'last_active_date'
         ) {
           keysToRemove.push(key);
         }
       }
       keysToRemove.forEach(k => localStorage.removeItem(k));
 
-      // Reset today in daily_activity_*
+      const today = getTodayKey();
+      localStorage.setItem(`kraft_cards_learned_${today}`, '0');
       ['DE', 'EN', 'RU'].forEach(lang => {
-        try {
-          const actKey = `daily_activity_${lang}`;
-          const raw = localStorage.getItem(actKey);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            const today = getTodayKey();
-            if (parsed && typeof parsed === 'object') {
-              parsed[today] = 0;
-              localStorage.setItem(actKey, JSON.stringify(parsed));
-            }
-          }
-        } catch {}
+        localStorage.setItem(`daily_activity_${lang}`, JSON.stringify({ [today]: 0 }));
+        statsByLang[lang] = {
+          date: today,
+          activeSeconds: 0,
+          cardsDone: 0,
+          correctCount: 0,
+          mistakesCountToday: 0,
+          mistakesPool: []
+        };
       });
 
       localStorage.setItem(purgeFlag, 'true');
@@ -373,8 +376,10 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
   let maxMistakesToday = current.date === todayKey ? (current.mistakesCountToday || 0) : 0;
 
   if (isCloudToday) {
-    const cloudDone = typeof cloudRaw.cardsDone === 'number' ? cloudRaw.cardsDone : 0;
-    const cloudCorrect = typeof cloudRaw.correctCount === 'number' ? cloudRaw.correctCount : cloudDone;
+    const rawCloudDone = typeof cloudRaw.cardsDone === 'number' ? cloudRaw.cardsDone : 0;
+    const cloudDone = rawCloudDone > 500 ? 0 : rawCloudDone;
+    const rawCloudCorrect = typeof cloudRaw.correctCount === 'number' ? cloudRaw.correctCount : cloudDone;
+    const cloudCorrect = rawCloudCorrect > 500 ? 0 : rawCloudCorrect;
     maxCardsDone = Math.max(maxCardsDone, cloudDone);
     maxCorrectCount = Math.max(maxCorrectCount, cloudCorrect, maxCardsDone);
 
@@ -792,7 +797,7 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
         if (typeof parsed.activeSeconds === 'number' && parsed.activeSeconds > maxActiveSeconds) {
           maxActiveSeconds = parsed.activeSeconds;
         }
-        if (typeof parsed.cardsDone === 'number' && parsed.cardsDone > maxCardsDone) {
+        if (typeof parsed.cardsDone === 'number' && parsed.cardsDone > maxCardsDone && parsed.cardsDone < 500) {
           maxCardsDone = parsed.cardsDone;
         }
         const parsedMistakesToday = typeof parsed.mistakesCountToday === 'number'
@@ -801,7 +806,7 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
         if (parsedMistakesToday > maxMistakesToday) {
           maxMistakesToday = parsedMistakesToday;
         }
-        if (typeof parsed.correctCount === 'number' && parsed.correctCount > maxCorrectCount) {
+        if (typeof parsed.correctCount === 'number' && parsed.correctCount > maxCorrectCount && parsed.correctCount < 500) {
           maxCorrectCount = parsed.correctCount;
         }
       }

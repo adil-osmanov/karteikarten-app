@@ -2293,6 +2293,21 @@ export const useStore = create<DeckState>()((set, get) => ({
     if (error) {
       console.error("SUPABASE ERROR on addBook:", error);
     }
+
+    // 3. Также гарантированно персистим в таблицу decks Supabase
+    try {
+      const deckPayload = {
+        id: cleanBook.id,
+        name: cleanBook.title,
+        category: cleanBook.category || 'books',
+        language: cleanBook.language || 'DE',
+        created_at: new Date().toISOString()
+      };
+      const { error: deckErr } = await supabase.from('decks').upsert(deckPayload);
+      if (deckErr) console.error('Ошибка сохранения книги в decks:', deckErr);
+    } catch (e) {
+      console.warn('decks upsert error:', e);
+    }
   },
   updateBookSettings: async (bookId, updates) => {
     const previousBooks = get().books;
@@ -7694,11 +7709,11 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
               <button
                 type="button"
                 onClick={onStartReview}
-                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-150 cursor-pointer select-none active:scale-[0.98]
-                  bg-sky-500 hover:bg-sky-400 dark:bg-sky-500 dark:hover:bg-sky-400
-                  text-white dark:text-white
-                  shadow-[0_2px_12px_rgba(14,165,233,0.35)]
-                  border-none outline-none"
+                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none active:scale-[0.98]
+                  bg-blue-600 hover:bg-blue-500
+                  text-white
+                  shadow-[0_0_24px_rgba(37,99,235,0.7)] hover:shadow-[0_0_32px_rgba(37,99,235,0.9)]
+                  border border-blue-400/40"
               >
                 <RotateCcw className="w-4 h-4 text-white shrink-0" />
                 <span className="font-semibold tracking-wider uppercase">
@@ -11394,9 +11409,12 @@ export default function App() {
             allDates.forEach(date => {
               const rawCloud = cloudDaily[date];
               const rawLocal = localDaily[date];
-              const cloudVal = typeof rawCloud === 'number' ? rawCloud : (rawCloud?.total || (typeof rawCloud === 'string' ? parseInt(rawCloud) || 0 : 0));
-              const localVal = typeof rawLocal === 'number' ? rawLocal : (rawLocal?.total || (typeof rawLocal === 'string' ? parseInt(rawLocal) || 0 : 0));
-              
+              let cloudVal = typeof rawCloud === 'number' ? rawCloud : (rawCloud?.total || (typeof rawCloud === 'string' ? parseInt(rawCloud) || 0 : 0));
+              let localVal = typeof rawLocal === 'number' ? rawLocal : (rawLocal?.total || (typeof rawLocal === 'string' ? parseInt(rawLocal) || 0 : 0));
+              if (date === getLocalTodayStr() && (cloudVal > 500 || localVal > 500)) {
+                cloudVal = 0;
+                localVal = 0;
+              }
               const maxVal = Math.max(cloudVal, localVal);
               
               if (maxVal > localVal || (rawLocal !== undefined && typeof rawLocal !== 'number')) {
