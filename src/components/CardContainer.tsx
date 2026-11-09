@@ -93,8 +93,7 @@ export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean,
   return cn(
     getRarityBorderClasses(r, isSealed, isLegendary),
     getRarityShadowClasses(r, isSealed, isLegendary),
-    "transition-shadow duration-300 ease-out",
-    isArchivingPulse && "animate-pulse"
+    "transition-shadow duration-300 ease-out"
   );
 }
 

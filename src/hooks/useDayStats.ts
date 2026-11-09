@@ -36,11 +36,15 @@ export const normalizeLanguage = (lang?: string | null): SupportedLanguage => {
 };
 
 export function getLocalTodayDateString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  try {
+    return new Date().toLocaleDateString('sv');
+  } catch {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 }
 
 export const getTodayKey = (): string => {
@@ -444,6 +448,12 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
     const todayStr = getTodayKey();
 
     let maxFound = 0;
+    const kraftRaw = localStorage.getItem(`kraft_day_count_${todayStr}`);
+    if (kraftRaw) {
+      const parsed = parseInt(kraftRaw, 10);
+      if (!isNaN(parsed) && parsed > maxFound) maxFound = parsed;
+    }
+
     const activityKeys = [
       `daily_activity_${normLang}`,
       `daily_activity_${normLang.toLowerCase()}`
@@ -930,6 +940,9 @@ let lastActivityTime = Date.now();
 export function resetDayStatsToZero(lang?: string) {
   if (typeof window === 'undefined') return;
   const todayKey = getTodayKey();
+  try {
+    localStorage.setItem(`kraft_day_count_${todayKey}`, '0');
+  } catch {}
   const langs = lang ? [normalizeLanguage(lang)] : ['DE', 'EN', 'RU'];
   langs.forEach(l => {
     const cur = statsByLang[l] || { mistakesPool: [] };
@@ -1276,8 +1289,14 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     const today = getTodayKey();
     const currentActivityCards = getTodayCompletedCardsCount(targetLang);
     const newCardsDone = isCorrect
-      ? Math.max((current.cardsDone || 0) + 1, currentActivityCards)
+      ? Math.max((current.cardsDone || 0) + 1, currentActivityCards + 1)
       : Math.max(current.cardsDone || 0, currentActivityCards);
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`kraft_day_count_${today}`, String(newCardsDone));
+      } catch {}
+    }
 
     const prevMistakesToday = typeof current.mistakesCountToday === 'number'
       ? current.mistakesCountToday

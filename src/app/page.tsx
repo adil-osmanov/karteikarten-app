@@ -57,11 +57,15 @@ function cn(...inputs: ClassValue[]) {
 
 // Получение локальной даты пользователя YYYY-MM-DD
 export function getDeviceLocalDate(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  try {
+    return new Date().toLocaleDateString('sv');
+  } catch {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 }
 
 export const getLocalDateKey = (): string => getDeviceLocalDate();
@@ -458,11 +462,21 @@ export function updateLanguageDailyStats(
   const cleanLang = (lang || 'de').toLowerCase();
   const current = { ...getLanguageDailyStats(cleanLang) };
 
+  // Strict: increment day counter by at least +1 on every card answer
+  const inc = deltaLearned > 0 ? deltaLearned : (isCorrect ? 1 : 0);
+  current.learnedToday = (current.learnedToday || 0) + inc;
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(`kraft_day_count_${today}`, String(current.learnedToday));
+    } catch {}
+  }
+
   if (options?.isReview) {
     current.cards_reviewed_today = (current.cards_reviewed_today || 0) + 1;
-  } else if (options?.isNewMastered || deltaLearned > 0) {
-    current.learnedToday = Math.max(0, current.learnedToday + (deltaLearned > 0 ? deltaLearned : 1));
-    current.words_learned_today = (current.words_learned_today || 0) + (deltaLearned > 0 ? deltaLearned : 1);
+  }
+  if (options?.isNewMastered) {
+    current.words_learned_today = (current.words_learned_today || 0) + 1;
   }
 
   if (isCorrect !== undefined) {
@@ -529,7 +543,7 @@ export const checkAndResetDailyProgress = () => {
   try {
     cleanLegacyDailyCounters();
     const todayStr = getLocalDateKey();
-    const storedDate = localStorage.getItem('app_daily_counter_date') || localStorage.getItem('last_active_date');
+    const storedDate = localStorage.getItem('app_daily_counter_date');
 
     if (!storedDate) {
       safeSetStorage('app_daily_counter_date', todayStr);
@@ -541,6 +555,9 @@ export const checkAndResetDailyProgress = () => {
       console.log(`[DailyReset] Наступил новый день (${todayStr}). Предыдущий: ${storedDate}. Сбрасываем счетчик.`);
       safeSetStorage('app_daily_counter_date', todayStr);
       safeSetStorage('last_active_date', todayStr);
+      try {
+        localStorage.setItem(`kraft_day_count_${todayStr}`, '0');
+      } catch {}
 
       ['de', 'en', 'ru'].forEach(lang => {
         const key = `daily_stats_${lang}_${todayStr}`;
@@ -4670,7 +4687,7 @@ function RapidFlashcardMode({
                   <div
                     onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                     className={cn(
-                      "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all duration-200 outline-none border cursor-text",
+                      "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
                       isMobile && "select-none",
                       isAnswered
                         ? (!isSurrendered
@@ -4740,7 +4757,7 @@ function RapidFlashcardMode({
                 <div
                   onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                   className={cn(
-                    "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-all duration-200 outline-none border cursor-text",
+                    "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
                     isMobile && "select-none",
                     isAnswered
                       ? (!isSurrendered
@@ -5252,10 +5269,10 @@ function RapidSession({
         card: liveCard,
         language: studyLanguage
       });
-      updateLanguageDailyStats(studyLanguage, isReviewMode ? 0 : 1, true, id, { isReview: isReviewMode, isNewMastered });
+      updateLanguageDailyStats(studyLanguage, 1, true, id, { isReview: isReviewMode, isNewMastered });
       setLangStats(prev => ({
         ...prev,
-        learnedToday: isReviewMode ? (prev?.learnedToday || 0) : (prev?.learnedToday || 0) + 1,
+        learnedToday: (prev?.learnedToday || 0) + 1,
         cards_reviewed_today: isReviewMode ? (prev?.cards_reviewed_today || 0) + 1 : (prev?.cards_reviewed_today || 0),
         totalCount: (prev?.totalCount || 0) + 1,
         correctCount: (prev?.correctCount || 0) + 1
@@ -5435,7 +5452,7 @@ function RapidSession({
         (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[320px] md:pb-6" : ""
       )}>
         <RapidFlashcardMode
-          key={`${current.card.id}-${turn}-${current.card.round ?? 0}-${current.card.isLegendary ? 'leg' : 'norm'}`}
+          key={`${current.card.id}-${turn}`}
           card={liveCard}
           progress={wordProgress[current.card.id] ?? liveCard.masteryLevel ?? 0}
           locked={locked}
@@ -5524,7 +5541,7 @@ function RapidStudyCard({
   return (
     <div className="w-full flex justify-center relative">
       <RapidFlashcardMode
-        key={`${card.id}-${stepTurn}-${card.round ?? 0}-${card.isLegendary ? 'leg' : 'norm'}`}
+        key={`${card.id}-${stepTurn}`}
         card={card}
         progress={progress}
         locked={locked}
@@ -5853,10 +5870,10 @@ function StudyInterface({
     // 3. Запись в статистику сессии и дневной счетчик
     if (isActualCorrect) {
       setSessionCorrect(prev => prev + 1);
-      updateLanguageDailyStats(studyLanguage, isReviewMode ? 0 : (isNewMastered ? 1 : 0), true, currentCardSnapshot.id, { isReview: isReviewMode, isNewMastered });
+      updateLanguageDailyStats(studyLanguage, 1, true, currentCardSnapshot.id, { isReview: isReviewMode, isNewMastered });
       setLangStats(prev => ({
         ...prev,
-        learnedToday: isReviewMode ? (prev?.learnedToday || 0) : (prev?.learnedToday || 0) + (isNewMastered ? 1 : 0),
+        learnedToday: (prev?.learnedToday || 0) + 1,
         cards_reviewed_today: isReviewMode ? (prev?.cards_reviewed_today || 0) + 1 : (prev?.cards_reviewed_today || 0),
         totalCount: (prev?.totalCount || 0) + 1,
         correctCount: (prev?.correctCount || 0) + 1
@@ -6100,7 +6117,7 @@ function StudyInterface({
         <AnimatePresence mode="wait">
           {currentCardTrainingMode === 'preposition_drill' ? (
             <PrepStudyCard
-              key={`${currentCardSnapshot.id}-${turn}-${currentCardSnapshot.round ?? 0}-${currentCardSnapshot.isLegendary ? 'leg' : 'norm'}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
               isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
@@ -6111,7 +6128,7 @@ function StudyInterface({
             />
           ) : currentCardTrainingMode === 'starke_verben' ? (
             <VerbStudyCard
-              key={`${currentCardSnapshot.id}-${turn}-${currentCardSnapshot.round ?? 0}-${currentCardSnapshot.isLegendary ? 'leg' : 'norm'}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
               isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
@@ -6122,7 +6139,7 @@ function StudyInterface({
             />
           ) : currentCardTrainingMode === 'redemittel' ? (
             <RedemittelStudyCard
-              key={`${currentCardSnapshot.id}-${turn}-${currentCardSnapshot.round ?? 0}-${currentCardSnapshot.isLegendary ? 'leg' : 'norm'}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={decks.find(d => d.id === currentDeckId)?.name || currentDeck?.name}
               cardIndex={masteredInSession + 1}
@@ -6135,7 +6152,7 @@ function StudyInterface({
             />
           ) : currentCardTrainingMode === 'rapid_flashcards' ? (
             <RapidStudyCard
-              key={`${currentCardSnapshot.id}-${turn}-${currentCardSnapshot.round ?? 0}-${currentCardSnapshot.isLegendary ? 'leg' : 'norm'}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
               isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && (liveCard.isLegendary ?? (liveCard.round === 4)))}
@@ -6147,7 +6164,7 @@ function StudyInterface({
             />
           ) : (
             <StudyCard
-              key={`${currentCardSnapshot.id}-${turn}-${currentCardSnapshot.round ?? 0}-${currentCardSnapshot.isLegendary ? 'leg' : 'norm'}`}
+              key={`${currentCardSnapshot.id}-${turn}`}
               card={liveCard}
               deckTitle={currentDeck?.name}
               isGrammar={isGrammarDeck}
@@ -7663,9 +7680,9 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
               <button
                 type="button"
                 onClick={onStartReview}
-                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none bg-gradient-to-r from-[#0d223a] to-[#122e4e] border border-sky-400/40 text-sky-100 shadow-[0_0_22px_rgba(14,165,233,0.35)] hover:border-sky-400/70 hover:shadow-[0_0_30px_rgba(14,165,233,0.55)] hover:text-white active:scale-[0.98]"
+                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white shadow-[0_0_24px_rgba(37,99,235,0.65)] hover:shadow-[0_0_32px_rgba(37,99,235,0.85)] border border-blue-400/40"
               >
-                <RotateCcw className="w-4 h-4 text-sky-400 shrink-0" />
+                <RotateCcw className="w-4 h-4 text-white shrink-0" />
                 <span>{dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}</span>
               </button>
             ) : (
