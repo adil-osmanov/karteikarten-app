@@ -239,17 +239,14 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
         ? stats.mistakesCountToday
         : (Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0));
 
-  const todayAttempts = (currentLangStats?.totalCount && currentLangStats.totalCount > 0)
-    ? currentLangStats.totalCount
-    : (todayLiveCards + todayMistakesCount);
-
   const todayCorrect = typeof currentLangStats?.correctCount === 'number'
     ? currentLangStats.correctCount
-    : todayLiveCards;
+    : (typeof stats?.correctCount === 'number' ? stats.correctCount : todayLiveCards);
 
-  const todayAccuracy = todayAttempts === 0
+  const totalAnswers = (todayCorrect || 0) + (todayMistakesCount || 0);
+  const todayAccuracy = totalAnswers === 0
     ? 100
-    : Math.max(0, Math.min(100, Math.round((todayCorrect / todayAttempts) * 100)));
+    : Math.max(0, Math.min(100, Math.round(((todayCorrect || 0) / totalAnswers) * 100)));
 
   // Find the selected day record
   const selectedRecord = historyDays.find(d => d.date === selectedDate) || {
@@ -287,7 +284,12 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
   const displayAccuracy = isSelectedToday 
     ? todayAccuracy 
-    : (typeof selectedRecord.accuracy === 'number' ? selectedRecord.accuracy : 100);
+    : (() => {
+        const c = selectedRecord.cardsReviewed || 0;
+        const m = selectedRecord.mistakesCount || 0;
+        const total = c + m;
+        return total === 0 ? 100 : (typeof selectedRecord.accuracy === 'number' ? selectedRecord.accuracy : Math.round((c / total) * 100));
+      })();
 
   const accuracyColor = displayAccuracy >= 80 
     ? 'text-emerald-600 dark:text-emerald-400' 

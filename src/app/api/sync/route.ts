@@ -73,6 +73,31 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    if (body.action === 'reset_week' || body.resetWeek) {
+      const today = new Date().toISOString().split('T')[0];
+      const langs = ['DE', 'EN', 'RU'];
+      for (const l of langs) {
+        const { data: st } = await serverSupabase.from('user_stats').select('*').eq('language', l).maybeSingle();
+        if (st && st.daily_activity) {
+          const act = { ...st.daily_activity, [today]: 0 };
+          await serverSupabase.from('user_stats').update({ daily_activity: act }).eq('language', l);
+        }
+        await serverSupabase.from('user_stats').upsert({
+          language: `DAY_STATS_${l}`,
+          daily_activity: {
+            date: today,
+            cardsDone: 0,
+            activeSeconds: 0,
+            correctCount: 0,
+            mistakesCountToday: 0,
+            mistakesPool: []
+          }
+        });
+      }
+      return NextResponse.json({ success: true, reset: true }, { headers: corsHeaders });
+    }
+
     const langKey = body.language || 'DAY_STATS_DE';
     const activityPayload = body.daily_activity !== undefined ? body.daily_activity : body;
 

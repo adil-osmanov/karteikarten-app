@@ -1485,6 +1485,45 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
 let isSyncingCardsFromSupabase = false;
 let lastSyncCardsFromSupabaseTime = 0;
 
+export async function syncBooksFromSupabase(): Promise<void> {
+  try {
+    const { data: cloudBooks, error } = await supabase.from('books').select('*').order('created_at', { ascending: true });
+    if (error || !cloudBooks || cloudBooks.length === 0) return;
+    
+    const mappedCloudBooks: BookMeta[] = cloudBooks.map((b: any) => {
+      let dedicatedCover = null;
+      try { dedicatedCover = localStorage.getItem(`book_cover_${b.id}`); } catch(e) {}
+      return {
+        id: b.id,
+        language: b.language || 'DE',
+        title: b.title,
+        subtitle: b.subtitle,
+        category: b.category || 'book',
+        training_mode: b.training_mode || 'standard_cloze',
+        tintColor: b.tintColor || b.tintcolor || '#007AFF',
+        coverImage: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || null,
+        activeLevels: b.activeLevels || b.activelevels || ['A1'],
+        coverType: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover ? 'image' : (b.coverType || b.covertype),
+        coverValue: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || b.coverValue || b.covervalue,
+        accentColor: b.accentColor || b.accentcolor
+      };
+    });
+
+    const localBooks = useStore.getState().books;
+    const cloudIds = new Set(mappedCloudBooks.map(b => b.id));
+    const merged = [...mappedCloudBooks];
+    localBooks.forEach(lb => {
+      if (!cloudIds.has(lb.id)) merged.push(lb);
+    });
+
+    useStore.getState().setBooks(merged);
+    await setIDBItem('app_books', merged);
+    safeSetStorage('cached_app_books', JSON.stringify(merged));
+  } catch (e) {
+    console.warn('[Sync] Failed to sync books from Supabase:', e);
+  }
+}
+
 export async function syncCardsFromSupabase(force: boolean = false): Promise<void> {
   const now = Date.now();
   if (isSyncingCardsFromSupabase) return;
@@ -2200,35 +2239,59 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
   },
   addBook: async (book) => {
+    const bookId = book.id || crypto.randomUUID();
+    const cleanBook: BookMeta = {
+      ...book,
+      id: bookId,
+      language: book.language || get().appLanguage || 'DE',
+      title: (book.title || 'Neues Buch').trim(),
+      subtitle: book.subtitle?.trim() || undefined,
+      tintColor: book.tintColor || '#000000',
+      coverImage: book.coverImage || null,
+      category: book.category || 'textbooks',
+      training_mode: book.training_mode || 'standard_cloze',
+      activeLevels: book.activeLevels?.length ? book.activeLevels : ['A1']
+    };
     const previousBooks = get().books;
-    set({ books: [...previousBooks, book] }); // Restore Optimistic UI
+    const nextBooks = [...previousBooks.filter(b => b.id !== bookId), cleanBook];
+    set({ books: nextBooks });
     
-    // Clean payload: remove legacy fields (accentColor, coverType, coverValue) that cause schema cache errors
+    // 1. Immediately persist to IndexedDB and localStorage (Local-First!)
+    await setIDBItem('app_books', nextBooks);
+    safeSetStorage('cached_app_books', JSON.stringify(nextBooks));
+    
+    // 2. Persist to Supabase books table
     const payload = {
-      id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
-      tintColor: book.tintColor || '#000000', coverImage: book.coverImage || null,
-      category: book.category || 'book', training_mode: book.training_mode || 'standard_cloze',
-      activeLevels: book.activeLevels || ['A1']
+      id: cleanBook.id,
+      language: cleanBook.language,
+      title: cleanBook.title,
+      subtitle: cleanBook.subtitle,
+      tintColor: cleanBook.tintColor,
+      coverImage: cleanBook.coverImage,
+      category: cleanBook.category,
+      training_mode: cleanBook.training_mode,
+      activeLevels: cleanBook.activeLevels,
+      created_at: new Date().toISOString()
     };
     
-    let { error } = await supabase.from('books').insert(payload);
+    let { error } = await supabase.from('books').upsert(payload);
     
     if (error && error.message.includes('does not exist')) {
        const fallbackPayload = {
-         id: book.id, language: book.language, title: book.title, subtitle: book.subtitle || null,
-         tintcolor: book.tintColor || '#000000', coverimage: book.coverImage || null,
-         activelevels: book.activeLevels || ['A1']
+         id: cleanBook.id,
+         language: cleanBook.language,
+         title: cleanBook.title,
+         subtitle: cleanBook.subtitle,
+         tintcolor: cleanBook.tintColor,
+         coverimage: cleanBook.coverImage,
+         activelevels: cleanBook.activeLevels
        };
-       const fallbackRes = await supabase.from('books').insert(fallbackPayload);
+       const fallbackRes = await supabase.from('books').upsert(fallbackPayload);
        error = fallbackRes.error;
     }
     
     if (error) {
-      console.error("SUPABASE ERROR:", error);
-      if (typeof window !== 'undefined' && (window as any).toast) {
-        (window as any).toast.error("Fehler beim Erstellen des Buches.");
-      }
-      set({ books: previousBooks }); // Rollback on failure
+      console.error("SUPABASE ERROR on addBook:", error);
     }
   },
   updateBookSettings: async (bookId, updates) => {
@@ -2239,16 +2302,22 @@ export const useStore = create<DeckState>()((set, get) => ({
     const updatedBook = { ...book, ...updates };
     const newBooks = previousBooks.map(b => b.id === bookId ? updatedBook : b);
     set({ books: newBooks });
+    await setIDBItem('app_books', newBooks);
+    safeSetStorage('cached_app_books', JSON.stringify(newBooks));
     
     const { data, error } = await supabase.from('books').update(updates).eq('id', bookId).select('id');
     if (error) {
       console.error("Supabase updateBookSettings error:", error);
       set({ books: previousBooks });
+      await setIDBItem('app_books', previousBooks);
+      safeSetStorage('cached_app_books', JSON.stringify(previousBooks));
       throw error;
     }
     if (!data || data.length === 0) {
       console.error("Supabase updateBookSettings silent failure (RLS blocked update): 0 rows affected.");
       set({ books: previousBooks });
+      await setIDBItem('app_books', previousBooks);
+      safeSetStorage('cached_app_books', JSON.stringify(previousBooks));
       throw new Error("Update failed: Row Level Security blocked the operation, or book does not exist.");
     }
     return true;
@@ -2257,6 +2326,8 @@ export const useStore = create<DeckState>()((set, get) => ({
     const previousBooks = get().books;
     const newBooks = previousBooks.map(b => b.id === book.id ? book : b);
     set({ books: newBooks });
+    await setIDBItem('app_books', newBooks);
+    safeSetStorage('cached_app_books', JSON.stringify(newBooks));
     
     try {
       if (book.coverImage) localStorage.setItem(`book_cover_${book.id}`, book.coverImage);
@@ -7623,13 +7694,13 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
               <button
                 type="button"
                 onClick={onStartReview}
-                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none group active:scale-[0.98]
-                  bg-blue-600 hover:bg-blue-700 text-white shadow-md
-                  dark:bg-[#0b1736]/90 dark:border dark:border-blue-400/50 dark:text-sky-100
-                  dark:shadow-[0_0_25px_rgba(14,165,233,0.45)] dark:hover:shadow-[0_0_35px_rgba(14,165,233,0.65)]
-                  dark:hover:border-sky-300 dark:hover:text-white"
+                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-150 cursor-pointer select-none active:scale-[0.98]
+                  bg-sky-500 hover:bg-sky-400 dark:bg-sky-500 dark:hover:bg-sky-400
+                  text-white dark:text-white
+                  shadow-[0_2px_12px_rgba(14,165,233,0.35)]
+                  border-none outline-none"
               >
-                <RotateCcw className="w-4 h-4 text-white dark:text-sky-400 transition-transform duration-300 group-hover:rotate-180 shrink-0" />
+                <RotateCcw className="w-4 h-4 text-white shrink-0" />
                 <span className="font-semibold tracking-wider uppercase">
                   {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
                 </span>
@@ -11277,6 +11348,7 @@ export default function App() {
         // Немедленно запускаем фоновый дельта-синк для устранения рассинхрона между браузерами
         (async () => {
           try {
+            await syncBooksFromSupabase();
             await syncCardsFromSupabase(true);
             await syncCloudDailyStats(undefined, useStore.getState().appLanguage || 'de', true);
             await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, true);
@@ -11401,10 +11473,18 @@ export default function App() {
             };
           });
 
-          setBooks(mappedBooks);
+          // Merge with local books so user-created books are never overwritten
+          const existingLocalBooks = useStore.getState().books;
+          const cloudIds = new Set(mappedBooks.map((b: any) => b.id));
+          const mergedBooks = [...mappedBooks];
+          existingLocalBooks.forEach(lb => {
+            if (!cloudIds.has(lb.id)) mergedBooks.push(lb);
+          });
+
+          setBooks(mergedBooks);
           setIsLoadingBooks(false);
-          setIDBItem('app_books', mappedBooks);
-          safeSetStorage('cached_app_books', JSON.stringify(mappedBooks));
+          setIDBItem('app_books', mergedBooks);
+          safeSetStorage('cached_app_books', JSON.stringify(mergedBooks));
         } else if (!booksRes.error) {
           const defaultBooks: BookMeta[] = [
             { id: 'default-de', language: 'DE', title: 'Basis Deutsch', subtitle: 'Grammatik & Wortschatz', tintColor: '#007AFF', activeLevels: ['A1', 'A2', 'B1', 'B2', 'C1-C2'], category: 'book', training_mode: 'standard_cloze' },

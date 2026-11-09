@@ -57,6 +57,52 @@ export const getTodayKey = (): string => {
 
 export const getStorageKey = (lang: string) => `app_daily_stats_${normalizeLanguage(lang)}`;
 
+export function purgeOldStaleActivityCounters(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const purgeFlag = 'kraft_clean_week_20261109_v3';
+    if (!localStorage.getItem(purgeFlag)) {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (
+          key.startsWith('kraft_day_count_') ||
+          key.startsWith('daily_stats_') ||
+          key.startsWith('day_stats_') ||
+          key.startsWith('app_daily_stats_') ||
+          key.startsWith('kraft_cards_learned_')
+        ) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+
+      // Reset today in daily_activity_*
+      ['DE', 'EN', 'RU'].forEach(lang => {
+        try {
+          const actKey = `daily_activity_${lang}`;
+          const raw = localStorage.getItem(actKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const today = getTodayKey();
+            if (parsed && typeof parsed === 'object') {
+              parsed[today] = 0;
+              localStorage.setItem(actKey, JSON.stringify(parsed));
+            }
+          }
+        } catch {}
+      });
+
+      localStorage.setItem(purgeFlag, 'true');
+    }
+  } catch (e) {}
+}
+
+if (typeof window !== 'undefined') {
+  purgeOldStaleActivityCounters();
+}
+
 export const MAX_CARD_SECONDS = 30; // Максимальный лимит на 1 карточку (Anki Timebox Standard)
 export const MEDIAN_CARD_SECONDS = 14; // Реалистичный медианный темп ввода карточки для коррекции аномалий
 
@@ -618,8 +664,9 @@ export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7)
       const liveMistakes = typeof currentToday.mistakesCountToday === 'number'
         ? currentToday.mistakesCountToday
         : (currentToday.mistakesPool?.length || 0);
-      const totalAttempts = liveCards + liveMistakes;
-      const liveAccuracy = totalAttempts > 0 ? Math.round((liveCards / totalAttempts) * 100) : 100;
+      const liveCorrect = typeof currentToday.correctCount === 'number' ? currentToday.correctCount : liveCards;
+      const totalAnswers = (liveCorrect || 0) + (liveMistakes || 0);
+      const liveAccuracy = totalAnswers === 0 ? 100 : Math.max(0, Math.min(100, Math.round(((liveCorrect || 0) / totalAnswers) * 100)));
 
       record = {
         ...record,
@@ -670,8 +717,9 @@ export function getCurrentWeekDailyStats(lang: string = 'DE'): DayRecord[] {
       const liveMistakes = typeof currentToday.mistakesCountToday === 'number'
         ? currentToday.mistakesCountToday
         : (currentToday.mistakesPool?.length || 0);
-      const totalAttempts = liveCards + liveMistakes;
-      const liveAccuracy = totalAttempts > 0 ? Math.round((liveCards / totalAttempts) * 100) : 100;
+      const liveCorrect = typeof currentToday.correctCount === 'number' ? currentToday.correctCount : liveCards;
+      const totalAnswers = (liveCorrect || 0) + (liveMistakes || 0);
+      const liveAccuracy = totalAnswers === 0 ? 100 : Math.max(0, Math.min(100, Math.round(((liveCorrect || 0) / totalAnswers) * 100)));
 
       record = {
         ...record,
