@@ -55,25 +55,25 @@ export function normalizeLemmaKey(rawWord: string): string {
 
 /**
  * 1. Агрессивная нормализация до корня слова (леммы) по строгому стандарту дедупликации SRS:
+ * Однозначно приводит вариации фразы/глагола ("sich vorstellen", "jemandem etwas vorstellen",
+ * "vor|stellen", "die Vorstellung") к общему каноническому корню без артиклей, рефлексивов и управления.
  */
 export function getStrictLemmaKey(raw: string): string {
   if (!raw) return '';
-  return raw
-    .toLowerCase()
-    .trim()
-    // Убираем маркер отделяемой приставки mit|teilen -> mitteilen
-    .replace(/\|/g, '')
-    // Убираем артикли
-    .replace(/^(der|die|das|dem|den|des|ein|eine|einen|einem|einer)\s+/gi, '')
-    // Убираем возвратную частицу sich
-    .replace(/^sich\s+/gi, '')
-    // Убираем паттерны управления глаголов
-    .replace(/^(jemanden|jemandem|jemand|etwas)\s+/gi, '')
-    // Убираем скобки и всё внутри них: "отвечать (на запрос)" -> "отвечать"
-    .replace(/\(.*?\)/g, '')
-    // Убираем знаки препинания и лишние пробелы
-    .replace(/[.,/#!$%^&*;:{}=\-_`~]/g, '')
-    .trim();
+  let s = raw.toLowerCase().trim();
+  // 1. Убираем скобки и всё внутри них: "отвечать (на запрос)" -> "отвечать"
+  s = s.replace(/\(.*?\)/g, ' ');
+  // 2. Убираем знаки отделяемых приставок и спецсимволы
+  s = s.replace(/[|·\u2506\u250A]/g, '');
+  // 3. Убираем все маркеры управления и местоимения в любой позиции (sich, jemanden, jemandem, jdn., jdm., etwas, etw. и т.д.)
+  s = s.replace(/\b(jemandem|jemanden|jemand|etwas|jmdn\.?|jmdm\.?|jdn\.?|jdm\.?|jmd\.?|etw\.?|sich)\b/gi, ' ');
+  // 4. Убираем артикли
+  s = s.replace(/\b(der|die|das|dem|den|des|ein|eine|einen|einem|einer)\b/gi, ' ');
+  // 5. Убираем знаки препинания
+  s = s.replace(/[.,/#!$%^&*;:{}=\-_`~?+]/g, ' ');
+  // 6. Схлопываем множественные пробелы
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
 }
 
 /**

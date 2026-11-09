@@ -31,39 +31,58 @@ export function parseVerbComponents(rawTarget: string, externalPrefixProp?: stri
 export const GERMAN_SEPARABLE_PREFIXES = [
   'auseinander', 'gegenüber', 'zusammen', 'entgegen', 'vorüber', 'herunter', 'hinunter',
   'hinüber', 'herüber', 'hervor', 'zurück', 'zurecht', 'entlang', 'entzwei',
+  'dazwischen', 'daneben', 'vorweg', 'voraus', 'vorbei', 'voran', 'weiter',
   'heraus', 'herein', 'herauf', 'herbei', 'herum', 'heran', 'herab',
   'hinaus', 'hinein', 'hinauf', 'hinweg', 'hinzu', 'hinab',
-  'weiter', 'wieder', 'voraus', 'vorbei', 'vorweg', 'voran',
+  'runter', 'rüber', 'raus', 'rein', 'rum', 'ran',
   'ab', 'an', 'auf', 'aus', 'bei', 'dar', 'ein', 'empor', 'fest', 'fort', 'frei',
   'heim', 'her', 'hin', 'los', 'mit', 'nach', 'nieder', 'statt', 'teil',
-  'vor', 'weg', 'zu'
+  'vor', 'weg', 'zu', 'wieder'
 ].sort((a, b) => b.length - a.length);
 
 /**
  * Автоматически находит отделяемую приставку в глаголе на основе форм глагола
- * (напр. "holt ein", "hat eingeholt") и вставляет маркер "|".
+ * (напр. "schnuppert rein", "hat reingeschnuppert") или по известным отделяемым префиксам
+ * и вставляет маркер "|".
  */
 export function detectAndMarkSeparable(word: string, forms?: string | null): string {
   if (!word || typeof word !== 'string') return word || '';
   if (word.includes('|')) return word;
-  if (!forms || typeof forms !== 'string') return word;
 
   const prefixPattern = GERMAN_SEPARABLE_PREFIXES.join('|');
-  const prefixRegex = new RegExp(`\\b(?:[a-zA-ZäöüÄÖÜß]+)\\s+(?:sich\\s+)?(${prefixPattern})\\b`, 'i');
-  const geRegex = new RegExp(`\\b(${prefixPattern})ge[a-zA-ZäöüÄÖÜß]+\\b`, 'i');
 
-  const match = forms.match(prefixRegex) || forms.match(geRegex);
-  if (!match) return word;
+  // 1. Поиск по формам глагола (e.g. "schnuppert rein", "hat reingeschnuppert")
+  if (forms && typeof forms === 'string') {
+    const prefixRegex = new RegExp(`\\b(?:[a-zA-ZäöüÄÖÜß]+)\\s+(?:sich\\s+)?(${prefixPattern})\\b`, 'i');
+    const geRegex = new RegExp(`\\b(${prefixPattern})ge[a-zA-ZäöüÄÖÜß]+\\b`, 'i');
 
-  const prefix = match[1].toLowerCase();
+    const match = forms.match(prefixRegex) || forms.match(geRegex);
+    if (match) {
+      const prefix = match[1].toLowerCase();
+      const tokens = word.split(' ');
+      const markedTokens = tokens.map((token) => {
+        const lower = token.toLowerCase();
+        if (lower.startsWith(prefix) && lower.length >= prefix.length + 3) {
+          return token.slice(0, prefix.length) + '|' + token.slice(prefix.length);
+        }
+        return token;
+      });
+      const res = markedTokens.join(' ');
+      if (res.includes('|')) return res;
+    }
+  }
 
-  // Ищем токен во фразе/слове, который начинается с этой приставки
+  // 2. Fallback: поиск по списку строго отделяемых приставок для глаголов (ending in en, eln, ern)
   const tokens = word.split(' ');
   const markedTokens = tokens.map((token) => {
     const lower = token.toLowerCase();
-    // Приставка должна быть в начале глагола (длина глагола минимум на 3 буквы длиннее приставки)
-    if (lower.startsWith(prefix) && lower.length >= prefix.length + 3) {
-      return token.slice(0, prefix.length) + '|' + token.slice(prefix.length);
+    if (!/(en|eln|ern)$/i.test(lower)) return token;
+
+    for (const prefix of GERMAN_SEPARABLE_PREFIXES) {
+      if (lower.startsWith(prefix) && lower.length >= prefix.length + 3) {
+        // Убеждаемся, что основа глагола выглядит как реальный корень
+        return token.slice(0, prefix.length) + '|' + token.slice(prefix.length);
+      }
     }
     return token;
   });

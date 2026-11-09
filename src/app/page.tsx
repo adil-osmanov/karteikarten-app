@@ -37,7 +37,7 @@ import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots, getRarityShadowClass
 import { CardEditorModal } from "@/components/CardEditorModal";
 import { CategoryTabs, getTabsForLanguage, type TabConfig } from "@/components/CategoryTabs";
 export { CategoryTabs, getTabsForLanguage, type TabConfig };
-import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX } from "@/lib/utils/formatSeparableWord";
+import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, detectAndMarkSeparable } from "@/lib/utils/formatSeparableWord";
 import { getCleanTranslation } from "@/lib/utils";
 import {
   writeThroughCardUpdate,
@@ -49,7 +49,7 @@ import {
   subscribeStateBus,
   type CloudSyncStatus
 } from "@/lib/sync/cloudStateSync";
-export { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, getCleanTranslation };
+export { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, getCleanTranslation, detectAndMarkSeparable };
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -3833,7 +3833,7 @@ export function isHelperToken(token: string): boolean {
   return HELPER_TOKEN_SET.has(clean) || /^(jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.)$/i.test(clean);
 }
 
-export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string): ParsedTargetPhrase {
+export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string, forms?: string | null): ParsedTargetPhrase {
   let cleanTarget = (rawTarget || '').replace(/\s+/g, ' ').trim();
   let externalPrefix = (externalPrefixProp || '').trim();
 
@@ -3882,6 +3882,11 @@ export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string
 
   // «sich» остается частью cleanTarget!
   // cleanTarget теперь содержит: "sich entscheiden", "sich aus|ruhen" и т.д.
+  // Если слово еще не размечено палочкой, автоматически определяем отделяемую приставку (напр. reinschnuppern -> rein|schnuppern)
+  if (!cleanTarget.includes('|')) {
+    cleanTarget = detectAndMarkSeparable(cleanTarget, forms);
+  }
+
   if (cleanTarget.includes('|')) {
     const pipeIdx = cleanTarget.indexOf('|');
     const cleanRemaining = cleanTarget.replace(/\|/g, '');
@@ -4004,8 +4009,8 @@ function RapidFlashcardMode({
 
   // Парсинг целевой конструкции (управление, отделяемая приставка, артикль)
   const parsedTarget = useMemo(() => {
-    return parseTargetPhrase(currentCard?.targetWord || '');
-  }, [currentCard?.targetWord]);
+    return parseTargetPhrase(currentCard?.targetWord || '', undefined, currentCard?.forms);
+  }, [currentCard?.targetWord, currentCard?.forms]);
 
   // Унифицированное разделение управления и ядра глагола
   const verbComponents = useMemo(() => {
@@ -4083,8 +4088,10 @@ function RapidFlashcardMode({
 
   // Элегантный рендер слова с тонкой пунктирной чертой того же цвета, что и текст (Раунды 1-2)
   const renderFormattedWord = useCallback((text: string) => {
-    if (!text || !text.includes('|')) return text;
-    const parts = text.split('|');
+    if (!text) return text;
+    const marked = text.includes('|') ? text : detectAndMarkSeparable(text, currentCard?.forms);
+    if (!marked || !marked.includes('|')) return text;
+    const parts = marked.split('|');
     return (
       <span className="inline-flex items-baseline flex-wrap justify-center">
         {parts[0]}
@@ -4092,7 +4099,7 @@ function RapidFlashcardMode({
         {parts.slice(1).join('')}
       </span>
     );
-  }, []);
+  }, [currentCard?.forms]);
 
   const speechText = useMemo(() => {
     if (!currentCard) return '';
@@ -7659,24 +7666,32 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             )}
           </div>
 
-          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
+          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ЭТАЛОННЫЙ НЕОНОВЫЙ КАПСЮЛЬ ИЗ ТЕМНОЙ ТЕМЫ ДЛЯ ОБЕИХ ТЕМ */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
-              <button
-                type="button"
-                onClick={onStartReview}
-                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none bg-[#13355c]/90 hover:bg-[#184273] border border-sky-400/60 hover:border-sky-300 shadow-[0_0_24px_rgba(14,165,233,0.5)] hover:shadow-[0_0_32px_rgba(14,165,233,0.7)] text-sky-100 hover:text-white active:scale-[0.98]"
-              >
-                <RotateCcw className="w-4 h-4 text-sky-300 shrink-0"/>
-                <span>{dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}</span>
-              </button>
+              <div className="relative group inline-flex items-center justify-center">
+                {/* Анимированная переливающаяся аура со свечением в обеих темах */}
+                <div className="absolute -inset-[1.5px] rounded-full opacity-70 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
+
+                {/* Сама кнопка: глубокий неоновый индиго-капсюль из темной темы в обеих темах */}
+                <button
+                  type="button"
+                  onClick={onStartReview}
+                  className="relative px-5 py-2.5 rounded-full bg-[#0b1736]/90 dark:bg-blue-950/40 text-white border border-blue-400/40 shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] hover:bg-[#0f1f48] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-150 active:scale-[0.98] cursor-pointer"
+                >
+                  <RotateCw className="w-3.5 h-3.5 text-blue-400 group-hover:rotate-180 transition-transform duration-500 shrink-0" />
+                  <span className="font-semibold text-white tracking-wider uppercase">
+                    {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
+                  </span>
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
                 disabled
-                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none text-xs font-medium tracking-wider uppercase"
               >
-                <RotateCcw className="w-4 h-4 text-zinc-400 shrink-0" />
+                <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
                 <span>
                   0 {getRepeatButtonLabel(effectiveLang || appLanguage)}
                 </span>
@@ -12362,7 +12377,7 @@ export default function App() {
                 });
                 initAudioCtx();
                 setIsReviewingMistakes(true);
-                setReviewCards(deduplicateCardsByLemma(list));
+                setReviewCards(deduplicateReviewSession(list));
               }
             } catch(e) {}
           }}

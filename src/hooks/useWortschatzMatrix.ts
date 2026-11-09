@@ -766,7 +766,13 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
         }
       }
 
-      // Строго сохраняем ТОЛЬКО слова, подтвержденные реальными выученными карточками в активных колодах (без карточек-призраков)
+      // Объединяем с локальной картой, гарантируя, что ни одно выученное слово не будет потеряно
+      existingMap.forEach((val, key) => {
+        if (!nextMap.has(key)) {
+          nextMap.set(key, val);
+        }
+      });
+
       const hadOrphans = existingMap.size !== nextMap.size;
       let hasChanged = hadOrphans;
       if (!hasChanged) {
@@ -786,16 +792,14 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
         notifyListeners(lang);
       }
 
-      if (hadOrphans) {
-        safeUpsertUserStats({
-          language: `MASTERED_WORDS_${lang.toUpperCase()}`,
-          daily_activity: {
-            counts: globalMatrixStatsByLang[lang]?.counts,
-            totalWords: globalMatrixStatsByLang[lang]?.totalWords || nextMap.size,
-            updatedAt: Date.now(),
-          },
-        }).catch(() => {});
-      }
+      safeUpsertUserStats({
+        language: `MASTERED_WORDS_${lang.toUpperCase()}`,
+        daily_activity: {
+          counts: globalMatrixStatsByLang[lang]?.counts,
+          totalWords: globalMatrixStatsByLang[lang]?.totalWords || nextMap.size,
+          updatedAt: Date.now(),
+        },
+      }).catch(() => {});
     }
   } catch (err) {
     console.warn('[Wortschatz-Matrix] syncMasteredWordsFromCloud notice:', err);
@@ -1031,11 +1035,6 @@ export async function autoBackfillMasteredWords(
     books.forEach((b) => bookMap.set(b.id, b));
   }
 
-  // Очищаем любые «сиротские» выученные слова, не принадлежащие существующим карточкам
-  try {
-    await purgeOrphanedMasteredWords(decks, books as any, targetLangParam);
-  } catch {}
-
   // Пересчитываем для всех поддерживаемых языков, присутствующих в колодах
   const langsToProcess: AppLang[] = SUPPORTED_LANGS;
 
@@ -1141,19 +1140,34 @@ export async function autoBackfillMasteredWords(
       });
     });
 
-    const prevMap = uniqueMasteredWordsByLang[targetLang];
-    let mapChanged = prevMap.size !== deduplicatedMap.size;
-    if (!mapChanged) {
-      for (const [k, v] of deduplicatedMap.entries()) {
-        const p = prevMap.get(k);
-        if (!p || p.level !== v.level || p.masteredAt !== v.masteredAt || p.translation !== v.translation) {
+    // Строгое инкрементальное объединение: новые выученные слова добавляются,
+    // а ранее освоенные слова из других колод/книг НИКОГДА не сбрасываются и не удаляются!
+    let mapChanged = false;
+    deduplicatedMap.forEach((entry, key) => {
+      const existing = existingMap.get(key);
+      if (!existing) {
+        existingMap.set(key, entry);
+        mapChanged = true;
+      } else {
+        const earliestTs = (entry.masteredAt > 0 && existing.masteredAt > 0)
+          ? Math.min(entry.masteredAt, existing.masteredAt)
+          : (existing.masteredAt || entry.masteredAt);
+        if (
+          existing.level !== entry.level ||
+          existing.masteredAt !== earliestTs ||
+          (entry.translation && existing.translation !== entry.translation)
+        ) {
+          existingMap.set(key, {
+            ...existing,
+            ...entry,
+            masteredAt: earliestTs,
+            first_mastered_at: existing.first_mastered_at || entry.first_mastered_at,
+          });
           mapChanged = true;
-          break;
         }
       }
-    }
+    });
 
-    uniqueMasteredWordsByLang[targetLang] = deduplicatedMap;
     recomputeStatsFromMap(targetLang);
     if (mapChanged) {
       persistMatrixToStorage(targetLang);
@@ -1165,7 +1179,7 @@ export async function autoBackfillMasteredWords(
           language: `MASTERED_WORDS_${targetLang.toUpperCase()}`,
           daily_activity: {
             counts: globalMatrixStatsByLang[targetLang]?.counts,
-            totalWords: globalMatrixStatsByLang[targetLang]?.totalWords || deduplicatedMap.size,
+            totalWords: globalMatrixStatsByLang[targetLang]?.totalWords || existingMap.size,
             updatedAt: Date.now(),
           },
         }).catch(() => {});
@@ -1173,7 +1187,7 @@ export async function autoBackfillMasteredWords(
     }
 
     if (targetLang === normalizeLanguageCode(targetLangParam)) {
-      primaryCount = deduplicatedMap.size;
+      primaryCount = existingMap.size;
     }
   }
 
@@ -1627,8 +1641,8 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       .catch(() => {});
     applyLatestStats();
 
-    // Синхронизируем из облака не более 1 раза на старте при абсолютно пустом сторе
-    if (!hasAttemptedCloudSyncByLang[normLang] && uniqueMasteredWordsByLang[normLang].size === 0) {
+    // Гарантированно синхронизируем выученные слова из облака на старте (Chrome, Safari, Mobile)
+    if (!hasAttemptedCloudSyncByLang[normLang]) {
       syncMasteredWordsFromCloud(normLang);
     }
 

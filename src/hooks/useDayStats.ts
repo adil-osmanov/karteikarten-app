@@ -327,6 +327,11 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
   let maxMistakesToday = current.date === todayKey ? (current.mistakesCountToday || 0) : 0;
 
   if (isCloudToday) {
+    const cloudDone = typeof cloudRaw.cardsDone === 'number' ? cloudRaw.cardsDone : 0;
+    const cloudCorrect = typeof cloudRaw.correctCount === 'number' ? cloudRaw.correctCount : cloudDone;
+    maxCardsDone = Math.max(maxCardsDone, cloudDone);
+    maxCorrectCount = Math.max(maxCorrectCount, cloudCorrect, maxCardsDone);
+
     const normalizedLocalSecs = normalizeFocusSeconds(maxActiveSeconds, maxCardsDone, true);
     const rawCloudSecs = typeof cloudRaw.activeSeconds === 'number' ? cloudRaw.activeSeconds : 0;
     const normalizedCloudSecs = normalizeFocusSeconds(rawCloudSecs, maxCardsDone, true);
@@ -334,6 +339,15 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
 
     const cloudMistakes = typeof cloudRaw.mistakesCountToday === 'number' ? cloudRaw.mistakesCountToday : cloudPool.length;
     maxMistakesToday = Math.max(maxMistakesToday, cloudMistakes, mergedPool.length);
+
+    try {
+      if (typeof window !== 'undefined') {
+        const storedTodayCount = parseInt(localStorage.getItem(`kraft_cards_learned_${todayKey}`) || '0', 10);
+        if (maxCardsDone > storedTodayCount) {
+          localStorage.setItem(`kraft_cards_learned_${todayKey}`, String(maxCardsDone));
+        }
+      }
+    } catch {}
   } else {
     maxActiveSeconds = normalizeFocusSeconds(maxActiveSeconds, maxCardsDone, true);
     maxMistakesToday = Math.max(maxMistakesToday, mergedPool.length);
