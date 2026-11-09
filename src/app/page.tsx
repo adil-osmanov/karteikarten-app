@@ -1070,6 +1070,8 @@ export interface Flashcard {
   masteryLevel: number; // 0 to 4
   isArchived: boolean;
   nextReviewDate: number | null;
+  next_review_at?: string | null;
+  next_review_date?: string | null;
   interval: number;
   repetitions: number;
   easeFactor?: number;
@@ -2806,9 +2808,9 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
 
     const currentDecks = get().decks;
-    const targetDeck = currentDecks.find((d) => d.id === deckId);
+    const targetDeck = currentDecks.find((d) => d.id === deckId) || currentDecks.find((d) => d.cards?.some((c) => c.id === cardId));
     if (!targetDeck) return;
-    const targetCard = targetDeck.cards.find((c) => c.id === cardId);
+    const targetCard = targetDeck.cards?.find((c) => c.id === cardId);
     if (!targetCard) return;
 
     const wasDueBefore = isCardDueForReview(targetCard);
@@ -2817,9 +2819,13 @@ export const useStore = create<DeckState>()((set, get) => ({
     const computedMastery = srsUpdate.masteryLevel ?? targetCard.masteryLevel ?? 0;
     const computedArchived = Boolean(srsUpdate.isArchived || computedMastery >= 4);
     const computedRound = computedArchived ? 4 : Math.max(1, Math.min(4, computedMastery + 1));
+    const scheduledDateIso = srsUpdate.nextReviewDate ? new Date(srsUpdate.nextReviewDate).toISOString() : null;
     const validCard: Flashcard = {
       ...targetCard,
       ...srsUpdate,
+      next_review_at: scheduledDateIso,
+      next_review_date: scheduledDateIso,
+      nextReviewDate: srsUpdate.nextReviewDate,
       masteryLevel: computedMastery,
       isArchived: computedArchived,
       round: computedRound,
@@ -2831,10 +2837,11 @@ export const useStore = create<DeckState>()((set, get) => ({
     writeThroughCardUpdate(cardId, validCard);
     updateCachedCardInMemory(cardId, validCard);
 
-    // 2. Обновляем Zustand-стейт и локальный IndexedDB строго для текущей колоды
+    // 2. Обновляем Zustand-стейт и локальный IndexedDB строго для всех колод, содержащих карточку
     set((state) => {
       const newDecks = state.decks.map((d) => {
-        if (d.id !== deckId) return d;
+        const hasCard = d.cards?.some((c) => c.id === cardId);
+        if (d.id !== deckId && !hasCard) return d;
         const updatedCards = d.cards.map((c) => {
           if (c.id === cardId) {
             return validCard;
@@ -2852,9 +2859,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     const nextDecks = get().decks;
     await setIDBItem('app_decks', nextDecks);
 
-    if (wasDueBefore || isHilfe || !isCorrect || validCard.isArchived) {
-      get().decrementDueCardsCount();
-    }
+    get().decrementDueCardsCount();
 
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
     const targetLemmaKey = normalizeLemmaKey(rawWord);
@@ -5281,10 +5286,8 @@ function RapidSession({
     setTurn(t => t + 1);
 
     // 2) Сохранение в стор и Supabase в фоне, не блокируя переключение UI
-    if (liveCard.isArchived && learned) {
-      void answerCard(current.deckId, id, true, false, true, studyLanguage, isReviewMode);
-    } else if (liveCard.isArchived && !correct) {
-      void answerCard(current.deckId, id, false, false, true, studyLanguage, isReviewMode);
+    if (isReviewMode || liveCard.isArchived) {
+      void answerCard(current.deckId, id, correct, false, true, studyLanguage, isReviewMode);
     } else {
       void setCardProgress(current.deckId, id, newScore, studyLanguage);
     }
@@ -5296,14 +5299,15 @@ function RapidSession({
     const id = current.card.id;
     const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
     const startRound = current.card.round ?? Math.max(1, Math.min(4, (wordProgress[id] ?? current.card.masteryLevel ?? liveCard.masteryLevel ?? 0) + 1));
+    const isReviewMode = Boolean(!isDrillMode && (reviewCards || liveCard.isArchived));
     const penalizedProgress = typeof forcedScore === 'number'
       ? Math.max(0, Math.min(3, forcedScore))
       : Math.max(0, Math.min(2, startRound - 2));
 
     // 1) Update local progress synchronously first, then persist to Zustand + Supabase
     setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
-    if (liveCard.isArchived) {
-      await answerCard(current.deckId, id, false, true, true, studyLanguage);
+    if (isReviewMode || liveCard.isArchived) {
+      await answerCard(current.deckId, id, false, true, true, studyLanguage, isReviewMode);
     } else {
       await setCardProgress(current.deckId, id, penalizedProgress, studyLanguage);
     }
@@ -5315,7 +5319,6 @@ function RapidSession({
       card: liveCard,
       language: studyLanguage
     });
-    const isReviewMode = Boolean(!isDrillMode && (reviewCards || liveCard.isArchived));
     updateLanguageDailyStats(studyLanguage, 0, false, id, { isReview: isReviewMode });
     setLangStats(prev => ({
       ...prev,
@@ -5856,7 +5859,7 @@ function StudyInterface({
         isNewMastered 
       }
     );
-    if (isGraduated || (wasMasteredBefore && !isActualCorrect && currentRound >= 4)) {
+    if (isReviewSession || isReviewMode || isGraduated || (wasMasteredBefore && !isActualCorrect && currentRound >= 4)) {
       await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, isReviewSession);
     } else {
       await setCardProgress(currentDeckId, currentCardSnapshot.id, nextMastery, studyLanguage);
@@ -7617,29 +7620,27 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
           {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
-              <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная переливающаяся аура со свечением в темной теме */}
-                <div className="hidden dark:block absolute -inset-[1.5px] rounded-full opacity-70 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
-
-                {/* Сама кнопка: чистый синий в светлой теме, глубокий неоновый индиго-капсюль в темной теме */}
-                <button
-                  type="button"
-                  onClick={onStartReview}
-                  className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none bg-blue-600 hover:bg-blue-700 text-white shadow-md active:scale-[0.98] dark:bg-[#0b1736]/90 dark:border dark:border-blue-400/40 dark:text-sky-100 dark:shadow-[0_0_24px_rgba(14,165,233,0.5)] dark:hover:border-sky-300 relative uppercase"
-                >
-                  <RotateCw className="w-4 h-4 text-white dark:text-sky-300 group-hover:rotate-180 transition-transform duration-500 shrink-0" />
-                  <span className="font-semibold text-white dark:text-sky-100 tracking-wider uppercase">
-                    {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
-                  </span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={onStartReview}
+                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none group active:scale-[0.98]
+                  bg-blue-600 hover:bg-blue-700 text-white shadow-md
+                  dark:bg-[#0b1736]/90 dark:border dark:border-blue-400/50 dark:text-sky-100
+                  dark:shadow-[0_0_25px_rgba(14,165,233,0.45)] dark:hover:shadow-[0_0_35px_rgba(14,165,233,0.65)]
+                  dark:hover:border-sky-300 dark:hover:text-white"
+              >
+                <RotateCcw className="w-4 h-4 text-white dark:text-sky-400 transition-transform duration-300 group-hover:rotate-180 shrink-0" />
+                <span className="font-semibold tracking-wider uppercase">
+                  {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
+                </span>
+              </button>
             ) : (
               <button
                 type="button"
                 disabled
                 className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none uppercase text-xs"
               >
-                <RotateCw className="w-4 h-4 text-zinc-400 shrink-0" />
+                <RotateCcw className="w-4 h-4 text-zinc-400 shrink-0" />
                 <span className="font-semibold tracking-wider uppercase">
                   0 {getRepeatButtonLabel(effectiveLang || appLanguage)}
                 </span>

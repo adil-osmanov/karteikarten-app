@@ -9,6 +9,9 @@ export interface Flashcard {
   options: string[]; 
   masteryLevel: 0 | 1 | 2 | 3 | 4;
   isArchived: boolean;
+  nextReviewDate?: number | null;
+  next_review_at?: string | null;
+  next_review_date?: string | null;
   created_at?: string;
   first_mastered_at?: string;
   round?: number;
