@@ -26,7 +26,7 @@ import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
 import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
-import { normalizeLemmaKey, deduplicateCardsByLemma } from "@/lib/utils/lemmaNormalizer";
+import { normalizeLemmaKey, deduplicateCardsByLemma, getWordKey, sortReviewCardsPedagogically, getDueReviewCards } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -2781,46 +2781,13 @@ export const useStore = create<DeckState>()((set, get) => ({
     writeThroughCardUpdate(cardId, validCard);
     updateCachedCardInMemory(cardId, validCard);
 
-    // 2. Автоматическая синхронизация карточек-близнецов (Canonical Lemma Sync) во всех колодах
-    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const targetLemmaKey = normalizeLemmaKey(rawWord);
-    const targetCanonicalKey = getCanonicalKey(rawWord);
-    const linkedIds = new Set<string>([
-      ...((validCard as any).linkedCardIds || []),
-      ...((targetCard as any).linkedCardIds || [])
-    ]);
-    const siblingUpdates: { id: string; card: Flashcard }[] = [];
-
-    // 3. Обновляем Zustand-стейт и локальный IndexedDB
+    // 2. Обновляем Zustand-стейт и локальный IndexedDB строго для текущей колоды
     set((state) => {
       const newDecks = state.decks.map((d) => {
+        if (d.id !== deckId) return d;
         const updatedCards = d.cards.map((c) => {
           if (c.id === cardId) {
             return validCard;
-          }
-          const cWord = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
-          const cCanonical = getCanonicalKey(cWord);
-          const cLemma = normalizeLemmaKey(cWord);
-
-          const isDirectMatch = linkedIds.has(c.id);
-          const isCanonicalMatch = Boolean(targetCanonicalKey && cCanonical && cCanonical === targetCanonicalKey);
-          const isLemmaMatch = Boolean(targetLemmaKey && targetLemmaKey.length >= 2 && cLemma === targetLemmaKey);
-
-          if (isDirectMatch || isCanonicalMatch || isLemmaMatch) {
-            const enriched = mergeCardContext(c, validCard);
-            const syncedSibling: Flashcard = {
-              ...c,
-              ...srsUpdate,
-              masteryLevel: computedMastery,
-              isArchived: computedArchived,
-              round: computedRound,
-              isLegendary: computedArchived,
-              updated_at: validCard.updated_at,
-              additionalTranslations: enriched.additionalTranslations,
-              alternateExamples: enriched.alternateExamples,
-            };
-            siblingUpdates.push({ id: c.id, card: syncedSibling });
-            return syncedSibling;
           }
           return c;
         });
@@ -2832,18 +2799,15 @@ export const useStore = create<DeckState>()((set, get) => ({
       return { decks: newDecks };
     });
 
-    if (siblingUpdates.length > 0) {
-      siblingUpdates.forEach((s) => {
-        updateCachedCardInMemory(s.id, s.card);
-      });
-    }
-
     const nextDecks = get().decks;
     await setIDBItem('app_decks', nextDecks);
 
     if (wasDueBefore || isHilfe || !isCorrect || validCard.isArchived) {
       get().decrementDueCardsCount();
     }
+
+    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+    const targetLemmaKey = normalizeLemmaKey(rawWord);
 
     // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
     const singleLemma = targetLemmaKey || normalizeGermanLemma(rawWord);
@@ -2921,49 +2885,13 @@ export const useStore = create<DeckState>()((set, get) => ({
     writeThroughCardUpdate(cardId, card);
     updateCachedCardInMemory(cardId, card);
 
-    const validCard = card;
-    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const targetLemmaKey = normalizeLemmaKey(rawWord);
-    const targetCanonicalKey = getCanonicalKey(rawWord);
-    const linkedIds = new Set<string>([
-      ...((validCard as any).linkedCardIds || []),
-      ...((targetCard as any).linkedCardIds || [])
-    ]);
-    const siblingUpdates: { id: string; card: Flashcard }[] = [];
-
-    // 2. Обновляем состояние и IndexedDB (включая карточки-близнецы в других колодах)
+    // 2. Обновляем состояние и IndexedDB строго для карточки в текущей колоде
     set((state) => {
       const newDecks = state.decks.map((d) => {
+        if (d.id !== deckId) return d;
         const updatedCards = d.cards.map((c) => {
           if (c.id === cardId) {
             return card;
-          }
-          const cWord = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
-          const cCanonical = getCanonicalKey(cWord);
-          const cLemma = normalizeLemmaKey(cWord);
-
-          const isDirectMatch = linkedIds.has(c.id);
-          const isCanonicalMatch = Boolean(targetCanonicalKey && cCanonical && cCanonical === targetCanonicalKey);
-          const isLemmaMatch = Boolean(targetLemmaKey && targetLemmaKey.length >= 2 && cLemma === targetLemmaKey);
-
-          if (isDirectMatch || isCanonicalMatch || isLemmaMatch) {
-            const enriched = mergeCardContext(c, card);
-            const syncedSibling: Flashcard = {
-              ...c,
-              masteryLevel: card.masteryLevel,
-              isArchived: card.isArchived,
-              round: card.round,
-              isLegendary: card.isLegendary,
-              nextReviewDate: card.nextReviewDate,
-              interval: card.interval,
-              repetitions: card.repetitions,
-              easeFactor: card.easeFactor,
-              updated_at: card.updated_at,
-              additionalTranslations: enriched.additionalTranslations,
-              alternateExamples: enriched.alternateExamples,
-            };
-            siblingUpdates.push({ id: c.id, card: syncedSibling });
-            return syncedSibling;
           }
           return c;
         });
@@ -2975,18 +2903,16 @@ export const useStore = create<DeckState>()((set, get) => ({
       return { decks: newDecks };
     });
 
-    if (siblingUpdates.length > 0) {
-      siblingUpdates.forEach((s) => {
-        updateCachedCardInMemory(s.id, s.card);
-      });
-    }
-
     const nextDecks = get().decks;
     await setIDBItem('app_decks', nextDecks);
 
     if (wasDueBefore || card.isArchived) {
       get().decrementDueCardsCount();
     }
+
+    const validCard = card;
+    const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+    const targetLemmaKey = normalizeLemmaKey(rawWord);
 
     const singleLemma = targetLemmaKey || normalizeGermanLemma(rawWord);
     const safeLemma = singleLemma.split(' ')[0].trim();
@@ -5097,7 +5023,9 @@ function RapidSession({
     let list: { deckId: string, card: Flashcard }[] = [];
     if (reviewCards) {
       const isDrill = isDrillMode;
-      list = reviewCards.map(item => {
+      // Сессия повторений: умная сортировка и строгая дедупликация (без перемешивания!)
+      const uniqueReview = deduplicateCardsByLemma([...reviewCards], true);
+      list = uniqueReview.map(item => {
         const initialRound = isDrill
           ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
           : (item.card.round ?? 4);
@@ -5115,12 +5043,9 @@ function RapidSession({
       const state = useStore.getState();
       const deck = state.decks.find(d => d.id === deckId);
       if (deck) {
-        const masteredSet = buildMasteredCanonicalSet(
-          getMasteredWordEntries(state.appLanguage),
-          state.decks
-        );
+        // Учебная колода: доступны ВСЕ карточки колоды, проверяем только локальный статус
         const unmastered = deck.cards
-          .filter(c => !isCardCanonicalMastered(c, masteredSet))
+          .filter(c => !c.isArchived && (c.masteryLevel ?? 0) < 4)
           .map(c => ({
             deckId,
             card: {
@@ -5129,7 +5054,7 @@ function RapidSession({
               isLegendary: false
             }
           }));
-        list = unmastered.length > 0 ? unmastered : deck.cards.map(c => ({
+        const rawList = unmastered.length > 0 ? unmastered : deck.cards.map(c => ({
           deckId,
           card: {
             ...c,
@@ -5137,12 +5062,13 @@ function RapidSession({
             isLegendary: false
           }
         }));
+        list = rawList;
+        // Перемешиваем карточки только для обычной колоды
+        for (let i = list.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [list[i], list[j]] = [list[j], list[i]];
+        }
       }
-    }
-    list = deduplicateCardsByLemma(list, false);
-    for (let i = list.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [list[i], list[j]] = [list[j], list[i]];
     }
     // Restore saved round progress (0-3) of not-yet-archived words
     const initialProgress: Record<string, number> = {};
@@ -5559,7 +5485,8 @@ function StudyInterface({
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
-      const unique = deduplicateCardsByLemma([...reviewCards], false).sort(() => Math.random() - 0.5);
+      // Сессия повторений: умная сортировка и строгая дедупликация (без перемешивания!)
+      const unique = deduplicateCardsByLemma([...reviewCards], true);
       return unique.map(item => {
         const isDrill = isDrillMode;
         const initialRound = isDrill
@@ -5580,12 +5507,9 @@ function StudyInterface({
       const state = useStore.getState();
       const deck = state.decks.find((d) => d.id === deckId);
       if (deck) {
-        const masteredSet = buildMasteredCanonicalSet(
-          getMasteredWordEntries(state.appLanguage),
-          state.decks
-        );
+        // Учебная колода: доступны ВСЕ слова урока, проверяем только локальный статус
         const unmastered = deck.cards
-          .filter((c) => !isCardCanonicalMastered(c, masteredSet))
+          .filter((c) => !c.isArchived && (c.masteryLevel ?? 0) < 4)
           .map(c => ({
             deckId,
             card: {
@@ -5602,7 +5526,7 @@ function StudyInterface({
             isLegendary: false,
           }
         }));
-        return deduplicateCardsByLemma(rawList, false).sort(() => Math.random() - 0.5);
+        return rawList.sort(() => Math.random() - 0.5);
       }
     }
     return [];
@@ -5614,13 +5538,8 @@ function StudyInterface({
       const state = useStore.getState();
       const deck = state.decks.find((d) => d.id === deckId);
       if (deck) {
-        const masteredSet = buildMasteredCanonicalSet(
-          getMasteredWordEntries(state.appLanguage),
-          state.decks
-        );
-        const unmastered = deck.cards.filter((c) => !isCardCanonicalMastered(c, masteredSet));
-        const source = unmastered.length > 0 ? unmastered : deck.cards;
-        return deduplicateCardsByLemma(source, false).length;
+        const unmastered = deck.cards.filter((c) => !c.isArchived && (c.masteryLevel ?? 0) < 4);
+        return (unmastered.length > 0 ? unmastered : deck.cards).length;
       }
     }
     return 0;
@@ -5640,7 +5559,8 @@ function StudyInterface({
     sessionInitKeyRef.current = initKey;
 
     if (reviewCards) {
-      const uniqueReview = deduplicateCardsByLemma([...reviewCards], false);
+      // Сессия повторений: умная сортировка и строгая дедупликация (без перемешивания!)
+      const uniqueReview = deduplicateCardsByLemma([...reviewCards], true);
       const isDrill = isDrillMode;
       const list = uniqueReview.map(item => {
         const initialRound = isDrill
@@ -5656,7 +5576,7 @@ function StudyInterface({
           }
         };
       });
-      setActiveCards(list.sort(() => Math.random() - 0.5));
+      setActiveCards(list);
       setInitialTotal(uniqueReview.length);
       setMasteredInSession(0);
       setSessionCorrect(0);
@@ -5666,12 +5586,9 @@ function StudyInterface({
       const state = useStore.getState();
       const deck = state.decks.find((d) => d.id === deckId);
       if (deck) {
-        const masteredSet = buildMasteredCanonicalSet(
-          getMasteredWordEntries(appLanguage || state.appLanguage),
-          decks
-        );
+        // Учебная колода: доступны ВСЕ слова урока, проверяем только локальный статус
         const unmastered = deck.cards
-          .filter((c) => !isCardCanonicalMastered(c, masteredSet))
+          .filter((c) => !c.isArchived && (c.masteryLevel ?? 0) < 4)
           .map(c => ({
             deckId,
             card: {
@@ -5688,9 +5605,8 @@ function StudyInterface({
             isLegendary: false,
           }
         }));
-        const list = deduplicateCardsByLemma(rawList, false);
-        setActiveCards(list.sort(() => Math.random() - 0.5));
-        setInitialTotal(list.length);
+        setActiveCards(rawList.sort(() => Math.random() - 0.5));
+        setInitialTotal(rawList.length);
         setMasteredInSession(0);
         setSessionCorrect(0);
         setSessionMistakes([]);
@@ -7882,7 +7798,7 @@ const DeckCard = React.memo(({
   const showTheoryButton = isGrammarTab && isStandardCloze;
 
   const total = deck.cards.length;
-  const mastered = deck.cards.filter(c => isCardCanonicalMastered(c, masteredSet)).length;
+  const mastered = deck.cards.filter(c => Boolean(c.isArchived || (c.masteryLevel && c.masteryLevel >= 4))).length;
   const progressPercentage = total > 0 ? (mastered / total) * 100 : 0;
 
   return (
@@ -11619,7 +11535,7 @@ export default function App() {
 
     targetDecks.forEach(d => {
       d.cards?.forEach(c => {
-        const isMastered = isCardCanonicalMastered(c, masteredCanonicalSet);
+        const isMastered = Boolean(c.isArchived || (c.masteryLevel && c.masteryLevel >= 4));
         if (!isMastered) {
           const startingRound = c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1));
           drillCards.push({
@@ -11713,7 +11629,7 @@ export default function App() {
 
     // 1. FAST IN-MEMORY PATH: Use local dueCards immediately (0 network requests)
     if (dueCards.length > 0) {
-      setReviewCards(deduplicateCardsByLemma(dueCards));
+      setReviewCards(deduplicateCardsByLemma(dueCards, true));
       return;
     }
 
@@ -11721,7 +11637,7 @@ export default function App() {
       const targetLang = activeBook?.language || appLanguage;
       const freshCards = await fetchDueCardsFromCloud(targetLang, activeBookId || undefined);
       if (freshCards.length > 0) {
-        setReviewCards(deduplicateCardsByLemma(freshCards));
+        setReviewCards(deduplicateCardsByLemma(freshCards, true));
         return;
       }
     } catch (e) {
@@ -11839,97 +11755,40 @@ export default function App() {
       const isRedemittelMode = trainingMode === 'redemittel' || (activeBook?.title || '').toLowerCase().includes('redemittel');
       const cyr = (t: string) => /[\u0400-\u04FF]/.test(t);
 
-      const allDecks = useStore.getState().decks;
-      const targetLang = (activeBook?.language as any) || useStore.getState().appLanguage || 'DE';
-      const globalStatusMap = new Map<string, Partial<Flashcard>>();
-
-      // 1. Из матрицы / user_mastered_words
-      const masteredEntries = getMasteredWordEntries(targetLang);
-      for (const entry of masteredEntries) {
-        const raw = (entry as any).lemma || (entry as any).word || entry.originalWord;
-        const k = getCanonicalKey(raw);
-        if (k) {
-          globalStatusMap.set(k, {
-            masteryLevel: 4,
-            isArchived: true,
-            repetitions: 1,
-            interval: 1,
-            easeFactor: 2.5,
-            nextReviewDate: Date.now() + 86400000,
-            first_mastered_at: entry.created_at || new Date().toISOString(),
-            translation: (entry as any).translation,
-            sentence: (entry as any).sentence,
-          });
-        }
-      }
-
-      // 2. Из всех существующих колод (обогащаем переводы и примеры при склейке дублей)
-      for (const d of allDecks) {
-        for (const c of d.cards || []) {
-          const raw = c.targetWord || (c as any).front || (c as any).word || (c as any).missingWord;
-          const k = getCanonicalKey(raw);
-          if (k) {
-            const existing = globalStatusMap.get(k);
-            const cScore = (c.isArchived ? 4 : 0) + (c.masteryLevel || 0);
-            const exScore = (existing?.isArchived ? 4 : 0) + (existing?.masteryLevel || 0);
-            if (!existing || cScore >= exScore) {
-              const enriched = existing ? mergeCardContext(c, existing) : c;
-              globalStatusMap.set(k, {
-                masteryLevel: c.masteryLevel ?? 0,
-                isArchived: Boolean(c.isArchived),
-                repetitions: c.repetitions ?? 0,
-                interval: c.interval ?? 0,
-                easeFactor: c.easeFactor ?? 2.5,
-                nextReviewDate: c.nextReviewDate ?? null,
-                first_mastered_at: c.first_mastered_at || existing?.first_mastered_at,
-                translation: c.translation || existing?.translation,
-                sentence: c.sentence || existing?.sentence,
-                additionalTranslations: enriched.additionalTranslations,
-                alternateExamples: enriched.alternateExamples,
-              });
-            } else {
-              const enriched = mergeCardContext(existing, c);
-              globalStatusMap.set(k, {
-                ...existing,
-                additionalTranslations: enriched.additionalTranslations,
-                alternateExamples: enriched.alternateExamples,
-              });
-            }
-          }
-        }
-      }
-
-      const seenDeckCanonicalKeys = new Set<string>();
+      // Локальная уникальность строго внутри добавляемой колоды (deck_id + targetWord)
+      const seenDeckWordKeys = new Set<string>();
 
       const addCard = (cardData: Omit<Flashcard, 'id' | 'masteryLevel' | 'isArchived' | 'nextReviewDate' | 'interval' | 'repetitions'>) => {
-        const cKey = getCanonicalKey(cardData.targetWord);
-        if (cKey) {
-          if (seenDeckCanonicalKeys.has(cKey)) {
-            // Пропуск дубликата внутри одной колоды, но обогащаем уже добавленную карточку
-            const addedCard = cards.find(c => getCanonicalKey(c.targetWord) === cKey);
+        const rawWord = (cardData.targetWord || '').trim();
+        if (!rawWord) return;
+
+        const wKey = getWordKey(rawWord) || rawWord.toLowerCase();
+        if (wKey) {
+          if (seenDeckWordKeys.has(wKey)) {
+            // Пропуск дубликата внутри одной колоды: обогащаем существующую карточку контекстом
+            const addedCard = cards.find(c => (getWordKey(c.targetWord) || c.targetWord.toLowerCase().trim()) === wKey);
             if (addedCard) {
               const enriched = mergeCardContext(addedCard, cardData);
               Object.assign(addedCard, enriched);
             }
             return;
           }
-          seenDeckCanonicalKeys.add(cKey);
+          seenDeckWordKeys.add(wKey);
         }
-        const inherited = cKey ? globalStatusMap.get(cKey) : undefined;
-        let baseCard: Flashcard = {
+
+        // Новая карточка создается чистой и готовой к изучению в контексте текущего урока книги
+        const baseCard: Flashcard = {
           ...cardData,
           id: ensureUuid(),
-          masteryLevel: (inherited?.masteryLevel ?? 0) as any,
-          isArchived: Boolean(inherited?.isArchived),
-          nextReviewDate: inherited?.nextReviewDate ?? null,
-          interval: inherited?.interval ?? 0,
-          repetitions: inherited?.repetitions ?? 0,
-          easeFactor: inherited?.easeFactor ?? 2.5,
-          first_mastered_at: inherited?.first_mastered_at,
+          masteryLevel: 0,
+          isArchived: false,
+          round: 1,
+          isLegendary: false,
+          nextReviewDate: null,
+          interval: 0,
+          repetitions: 0,
+          easeFactor: 2.2,
         };
-        if (inherited) {
-          baseCard = mergeCardContext(baseCard, inherited);
-        }
         cards.push(baseCard);
       };
 
@@ -12675,19 +12534,19 @@ export default function App() {
                 const inProgressDecks = visibleDecks.filter(d => {
                   const total = d.cards.length;
                   if (total === 0) return true;
-                  const masteredCount = d.cards.filter(c => isCardCanonicalMastered(c, masteredCanonicalSet)).length;
+                  const masteredCount = d.cards.filter(c => Boolean(c.isArchived || (c.masteryLevel && c.masteryLevel >= 4))).length;
                   return masteredCount < total;
                 });
                 const completedDecks = visibleDecks.filter(d => {
                   const total = d.cards.length;
                   if (total === 0) return false;
-                  const masteredCount = d.cards.filter(c => isCardCanonicalMastered(c, masteredCanonicalSet)).length;
+                  const masteredCount = d.cards.filter(c => Boolean(c.isArchived || (c.masteryLevel && c.masteryLevel >= 4))).length;
                   return masteredCount >= total;
                 });
                 const isExpanded = expandedCategories[sectionKey] || false;
 
                 const levelCards = sortedDecks.flatMap(d => d.cards || []);
-                const pendingLevelCards = levelCards.filter(c => !isCardCanonicalMastered(c, masteredCanonicalSet));
+                const pendingLevelCards = levelCards.filter(c => !c.isArchived && (c.masteryLevel ?? 0) < 4);
                 const isLevelCompleted = levelCards.length > 0 && pendingLevelCards.length === 0;
 
                 return (

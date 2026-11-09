@@ -54,33 +54,85 @@ export function normalizeLemmaKey(rawWord: string): string {
 }
 
 /**
- * Дедупликация массива карточек (или оберток { deckId, card }) по нормализованному ключу леммы.
- * При обнаружении дубля выбирается карточка с более низким уровнем освоения (masteryLevel).
+ * Нормализация ключа слова (Lemma Key) для строгой дедупликации в сессии повторений
+ */
+export function getWordKey(word: string): string {
+  if (!word) return '';
+  return word
+    .toLowerCase()
+    .replace(/^(der|die|das|dem|den|des)\s+/i, '') // убираем артикли
+    .replace(/^sich\s+/i, '')                      // убираем sich
+    .replace(/^(jemanden|jemandem|etwas)\s+/i, '') // убираем местоимения управления
+    .replace(/\|/g, '')                           // убираем маркер отделяемой приставки mit|teilen -> mitteilen
+    .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, '')     // убираем знаки препинания
+    .trim();
+}
+
+/**
+ * Умная педагогическая сортировка очереди повторений (Smart Review Sorting):
+ * 1. Проблемные слова (низкий masteryLevel 1 -> 2 -> 3)
+ * 2. Самые просроченные карточки (давний next_review_at идет первым)
+ */
+export function sortReviewCardsPedagogically<
+  T extends { id?: string; targetWord?: string; card?: any; masteryLevel?: number; nextReviewDate?: any; nextReviewAt?: any }
+>(candidates: T[]): T[] {
+  if (!Array.isArray(candidates) || candidates.length <= 1) return candidates;
+
+  return [...candidates].sort((itemA, itemB) => {
+    const a = (itemA as any).card || itemA;
+    const b = (itemB as any).card || itemB;
+
+    const masteryA = a.masteryLevel ?? (a as any).mastery_level ?? 0;
+    const masteryB = b.masteryLevel ?? (b as any).mastery_level ?? 0;
+
+    // 1. Приоритет: проблемные слова (низкий уровень владения masteryLevel 1 -> 2 -> 3)
+    if (masteryA !== masteryB) {
+      return masteryA - masteryB;
+    }
+
+    // 2. Приоритет: самые просроченные карточки (давний next_review_at идет первым)
+    const rawDateA = a.nextReviewAt ?? a.nextReviewDate ?? a.next_review_date ?? 0;
+    const rawDateB = b.nextReviewAt ?? b.nextReviewDate ?? b.next_review_date ?? 0;
+    const timeA = typeof rawDateA === 'number' ? rawDateA : new Date(rawDateA || 0).getTime();
+    const timeB = typeof rawDateB === 'number' ? rawDateB : new Date(rawDateB || 0).getTime();
+    return timeA - timeB;
+  });
+}
+
+/**
+ * Строгая дедупликация в сессии повторений (SRS Review Session):
+ * В ежедневной тренировке повторов одно и то же слово ни в коем случае не должно попадаться дважды за день!
+ * Кандидаты сортируются по педагогическому приоритету, после чего оставляется строго ОДНА карточка на лемму,
+ * а дубликаты откладываются на следующие сессии.
  */
 export function deduplicateCardsByLemma<
-  T extends { id?: string; targetWord?: string; front?: string; sentence?: string; card?: any; linkedCardIds?: string[] }
+  T extends { id?: string; targetWord?: string; front?: string; sentence?: string; card?: any; linkedCardIds?: string[]; masteryLevel?: number; nextReviewDate?: any; nextReviewAt?: any }
 >(cards: T[], logDeduplication: boolean = true): T[] {
   if (!Array.isArray(cards) || cards.length === 0) return [];
 
-  const seen = new Map<string, T>();
+  // 1. Умная сортировка кандидатов по педагогическому приоритету
+  const sortedCandidates = sortReviewCardsPedagogically(cards);
+
+  // 2. Фильтрация дублей перед стартом сессии
+  const seenKeys = new Map<string, T>();
+  const sessionQueue: T[] = [];
   const removedDuplicates: string[] = [];
 
-  for (const card of cards) {
-    if (!card) continue;
-    const inner = (card as any).card ? (card as any).card : card;
+  for (const item of sortedCandidates) {
+    if (!item) continue;
+    const inner = (item as any).card ? (item as any).card : item;
     const raw = inner.targetWord || inner.target_word || inner.front || inner.lemma || inner.word || inner.missingWord || inner.infinitive || '';
-    const key = getCanonicalKey(raw) || normalizeLemmaKey(raw);
+    const key = getWordKey(raw) || getCanonicalKey(raw) || normalizeLemmaKey(raw);
 
     if (!key) {
-      // Если по какой-то причине ключа нет, сохраняем по id
-      const fallbackId = inner.id || (card as any).id || Math.random().toString();
-      seen.set(`__id_${fallbackId}`, card);
+      // Если ключа нет, сохраняем карточку в очередь по id
+      sessionQueue.push(item);
       continue;
     }
 
-    const currentId = inner.id || (card as any).id;
+    const currentId = inner.id || (item as any).id;
 
-    if (!seen.has(key)) {
+    if (!seenKeys.has(key)) {
       const initialIds: string[] = [];
       if (currentId) initialIds.push(currentId);
       if (Array.isArray(inner.linkedCardIds)) {
@@ -88,60 +140,46 @@ export function deduplicateCardsByLemma<
       }
       const uniqueIds = Array.from(new Set(initialIds));
       inner.linkedCardIds = uniqueIds;
-      if ((card as any).card) {
-        (card as any).card.linkedCardIds = uniqueIds;
+      if ((item as any).card) {
+        (item as any).card.linkedCardIds = uniqueIds;
       }
-      seen.set(key, card);
+      seenKeys.set(key, item);
+      sessionQueue.push(item);
     } else {
-      // Если дубль уже встретился:
-      // Выбираем карточку с более низким уровнем освоения (более проблемную)
-      const existing = seen.get(key)!;
+      // Карточка-дубль пропускается и не попадает в сегодняшнюю сессию (откладывается)
+      const existing = seenKeys.get(key)!;
       const existingInner = (existing as any).card ? (existing as any).card : existing;
-      const cardMastery = inner.masteryLevel ?? inner.mastery_level ?? 0;
-      const existingMastery = existingInner.masteryLevel ?? existingInner.mastery_level ?? 0;
-      const existingId = existingInner.id || (existing as any).id;
+      removedDuplicates.push(`${raw} (ключ: "${key}")`);
 
+      // Обогащаем сохраненную карточку контекстом и связываем ID
+      const existingId = existingInner.id || (existing as any).id;
       const mergedIds = Array.from(new Set([
         ...(existingInner.linkedCardIds || []),
         ...(inner.linkedCardIds || []),
         existingId,
         currentId
       ].filter(Boolean)));
-
-      if (cardMastery < existingMastery) {
-        removedDuplicates.push(`${existingInner.targetWord || existingInner.front || key} (ключ: "${key}")`);
-        inner.linkedCardIds = mergedIds;
-        const enriched = mergeCardContext(inner, existingInner);
-        Object.assign(inner, enriched);
-        if ((card as any).card) {
-          (card as any).card.linkedCardIds = mergedIds;
-          Object.assign((card as any).card, enriched);
-        }
-        seen.set(key, card);
-      } else {
-        removedDuplicates.push(`${raw} (ключ: "${key}")`);
-        existingInner.linkedCardIds = mergedIds;
-        const enriched = mergeCardContext(existingInner, inner);
-        Object.assign(existingInner, enriched);
-        if ((existing as any).card) {
-          (existing as any).card.linkedCardIds = mergedIds;
-          Object.assign((existing as any).card, enriched);
-        }
+      existingInner.linkedCardIds = mergedIds;
+      const enriched = mergeCardContext(existingInner, inner);
+      Object.assign(existingInner, enriched);
+      if ((existing as any).card) {
+        (existing as any).card.linkedCardIds = mergedIds;
+        Object.assign((existing as any).card, enriched);
       }
     }
   }
 
-  const uniqueCards = Array.from(seen.values());
-
   if (logDeduplication) {
     console.info(
-      `[SRS Deduplication] Было карточек: ${cards.length}, осталось уникальных: ${uniqueCards.length} (отфильтровано дублей: ${cards.length - uniqueCards.length})`
+      `[SRS Deduplication] Было карточек: ${cards.length}, осталось уникальных: ${sessionQueue.length} (отфильтровано дублей: ${cards.length - sessionQueue.length})`
     );
-    console.log('✅ Очередь сессии очищена от дублей. Уникальных слов:', uniqueCards.length);
+    console.log('✅ Очередь сессии очищена от дублей. Уникальных слов:', sessionQueue.length);
     if (removedDuplicates.length > 0) {
       console.info('🗑 [SRS Deduplication] Удаленные дубликаты слов:', removedDuplicates);
     }
   }
 
-  return uniqueCards;
+  return sessionQueue;
 }
+
+export const getDueReviewCards = deduplicateCardsByLemma;
