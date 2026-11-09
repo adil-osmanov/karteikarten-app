@@ -24,7 +24,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma, getWordKey, sortReviewCardsPedagogically, getDueReviewCards } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
@@ -43,6 +43,7 @@ import {
   writeThroughCardUpdate,
   syncWithCloud,
   forcePushLocalToCloud,
+  fetchCardsDelta,
   subscribeCloudSyncStatus,
   broadcastStateBus,
   subscribeStateBus,
@@ -1462,30 +1463,28 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
 
   const currentBooks = useStore.getState().books;
   let baseDecks = useStore.getState().decks;
+  if (!Array.isArray(baseDecks) || baseDecks.length === 0) {
+    const idb = await getIDBItem<Deck[]>('app_decks').catch(() => null);
+    if (Array.isArray(idb) && idb.length > 0) {
+      baseDecks = idb;
+    }
+  }
   const totalLocalCards = baseDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
 
   isSyncingCardsFromSupabase = true;
   lastSyncCardsFromSupabaseTime = now;
 
   try {
-    // РЕЖИМ 1: ДЕЛЬТА-СИНХРОНИЗАЦИЯ (DELTA SYNC ONLY), если локальный кэш уже заполнен и force === false
-    if (!force && totalLocalCards > 0 && typeof window !== 'undefined') {
-      const lastSync = localStorage.getItem(KRAFT_LAST_SYNC_KEY) || '1970-01-01T00:00:00Z';
-      if (lastSync === '1970-01-01T00:00:00Z') {
-        localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
-        return;
-      }
+    // РЕЖИМ 1: ДЕЛЬТА-СИНХРОНИЗАЦИЯ (DELTA SYNC ONLY), если локальный кэш карточек уже существует
+    if (totalLocalCards > 0 && typeof window !== 'undefined') {
+      const lastSync = localStorage.getItem('kraft_last_cards_sync_at');
+      const nowIso = new Date().toISOString();
 
-      const { data: deltaCards, error: deltaError } = await supabase
-        .from('cards')
-        .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, updated_at')
-        .gt('updated_at', lastSync)
-        .limit(1000);
+      const deltaCards = await fetchCardsDelta(force ? null : lastSync);
+      localStorage.setItem('kraft_last_cards_sync_at', nowIso);
+      localStorage.setItem(KRAFT_LAST_SYNC_KEY, nowIso);
 
-      localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
-
-      // Если колонки updated_at нет или изменений 0 — мгновенный выход (0.1 КБ трафика вместо 2 МБ!)
-      if (deltaError || !Array.isArray(deltaCards) || deltaCards.length === 0) {
+      if (!Array.isArray(deltaCards) || deltaCards.length === 0) {
         return;
       }
 
@@ -1504,27 +1503,37 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
 
           const remoteMastery = remote.masteryLevel ?? remote.mastery_level ?? 0;
           const remoteIsArchived = Boolean(remote.isArchived ?? remote.is_archived);
+          const remoteReviewDate = remote.nextReviewDate ?? remote.next_review_date ?? null;
+          const remoteInterval = remote.interval ?? 0;
+          const remoteReps = remote.repetitions ?? 0;
+
           const localMastery = card.masteryLevel ?? 0;
           const localArchived = Boolean(card.isArchived);
+          const localReviewDate = card.nextReviewDate ?? null;
 
-          // Stale Overwrite Guard: локальный более высокий ранг никогда не затирается
-          if (localMastery > remoteMastery || (localArchived && !remoteIsArchived)) {
-            return card;
-          }
+          const isDiff =
+            remoteMastery !== localMastery ||
+            remoteIsArchived !== localArchived ||
+            remoteReviewDate !== localReviewDate ||
+            remoteInterval !== (card.interval ?? 0) ||
+            remoteReps !== (card.repetitions ?? 0);
 
-          if (remoteMastery > localMastery || (remoteIsArchived && !localArchived)) {
+          if (isDiff) {
             deckModified = true;
             hasDeltaChanges = true;
+            const finalMastery = Math.max(localMastery, remoteMastery);
+            const finalArchived = localArchived || remoteIsArchived || finalMastery >= 4;
+            const finalRound = finalArchived ? 4 : Math.max(1, Math.min(4, finalMastery + 1));
             return {
               ...card,
-              masteryLevel: remoteMastery,
-              round: remoteIsArchived ? 4 : Math.max(1, Math.min(4, remoteMastery + 1)),
-              isLegendary: remoteIsArchived,
-              isArchived: remoteIsArchived,
-              repetitions: remote.repetitions ?? card.repetitions,
-              interval: remote.interval ?? card.interval,
-              nextReviewDate: remote.nextReviewDate ?? remote.next_review_date ?? card.nextReviewDate,
-              updated_at: remote.updated_at || new Date().toISOString(),
+              masteryLevel: finalMastery,
+              round: finalRound,
+              isLegendary: finalArchived,
+              isArchived: finalArchived,
+              repetitions: remoteReps || card.repetitions,
+              interval: remoteInterval || card.interval,
+              nextReviewDate: remoteReviewDate ?? card.nextReviewDate,
+              updated_at: remote.updated_at || nowIso,
             };
           }
           return card;
@@ -1536,7 +1545,16 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       if (hasDeltaChanges) {
         useStore.setState({ decks: updatedDecks });
         await setIDBItem('app_decks', updatedDecks);
-        useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem('cached_app_decks');
+            localStorage.removeItem('cache_decks_v2');
+          } catch {}
+          window.dispatchEvent(new Event('storage-update'));
+          window.dispatchEvent(new CustomEvent('stats-update'));
+        }
+        await useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
+        await autoBackfillMasteredWords(updatedDecks, currentBooks, useStore.getState().appLanguage);
       }
       return;
     }
@@ -4612,8 +4630,8 @@ function RapidFlashcardMode({
                           autoCorrect="off"
                           spellCheck={false}
                           placeholder=""
-                          style={{ caretColor: 'transparent' }}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
+                          style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent"
                         />
                         <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
                           displayParts.totalLength > 22
@@ -4682,8 +4700,8 @@ function RapidFlashcardMode({
                         autoCorrect="off"
                         spellCheck={false}
                         placeholder=""
-                        style={{ caretColor: 'transparent' }}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto"
+                        style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent"
                       />
                       <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
                         displayParts.totalLength > 22
@@ -7041,8 +7059,9 @@ function StudyCard({
                       value={inputText}
                       onChange={(e) => !isMobile && handleInputChange(e)}
                       onKeyDown={handleKeyDown}
+                      style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
                       className={cn(
-                        "absolute inset-0 opacity-0 cursor-default w-full h-full",
+                        "absolute inset-0 opacity-0 cursor-default w-full h-full caret-transparent text-transparent bg-transparent",
                         isMobile && "pointer-events-none select-none"
                       )}
                       autoComplete="off"
@@ -7496,7 +7515,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                className="px-3.5 py-1.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
                 title="Zurück zur Übersicht"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
@@ -7507,7 +7526,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                 <button
                   type="button"
                   onClick={() => setIsLangOpen(prev => !prev)}
-                  className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                  className="px-3.5 py-1.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
                   title="Sprache wählen"
                 >
                   <span className="text-base leading-none select-none">{currentLang.flag}</span>
@@ -7556,21 +7575,21 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             )}
           </div>
 
-          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ВСЕГДА В DOM ПО APPLE HIG */}
+          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ЯРКАЯ СИНЯЯ КАПСУЛА (СКРИНШОТ 7 И 8) */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
               <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная переливающаяся аура ТОЛЬКО в темной теме */}
-                <div className="hidden dark:block absolute -inset-[1.5px] rounded-full opacity-0 dark:opacity-70 dark:bg-gradient-to-r dark:from-blue-500 dark:via-indigo-500 dark:to-cyan-400 dark:group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
+                {/* Анимированная переливающаяся аура со свечением в обеих темах */}
+                <div className="absolute -inset-[1.5px] rounded-full opacity-60 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
 
-                {/* Сама кнопка: чистая белая пилюля без синего свечения в Light Mode, глубокий неон в Dark Mode */}
+                {/* Сама кнопка: яркая синяя капсула со свечением */}
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-white hover:bg-black/[0.04] border border-black/10 text-neutral-800 shadow-[0_1px_3px_rgba(0,0,0,0.05)] dark:bg-blue-950/40 dark:text-white dark:border-blue-400/40 dark:shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-colors duration-150 active:scale-[0.98] cursor-pointer"
+                  className="relative h-10 px-6 rounded-full text-sm font-semibold inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.45)] hover:shadow-[0_0_28px_rgba(37,99,235,0.6)] active:scale-[0.98] select-none tracking-wider uppercase"
                 >
-                  <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 group-hover:rotate-180 transition-transform duration-500" />
-                  <span className="font-semibold text-neutral-800 dark:text-white">
+                  <RotateCw className="w-4 h-4 text-white group-hover:rotate-180 transition-transform duration-500 shrink-0" />
+                  <span className="font-semibold text-white tracking-wider uppercase">
                     {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
                   </span>
                 </button>
@@ -7604,7 +7623,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="px-3.5 py-1.5 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+              className="px-3.5 py-1.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
               title="Статистика дня"
             >
               <svg className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -7621,7 +7640,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             <button 
               type="button"
               onClick={toggleTheme}
-              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-black/[0.04] dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors duration-150 active:scale-95 cursor-pointer"
+              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 active:scale-95 cursor-pointer"
               aria-label="Toggle theme"
               title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
@@ -11408,11 +11427,15 @@ export default function App() {
           const validDecks = filterValidActiveDecks(enhancedDecks as Deck[], useStore.getState().books);
           setDecks(validDecks);
           await setIDBItem('app_decks', validDecks);
-          await autoBackfillMasteredWords(validDecks, useStore.getState().books, useStore.getState().appLanguage);
-          await purgeOrphanedMasteredWords(validDecks, useStore.getState().books, useStore.getState().appLanguage);
+
+          // Delta-Sync карточек при старте приложения (устранение рассинхрона между браузерами)
+          await syncCardsFromSupabase(false);
+
+          const syncedDecks = useStore.getState().decks;
+          await autoBackfillMasteredWords(syncedDecks, useStore.getState().books, useStore.getState().appLanguage);
+          await purgeOrphanedMasteredWords(syncedDecks, useStore.getState().books, useStore.getState().appLanguage);
           if (typeof window !== 'undefined') {
             localStorage.setItem('last_library_cloud_sync', String(Date.now()));
-            localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
           }
         }
       } catch (err: any) {
@@ -11421,6 +11444,8 @@ export default function App() {
         setIsLoadingBooks(false);
         useStore.setState({ isLoaded: true });
         useStore.getState().refreshDueCardsCount().catch(() => {});
+        syncCloudDailyStats(undefined, useStore.getState().appLanguage || 'de', true).catch(() => {});
+        syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any).catch(() => {});
       }
     };
     fetchData();

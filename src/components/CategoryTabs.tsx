@@ -68,10 +68,10 @@ export const CategoryTabs = React.memo(function CategoryTabs({
               aria-selected={isActive}
               type="button"
               onClick={() => onTabChange(tab.id)}
-              className={`relative px-5 py-1.5 rounded-full text-xs font-medium tracking-tight transition-colors duration-150 outline-none cursor-pointer ${
+              className={`relative px-5 py-1.5 rounded-full text-xs font-medium tracking-tight transition-all duration-150 outline-none cursor-pointer ${
                 isActive
                   ? 'bg-white text-neutral-900 dark:bg-white/15 dark:text-white shadow-sm'
-                  : 'text-neutral-600 hover:text-neutral-900 hover:bg-black/[0.04] dark:text-neutral-400 dark:hover:text-neutral-100 dark:hover:bg-white/[0.06]'
+                  : 'text-neutral-600 hover:text-black hover:bg-white hover:shadow-xs dark:text-neutral-400 dark:hover:text-neutral-100 dark:hover:bg-white/[0.06]'
               }`}
             >
               {tab.label}

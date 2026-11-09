@@ -634,6 +634,18 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
           }
         }
       }
+
+      // Если в user_stats сохранен компактный снимок (totalWords, counts) — применяем сразу для шапки
+      if (typeof statsDaily?.totalWords === 'number' && statsDaily.totalWords > 0 && statsDaily?.counts) {
+        if (statsDaily.totalWords > globalMatrixStatsByLang[lang].totalWords) {
+          globalMatrixStatsByLang[lang] = {
+            counts: { ...globalMatrixStatsByLang[lang].counts, ...statsDaily.counts },
+            totalWords: statsDaily.totalWords,
+            activeLevel: calculateActiveLevel(statsDaily.counts),
+          };
+          notifyListeners(lang);
+        }
+      }
     } catch {}
 
     // 1. Загружаем timestamps и уровни из user_mastered_words (если пользователь авторизован)
