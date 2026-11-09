@@ -565,6 +565,21 @@ export const checkAndResetDailyProgress = () => {
           progress[todayStr] = 0;
           safeSetStorage(actKey, JSON.stringify(progress));
         } catch (e) {}
+
+        try {
+          const emptyDayStats = {
+            date: todayStr,
+            cardsDone: 0,
+            activeSeconds: 0,
+            correctCount: 0,
+            mistakesCountToday: 0,
+            mistakesPool: []
+          };
+          safeSetStorage(`app_daily_stats_${lang.toLowerCase()}`, JSON.stringify(emptyDayStats));
+          safeSetStorage(`app_daily_stats_${lang.toUpperCase()}`, JSON.stringify(emptyDayStats));
+        } catch (e) {}
+
+        performDailyStatsToCloudSync(lang, 0, emptyStats).catch(() => {});
       });
 
       resetDayStatsToZero();
@@ -1596,13 +1611,26 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
         await autoBackfillMasteredWords(updatedDecks, currentBooks, useStore.getState().appLanguage);
       }
 
-      // Неблокирующая отправка локальных изменений в облако
+      // Неблокирующая отправка локальных изменений в облако через надёжный update
       if (cardsToPushToRemote.length > 0) {
         (async () => {
           try {
-            for (let i = 0; i < cardsToPushToRemote.length; i += 50) {
-              const batch = cardsToPushToRemote.slice(i, i + 50);
-              await supabase.from('cards').upsert(batch);
+            for (let i = 0; i < cardsToPushToRemote.length; i += 10) {
+              const chunk = cardsToPushToRemote.slice(i, i + 10);
+              await Promise.all(
+                chunk.map((card) =>
+                  supabase
+                    .from('cards')
+                    .update({
+                      masteryLevel: card.masteryLevel,
+                      isArchived: card.isArchived,
+                      repetitions: card.repetitions,
+                      interval: card.interval,
+                      nextReviewDate: card.nextReviewDate,
+                    })
+                    .eq('id', card.id)
+                )
+              );
             }
           } catch (e) {
             console.warn('[Sync] Non-blocking push notice:', e);
@@ -7629,18 +7657,18 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             )}
           </div>
 
-          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ЭТАЛОННЫЙ НЕОНОВЫЙ КАПСЮЛЬ ИЗ ТЕМНОЙ ТЕМЫ ДЛЯ ОБЕИХ ТЕМ */}
+          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ТОЧНО ТАКАЯ ЖЕ КАК НА СКРИНЕ 5 В ОБЕИХ ТЕМАХ */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
               <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная переливающаяся аура со свечением в обеих темах */}
-                <div className="absolute -inset-[1.5px] rounded-full opacity-70 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
+                {/* Анимированная светящаяся аура из скрина 5 */}
+                <div className="absolute -inset-[2px] rounded-full opacity-85 dark:opacity-75 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-500 blur-[2px] animate-pulse pointer-events-none" />
 
-                {/* Сама кнопка: глубокий неоновый индиго-капсюль из темной темы в обеих темах */}
+                {/* Сама кнопка: глубокий синий индиго-капсюль с ярким неоновым свечением из темной темы */}
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-[#0b1736]/90 dark:bg-blue-950/40 text-white border border-blue-400/40 shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] hover:bg-[#0f1f48] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-150 active:scale-[0.98] cursor-pointer"
+                  className="relative px-5 py-2.5 rounded-full bg-[#0b1736] text-white border border-blue-400/50 shadow-[0_0_25px_rgba(59,130,246,0.6),0_0_45px_rgba(6,182,212,0.35)] hover:bg-[#0f1f48] hover:shadow-[0_0_30px_rgba(59,130,246,0.8),0_0_50px_rgba(6,182,212,0.45)] font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-150 active:scale-[0.98] cursor-pointer"
                 >
                   <RotateCw className="w-3.5 h-3.5 text-blue-400 group-hover:rotate-180 transition-transform duration-500 shrink-0" />
                   <span className="font-semibold text-white tracking-wider uppercase">
@@ -11541,7 +11569,13 @@ export default function App() {
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleFocus);
 
+    // 3. Автоматический сброс дневного прогресса в 00:00 (проверка каждые 30 секунд)
+    const dailyResetInterval = setInterval(() => {
+      checkAndResetDailyProgress();
+    }, 30000);
+
     return () => {
+      clearInterval(dailyResetInterval);
       unsubscribeStateBus();
       window.removeEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
       window.removeEventListener('focus', handleFocus);
