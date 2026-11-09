@@ -137,7 +137,7 @@ export function deduplicateCardsByLemma<
     if (!item) continue;
     const inner = (item as any).card ? (item as any).card : item;
     const raw = inner.targetWord || inner.target_word || inner.front || inner.lemma || inner.word || inner.missingWord || inner.infinitive || '';
-    const key = getWordKey(raw) || getCanonicalKey(raw) || normalizeLemmaKey(raw);
+    const key = getLemmaKey(raw) || getWordKey(raw) || getCanonicalKey(raw) || normalizeLemmaKey(raw);
 
     if (!key) {
       // Если ключа нет, сохраняем карточку в очередь по id
@@ -197,32 +197,47 @@ export function deduplicateCardsByLemma<
   return sessionQueue;
 }
 
-/**
- * 2. Гарантированный фильтр дублей (одно слово/корень = строго 1 карточка за сессию):
- */
-export function deduplicateReviewSession<
-  T extends { id?: string; targetWord?: string; front?: string; lemma?: string; word?: string; card?: any }
->(rawCards: T[]): T[] {
-  if (!Array.isArray(rawCards) || rawCards.length === 0) return [];
-  const seenRoots = new Set<string>();
-  const cleanQueue: T[] = [];
+export function getLemmaKey(word: string): string {
+  if (!word) return '';
+  return word
+    .toLowerCase()
+    .trim()
+    .replace(/\|/g, '')
+    .replace(/^(der|die|das|dem|den|des|ein|eine|einen|einem|einer)\s+/gi, '')
+    .replace(/^sich\s+/gi, '')
+    .replace(/^(jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.)\s+/gi, '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/[.,/#!$%^&*;:{}=\-_`~]/g, '')
+    .trim();
+}
 
-  for (const item of rawCards) {
+export function getUniqueReviewQueue<
+  T extends { id?: string; targetWord?: string; front?: string; lemma?: string; word?: string; card?: any }
+>(cards: T[]): T[] {
+  if (!Array.isArray(cards) || cards.length === 0) return [];
+  const seen = new Set<string>();
+  const queue: T[] = [];
+
+  for (const item of cards) {
     if (!item) continue;
     const card = (item as any).card || item;
     const word = card.targetWord || card.target_word || card.front || card.lemma || card.word || card.missingWord || card.infinitive || '';
-    const rootKey = getStrictLemmaKey(word);
-    
-    // Если корень уже был сегодня в сессии — ПРОПУСКАЕМ НА СЕГОДНЯ:
-    if (!rootKey || seenRoots.has(rootKey)) {
-      continue;
-    }
-
-    seenRoots.add(rootKey);
-    cleanQueue.push(item);
+    const key = getLemmaKey(word);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    queue.push(item);
   }
-
-  return cleanQueue;
+  return queue;
 }
 
-export const getDueReviewCards = deduplicateReviewSession;
+export function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+export const deduplicateReviewSession = getUniqueReviewQueue;
+export const getDueReviewCards = getUniqueReviewQueue;

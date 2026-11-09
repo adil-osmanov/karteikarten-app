@@ -623,28 +623,34 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
     try {
       const statsDaily = await safeFetchUserStats(`MASTERED_WORDS_${lang.toUpperCase()}`);
 
+      let addedWords = false;
+      if (statsDaily?.words && Array.isArray(statsDaily.words)) {
+        for (const w of statsDaily.words) {
+          if (w && typeof w === 'string') {
+            const key = normalizeLemmaKey(w);
+            if (key && key.length >= 2 && !existingMap.has(key)) {
+              existingMap.set(key, { originalWord: w, level: 'B1', masteredAt: Date.now() });
+              addedWords = true;
+            }
+          }
+        }
+      }
       if (statsDaily?.entries && Array.isArray(statsDaily.entries)) {
         for (const item of statsDaily.entries) {
           if (item && item.originalWord) {
             const key = normalizeLemmaKey(item.originalWord);
             if (key && key.length >= 2 && !existingMap.has(key)) {
               existingMap.set(key, item);
+              addedWords = true;
             }
           }
         }
       }
 
-      // Если в user_stats сохранен компактный снимок (totalWords, counts) — применяем сразу для шапки
-      if (typeof statsDaily?.totalWords === 'number' && statsDaily.totalWords > 0 && statsDaily?.counts) {
-        if (statsDaily.totalWords > globalMatrixStatsByLang[lang].totalWords) {
-          globalMatrixStatsByLang[lang] = {
-            counts: { ...globalMatrixStatsByLang[lang].counts, ...statsDaily.counts },
-            totalWords: statsDaily.totalWords,
-            activeLevel: calculateActiveLevel(statsDaily.counts),
-          };
-          persistMatrixToStorage(lang);
-          notifyListeners(lang);
-        }
+      if (addedWords) {
+        recomputeStatsFromMap(lang);
+        persistMatrixToStorage(lang);
+        notifyListeners(lang);
       }
     } catch (e) {
       console.warn('[Wortschatz-Matrix] safeFetchUserStats notice:', e);
@@ -796,7 +802,8 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
         language: `MASTERED_WORDS_${lang.toUpperCase()}`,
         daily_activity: {
           counts: globalMatrixStatsByLang[lang]?.counts,
-          totalWords: globalMatrixStatsByLang[lang]?.totalWords || nextMap.size,
+          totalWords: nextMap.size,
+          words: Array.from(nextMap.keys()),
           updatedAt: Date.now(),
         },
       }).catch(() => {});
@@ -909,12 +916,14 @@ export async function recordMasteredLemma(
   // Всегда сохраняем компактную статистику в user_stats (без передачи сотен килобайт entries)
   try {
     const counts = globalMatrixStatsByLang[currentLanguage].counts;
-    const totalWords = globalMatrixStatsByLang[currentLanguage].totalWords;
+    const currentMap = uniqueMasteredWordsByLang[currentLanguage];
+    const totalWords = currentMap.size;
     safeUpsertUserStats({
       language: `MASTERED_WORDS_${currentLanguage.toUpperCase()}`,
       daily_activity: {
         counts,
         totalWords,
+        words: Array.from(currentMap.keys()),
         updatedAt: Date.now(),
       },
     }).catch(() => {});
@@ -1179,7 +1188,8 @@ export async function autoBackfillMasteredWords(
           language: `MASTERED_WORDS_${targetLang.toUpperCase()}`,
           daily_activity: {
             counts: globalMatrixStatsByLang[targetLang]?.counts,
-            totalWords: globalMatrixStatsByLang[targetLang]?.totalWords || existingMap.size,
+            totalWords: existingMap.size,
+            words: Array.from(existingMap.keys()),
             updatedAt: Date.now(),
           },
         }).catch(() => {});
@@ -1256,7 +1266,8 @@ export async function purgeOrphanedMasteredWords(
         language: `MASTERED_WORDS_${normLang.toUpperCase()}`,
         daily_activity: {
           counts: globalMatrixStatsByLang[normLang]?.counts,
-          totalWords: globalMatrixStatsByLang[normLang]?.totalWords || currentMap.size,
+          totalWords: currentMap.size,
+          words: Array.from(currentMap.keys()),
           updatedAt: Date.now(),
         },
       }).catch(() => {});

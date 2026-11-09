@@ -26,7 +26,7 @@ import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
 import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
-import { normalizeLemmaKey, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards } from "@/lib/utils/lemmaNormalizer";
+import { normalizeLemmaKey, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -1106,22 +1106,21 @@ export function isCardDueForReview(card: any): boolean {
 
   // Учитываем и camelCase, и snake_case
   const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
-  const archived = card.isArchived ?? card.is_archived ?? false;
+  const archived = Boolean(card.isArchived ?? card.is_archived);
 
-  // 1. В глобальный повтор идут ТОЛЬКО выученные слова 4 этапа (из архива / mastery >= 4)
-  if (mastery < 4 && !archived) {
+  // В повтор идут карточки, которые находятся в процессе SRS (mastery > 0 или в архиве)
+  if (mastery <= 0 && !archived) {
     return false;
   }
 
-  // 2. Проверяем дату (к текущему моменту времени)
-  const rawDate = card.nextReviewDate || card.next_review_date;
+  // Проверяем дату (к текущему моменту времени)
+  const rawDate = card.nextReviewDate || card.next_review_date || card.next_review_at;
   if (!rawDate) return false;
 
-  const reviewTime = new Date(rawDate).getTime();
+  const reviewTime = typeof rawDate === 'number' ? rawDate : new Date(rawDate).getTime();
   if (isNaN(reviewTime)) return false;
 
-  // Округляем до минуты во избежание микросекундных расхождений между вкладками
-  return Math.floor(reviewTime / 60000) <= Math.floor(Date.now() / 60000);
+  return reviewTime <= Date.now();
 }
 
 export const isCardDue = isCardDueForReview;
@@ -1429,7 +1428,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
     let query = supabase
       .from('cards')
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
-      .or('isArchived.eq.true,masteryLevel.gte.4')
+      .or('isArchived.eq.true,masteryLevel.gt.0')
       .not('nextReviewDate', 'is', null)
       .lte('nextReviewDate', now);
 
@@ -1851,105 +1850,43 @@ export function calculateNextSRSState(
   const currentEase = typeof card.easeFactor === 'number' ? card.easeFactor : 2.2;
   const currentReps = card.repetitions || 0;
   const currentInterval = card.interval || 0;
-  const currentMastery = card.masteryLevel || 0;
-  const isArchived = Boolean(card.isArchived);
+  const currentMastery = card.masteryLevel ?? card.mastery_level ?? 0;
+  const isArchived = Boolean(card.isArchived ?? card.is_archived);
 
-  // Режим интервального повторения (SRS Review):
-  // Карточка находится на этапе повторения, если это сессия ревью, или карточка уже заархивирована.
-  const isReview = isReviewMode || isArchived;
+  // Календарные интервалы (в днях): 1d -> 3d -> 7d -> 14d -> 30d
+  const INTERVALS_BY_LEVEL = [1, 1, 3, 7, 14, 30];
 
-  if (isReview) {
-    if (isCorrect && !isHilfe) {
-      const newReps = currentReps + 1;
-      let nextInterval = 1;
-
-      if (currentInterval >= 16) {
-        // Долгосрочное интервальное повторение (Long-term Maintenance Reviews):
-        // 30 дней -> 65 дней -> 150 дней (с учетом easeFactor)
-        nextInterval = Math.max(
-          Math.round(currentInterval * Math.max(1.8, currentEase)),
-          currentInterval + 7
-        );
-      } else if (newReps === 1) {
-        nextInterval = 1; // 1 день
-      } else if (newReps === 2) {
-        nextInterval = 3; // 3 дня
-      } else if (newReps === 3) {
-        nextInterval = 7; // 7 дней
-      } else if (newReps === 4) {
-        nextInterval = 16; // 16 дней
-      } else {
-        // 5+ повторов: от 35 дней с учетом easeFactor
-        nextInterval = Math.max(35, Math.round((currentInterval || 16) * currentEase));
-      }
-
-      const newEase = Math.min(2.8, currentEase + 0.05);
-      const nextMastery = 4; // Успешное ревью подтверждает Stage 4
-      const nextReviewDate = Date.now() + nextInterval * 86400000;
-
-      return {
-        masteryLevel: nextMastery,
-        isArchived: true,
-        repetitions: newReps,
-        interval: nextInterval,
-        easeFactor: Number(newEase.toFixed(2)),
-        nextReviewDate,
-        first_mastered_at: card.first_mastered_at
-      };
-    } else {
-      // ЗАБЫВАНИЕ (Lapse): Сбой при повторении
-      // Ошибка («Не знаю / Wiederholen»):
-      // Сброс на 3-й синий раунд (masteryLevel = 2, round = 3), синхронно с UI
-      const newEase = Math.max(1.3, currentEase - 0.2);
-
-      return {
-        masteryLevel: 2, // сброс на 3-й (синий) раунд
-        isArchived: false, // вывод из архива (Demotion)
-        repetitions: 0,  // сброс серии
-        interval: 1,     // сброс интервала на 1 день
-        easeFactor: Number(newEase.toFixed(2)),
-        nextReviewDate: Date.now() + 10 * 60 * 1000, // +10 минут
-        first_mastered_at: card.first_mastered_at
-      };
-    }
-  }
-
-  // -------------------------------------------------------------
-  // ФАЗА 1: ПЕРВИЧНОЕ ОСВОЕНИЕ (Карточка учится внутри колоды с 0 раунда)
-  // -------------------------------------------------------------
   if (isCorrect && !isHilfe) {
-    const newMastery = currentMastery + 1;
-    
-    // Выпуск в долгосрочную память (порог 4 успешных ответа)
-    if (newMastery >= 4) {
-      return {
-        masteryLevel: 4,
-        isArchived: true,
-        repetitions: 1,
-        interval: 1,
-        easeFactor: currentEase,
-        nextReviewDate: Date.now() + 1 * 86400000, // Завтра (+24ч)
-        first_mastered_at: card.first_mastered_at || new Date().toISOString()
-      };
-    }
+    const nextMastery = Math.min(5, currentMastery + 1);
+    const nextInterval = INTERVALS_BY_LEVEL[nextMastery] || 30;
+    const nextReviewDate = Date.now() + nextInterval * 86400000;
+    const nextEase = Number(Math.min(2.8, currentEase + 0.05).toFixed(2));
 
     return {
-      masteryLevel: newMastery,
-      isArchived: false,
-      repetitions: 0,
-      interval: 0,
-      easeFactor: currentEase,
-      nextReviewDate: null
+      masteryLevel: nextMastery,
+      isArchived: nextMastery >= 4 || isArchived,
+      repetitions: currentReps + 1,
+      interval: nextInterval,
+      easeFactor: nextEase,
+      nextReviewDate,
+      first_mastered_at: card.first_mastered_at || (nextMastery >= 4 ? new Date().toISOString() : undefined)
     };
   } else {
-    // Ошибка на первичном этапе: мягкий штраф
+    // При ошибке: сброс интервала на 1 день (86400000 мс), repetitions = 0
+    // Сброс masteryLevel на 1 раунд назад (минимум 1). Никаких +10 минут!
+    const nextMastery = Math.max(1, currentMastery - 1);
+    const nextInterval = 1; // строго 1 день
+    const nextReviewDate = Date.now() + nextInterval * 86400000;
+    const nextEase = Number(Math.max(1.3, currentEase - 0.2).toFixed(2));
+
     return {
-      masteryLevel: Math.max(0, currentMastery - 1),
+      masteryLevel: nextMastery,
       isArchived: false,
       repetitions: 0,
-      interval: 0,
-      easeFactor: Number(Math.max(1.3, currentEase - 0.1).toFixed(2)),
-      nextReviewDate: null
+      interval: nextInterval,
+      easeFactor: nextEase,
+      nextReviewDate,
+      first_mastered_at: card.first_mastered_at
     };
   }
 }
@@ -3804,10 +3741,10 @@ export interface ParsedTargetPhrase {
   inputTarget: string;
 }
 
-export function TrennbarDottedBar() {
+export function TrennbarDottedBar({ className }: { className?: string } = {}) {
   return (
     <span 
-      className="text-neutral-500 font-light mx-0.5 select-none" 
+      className={cn("text-neutral-400 dark:text-neutral-400 font-normal mx-0.5 select-none", className)} 
       title="Trennbare Vorsilbe"
       aria-hidden="true"
     >
@@ -4018,7 +3955,7 @@ function RapidFlashcardMode({
   }, [currentCard?.targetWord, parsedTarget.prefixContext]);
 
   const effectivePrefix = verbComponents.prefix || parsedTarget.prefixContext;
-  const effectiveCoreWord = verbComponents.coreWord || parsedTarget.coreWord || currentCard?.targetWord || '';
+  const effectiveCoreWord = parsedTarget.coreWord || verbComponents.coreWord || currentCard?.targetWord || '';
 
   // Извлечение артикля, основного слова и множественного числа
   // Устранена ошибка повторного артикля ("die die Aushilfe"): артикль строго отделяется от слова!
@@ -4709,10 +4646,18 @@ function RapidFlashcardMode({
                           : 'text-2xl md:text-3xl',
                         !isSurrendered ? 'text-emerald-400' : 'text-red-400'
                       )}>
-                        {formatSeparableWord(
-                          effectiveCoreWord,
-                          currentCard?.forms,
-                          !isSurrendered ? 'emerald' : 'red'
+                        {displayParts.hasDivider ? (
+                          <>
+                            <span>{displayParts.prefix}</span>
+                            <TrennbarDottedBar />
+                            <span>{displayParts.stem}</span>
+                          </>
+                        ) : (
+                          formatSeparableWord(
+                            effectiveCoreWord,
+                            currentCard?.forms,
+                            !isSurrendered ? 'emerald' : 'red'
+                          )
                         )}
                       </div>
                     ) : (
@@ -4779,10 +4724,18 @@ function RapidFlashcardMode({
                         : 'text-2xl md:text-3xl',
                       !isSurrendered ? 'text-emerald-400' : 'text-red-400'
                     )}>
-                      {formatSeparableWord(
-                        effectiveCoreWord,
-                        currentCard?.forms,
-                        !isSurrendered ? 'emerald' : 'red'
+                      {displayParts.hasDivider ? (
+                        <>
+                          <span>{displayParts.prefix}</span>
+                          <TrennbarDottedBar />
+                          <span>{displayParts.stem}</span>
+                        </>
+                      ) : (
+                        formatSeparableWord(
+                          effectiveCoreWord,
+                          currentCard?.forms,
+                          !isSurrendered ? 'emerald' : 'red'
+                        )
                       )}
                     </div>
                   ) : (
@@ -5142,8 +5095,8 @@ function RapidSession({
     let list: { deckId: string, card: Flashcard }[] = [];
     if (reviewCards) {
       const isDrill = isDrillMode;
-      // Сессия повторений: умная сортировка и строгая дедупликация (без перемешивания!)
-      const uniqueReview = deduplicateReviewSession([...reviewCards]);
+      // Сессия повторений: строгая дедупликация и перемешивание при старте
+      const uniqueReview = shuffleArray(getUniqueReviewQueue([...reviewCards]));
       list = uniqueReview.map(item => {
         const initialRound = isDrill
           ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
@@ -5181,12 +5134,7 @@ function RapidSession({
             isLegendary: false
           }
         }));
-        list = rawList;
-        // Перемешиваем карточки только для обычной колоды
-        for (let i = list.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [list[i], list[j]] = [list[j], list[i]];
-        }
+        list = shuffleArray(rawList);
       }
     }
     // Restore saved round progress (0-3) of not-yet-archived words
@@ -5602,8 +5550,8 @@ function StudyInterface({
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
-      // Сессия повторений: умная сортировка и строгая дедупликация (без перемешивания!)
-      const unique = deduplicateReviewSession([...reviewCards]);
+      // Сессия повторений: строгая дедупликация и перемешивание при старте
+      const unique = shuffleArray(getUniqueReviewQueue([...reviewCards]));
       return unique.map(item => {
         const isDrill = isDrillMode;
         const initialRound = isDrill
@@ -5643,14 +5591,14 @@ function StudyInterface({
             isLegendary: false,
           }
         }));
-        return rawList.sort(() => Math.random() - 0.5);
+        return shuffleArray(rawList);
       }
     }
     return [];
   });
   const [turn, setTurn] = useState(0);
   const [initialTotal, setInitialTotal] = useState(() => {
-    if (reviewCards && reviewCards.length > 0) return deduplicateCardsByLemma(reviewCards, false).length;
+    if (reviewCards && reviewCards.length > 0) return getUniqueReviewQueue(reviewCards).length;
     if (deckId) {
       const state = useStore.getState();
       const deck = state.decks.find((d) => d.id === deckId);
@@ -5676,8 +5624,8 @@ function StudyInterface({
     sessionInitKeyRef.current = initKey;
 
     if (reviewCards) {
-      // Сессия повторений: умная сортировка и строгая дедупликация (без перемешивания!)
-      const uniqueReview = deduplicateCardsByLemma([...reviewCards], true);
+      // Сессия повторений: строгая дедупликация и перемешивание при старте
+      const uniqueReview = shuffleArray(getUniqueReviewQueue([...reviewCards]));
       const isDrill = isDrillMode;
       const list = uniqueReview.map(item => {
         const initialRound = isDrill
@@ -5722,7 +5670,7 @@ function StudyInterface({
             isLegendary: false,
           }
         }));
-        setActiveCards(rawList.sort(() => Math.random() - 0.5));
+        setActiveCards(shuffleArray(rawList));
         setInitialTotal(rawList.length);
         setMasteredInSession(0);
         setSessionCorrect(0);
@@ -7109,9 +7057,9 @@ function StudyCard({
                 parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
               )}>
                 {parsedTargetWord ? (
-                  <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {formatSeparableWord(parsedTargetWord.rest)}</>
+                  <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {formatSeparableWord(parsedTargetWord.rest, card.forms)}</>
                 ) : (
-                  formatSeparableWord(card.targetWord && card.targetWord.includes('|') ? card.targetWord : displayAnswerWord)
+                  formatSeparableWord(card.targetWord && card.targetWord.includes('|') ? card.targetWord : displayAnswerWord, card.forms)
                 )}
               </span>
             ) : (
@@ -7666,21 +7614,21 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             )}
           </div>
 
-          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ЭТАЛОННЫЙ НЕОНОВЫЙ КАПСЮЛЬ ИЗ ТЕМНОЙ ТЕМЫ ДЛЯ ОБЕИХ ТЕМ */}
+          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
               <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная переливающаяся аура со свечением в обеих темах */}
-                <div className="absolute -inset-[1.5px] rounded-full opacity-70 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
+                {/* Анимированная переливающаяся аура со свечением в темной теме */}
+                <div className="hidden dark:block absolute -inset-[1.5px] rounded-full opacity-70 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
 
-                {/* Сама кнопка: глубокий неоновый индиго-капсюль из темной темы в обеих темах */}
+                {/* Сама кнопка: чистый синий в светлой теме, глубокий неоновый индиго-капсюль в темной теме */}
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-[#0b1736]/90 dark:bg-blue-950/40 text-white border border-blue-400/40 shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] hover:bg-[#0f1f48] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-150 active:scale-[0.98] cursor-pointer"
+                  className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none bg-blue-600 hover:bg-blue-700 text-white shadow-md active:scale-[0.98] dark:bg-[#0b1736]/90 dark:border dark:border-blue-400/40 dark:text-sky-100 dark:shadow-[0_0_24px_rgba(14,165,233,0.5)] dark:hover:border-sky-300 relative uppercase"
                 >
-                  <RotateCw className="w-3.5 h-3.5 text-blue-400 group-hover:rotate-180 transition-transform duration-500 shrink-0" />
-                  <span className="font-semibold text-white tracking-wider uppercase">
+                  <RotateCw className="w-4 h-4 text-white dark:text-sky-300 group-hover:rotate-180 transition-transform duration-500 shrink-0" />
+                  <span className="font-semibold text-white dark:text-sky-100 tracking-wider uppercase">
                     {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
                   </span>
                 </button>
@@ -7689,10 +7637,10 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
               <button
                 type="button"
                 disabled
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none text-xs font-medium tracking-wider uppercase"
+                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none uppercase text-xs"
               >
-                <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
-                <span>
+                <RotateCw className="w-4 h-4 text-zinc-400 shrink-0" />
+                <span className="font-semibold tracking-wider uppercase">
                   0 {getRepeatButtonLabel(effectiveLang || appLanguage)}
                 </span>
               </button>
@@ -11761,7 +11709,7 @@ export default function App() {
 
     // 1. FAST IN-MEMORY PATH: Use local dueCards immediately (0 network requests)
     if (dueCards.length > 0) {
-      setReviewCards(deduplicateReviewSession(dueCards));
+      setReviewCards(shuffleArray(getUniqueReviewQueue(dueCards)));
       return;
     }
 
@@ -11769,7 +11717,7 @@ export default function App() {
       const targetLang = activeBook?.language || appLanguage;
       const freshCards = await fetchDueCardsFromCloud(targetLang, activeBookId || undefined);
       if (freshCards.length > 0) {
-        setReviewCards(deduplicateReviewSession(freshCards));
+        setReviewCards(shuffleArray(getUniqueReviewQueue(freshCards)));
         return;
       }
     } catch (e) {

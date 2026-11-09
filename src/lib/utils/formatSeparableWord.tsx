@@ -1,7 +1,7 @@
 import React from 'react';
 
 // СТРОГИЙ список только для внешнего серого лейбла (КАТЕГОРИЧЕСКИ без 'sich'):
-export const EXTERNAL_GOVERNANCE_REGEX = /^(jemandem\s+etwas|jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.)\s+/i;
+export const EXTERNAL_GOVERNANCE_REGEX = /^(?:(?:in|an|auf|aus|bei|mit|nach|über|um|unter|von|vor|zu|für|gegen|durch)\s+)?(jemandem\s+etwas|jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.)\s+/i;
 export const GOVERNANCE_REGEX = EXTERNAL_GOVERNANCE_REGEX;
 
 export function parseVerbComponents(rawTarget: string, externalPrefixProp?: string) {
@@ -142,7 +142,7 @@ export function formatSeparableWord(
   if (parts.isSeparable) {
     return (
       <span className="whitespace-nowrap font-medium tracking-tight">
-        {parts.prefixPart}<span className="opacity-40 mx-0.5 font-light select-none" aria-hidden="true">|</span>{parts.stemPart}
+        {parts.prefixPart}<span className="text-neutral-400 dark:text-neutral-400 font-normal mx-0.5 select-none" aria-hidden="true">|</span>{parts.stemPart}
       </span>
     );
   }

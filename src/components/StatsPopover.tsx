@@ -243,11 +243,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     ? currentLangStats.totalCount
     : (todayLiveCards + todayMistakesCount);
 
-  const todayAccuracy = typeof currentLangStats?.accuracy === 'number'
-    ? currentLangStats.accuracy
-    : ((currentLangStats?.totalCount && currentLangStats.totalCount > 0)
-        ? Math.round((currentLangStats.correctCount / currentLangStats.totalCount) * 100)
-        : (todayAttempts > 0 ? Math.round((todayLiveCards / todayAttempts) * 100) : null));
+  const todayCorrect = typeof currentLangStats?.correctCount === 'number'
+    ? currentLangStats.correctCount
+    : todayLiveCards;
+
+  const todayAccuracy = todayAttempts === 0
+    ? 100
+    : Math.max(0, Math.min(100, Math.round((todayCorrect / todayAttempts) * 100)));
 
   // Find the selected day record
   const selectedRecord = historyDays.find(d => d.date === selectedDate) || {
@@ -285,15 +287,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
   const displayAccuracy = isSelectedToday 
     ? todayAccuracy 
-    : (displayCardsDone > 0 ? selectedRecord.accuracy : null);
+    : (typeof selectedRecord.accuracy === 'number' ? selectedRecord.accuracy : 100);
 
-  const accuracyColor = displayAccuracy === null
-    ? 'text-zinc-400 dark:text-zinc-500'
-    : displayAccuracy >= 80 
-      ? 'text-emerald-600 dark:text-emerald-400' 
-      : displayAccuracy >= 50 
-        ? 'text-amber-600 dark:text-amber-400' 
-        : 'text-rose-600 dark:text-rose-400';
+  const accuracyColor = displayAccuracy >= 80 
+    ? 'text-emerald-600 dark:text-emerald-400' 
+    : displayAccuracy >= 50 
+      ? 'text-amber-600 dark:text-amber-400' 
+      : 'text-rose-600 dark:text-rose-400';
 
   return (
     <div 

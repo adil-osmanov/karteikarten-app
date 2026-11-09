@@ -1247,25 +1247,16 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     }
 
     const today = getTodayKey();
+    // Инкремент счетчика уже выполнен в updateLanguageDailyStats при ответе на карточку (строго 1 повтор = 1 карточка)
     const currentActivityCards = getTodayCompletedCardsCount(targetLang);
-    const newCardsDone = isCorrect
-      ? (currentActivityCards + 1)
-      : currentActivityCards;
-
-    if (isCorrect && typeof window !== 'undefined') {
-      try {
-        localStorage.setItem(`kraft_cards_learned_${today}`, String(newCardsDone));
-      } catch {}
-    }
+    const newCardsDone = currentActivityCards;
 
     const prevMistakesToday = typeof current.mistakesCountToday === 'number'
       ? current.mistakesCountToday
       : (current.mistakesPool?.length || 0);
     const newMistakesToday = isCorrect ? prevMistakesToday : Math.max(prevMistakesToday + 1, updatedPool.length);
 
-    const newCorrectCount = isCorrect
-      ? Math.max((current.correctCount || 0) + 1, newCardsDone)
-      : Math.max(current.correctCount || 0, newCardsDone);
+    const newCorrectCount = Math.max(current.correctCount || 0, newCardsDone);
 
     const isReview = Boolean(callOptions?.isReview || card?.isArchived);
     const isNewMastered = Boolean(callOptions?.isNewMastered);
@@ -1294,8 +1285,10 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     };
 
     // Keep today's entry up-to-date in multi-day history
-    const totalAttempts = newCardsDone + newMistakesToday;
-    const currentAcc = totalAttempts > 0 ? Math.round((newCardsDone / totalAttempts) * 100) : 100;
+    const totalAnswers = newCardsDone + newMistakesToday;
+    const currentAcc = totalAnswers === 0 
+      ? 100 
+      : Math.max(0, Math.min(100, Math.round((newCardsDone / totalAnswers) * 100)));
     const currentRecord = getDayRecord(targetLang, today);
     saveDayRecord(targetLang, {
       date: today,
