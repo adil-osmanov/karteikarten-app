@@ -586,7 +586,7 @@ function initMatrixStore(lang: AppLang) {
 
 // Local-first in-memory cooldown guards to eliminate egress spikes
 let lastRepairTimestampByLang: Record<string, number> = {};
-const MATRIX_CLOUD_SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+const MATRIX_CLOUD_SYNC_COOLDOWN_MS = 20 * 1000; // 20 seconds
 const REPAIR_TIMESTAMPS_COOLDOWN_MS = 60 * 60 * 1000; // 60 minutes
 
 /**
@@ -594,11 +594,11 @@ const REPAIR_TIMESTAMPS_COOLDOWN_MS = 60 * 60 * 1000; // 60 minutes
  * Собирает реально выученные карточки пользователя (masteryLevel >= 4 || isArchived === true)
  * и записи user_mastered_words, строго дедуплицируя по normalizeLemmaKey.
  */
-export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<void> {
+export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: boolean = false): Promise<void> {
   initMatrixStore(lang);
   if (isSyncingByLang[lang]) return;
   const now = Date.now();
-  if (now - (lastCloudSyncByLang[lang] || 0) < MATRIX_CLOUD_SYNC_COOLDOWN_MS) return;
+  if (!force && now - (lastCloudSyncByLang[lang] || 0) < MATRIX_CLOUD_SYNC_COOLDOWN_MS) return;
 
   isSyncingByLang[lang] = true;
   lastCloudSyncByLang[lang] = now;
@@ -613,7 +613,6 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
         const totalCards = localDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
         if (totalCards > 0) {
           await autoBackfillMasteredWords(localDecks, undefined, lang);
-          return;
         }
       }
     } catch {}
@@ -643,10 +642,13 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de'): Promise<
             totalWords: statsDaily.totalWords,
             activeLevel: calculateActiveLevel(statsDaily.counts),
           };
+          persistMatrixToStorage(lang);
           notifyListeners(lang);
         }
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[Wortschatz-Matrix] safeFetchUserStats notice:', e);
+    }
 
     // 1. Загружаем timestamps и уровни из user_mastered_words (если пользователь авторизован)
     const remoteMetaByKey = new Map<string, { level?: string | null; masteredAt: number; first_mastered_at?: string }>();

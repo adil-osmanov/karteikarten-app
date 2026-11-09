@@ -1148,7 +1148,7 @@ export function updateCachedCardInMemory(cardId: string, updated: Partial<Flashc
 }
 
 const KRAFT_LAST_SYNC_KEY = 'kraft_last_sync_timestamp';
-const DELTA_SYNC_COOLDOWN_MS = 10 * 60 * 1000; // НЕ чаще 1 раза в 10 минут!
+const DELTA_SYNC_COOLDOWN_MS = 15 * 1000; // Быстрый и легкий Delta-Sync без задержек
 
 /**
  * Серверный подсчет количества карточек в Supabase БЕЗ передачи строк (0 байт egress тела).
@@ -1477,10 +1477,9 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
   try {
     // РЕЖИМ 1: ДЕЛЬТА-СИНХРОНИЗАЦИЯ (DELTA SYNC ONLY), если локальный кэш карточек уже существует
     if (totalLocalCards > 0 && typeof window !== 'undefined') {
-      const lastSync = localStorage.getItem('kraft_last_cards_sync_at');
       const nowIso = new Date().toISOString();
 
-      const deltaCards = await fetchCardsDelta(force ? null : lastSync);
+      const deltaCards = await fetchCardsDelta();
       localStorage.setItem('kraft_last_cards_sync_at', nowIso);
       localStorage.setItem(KRAFT_LAST_SYNC_KEY, nowIso);
 
@@ -1494,12 +1493,35 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       }
 
       let hasDeltaChanges = false;
+      const cardsToPushToRemote: any[] = [];
+
       const updatedDecks = baseDecks.map((deck) => {
         if (!Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
         let deckModified = false;
         const nextCards = deck.cards.map((card) => {
           const remote = deltaMap.get(card.id);
-          if (!remote) return card;
+
+          const localMastery = card.masteryLevel ?? 0;
+          const localArchived = Boolean(card.isArchived);
+          const localReviewDate = card.nextReviewDate ?? null;
+          const localInterval = card.interval ?? 0;
+          const localReps = card.repetitions ?? 0;
+
+          if (!remote) {
+            // Если на сервере нет записи, а локально карточка пройдена — пушим на сервер
+            if (localMastery > 0 || localArchived) {
+              cardsToPushToRemote.push({
+                id: card.id,
+                deck_id: (card as any).deck_id || (card as any).deckId || deck.id,
+                masteryLevel: localMastery,
+                isArchived: localArchived,
+                repetitions: localReps,
+                interval: localInterval,
+                nextReviewDate: localReviewDate,
+              });
+            }
+            return card;
+          }
 
           const remoteMastery = remote.masteryLevel ?? remote.mastery_level ?? 0;
           const remoteIsArchived = Boolean(remote.isArchived ?? remote.is_archived);
@@ -1507,35 +1529,52 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
           const remoteInterval = remote.interval ?? 0;
           const remoteReps = remote.repetitions ?? 0;
 
-          const localMastery = card.masteryLevel ?? 0;
-          const localArchived = Boolean(card.isArchived);
-          const localReviewDate = card.nextReviewDate ?? null;
+          // Строгое сведение к максимальному прогрессу (Chrome vs Safari max-progress rule)
+          const finalMastery = Math.max(localMastery, remoteMastery);
+          const finalArchived = localArchived || remoteIsArchived || finalMastery >= 4;
+          const finalRound = finalArchived ? 4 : Math.max(1, Math.min(4, finalMastery + 1));
+          const finalReps = Math.max(localReps, remoteReps);
+          const finalInterval = Math.max(localInterval, remoteInterval);
+          const finalReviewDate = remoteReviewDate ?? localReviewDate;
 
           const isDiff =
-            remoteMastery !== localMastery ||
-            remoteIsArchived !== localArchived ||
-            remoteReviewDate !== localReviewDate ||
-            remoteInterval !== (card.interval ?? 0) ||
-            remoteReps !== (card.repetitions ?? 0);
+            finalMastery !== localMastery ||
+            finalArchived !== localArchived ||
+            finalRound !== (card.round ?? 1) ||
+            Boolean(card.isLegendary) !== finalArchived ||
+            finalReps !== localReps ||
+            finalInterval !== localInterval ||
+            finalReviewDate !== localReviewDate;
 
           if (isDiff) {
             deckModified = true;
             hasDeltaChanges = true;
-            const finalMastery = Math.max(localMastery, remoteMastery);
-            const finalArchived = localArchived || remoteIsArchived || finalMastery >= 4;
-            const finalRound = finalArchived ? 4 : Math.max(1, Math.min(4, finalMastery + 1));
             return {
               ...card,
               masteryLevel: finalMastery,
               round: finalRound,
               isLegendary: finalArchived,
               isArchived: finalArchived,
-              repetitions: remoteReps || card.repetitions,
-              interval: remoteInterval || card.interval,
-              nextReviewDate: remoteReviewDate ?? card.nextReviewDate,
-              updated_at: remote.updated_at || nowIso,
+              repetitions: finalReps,
+              interval: finalInterval,
+              nextReviewDate: finalReviewDate,
+              updated_at: nowIso,
             };
           }
+
+          // Если локальная карточка опережает сервер — пушим в облако, чтобы другие клиенты подтянулись
+          if (localMastery > remoteMastery || (localArchived && !remoteIsArchived)) {
+            cardsToPushToRemote.push({
+              id: card.id,
+              deck_id: (card as any).deck_id || (card as any).deckId || deck.id,
+              masteryLevel: finalMastery,
+              isArchived: finalArchived,
+              repetitions: finalReps,
+              interval: finalInterval,
+              nextReviewDate: finalReviewDate,
+            });
+          }
+
           return card;
         });
 
@@ -1556,6 +1595,21 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
         await useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
         await autoBackfillMasteredWords(updatedDecks, currentBooks, useStore.getState().appLanguage);
       }
+
+      // Неблокирующая отправка локальных изменений в облако
+      if (cardsToPushToRemote.length > 0) {
+        (async () => {
+          try {
+            for (let i = 0; i < cardsToPushToRemote.length; i += 50) {
+              const batch = cardsToPushToRemote.slice(i, i + 50);
+              await supabase.from('cards').upsert(batch);
+            }
+          } catch (e) {
+            console.warn('[Sync] Non-blocking push notice:', e);
+          }
+        })();
+      }
+
       return;
     }
 
@@ -7575,20 +7629,20 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             )}
           </div>
 
-          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ЯРКАЯ СИНЯЯ КАПСУЛА (СКРИНШОТ 7 И 8) */}
+          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ЭТАЛОННЫЙ НЕОНОВЫЙ КАПСЮЛЬ ИЗ ТЕМНОЙ ТЕМЫ ДЛЯ ОБЕИХ ТЕМ */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
               <div className="relative group inline-flex items-center justify-center">
                 {/* Анимированная переливающаяся аура со свечением в обеих темах */}
-                <div className="absolute -inset-[1.5px] rounded-full opacity-60 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
+                <div className="absolute -inset-[1.5px] rounded-full opacity-70 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-pulse pointer-events-none" />
 
-                {/* Сама кнопка: яркая синяя капсула со свечением */}
+                {/* Сама кнопка: глубокий неоновый индиго-капсюль из темной темы в обеих темах */}
                 <button
                   type="button"
                   onClick={onStartReview}
-                  className="relative h-10 px-6 rounded-full text-sm font-semibold inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.45)] hover:shadow-[0_0_28px_rgba(37,99,235,0.6)] active:scale-[0.98] select-none tracking-wider uppercase"
+                  className="relative px-5 py-2.5 rounded-full bg-[#0b1736]/90 dark:bg-blue-950/40 text-white border border-blue-400/40 shadow-[0_0_35px_-5px_rgba(59,130,246,0.55)] hover:bg-[#0f1f48] dark:hover:bg-blue-900/40 font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-150 active:scale-[0.98] cursor-pointer"
                 >
-                  <RotateCw className="w-4 h-4 text-white group-hover:rotate-180 transition-transform duration-500 shrink-0" />
+                  <RotateCw className="w-3.5 h-3.5 text-blue-400 group-hover:rotate-180 transition-transform duration-500 shrink-0" />
                   <span className="font-semibold text-white tracking-wider uppercase">
                     {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
                   </span>
@@ -11234,6 +11288,16 @@ export default function App() {
           localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
         }
         useStore.getState().refreshDueCardsCount().catch(() => {});
+        // Немедленно запускаем фоновый дельта-синк для устранения рассинхрона между браузерами
+        (async () => {
+          try {
+            await syncCardsFromSupabase(true);
+            await syncCloudDailyStats(undefined, useStore.getState().appLanguage || 'de', true);
+            await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, true);
+          } catch (e) {
+            console.warn('[App] Background delta sync error:', e);
+          }
+        })();
         return;
       }
 
@@ -11450,9 +11514,9 @@ export default function App() {
     };
     fetchData();
 
-    // 2. Строгий Cooldown 10 минут для focus / visibilitychange (ТОЛЬКО Delta Sync, никакого слепого select('*'))
-    let lastFocusSync = Date.now();
-    const FOCUS_COOLDOWN_MS = 10 * 60 * 1000; // НЕ чаще 1 раза в 10 минут!
+    // 2. Cooldown 20 секунд для focus / visibilitychange (легкий Delta Sync, быстрое обновление между вкладками)
+    let lastFocusSync = 0;
+    const FOCUS_COOLDOWN_MS = 20 * 1000; // 20 секунд
 
     const handleFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;

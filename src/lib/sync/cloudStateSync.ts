@@ -340,53 +340,34 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
 // INCREMENTAL DELTA-SYNC (CHROME <-> SAFARI SYNC)
 // ============================================================================
 
-export async function fetchCardsDelta(lastSync: string | null): Promise<any[]> {
-  let updatedCards: any[] = [];
-  let usedUpdatedAt = false;
-
-  if (lastSync) {
-    try {
-      const { data, error } = await supabase
+export async function fetchCardsDelta(_lastSync?: string | null): Promise<any[]> {
+  try {
+    const [res1, res2, res3] = await Promise.all([
+      supabase
         .from('cards')
-        .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions, updated_at')
-        .gt('updated_at', lastSync)
-        .limit(2000);
+        .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
+        .or('masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
+        .range(0, 999),
+      supabase
+        .from('cards')
+        .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
+        .or('masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
+        .range(1000, 1999),
+      supabase
+        .from('cards')
+        .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
+        .or('masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
+        .range(2000, 2999),
+    ]);
 
-      if (!error && Array.isArray(data)) {
-        updatedCards = data;
-        usedUpdatedAt = true;
-      }
-    } catch {
-      usedUpdatedAt = false;
-    }
+    const p1 = res1.data || [];
+    const p2 = res2.data || [];
+    const p3 = res3.data || [];
+    return [...p1, ...p2, ...p3];
+  } catch (e) {
+    console.warn('[DeltaSync] Failed to fetch studied cards from Supabase:', e);
+    return [];
   }
-
-  // Fallback: если колонки updated_at в Supabase еще нет или это первая синхронизация
-  if (!usedUpdatedAt) {
-    try {
-      const [res1, res2] = await Promise.all([
-        supabase
-          .from('cards')
-          .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
-          .or('masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
-          .range(0, 999),
-        supabase
-          .from('cards')
-          .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
-          .or('masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
-          .range(1000, 1999),
-      ]);
-
-      const p1 = res1.data || [];
-      const p2 = res2.data || [];
-      updatedCards = [...p1, ...p2];
-    } catch (e) {
-      console.warn('[DeltaSync] Failed to fetch studied cards from Supabase:', e);
-      return [];
-    }
-  }
-
-  return updatedCards;
 }
 
 // ============================================================================
