@@ -7657,32 +7657,24 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             )}
           </div>
 
-          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) — ТОЧНО ТАКАЯ ЖЕ КАК НА СКРИНЕ 5 В ОБЕИХ ТЕМАХ */}
+          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
             {dueCount > 0 ? (
-              <div className="relative group inline-flex items-center justify-center">
-                {/* Анимированная светящаяся аура из скрина 5 */}
-                <div className="absolute -inset-[2px] rounded-full opacity-85 dark:opacity-75 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-400 group-hover:opacity-100 transition duration-500 blur-[2px] animate-pulse pointer-events-none" />
-
-                {/* Сама кнопка: глубокий синий индиго-капсюль с ярким неоновым свечением из темной темы */}
-                <button
-                  type="button"
-                  onClick={onStartReview}
-                  className="relative px-5 py-2.5 rounded-full bg-[#0b1736] text-white border border-blue-400/50 shadow-[0_0_25px_rgba(59,130,246,0.6),0_0_45px_rgba(6,182,212,0.35)] hover:bg-[#0f1f48] hover:shadow-[0_0_30px_rgba(59,130,246,0.8),0_0_50px_rgba(6,182,212,0.45)] font-semibold text-xs tracking-wider uppercase flex items-center gap-2 transition-all duration-150 active:scale-[0.98] cursor-pointer"
-                >
-                  <RotateCw className="w-3.5 h-3.5 text-blue-400 group-hover:rotate-180 transition-transform duration-500 shrink-0" />
-                  <span className="font-semibold text-white tracking-wider uppercase">
-                    {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
-                  </span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={onStartReview}
+                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none bg-gradient-to-r from-[#0d223a] to-[#122e4e] border border-sky-400/40 text-sky-100 shadow-[0_0_22px_rgba(14,165,233,0.35)] hover:border-sky-400/70 hover:shadow-[0_0_30px_rgba(14,165,233,0.55)] hover:text-white active:scale-[0.98]"
+              >
+                <RotateCcw className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>{dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}</span>
+              </button>
             ) : (
               <button
                 type="button"
                 disabled
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none text-xs font-medium tracking-wider uppercase"
+                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none"
               >
-                <RotateCw className="w-3.5 h-3.5 text-zinc-400" />
+                <RotateCcw className="w-4 h-4 text-zinc-400 shrink-0" />
                 <span>
                   0 {getRepeatButtonLabel(effectiveLang || appLanguage)}
                 </span>
