@@ -4077,6 +4077,19 @@ export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string
 export const parseTargetWord = parseTargetPhrase;
 export const splitPrefix = parseTargetPhrase;
 
+function scheduleInputFocus(inputRef: React.RefObject<HTMLInputElement | null>): () => void {
+  let raf2 = 0;
+  const raf1 = requestAnimationFrame(() => {
+    raf2 = requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+    });
+  });
+  return () => {
+    cancelAnimationFrame(raf1);
+    if (raf2) cancelAnimationFrame(raf2);
+  };
+}
+
 function getCardRemainingSessionSteps(card: Flashcard, fallbackMastery?: number): number {
   if (card.isLegendary || (typeof card.round === 'number' && card.round >= 4)) return 1;
   const r = card.round ?? Math.max(1, Math.min(4, (fallbackMastery ?? card.masteryLevel ?? 0) + 1));
@@ -4316,15 +4329,12 @@ function RapidFlashcardMode({
     }
   }, [currentCard?.id, isRound1or2, forcedReverse, isReview]);
 
-  // Автофокус инпута в режиме ввода на ПК
+  // Автофокус инпута в режиме ввода на ПК (двойной RAF после transition-анимации)
   useEffect(() => {
-    if (!isRound1or2 && !locked && !isAnswered && !isMobile) {
-      const timer = setTimeout(() => {
-        inputRef.current?.focus();
-      }, 80);
-      return () => clearTimeout(timer);
+    if (!isRound1or2 && !locked && !isAnswered && !isMobile && !isEditModalOpen) {
+      return scheduleInputFocus(inputRef);
     }
-  }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile]);
+  }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile, isEditModalOpen]);
 
   // 5. Тактильная микро-вспышка (220 мс) + монолитный cross-fade без скачков и обратного кульбита
   const handleRateCard = useCallback((remembered: boolean) => {
@@ -4437,6 +4447,9 @@ function RapidFlashcardMode({
   // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter (без мигания внешней рамки)
   const handleProceedNext = useCallback(() => {
     if (!isAnswered || isTransitioning) return;
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setIsTransitioning(true);
 
     const willBeVaporized = currentRound === 4 && !isSurrendered;
@@ -4602,10 +4615,22 @@ function RapidFlashcardMode({
           handleProceedNext();
           return;
         }
-        if (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
-          if (!isAnswered) return;
+        if (isAnswered && (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К')) {
           playSafeAudio(() => playCardAudio(currentCard?.targetWord));
           return;
+        }
+        // Глобальный перехват печати: возвращаем фокус в инпут при любом печатном символе / Backspace
+        if (!isAnswered && !locked && !isMobile && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          if (document.activeElement !== inputRef.current && (e.key.length === 1 || e.key === 'Backspace') && !e.repeat) {
+            if (document.activeElement instanceof HTMLElement) {
+              document.activeElement.blur();
+            }
+            inputRef.current?.focus({ preventScroll: true });
+            if (e.key === ' ') {
+              e.preventDefault();
+              handleInputChange(typedValue + ' ');
+            }
+          }
         }
         return;
       }
@@ -4663,7 +4688,7 @@ function RapidFlashcardMode({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditModalOpen, isTransitioning, isRound1or2, isFlipped, isAnswered, handleProceedNext, handleEnterSubmit, handleRateCard, playCardAudio, currentCard?.targetWord]);
+  }, [isEditModalOpen, isTransitioning, isRound1or2, isFlipped, isAnswered, locked, isMobile, typedValue, handleInputChange, handleProceedNext, handleEnterSubmit, handleRateCard, playCardAudio, currentCard?.targetWord]);
 
   const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered;
 
@@ -4895,6 +4920,13 @@ function RapidFlashcardMode({
           isSealed={isMasteredGolden || isVaporizing}
           isLegendary={isLegendaryVisual}
           isVaporizing={isVaporizing}
+          className={cn(!isAnswered && !isMobile && "cursor-text")}
+          onClick={(e) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('button') && !isMobile && !isAnswered) {
+              inputRef.current?.focus({ preventScroll: true });
+            }
+          }}
         >
           {/* Шапка */}
           <div className="flex items-center justify-between w-full shrink-0">
@@ -5018,6 +5050,7 @@ function RapidFlashcardMode({
                             autoFocus={!isMobile}
                             autoComplete="off"
                             autoCorrect="off"
+                            autoCapitalize="off"
                             spellCheck={false}
                             placeholder=""
                             style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
@@ -6926,10 +6959,10 @@ function StudyCard({
   }, [phase, isRecognitionMode]);
 
   useEffect(() => {
-    if (!isMobile && phase === "Question" && !isRecognitionMode && inputRef.current) {
-      inputRef.current.focus();
+    if (!isMobile && phase === "Question" && !isRecognitionMode && !isEditModalOpen && inputRef.current) {
+      return scheduleInputFocus(inputRef);
     }
-  }, [isMobile, isRecognitionMode, phase]);
+  }, [card.id, isMobile, isRecognitionMode, phase, isEditModalOpen]);
 
   const playAudio = useCallback((text: string) => {
     setIsPlayingAudio(true);
@@ -6941,6 +6974,9 @@ function StudyCard({
 
   const handleAdvanceNext = useCallback(() => {
     if (isTransitionLocked || isTransitioning) return;
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setIsTransitionLocked(true);
     setIsTransitioning(true);
 
@@ -7177,6 +7213,8 @@ function StudyCard({
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (isEditModalOpen) return;
+
       if (phase === "Answer") {
         if (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter') {
           e.preventDefault();
@@ -7184,6 +7222,41 @@ function StudyCard({
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           handleAdvanceNext();
           return;
+        }
+      }
+
+      if (phase === "Question" && !isRecognitionMode && !isMobile) {
+        if (document.activeElement !== inputRef.current && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          if (e.key === 'Enter' || e.code === 'Enter') {
+            e.preventDefault();
+            inputRef.current?.focus({ preventScroll: true });
+            if (inputText.trim().length > 0) {
+              const { isValid, isComplete } = checkInputValidation(inputText);
+              if (!isValid || !isComplete) {
+                handleHilfe();
+              }
+            }
+            return;
+          }
+          if (e.key === 'Backspace' && !e.repeat) {
+            e.preventDefault();
+            inputRef.current?.focus({ preventScroll: true });
+            processNewValue(inputText.slice(0, -1));
+            return;
+          }
+          if (e.key.length === 1 && !e.repeat) {
+            if (document.activeElement instanceof HTMLElement) {
+              document.activeElement.blur();
+            }
+            inputRef.current?.focus({ preventScroll: true });
+            const mapEntry = GERMAN_KEY_MAP[e.code];
+            if (mapEntry) {
+              e.preventDefault();
+              const char = e.shiftKey ? mapEntry.shift : mapEntry.base;
+              processNewValue(inputText + char);
+            }
+            return;
+          }
         }
       }
 
@@ -7213,7 +7286,7 @@ function StudyCard({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [phase, isMultipleChoice, isRecognitionMode, handleReveal, card, playAudio, handleAdvanceNext, fullSentence, parts, resolvedOptions]);
+  }, [phase, isEditModalOpen, isMobile, isTransitionLocked, inputText, isMultipleChoice, isRecognitionMode, handleReveal, handleHilfe, processNewValue, card, playAudio, handleAdvanceNext, fullSentence, parts, resolvedOptions]);
 
   const renderInputChars = () => {
     if (inputText.length === 0) {
@@ -7279,11 +7352,13 @@ function StudyCard({
         isVaporizing={isVaporizing}
         className={cn(
           "min-h-[340px] sm:min-h-[520px] md:min-h-[560px]",
+          !isMobile && !isRecognitionMode && phase === "Question" && "cursor-text",
           isTransitioning && "pointer-events-none"
         )}
-        onClick={() => {
-          if (!isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
-            inputRef.current.focus();
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (!target.closest('button') && !isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
+            inputRef.current.focus({ preventScroll: true });
           }
         }}
       >
@@ -7407,7 +7482,7 @@ function StudyCard({
                       ref={inputRef}
                       type="text"
                       readOnly={isMobile}
-                      inputMode="none"
+                      inputMode={isMobile ? "none" : undefined}
                       tabIndex={isMobile ? -1 : 0}
                       value={inputText}
                       onChange={(e) => !isMobile && handleInputChange(e)}
@@ -7419,8 +7494,9 @@ function StudyCard({
                       )}
                       autoComplete="off"
                       autoCorrect="off"
+                      autoCapitalize="off"
                       spellCheck={false}
-                      autoFocus={false}
+                      autoFocus={!isMobile}
                     />
                   </span>
                 )}
