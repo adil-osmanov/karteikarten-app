@@ -26,7 +26,7 @@ import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
 import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
-import { normalizeLemmaKey, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey } from "@/lib/utils/lemmaNormalizer";
+import { normalizeLemmaKey, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -1412,7 +1412,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         }
       });
     });
-    const count = deduplicateCardsByLemma(dueList, false).length;
+    const count = buildDeduplicatedReviewQueue(dueList).length;
     cachedDueCount[cleanLang] = count;
     return count;
   }
@@ -1464,7 +1464,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
         }
       });
     });
-    const result = deduplicateCardsByLemma(list, false);
+    const result = buildDeduplicatedReviewQueue(list);
     cachedDueCardsFromCloud[cleanLang] = result;
     return result;
   }
@@ -1521,7 +1521,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
             forms: row.forms
           } as Flashcard
         }));
-      const result = deduplicateCardsByLemma(mapped, false);
+      const result = buildDeduplicatedReviewQueue(mapped);
       cachedDueCardsFromCloud[cleanLang] = result;
       return result;
     }
@@ -2975,17 +2975,55 @@ export const useStore = create<DeckState>()((set, get) => ({
     writeThroughCardUpdate(cardId, validCard);
     updateCachedCardInMemory(cardId, validCard);
 
-    // 2. Обновляем Zustand-стейт и локальный IndexedDB строго для всех колод, содержащих карточку
+    const rawWordForSync = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
+    const canonicalSyncKey = getCanonicalLemmaKey(rawWordForSync);
+    const shouldSyncDuplicateDueDates = Boolean(
+      isCorrect &&
+      !isHilfe &&
+      canonicalSyncKey &&
+      validCard.nextReviewDate &&
+      validCard.nextReviewDate > Date.now()
+    );
+    const syncedDuplicates: Flashcard[] = [];
+
+    // 2. Обновляем Zustand-стейт и локальный IndexedDB (сдвигая также cross-deck дубли с тем же корнем при успешном повторе)
     set((state) => {
       const newDecks = state.decks.map((d) => {
+        const deckLang = normalizeLanguage(d.language || state.books.find(b => b.id === d.bookId)?.language || cleanLang);
+        const isSameLangDeck = deckLang === cleanLang;
         const hasCard = d.cards?.some((c) => c.id === cardId);
-        if (d.id !== deckId && !hasCard) return d;
+
+        let deckModified = false;
         const updatedCards = d.cards.map((c) => {
           if (c.id === cardId) {
+            deckModified = true;
             return validCard;
+          }
+          if (
+            shouldSyncDuplicateDueDates &&
+            isSameLangDeck &&
+            !(c as any).isDeleted &&
+            (c.isArchived || (c.masteryLevel ?? 0) >= 4) &&
+            isCardDueForReview(c)
+          ) {
+            const cRaw = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+            if (getCanonicalLemmaKey(cRaw) === canonicalSyncKey) {
+              const syncedCard: Flashcard = {
+                ...c,
+                next_review_at: validCard.next_review_at,
+                next_review_date: validCard.next_review_date,
+                nextReviewDate: validCard.nextReviewDate,
+                updated_at: validCard.updated_at,
+              };
+              syncedDuplicates.push(syncedCard);
+              deckModified = true;
+              return syncedCard;
+            }
           }
           return c;
         });
+
+        if (d.id !== deckId && !hasCard && !deckModified) return d;
         return {
           ...d,
           cards: updatedCards,
@@ -2993,6 +3031,11 @@ export const useStore = create<DeckState>()((set, get) => ({
       });
       return { decks: newDecks };
     });
+
+    for (const dupCard of syncedDuplicates) {
+      writeThroughCardUpdate(dupCard.id, dupCard);
+      updateCachedCardInMemory(dupCard.id, dupCard);
+    }
 
     const nextDecks = get().decks;
     await setIDBItem('app_decks', nextDecks);
@@ -5376,8 +5419,8 @@ function RapidSession({
     let list: { deckId: string, card: Flashcard }[] = [];
     if (reviewCards) {
       const isDrill = isDrillMode;
-      // Сессия повторений: строгая дедупликация и перемешивание при старте
-      const uniqueReview = shuffleArray(getUniqueReviewQueue([...reviewCards]));
+      // Сессия повторений: строгая дедупликация по каноническому корню и перемешивание при старте
+      const uniqueReview = shuffleArray(buildDeduplicatedReviewQueue([...reviewCards]));
       list = uniqueReview.map(item => {
         const initialRound = isDrill
           ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
@@ -5824,8 +5867,8 @@ function StudyInterface({
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
-      // Сессия повторений: строгая дедупликация и перемешивание при старте
-      const unique = shuffleArray(getUniqueReviewQueue([...reviewCards]));
+      // Сессия повторений: строгая дедупликация по каноническому корню и перемешивание при старте
+      const unique = shuffleArray(buildDeduplicatedReviewQueue([...reviewCards]));
       return unique.map(item => {
         const isDrill = isDrillMode;
         const initialRound = isDrill
@@ -5872,7 +5915,7 @@ function StudyInterface({
   });
   const [turn, setTurn] = useState(0);
   const [initialTotal, setInitialTotal] = useState(() => {
-    if (reviewCards && reviewCards.length > 0) return getUniqueReviewQueue(reviewCards).length;
+    if (reviewCards && reviewCards.length > 0) return buildDeduplicatedReviewQueue(reviewCards).length;
     if (deckId) {
       const state = useStore.getState();
       const deck = state.decks.find((d) => d.id === deckId);
@@ -5901,8 +5944,8 @@ function StudyInterface({
     sessionInitKeyRef.current = initKey;
 
     if (reviewCards) {
-      // Сессия повторений: строгая дедупликация и перемешивание при старте
-      const uniqueReview = shuffleArray(getUniqueReviewQueue([...reviewCards]));
+      // Сессия повторений: строгая дедупликация по каноническому корню и перемешивание при старте
+      const uniqueReview = shuffleArray(buildDeduplicatedReviewQueue([...reviewCards]));
       const isDrill = isDrillMode;
       const list = uniqueReview.map(item => {
         const initialRound = isDrill
@@ -12020,7 +12063,7 @@ export default function App() {
         }
       });
     });
-    return deduplicateReviewSession(list);
+    return buildDeduplicatedReviewQueue(list);
   }, [decks, books, appLanguage, activeBookId]);
 
   const matchesReviewMode = useCallback(
@@ -12098,9 +12141,9 @@ export default function App() {
     setIsReviewingMistakes(false);
     initAudioCtx();
 
-    // 1. FAST IN-MEMORY PATH: Use filtered dueCards immediately (0 network requests)
+    // 1. FAST IN-MEMORY PATH: Use filtered & deduplicated dueCards immediately (0 network requests)
     if (dueCards.length > 0) {
-      setReviewCards(shuffleArray(getUniqueReviewQueue(dueCards)));
+      setReviewCards(shuffleArray(buildDeduplicatedReviewQueue(dueCards)));
       return;
     }
 
@@ -12121,7 +12164,7 @@ export default function App() {
             )
           );
       if (filteredFresh.length > 0) {
-        setReviewCards(shuffleArray(getUniqueReviewQueue(filteredFresh)));
+        setReviewCards(shuffleArray(buildDeduplicatedReviewQueue(filteredFresh)));
         return;
       }
     } catch (e) {

@@ -136,8 +136,8 @@ export function deduplicateCardsByLemma<
   for (const item of sortedCandidates) {
     if (!item) continue;
     const inner = (item as any).card ? (item as any).card : item;
-    const raw = inner.targetWord || inner.target_word || inner.front || inner.lemma || inner.word || inner.missingWord || inner.infinitive || '';
-    const key = getLemmaKey(raw) || getWordKey(raw) || getCanonicalKey(raw) || normalizeLemmaKey(raw);
+    const raw = extractRawWordFromItem(item);
+    const key = getCanonicalLemmaKey(raw) || getWordKey(raw) || getCanonicalKey(raw) || normalizeLemmaKey(raw);
 
     if (!key) {
       // Если ключа нет, сохраняем карточку в очередь по id
@@ -197,37 +197,145 @@ export function deduplicateCardsByLemma<
   return sessionQueue;
 }
 
+const CANONICAL_ARTICLES = new Set([
+  'der', 'die', 'das', 'dem', 'den', 'des', 'ein', 'eine', 'einen', 'einem', 'eines', 'einer'
+]);
+
+const CANONICAL_REFLEXIVES = new Set([
+  'sich', 'mich', 'dich', 'uns', 'euch'
+]);
+
+const CANONICAL_GOVERNANCE_MARKERS = new Set([
+  'jemanden', 'jemandem', 'jemandes', 'jemand', 'etwas',
+  'jmdn', 'jmdm', 'jdn', 'jdm', 'jmd', 'etw',
+  'akk', 'dat', 'gen', 'nom'
+]);
+
+const CANONICAL_PREPOSITIONS = new Set([
+  'an', 'auf', 'aus', 'bei', 'durch', 'für', 'gegen', 'gegenüber', 'hinter',
+  'in', 'mit', 'nach', 'neben', 'über', 'um', 'unter', 'von', 'vor', 'zu', 'zwischen',
+  'ins', 'ans', 'aufs', 'zum', 'zur', 'beim', 'vom', 'im', 'am'
+]);
+
+/**
+ * Строгий канонический нормализатор немецкого корня / леммы.
+ * Приводит любые вариации записи ("der Antrag" vs "Antrag", "jemanden vor jemandem schützen" vs "schützen",
+ * "sich freuen" vs "freuen", "mit|teilen" vs "mitteilen", "aufhören (mit Dat.)" vs "aufhören") к одному ключу.
+ */
+export function getCanonicalLemmaKey(rawWord: string): string {
+  if (!rawWord || typeof rawWord !== 'string') return '';
+
+  let cleaned = rawWord.toLowerCase().trim();
+  if (!cleaned) return '';
+
+  // 1. Убираем разделитель отделяемой приставки (mit|teilen -> mitteilen)
+  cleaned = cleaned.replace(/[|·\u2506\u250A]/g, '');
+
+  // 2. Убираем пояснения в скобках: "aufhören (mit Dat.)" -> "aufhören"
+  cleaned = cleaned.replace(/\(.*?\)|\[.*?\]/g, ' ');
+
+  // 3. Обрабатываем инверсию с многоточием ("schrauben ... auf" -> "aufschrauben")
+  const ellipsisMatch = cleaned.trim().match(/^([a-zäöüß]+)\s*(?:\.{2,}|…+)\s*([a-zäöüß]+)$/i);
+  if (ellipsisMatch) {
+    return `${ellipsisMatch[2]}${ellipsisMatch[1]}`.toLowerCase();
+  }
+
+  // 4. Очищаем от пунктуации и лишних пробелов (безопасно для умлаутов äöüß!)
+  cleaned = cleaned.replace(/[.,/#!$%^&*;:{}=\-_`~?+]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+
+  const rawTokens = cleaned.split(' ').filter(Boolean);
+  if (rawTokens.length === 0) return rawWord.toLowerCase().trim();
+
+  // 5. Убираем артикли, возвратные местоимения, маркеры падежей/управления и предлоги управления
+  const coreTokens = rawTokens.filter((tok) =>
+    !CANONICAL_ARTICLES.has(tok) &&
+    !CANONICAL_REFLEXIVES.has(tok) &&
+    !CANONICAL_GOVERNANCE_MARKERS.has(tok) &&
+    !CANONICAL_PREPOSITIONS.has(tok)
+  );
+
+  const candidates = coreTokens.length > 0 ? coreTokens : rawTokens;
+  if (candidates.length === 1) return candidates[0];
+
+  // Если осталась составная фраза — берём ключевое самое длинное слово
+  return [...candidates].sort((a, b) => b.length - a.length)[0];
+}
+
+function extractRawWordFromItem(item: any): string {
+  const card = item?.card ? item.card : item;
+  return (
+    card?.targetWord ||
+    card?.target_word ||
+    card?.front ||
+    card?.lemma ||
+    card?.word ||
+    card?.missingWord ||
+    card?.infinitive ||
+    ''
+  );
+}
+
+function getReviewTimestampMs(raw: any): number {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (!raw) return 0;
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Дедупликация и приоритизация очереди повторений:
+ * сортирует по самому раннему сроку повтора (и меньшему masteryLevel) и оставляет
+ * строго 1 карточку на канонический корень getCanonicalLemmaKey.
+ */
+export function buildDeduplicatedReviewQueue<
+  T extends { id?: string; targetWord?: string; front?: string; lemma?: string; word?: string; card?: any; masteryLevel?: number; nextReviewDate?: any; nextReviewAt?: any; next_review_at?: any }
+>(dueCards: T[]): T[] {
+  if (!Array.isArray(dueCards) || dueCards.length === 0) return [];
+
+  const sortedCandidates = [...dueCards].sort((itemA, itemB) => {
+    const a = (itemA as any)?.card || itemA;
+    const b = (itemB as any)?.card || itemB;
+
+    const timeA = getReviewTimestampMs(a?.next_review_at ?? a?.nextReviewAt ?? a?.nextReviewDate ?? a?.next_review_date ?? 0);
+    const timeB = getReviewTimestampMs(b?.next_review_at ?? b?.nextReviewAt ?? b?.nextReviewDate ?? b?.next_review_date ?? 0);
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
+
+    const masteryA = a?.masteryLevel ?? a?.mastery_level ?? 0;
+    const masteryB = b?.masteryLevel ?? b?.mastery_level ?? 0;
+    return masteryA - masteryB;
+  });
+
+  const seenLemmas = new Set<string>();
+  const uniqueQueue: T[] = [];
+
+  for (const item of sortedCandidates) {
+    if (!item) continue;
+    const card = (item as any)?.card || item;
+    const rawWord = extractRawWordFromItem(item);
+    const lemmaKey = getCanonicalLemmaKey(rawWord) || (card?.id ? `__id:${card.id}` : '');
+
+    if (!lemmaKey || seenLemmas.has(lemmaKey)) {
+      continue;
+    }
+
+    seenLemmas.add(lemmaKey);
+    uniqueQueue.push(item);
+  }
+
+  return uniqueQueue;
+}
+
 export function getLemmaKey(word: string): string {
-  if (!word) return '';
-  return word
-    .toLowerCase()
-    .trim()
-    .replace(/\|/g, '')
-    .replace(/^(der|die|das|dem|den|des|ein|eine|einen|einem|einer)\s+/gi, '')
-    .replace(/^sich\s+/gi, '')
-    .replace(/^(jemanden|jemandem|etwas|jdn\.|jdm\.|etw\.)\s+/gi, '')
-    .replace(/\(.*?\)/g, '')
-    .replace(/[.,/#!$%^&*;:{}=\-_`~]/g, '')
-    .trim();
+  return getCanonicalLemmaKey(word);
 }
 
 export function getUniqueReviewQueue<
   T extends { id?: string; targetWord?: string; front?: string; lemma?: string; word?: string; card?: any }
 >(cards: T[]): T[] {
-  if (!Array.isArray(cards) || cards.length === 0) return [];
-  const seen = new Set<string>();
-  const queue: T[] = [];
-
-  for (const item of cards) {
-    if (!item) continue;
-    const card = (item as any).card || item;
-    const word = card.targetWord || card.target_word || card.front || card.lemma || card.word || card.missingWord || card.infinitive || '';
-    const key = getLemmaKey(word);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    queue.push(item);
-  }
-  return queue;
+  return buildDeduplicatedReviewQueue(cards);
 }
 
 export function shuffleArray<T>(array: T[]): T[] {
@@ -239,5 +347,5 @@ export function shuffleArray<T>(array: T[]): T[] {
   return shuffled;
 }
 
-export const deduplicateReviewSession = getUniqueReviewQueue;
-export const getDueReviewCards = getUniqueReviewQueue;
+export const deduplicateReviewSession = buildDeduplicatedReviewQueue;
+export const getDueReviewCards = buildDeduplicatedReviewQueue;
