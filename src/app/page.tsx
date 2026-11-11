@@ -4195,6 +4195,75 @@ function scheduleInputFocus(inputRef: React.RefObject<HTMLInputElement | null>):
   };
 }
 
+type CardTransitionState = 'idle' | 'exiting-know' | 'exiting-repeat' | 'entering';
+
+const APPLE_FLUID_TRANSITION =
+  'transition-all duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform';
+
+function getCardTransitionClasses(transitionState: CardTransitionState): string {
+  switch (transitionState) {
+    case 'exiting-know':
+      return `${APPLE_FLUID_TRANSITION} opacity-0 translate-x-4 -translate-y-1 scale-[0.98] blur-[1px] pointer-events-none`;
+    case 'exiting-repeat':
+      return `${APPLE_FLUID_TRANSITION} opacity-0 -translate-x-4 translate-y-1 scale-[0.98] blur-[1px] pointer-events-none`;
+    case 'entering':
+      return 'transition-none opacity-0 scale-[0.99] translate-y-2 will-change-transform pointer-events-none';
+    case 'idle':
+    default:
+      return `${APPLE_FLUID_TRANSITION} opacity-100 translate-x-0 translate-y-0 scale-100 blur-0`;
+  }
+}
+
+function useCardTransition() {
+  const [transitionState, setTransitionState] = useState<CardTransitionState>('idle');
+  const busyRef = useRef(false);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const raf1Ref = useRef<number | null>(null);
+  const raf2Ref = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+      if (raf1Ref.current !== null) cancelAnimationFrame(raf1Ref.current);
+      if (raf2Ref.current !== null) cancelAnimationFrame(raf2Ref.current);
+    };
+  }, []);
+
+  const handleCardEvaluation = useCallback(
+    (evaluation: 'good' | 'again', goToNextCard: () => void): boolean => {
+      if (busyRef.current) return false;
+      busyRef.current = true;
+      setTransitionState(evaluation === 'good' ? 'exiting-know' : 'exiting-repeat');
+
+      exitTimerRef.current = setTimeout(() => {
+        goToNextCard();
+        setTransitionState('entering');
+
+        raf1Ref.current = requestAnimationFrame(() => {
+          raf2Ref.current = requestAnimationFrame(() => {
+            setTransitionState('idle');
+            settleTimerRef.current = setTimeout(() => {
+              busyRef.current = false;
+            }, 180);
+          });
+        });
+      }, 180);
+
+      return true;
+    },
+    []
+  );
+
+  return {
+    transitionState,
+    isTransitionBusy: transitionState !== 'idle',
+    transitionClasses: getCardTransitionClasses(transitionState),
+    handleCardEvaluation,
+  };
+}
+
 function getCardRemainingSessionSteps(card: Flashcard, fallbackMastery?: number): number {
   if (card.isLegendary || (typeof card.round === 'number' && card.round >= 4)) return 1;
   const r = card.round ?? Math.max(1, Math.min(4, (fallbackMastery ?? card.masteryLevel ?? 0) + 1));
@@ -4267,6 +4336,12 @@ function RapidFlashcardMode({
   const [isShaking, setIsShaking] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [skipFlipTransition, setSkipFlipTransition] = useState(false);
+  const {
+    transitionState,
+    isTransitionBusy,
+    transitionClasses,
+    handleCardEvaluation,
+  } = useCardTransition();
   const hintPenaltySentRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4285,11 +4360,14 @@ function RapidFlashcardMode({
     setLocalMastery(mastery);
     const typingMode = Boolean(isLeg || round >= 3);
     setIsRound1or2(!typingMode);
-    // Сбрасываем разворот 180->0 без обратного вращения за 1 кадр, чтобы рамка оставалась монолитной
+    // Сбрасываем разворот 180->0 без обратного вращения, пока контент невидим при входе
     setSkipFlipTransition(true);
     setIsFlipped(false);
+    let raf2 = 0;
     const rafId = requestAnimationFrame(() => {
-      setSkipFlipTransition(false);
+      raf2 = requestAnimationFrame(() => {
+        setSkipFlipTransition(false);
+      });
     });
     setIsAnswered(false);
     setIsSurrendered(false);
@@ -4300,7 +4378,10 @@ function RapidFlashcardMode({
     hintPenaltySentRef.current = false;
     setIsTransitioning(false);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      cancelAnimationFrame(rafId);
+      if (raf2) cancelAnimationFrame(raf2);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentCard?.id, currentCard?.round, currentCard?.isLegendary]);
 
@@ -4441,11 +4522,18 @@ function RapidFlashcardMode({
     }
   }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile, isEditModalOpen]);
 
-  // 5. Тактильная микро-вспышка (220 мс) + монолитный cross-fade без скачков и обратного кульбита
+  // 5. Направленная анимация ухода/входа карточки в стиле Apple Fluid Motion (180мс) + double-tap guard
   const handleRateCard = useCallback((remembered: boolean) => {
-    if (locked || isTransitioning) return;
-    setIsTransitioning(true);
+    if (locked || isTransitioning || isTransitionBusy) return;
 
+    const started = handleCardEvaluation(remembered ? 'good' : 'again', () => {
+      setSkipFlipTransition(true);
+      setIsFlipped(false);
+      onAnswer(remembered, false);
+    });
+    if (!started) return;
+
+    setIsTransitioning(true);
     if (remembered) {
       if (currentRound === 4) {
         triggerHaptic('success');
@@ -4461,11 +4549,7 @@ function RapidFlashcardMode({
       setLocalMastery(nextMastery);
       setVisualRound(prev => Math.max(1, prev - 1));
     }
-
-    setSkipFlipTransition(true);
-    setIsFlipped(false);
-    onAnswer(remembered, false);
-  }, [locked, isTransitioning, currentRound, localMastery, onAnswer]);
+  }, [locked, isTransitioning, isTransitionBusy, handleCardEvaluation, currentRound, localMastery, onAnswer]);
 
   const toggleFlip = useCallback(() => {
     setIsFlipped(prev => !prev);
@@ -4549,32 +4633,36 @@ function RapidFlashcardMode({
     // Карточка показывает правильный ответ и СПОКОЙНО ЖДЕТ, пока пользователь прочитает и нажмет «Weiter»
   }, [locked, isAnswered, isLegendaryVisual, visualRound, effectivePrefix, verbComponents.coreWord, parsedTarget, currentCard?.targetWord, playCardAudio, onHintPenalty]);
 
-  // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter (без мигания внешней рамки)
+  // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter с плавным выходом/входом контента (180мс)
   const handleProceedNext = useCallback(() => {
-    if (!isAnswered || isTransitioning) return;
+    if (!isAnswered || isTransitioning || isTransitionBusy) return;
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
-    setIsTransitioning(true);
 
+    const evaluation = isSurrendered ? 'again' : 'good';
+    const started = handleCardEvaluation(evaluation, () => {
+      if (isSurrendered) {
+        if (!hintPenaltySentRef.current) {
+          hintPenaltySentRef.current = true;
+          const penalizedMastery = Math.max(0, Math.min(3, localMastery ?? 0));
+          try {
+            onHintPenalty?.(penalizedMastery);
+          } catch {}
+        }
+        onAnswer(false, false, true);
+      } else {
+        onAnswer(true, false, false);
+      }
+    });
+    if (!started) return;
+
+    setIsTransitioning(true);
     const willBeVaporized = currentRound === 4 && !isSurrendered;
     if (willBeVaporized) {
       triggerHaptic('success');
     }
-
-    if (isSurrendered) {
-      if (!hintPenaltySentRef.current) {
-        hintPenaltySentRef.current = true;
-        const penalizedMastery = Math.max(0, Math.min(3, localMastery ?? 0));
-        try {
-          onHintPenalty?.(penalizedMastery);
-        } catch {}
-      }
-      onAnswer(false, false, true);
-    } else {
-      onAnswer(true, false, false);
-    }
-  }, [isAnswered, isTransitioning, isSurrendered, currentRound, localMastery, onHintPenalty, onAnswer]);
+  }, [isAnswered, isTransitioning, isTransitionBusy, handleCardEvaluation, isSurrendered, currentRound, localMastery, onHintPenalty, onAnswer]);
 
   // Проверка совпадения ввода с целевым словом или всей фразой
   const checkTargetMatch = useCallback((input: string) => {
@@ -4702,7 +4790,7 @@ function RapidFlashcardMode({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Игнорируем нажатия, если открыты модалки редактирования или идет фаза перехода
-      if (isEditModalOpen || isTransitioning) return;
+      if (isEditModalOpen || isTransitioning || isTransitionBusy) return;
 
       // РЕЖИМ 1: Раунды 3-4 (Active Recall / Текстовый ввод)
       if (!isRound1or2) {
@@ -4793,7 +4881,7 @@ function RapidFlashcardMode({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditModalOpen, isTransitioning, isRound1or2, isFlipped, isAnswered, locked, isMobile, typedValue, handleInputChange, handleProceedNext, handleEnterSubmit, handleRateCard, playCardAudio, currentCard?.targetWord]);
+  }, [isEditModalOpen, isTransitioning, isTransitionBusy, isRound1or2, isFlipped, isAnswered, locked, isMobile, typedValue, handleInputChange, handleProceedNext, handleEnterSubmit, handleRateCard, playCardAudio, currentCard?.targetWord]);
 
   const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered;
 
@@ -4802,9 +4890,9 @@ function RapidFlashcardMode({
       className={cn(
         "relative w-full max-w-4xl lg:max-w-5xl mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
         isRound1or2
-          ? "min-h-[440px] h-[500px] md:min-h-[560px] sm:min-h-[520px] sm:h-[600px] sm:max-h-[600px]"
-          : "min-h-[340px] sm:min-h-[520px] md:min-h-[560px] h-auto sm:h-[600px] sm:max-h-[600px]",
-        isTransitioning && "pointer-events-none"
+          ? "min-h-[440px] h-[500px] sm:min-h-[520px] md:min-h-[540px] sm:h-[600px] sm:max-h-[600px]"
+          : "min-h-[440px] sm:min-h-[520px] md:min-h-[540px] h-auto sm:h-[600px] sm:max-h-[600px]",
+        (isTransitioning || isTransitionBusy) && "pointer-events-none"
       )}
       style={{ perspective: 1400, WebkitPerspective: 1400 }}
     >
@@ -4816,7 +4904,7 @@ function RapidFlashcardMode({
           onClick={handleCardClick}
           className={cn(
             "w-full h-full relative cursor-pointer [transform-style:preserve-3d]",
-            skipFlipTransition ? 'transition-none duration-0' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
+            skipFlipTransition ? 'transition-none duration-0' : 'transition-transform duration-[340ms] ease-[cubic-bezier(0.16,1,0.3,1)]'
           )}
           style={{
             transformStyle: 'preserve-3d',
@@ -4868,10 +4956,13 @@ function RapidFlashcardMode({
               </div>
             </div>
 
-            {/* Центр: Слово + Множественное число / Формы (с плавным cross-fade) */}
+            {/* Центр: Слово + Множественное число / Формы (Apple Fluid Motion) */}
             <div
               key={currentCard.id}
-              className="w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+              className={cn(
+                "card-body w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text",
+                transitionClasses
+              )}
             >
               <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight break-words max-w-full">
                 {article && <span className={getArticleColor(article)}>{article} </span>}
@@ -4931,10 +5022,13 @@ function RapidFlashcardMode({
               </div>
             </div>
 
-            {/* Центр: Слово, перевод, чистый пример */}
+            {/* Центр: Слово, перевод, чистый пример (Apple Fluid Motion) */}
             <div
               key={currentCard.id}
-              className="w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text overflow-y-auto transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+              className={cn(
+                "card-body w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text overflow-y-auto",
+                transitionClasses
+              )}
             >
               <div>
                 <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight break-words max-w-full">
@@ -4948,32 +5042,28 @@ function RapidFlashcardMode({
                 )}
               </div>
 
-              <p
-                key={`${currentCard.id}-${isFlipped ? 'shown' : 'hidden'}-trans`}
+              <div
+                key={`${currentCard.id}-${isFlipped ? 'shown' : 'hidden'}-reveal`}
                 className={cn(
-                  "text-lg sm:text-xl md:text-2xl font-medium text-neutral-800 dark:text-neutral-200 mt-4 sm:mt-6",
-                  isFlipped && "animate-in fade-in zoom-in-[0.98] duration-200"
+                  "w-full text-center mt-6 transition-all duration-200 ease-out",
+                  isFlipped && "animate-in fade-in zoom-in-[0.98]"
                 )}
               >
-                {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
-              </p>
+                <p className="text-lg sm:text-xl md:text-2xl font-medium text-neutral-800 dark:text-neutral-200">
+                  {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
+                </p>
 
-              {/* Чистая цитата примера */}
-              {displaySentence && (
-                <div
-                  key={`${currentCard.id}-${isFlipped ? 'shown' : 'hidden'}-sent`}
-                  className={cn(
-                    "w-full max-w-lg mx-auto my-3 flex justify-center",
-                    isFlipped && "animate-in fade-in zoom-in-[0.98] duration-200"
-                  )}
-                >
-                  <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
-                    <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-neutral-600 dark:text-neutral-400 select-text">
-                      {displaySentence}
-                    </p>
+                {/* Чистая цитата примера */}
+                {displaySentence && (
+                  <div className="w-full max-w-lg mx-auto my-3 flex justify-center">
+                    <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
+                      <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-neutral-600 dark:text-neutral-400 select-text">
+                        {displaySentence}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* Отображать ИСКЛЮЧИТЕЛЬНО на мобильных тач-экранах (< md), на десктопе не рендерится в DOM: */}
@@ -5075,10 +5165,13 @@ function RapidFlashcardMode({
             </div>
           </div>
 
-          {/* Центр: Русский перевод и Cloze поле ввода (с плавным cross-fade) */}
+          {/* Центр: Русский перевод и Cloze поле ввода (Apple Fluid Motion) */}
           <div 
             key={currentCard.id}
-            className="w-full flex-1 flex flex-col justify-center items-center text-center my-auto select-text transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200 py-2 sm:py-0"
+            className={cn(
+              "card-body w-full flex-1 flex flex-col justify-center items-center text-center my-auto select-text py-2 sm:py-0",
+              transitionClasses
+            )}
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
             <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-white mb-4 sm:mb-6 max-w-2xl leading-tight">
@@ -5186,9 +5279,9 @@ function RapidFlashcardMode({
               );
             })()}
 
-            {/* Пример предложения и формы слова после ввода ответа (как в раундах 1-2) */}
+            {/* Пример предложения и формы слова после ввода ответа (мягкое проявление) */}
             {isAnswered && (
-              <div className="w-full max-w-xl mx-auto mt-3 animate-in fade-in duration-300">
+              <div className="w-full max-w-xl mx-auto text-center mt-6 transition-all duration-200 ease-out animate-in fade-in zoom-in-[0.98]">
                 {plural && (
                   <p className="text-xs md:text-sm font-medium text-neutral-500 dark:text-neutral-500 text-center mt-3 mb-1">
                     {plural}
@@ -6978,6 +7071,11 @@ function StudyCard({
   const [isVaporizing, setIsVaporizing] = useState(false);
   const [isTransitionLocked, setIsTransitionLocked] = useState(false);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {
+    isTransitionBusy,
+    transitionClasses,
+    handleCardEvaluation,
+  } = useCardTransition();
 
   const currentRound = card.round ?? (
     card.isLegendary === false 
@@ -7157,7 +7255,7 @@ function StudyCard({
   }, [playbackSpeed]);
 
   const handleAdvanceNext = useCallback(() => {
-    if (isTransitionLocked || isTransitioning) return;
+    if (isTransitionLocked || isTransitioning || isTransitionBusy) return;
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
@@ -7170,15 +7268,20 @@ function StudyCard({
       triggerHaptic('success');
     }
 
-    setPhase("Question");
-    setSelectedOption(null);
-    setInputText("");
-    onNext();
-    requestAnimationFrame(() => {
+    const evaluation = hasErroredRef.current ? 'again' : 'good';
+    const started = handleCardEvaluation(evaluation, () => {
+      setPhase("Question");
+      setSelectedOption(null);
+      setInputText("");
+      onNext();
       setIsTransitionLocked(false);
       setIsTransitioning(false);
     });
-  }, [isTransitionLocked, isTransitioning, currentRound, onNext]);
+    if (!started) {
+      setIsTransitionLocked(false);
+      setIsTransitioning(false);
+    }
+  }, [isTransitionLocked, isTransitioning, isTransitionBusy, currentRound, handleCardEvaluation, onNext]);
 
   const handleReveal = useCallback(() => {
     if (phase !== "Question") return;
@@ -7397,12 +7500,12 @@ function StudyCard({
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (isEditModalOpen) return;
+      if (isEditModalOpen || isTransitionBusy) return;
 
       if (phase === "Answer") {
         if (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter') {
           e.preventDefault();
-          if (isTransitionLocked) return;
+          if (isTransitionLocked || isTransitionBusy) return;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           handleAdvanceNext();
           return;
@@ -7535,9 +7638,9 @@ function StudyCard({
         isLegendary={isLegendaryVisual}
         isVaporizing={isVaporizing}
         className={cn(
-          "min-h-[340px] sm:min-h-[520px] md:min-h-[560px]",
+          "min-h-[420px] sm:min-h-[520px] md:min-h-[540px]",
           !isMobile && !isRecognitionMode && phase === "Question" && "cursor-text",
-          isTransitioning && "pointer-events-none"
+          (isTransitioning || isTransitionBusy) && "pointer-events-none"
         )}
         onClick={(e) => {
           const target = e.target as HTMLElement;
@@ -7619,7 +7722,7 @@ function StudyCard({
 
         <div
           key={card.id}
-          className="w-full flex-1 flex flex-col justify-center items-center text-center my-auto transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+          className={cn("card-body w-full flex-1 flex flex-col justify-center items-center text-center my-auto", transitionClasses)}
         >
           <div className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-4 sm:mb-6">
             {parts[0]}
@@ -7696,7 +7799,7 @@ function StudyCard({
             </p>
 
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
-              <div className="mt-4 flex flex-col items-center gap-1.5 transition-all duration-200 animate-in fade-in zoom-in-[0.98]">
+              <div className="w-full text-center mt-6 flex flex-col items-center gap-1.5 transition-all duration-200 ease-out animate-in fade-in zoom-in-[0.98]">
                 <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm max-w-[95%]">
                   {renderFormattedGrammarRule(
                     card.grammarHint || 
@@ -7767,8 +7870,8 @@ function StudyCard({
               <button
                 ref={nextButtonRef}
                 type="button"
-                disabled={isTransitionLocked}
-                onClick={isTransitionLocked ? undefined : handleAdvanceNext}
+                disabled={isTransitionLocked || isTransitionBusy}
+                onClick={(isTransitionLocked || isTransitionBusy) ? undefined : handleAdvanceNext}
                 className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center cursor-pointer border-0 select-none disabled:opacity-80"
                 style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
               >
@@ -7779,8 +7882,8 @@ function StudyCard({
             <button
               ref={nextButtonRef}
               type="button"
-              disabled={isTransitionLocked}
-              onClick={isTransitionLocked ? undefined : handleAdvanceNext}
+              disabled={isTransitionLocked || isTransitionBusy}
+              onClick={(isTransitionLocked || isTransitionBusy) ? undefined : handleAdvanceNext}
               className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center cursor-pointer border-0 select-none disabled:opacity-80"
               style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
             >
@@ -10536,18 +10639,28 @@ function PrepStudyCard({
     } catch (e) {}
   }, [card.id, onAnswer, playAudio, isLegendary, isLegendaryVisual, visualRound]);
 
+  const {
+    isTransitionBusy,
+    transitionClasses,
+    handleCardEvaluation,
+  } = useCardTransition();
   const [isTransitioning, setIsTransitioning] = useState(false);
   const handleProceedNext = useCallback(() => {
-    if (isTransitioning) return;
+    if (isTransitioning || isTransitionBusy) return;
     setIsTransitioning(true);
-    onNext();
-    requestAnimationFrame(() => {
+    const evaluation = (hasErroredRef.current || isHilfe) ? 'again' : 'good';
+    const started = handleCardEvaluation(evaluation, () => {
+      onNext();
       setIsTransitioning(false);
     });
-  }, [isTransitioning, onNext]);
+    if (!started) {
+      setIsTransitioning(false);
+    }
+  }, [isTransitioning, isTransitionBusy, isHilfe, handleCardEvaluation, onNext]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (isTransitionBusy) return;
       if ((isSuccess || isHilfe) && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
         e.preventDefault();
         handleProceedNext();
@@ -10583,7 +10696,7 @@ function PrepStudyCard({
       rarityRound={visualRound}
       isLegendary={isLegendaryVisual}
       isSealed={isMasteredGolden}
-      className={cn(isTransitioning && "pointer-events-none")}
+      className={cn((isTransitioning || isTransitionBusy) && "pointer-events-none")}
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -10627,7 +10740,7 @@ function PrepStudyCard({
 
       <div
         key={card.id}
-        className="w-full flex-1 flex flex-col items-center justify-center max-w-xl mb-0 relative transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+        className={cn("card-body w-full flex-1 flex flex-col items-center justify-center max-w-xl mb-0 relative", transitionClasses)}
       >
         <div className="text-center mb-10 w-full mt-10">
           <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
@@ -10792,18 +10905,28 @@ function VerbStudyCard({
     playGermanSpeech(fullSentence);
   }, [targets]);
 
+  const {
+    isTransitionBusy,
+    transitionClasses,
+    handleCardEvaluation,
+  } = useCardTransition();
   const [isTransitioning, setIsTransitioning] = useState(false);
   const handleProceedNext = useCallback(() => {
-    if (isTransitioning) return;
+    if (isTransitioning || isTransitionBusy) return;
     setIsTransitioning(true);
-    onNext();
-    requestAnimationFrame(() => {
+    const evaluation = (hasErroredRef.current || isHilfe) ? 'again' : 'good';
+    const started = handleCardEvaluation(evaluation, () => {
+      onNext();
       setIsTransitioning(false);
     });
-  }, [isTransitioning, onNext]);
+    if (!started) {
+      setIsTransitioning(false);
+    }
+  }, [isTransitioning, isTransitionBusy, isHilfe, handleCardEvaluation, onNext]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (isTransitionBusy) return;
       if ((isSuccess || isHilfe) && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
         e.preventDefault();
         handleProceedNext();
@@ -10811,7 +10934,7 @@ function VerbStudyCard({
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isSuccess, isHilfe, handleProceedNext]);
+  }, [isSuccess, isHilfe, isTransitionBusy, handleProceedNext]);
 
   useEffect(() => {
     const inf = (verbInfo.infinitiv || "").replace(/\|/g, '');
@@ -10875,7 +10998,7 @@ function VerbStudyCard({
       rarityRound={visualRound}
       isLegendary={isLegendaryVisual}
       isSealed={isMasteredGolden}
-      className={cn(isTransitioning && "pointer-events-none")}
+      className={cn((isTransitioning || isTransitionBusy) && "pointer-events-none")}
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -10918,7 +11041,7 @@ function VerbStudyCard({
 
       <div
         key={card.id}
-        className="w-full flex-1 flex flex-col items-center justify-center max-w-xl mb-0 relative transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+        className={cn("card-body w-full flex-1 flex flex-col items-center justify-center max-w-xl mb-0 relative", transitionClasses)}
       >
         <div className="text-center mb-8 w-full mt-10">
           <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5 whitespace-nowrap select-none">
@@ -11331,19 +11454,29 @@ export function RedemittelStudyCard({
 
   const showTranslation = placedChunks.length === 0 || status === 'success' || status === 'surrender';
 
+  const {
+    isTransitionBusy,
+    transitionClasses,
+    handleCardEvaluation,
+  } = useCardTransition();
   const [isTransitioning, setIsTransitioning] = useState(false);
   const handleProceedNext = useCallback(() => {
-    if (isTransitioning) return;
+    if (isTransitioning || isTransitionBusy) return;
     setIsTransitioning(true);
-    onNext();
-    requestAnimationFrame(() => {
+    const evaluation = status === 'surrender' ? 'again' : 'good';
+    const started = handleCardEvaluation(evaluation, () => {
+      onNext();
       setIsTransitioning(false);
     });
-  }, [isTransitioning, onNext]);
+    if (!started) {
+      setIsTransitioning(false);
+    }
+  }, [isTransitioning, isTransitionBusy, status, handleCardEvaluation, onNext]);
 
   // Keyboard shortcut support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTransitionBusy) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
       if ((status === 'success' || status === 'surrender') && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
@@ -11393,7 +11526,7 @@ export function RedemittelStudyCard({
         rarityRound={visualRound}
         isLegendary={isLegendaryVisual}
         isSealed={isMasteredGolden}
-        className={cn(isTransitioning && "pointer-events-none")}
+        className={cn((isTransitioning || isTransitionBusy) && "pointer-events-none")}
       >
         {/* 1. Верхняя панель карточки */}
         <div className="w-full flex items-center justify-between mb-6 pb-2 border-b border-black/[0.05] dark:border-white/[0.06]">
@@ -11439,7 +11572,7 @@ export function RedemittelStudyCard({
 
         <div
           key={card.id}
-          className="w-full flex-1 flex flex-col justify-center transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+          className={cn("card-body w-full flex-1 flex flex-col justify-center", transitionClasses)}
         >
         {/* 2. Заголовок-подсказка: Русский перевод (плавно скрывается во время сборки) */}
         <div className={cn(
