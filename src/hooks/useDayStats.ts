@@ -35,16 +35,105 @@ export const normalizeLanguage = (lang?: string | null): SupportedLanguage => {
   return clean || 'DE';
 };
 
+export function getLocalDateString(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function getLocalTodayDateString(): string {
+  return getLocalDateString(new Date());
+}
+
+export function computeStrictAccuracy(correct: number, mistakes: number): number {
+  const c = Math.max(0, correct || 0);
+  const m = Math.max(0, mistakes || 0);
+  const totalAnswers = c + m;
+  if (totalAnswers === 0 || m === 0) return 100;
+  return Math.max(0, Math.min(100, Math.round((c / totalAnswers) * 100)));
+}
+
+export interface KraftDailyStatEntry {
+  cardsDone: number;
+  correct: number;
+  mistakes: number;
+  focusMinutes?: number;
+}
+
+export function getKraftDailyStatsMap(): Record<string, KraftDailyStatEntry> {
+  if (typeof window === 'undefined') return {};
   try {
-    return new Date().toLocaleDateString('en-CA');
+    const raw = localStorage.getItem('kraft_daily_stats');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    return {};
   }
+}
+
+export function syncKraftDailyStatEntry(
+  dateStr: string,
+  updates: Partial<KraftDailyStatEntry> & {
+    incrementCards?: number;
+    incrementCorrect?: number;
+    incrementMistakes?: number;
+  }
+): Record<string, KraftDailyStatEntry> {
+  if (typeof window === 'undefined' || !dateStr) return {};
+  try {
+    const map = getKraftDailyStatsMap();
+    const prev = map[dateStr] || { cardsDone: 0, correct: 0, mistakes: 0 };
+    const nextCardsDone = typeof updates.cardsDone === 'number'
+      ? Math.max(prev.cardsDone || 0, updates.cardsDone)
+      : (prev.cardsDone || 0) + (updates.incrementCards || 0);
+    const nextCorrect = typeof updates.correct === 'number'
+      ? Math.max(prev.correct || 0, updates.correct)
+      : (prev.correct || 0) + (updates.incrementCorrect || 0);
+    const nextMistakes = typeof updates.mistakes === 'number'
+      ? Math.max(0, updates.mistakes)
+      : Math.max(0, (prev.mistakes || 0) + (updates.incrementMistakes || 0));
+
+    map[dateStr] = {
+      cardsDone: Math.max(0, nextCardsDone),
+      correct: Math.max(0, nextCorrect),
+      mistakes: nextMistakes,
+      ...(typeof updates.focusMinutes === 'number'
+        ? { focusMinutes: updates.focusMinutes }
+        : prev.focusMinutes !== undefined
+          ? { focusMinutes: prev.focusMinutes }
+          : {}),
+    };
+    localStorage.setItem('kraft_daily_stats', JSON.stringify(map));
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+export function sanitizeTodayMistakesCount(
+  rawMistakesCount: number | undefined | null,
+  explicitIds?: string[] | null,
+  poolLength?: number
+): number {
+  const count = typeof rawMistakesCount === 'number' && rawMistakesCount > 0 ? rawMistakesCount : 0;
+  if (count === 0) return 0;
+
+  const explicitLen = Array.isArray(explicitIds) ? explicitIds.length : null;
+  const poolLen = typeof poolLength === 'number' ? poolLength : 0;
+
+  // Reject stale multi-day mistakesPool sizes or unbacked inflated values when 0 mistakes are logged for today
+  if (explicitLen === 0 && (count >= 20 || (poolLen > 0 && count >= poolLen))) {
+    return 0;
+  }
+  if (explicitLen === null && poolLen > 0 && count >= poolLen && count >= 20) {
+    return 0;
+  }
+  if (explicitLen === null && poolLen === 0 && count >= 50) {
+    return 0;
+  }
+  return count;
 }
 
 export const getTodayKey = (): string => {
@@ -388,8 +477,16 @@ export function reconcileStatsFromCloud(lang: string, cloudRaw: any): DailyStats
     const normalizedCloudSecs = normalizeFocusSeconds(rawCloudSecs, maxCardsDone, true);
     maxActiveSeconds = Math.max(normalizedLocalSecs, normalizedCloudSecs);
 
-    const cloudMistakes = typeof cloudRaw.mistakesCountToday === 'number' ? cloudRaw.mistakesCountToday : 0;
-    maxMistakesToday = Math.max(maxMistakesToday, cloudMistakes);
+    const rawCloudMistakes = typeof cloudRaw.mistakesCountToday === 'number' ? cloudRaw.mistakesCountToday : 0;
+    const cloudMistakes = sanitizeTodayMistakesCount(
+      rawCloudMistakes,
+      Array.isArray(cloudRaw.mistakes) ? cloudRaw.mistakes : null,
+      mergedPool.length
+    );
+    maxMistakesToday = Math.max(
+      sanitizeTodayMistakesCount(maxMistakesToday, null, mergedPool.length),
+      cloudMistakes
+    );
 
     try {
       if (typeof window !== 'undefined') {
@@ -517,6 +614,9 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
 export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
   const normLang = normalizeLanguage(lang);
   const targetCards = 200;
+  const isToday = dateStr === getTodayKey();
+  const kraftEntry = getKraftDailyStatsMap()[dateStr];
+  const kraftCards = kraftEntry && typeof kraftEntry.cardsDone === 'number' ? kraftEntry.cardsDone : 0;
 
   // 1. Check daily_stats_history map in localStorage
   if (typeof window !== 'undefined') {
@@ -527,8 +627,7 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
         const histMap: Record<string, DayRecord> = JSON.parse(histRaw);
         if (histMap && histMap[dateStr]) {
           const rec = histMap[dateStr];
-          const isToday = dateStr === getTodayKey();
-          let cardsReviewed = rec.cardsReviewed || 0;
+          let cardsReviewed = Math.max(rec.cardsReviewed || 0, kraftCards);
           try {
             const actRaw = localStorage.getItem(`daily_activity_${normLang}`);
             if (actRaw) {
@@ -542,10 +641,14 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
               if (liveToday > cardsReviewed) cardsReviewed = liveToday;
             }
           } catch {}
+          const rawMistakes = typeof rec.mistakesCount === 'number' ? rec.mistakesCount : (kraftEntry?.mistakes || 0);
+          const cleanMistakes = isToday ? sanitizeTodayMistakesCount(rawMistakes) : rawMistakes;
           const normMins = normalizeFocusMinutes(rec.focusMinutes || 0, cardsReviewed, isToday);
           return {
             ...rec,
             cardsReviewed,
+            mistakesCount: cleanMistakes,
+            accuracy: computeStrictAccuracy(cardsReviewed, cleanMistakes),
             focusMinutes: normMins
           };
         }
@@ -554,10 +657,9 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
   }
 
   // 2. Fallback: check scoped daily_stats_{lang}_{date}
-  let cardsReviewed = 0;
-  let focusMinutes = 0;
-  let accuracy = 100;
-  let mistakesCount = 0;
+  let cardsReviewed = kraftCards;
+  let focusMinutes = kraftEntry?.focusMinutes || 0;
+  let mistakesCount = kraftEntry?.mistakes || 0;
   let wordsMastered = 0;
 
   if (typeof window !== 'undefined') {
@@ -566,31 +668,43 @@ export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
       const scopedRaw = localStorage.getItem(scopedKey);
       if (scopedRaw) {
         const parsed = JSON.parse(scopedRaw);
-        if (typeof parsed?.learnedToday === 'number') cardsReviewed = parsed.learnedToday;
-        if (typeof parsed?.focusSeconds === 'number') {
-          const normSecs = normalizeFocusSeconds(parsed.focusSeconds, cardsReviewed, dateStr === getTodayKey());
-          focusMinutes = Math.floor(normSecs / 60);
+        if (typeof parsed?.learnedToday === 'number') {
+          cardsReviewed = Math.max(cardsReviewed, parsed.learnedToday);
         }
-        if (typeof parsed?.accuracy === 'number') accuracy = parsed.accuracy;
-        if (typeof parsed?.mistakesCount === 'number') mistakesCount = parsed.mistakesCount;
+        if (typeof parsed?.focusSeconds === 'number') {
+          const normSecs = normalizeFocusSeconds(parsed.focusSeconds, cardsReviewed, isToday);
+          focusMinutes = Math.max(focusMinutes, Math.floor(normSecs / 60));
+        }
+        if (typeof parsed?.mistakesCount === 'number') {
+          mistakesCount = isToday
+            ? sanitizeTodayMistakesCount(
+                parsed.mistakesCount,
+                Array.isArray(parsed.mistakes) ? parsed.mistakes : null
+              )
+            : parsed.mistakesCount;
+        }
       }
     } catch {}
 
-    // 3. Fallback: check daily_activity_{lang}
-    if (cardsReviewed === 0) {
-      try {
-        const actRaw = localStorage.getItem(`daily_activity_${normLang}`);
-        if (actRaw) {
-          const parsed = JSON.parse(actRaw);
-          const val = parsed?.[dateStr];
-          const num = typeof val === 'number' ? val : (val?.total || (typeof val === 'string' ? parseInt(val, 10) || 0 : 0));
-          if (num > cardsReviewed) cardsReviewed = num;
-        }
-      } catch {}
+    // 3. Fallback: check daily_activity_{lang} & today's live counter
+    try {
+      const actRaw = localStorage.getItem(`daily_activity_${normLang}`);
+      if (actRaw) {
+        const parsed = JSON.parse(actRaw);
+        const val = parsed?.[dateStr];
+        const num = typeof val === 'number' ? val : (val?.total || (typeof val === 'string' ? parseInt(val, 10) || 0 : 0));
+        if (num > cardsReviewed) cardsReviewed = num;
+      }
+    } catch {}
+
+    if (isToday) {
+      const liveToday = getTodayCompletedCardsCount(normLang);
+      if (liveToday > cardsReviewed) cardsReviewed = liveToday;
     }
   }
 
-  const effectiveFocusMinutes = normalizeFocusMinutes(focusMinutes || 0, cardsReviewed, dateStr === getTodayKey());
+  const effectiveFocusMinutes = normalizeFocusMinutes(focusMinutes || 0, cardsReviewed, isToday);
+  const accuracy = computeStrictAccuracy(cardsReviewed, mistakesCount);
 
   return {
     date: dateStr,
@@ -610,14 +724,15 @@ export function saveDayRecord(lang: string = 'DE', record: Partial<DayRecord> & 
   const rawMinutes = typeof record.focusMinutes === 'number' ? record.focusMinutes : current.focusMinutes;
   const isToday = record.date === getTodayKey();
   const effectiveMinutes = normalizeFocusMinutes(rawMinutes || 0, reviewed, isToday);
+  const mistakes = typeof record.mistakesCount === 'number' ? record.mistakesCount : current.mistakesCount;
 
   const updated: DayRecord = {
     date: record.date,
     cardsReviewed: reviewed,
     targetCards: typeof record.targetCards === 'number' ? record.targetCards : (current.targetCards || 200),
     focusMinutes: effectiveMinutes,
-    accuracy: typeof record.accuracy === 'number' ? record.accuracy : current.accuracy,
-    mistakesCount: typeof record.mistakesCount === 'number' ? record.mistakesCount : current.mistakesCount,
+    accuracy: computeStrictAccuracy(reviewed, mistakes),
+    mistakesCount: mistakes,
     wordsMastered: typeof record.wordsMastered === 'number' ? record.wordsMastered : current.wordsMastered,
     words_learned_today: typeof record.words_learned_today === 'number' ? record.words_learned_today : (typeof record.wordsMastered === 'number' ? record.wordsMastered : current.words_learned_today || 0),
     cards_reviewed_today: typeof record.cards_reviewed_today === 'number' ? record.cards_reviewed_today : (current.cards_reviewed_today || 0),
@@ -637,6 +752,14 @@ export function saveDayRecord(lang: string = 'DE', record: Partial<DayRecord> & 
       const actMap = actRaw ? JSON.parse(actRaw) : {};
       actMap[record.date] = Math.max(actMap[record.date] || 0, updated.cardsReviewed);
       safeSetStorage(actKey, JSON.stringify(actMap));
+
+      // Synchronize with unified kraft_daily_stats map
+      syncKraftDailyStatEntry(record.date, {
+        cardsDone: updated.cardsReviewed,
+        correct: updated.cardsReviewed,
+        mistakes: updated.mistakesCount,
+        focusMinutes: updated.focusMinutes,
+      });
 
       // Synchronize with daily_stats_{lang}_{date} preserving sub-minute activeSeconds
       const scopedKey = `daily_stats_${normLang.toLowerCase()}_${record.date}`;
@@ -672,7 +795,7 @@ export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7)
   for (let i = daysCount - 1; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const dateStr = getLocalDateString(d);
 
     let record = getDayRecord(normLang, dateStr);
 
@@ -680,15 +803,16 @@ export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7)
       const liveCards = Math.max(record.cardsReviewed, currentToday?.cardsDone || 0, getTodayCompletedCardsCount(normLang));
       const liveSeconds = normalizeFocusSeconds(currentToday?.activeSeconds || 0, liveCards, true);
       const liveMinutes = Math.floor(liveSeconds / 60);
-      const liveMistakes = typeof currentToday?.mistakesCountToday === 'number'
-        ? currentToday.mistakesCountToday
-        : 0;
+      const liveMistakes = sanitizeTodayMistakesCount(
+        typeof currentToday?.mistakesCountToday === 'number' ? currentToday.mistakesCountToday : record.mistakesCount,
+        null,
+        Array.isArray(currentToday?.mistakesPool) ? currentToday.mistakesPool.length : 0
+      );
       const liveCorrect = Math.max(
         liveCards,
         typeof currentToday?.correctCount === 'number' ? currentToday.correctCount : 0
       );
-      const totalAnswers = liveCorrect + liveMistakes;
-      const liveAccuracy = totalAnswers === 0 ? 100 : Math.max(0, Math.min(100, Math.round((liveCorrect / totalAnswers) * 100)));
+      const liveAccuracy = computeStrictAccuracy(liveCorrect, liveMistakes);
 
       record = {
         ...record,
@@ -697,9 +821,6 @@ export function getDailyStatsHistory(lang: string = 'DE', daysCount: number = 7)
         accuracy: liveAccuracy,
         mistakesCount: liveMistakes
       };
-      if (currentToday) {
-        saveDayRecord(normLang, record);
-      }
     }
 
     const effectiveMinutes = normalizeFocusMinutes(record.focusMinutes || 0, record.cardsReviewed || 0, dateStr === todayKey);
@@ -730,7 +851,7 @@ export function getCurrentWeekDailyStats(lang: string = 'DE'): DayRecord[] {
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const dateStr = getLocalDateString(d);
 
     let record = getDayRecord(normLang, dateStr);
 
@@ -738,15 +859,16 @@ export function getCurrentWeekDailyStats(lang: string = 'DE'): DayRecord[] {
       const liveCards = Math.max(record.cardsReviewed, currentToday?.cardsDone || 0, getTodayCompletedCardsCount(normLang));
       const liveSeconds = normalizeFocusSeconds(currentToday?.activeSeconds || 0, liveCards, true);
       const liveMinutes = Math.floor(liveSeconds / 60);
-      const liveMistakes = typeof currentToday?.mistakesCountToday === 'number'
-        ? currentToday.mistakesCountToday
-        : 0;
+      const liveMistakes = sanitizeTodayMistakesCount(
+        typeof currentToday?.mistakesCountToday === 'number' ? currentToday.mistakesCountToday : record.mistakesCount,
+        null,
+        Array.isArray(currentToday?.mistakesPool) ? currentToday.mistakesPool.length : 0
+      );
       const liveCorrect = Math.max(
         liveCards,
         typeof currentToday?.correctCount === 'number' ? currentToday.correctCount : 0
       );
-      const totalAnswers = liveCorrect + liveMistakes;
-      const liveAccuracy = totalAnswers === 0 ? 100 : Math.max(0, Math.min(100, Math.round((liveCorrect / totalAnswers) * 100)));
+      const liveAccuracy = computeStrictAccuracy(liveCorrect, liveMistakes);
 
       record = {
         ...record,
@@ -755,9 +877,6 @@ export function getCurrentWeekDailyStats(lang: string = 'DE'): DayRecord[] {
         accuracy: liveAccuracy,
         mistakesCount: liveMistakes
       };
-      if (currentToday) {
-        saveDayRecord(normLang, record);
-      }
     }
 
     const effectiveMinutes = normalizeFocusMinutes(record.focusMinutes || 0, record.cardsReviewed || 0, dateStr === todayKey);
@@ -860,18 +979,24 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
     }
   } catch {}
 
-  // Одноразовое самолечение загрязнённого счётчика ошибок (если старый баг записал размер mistakesPool в mistakesCountToday при 0 ошибок за сегодня)
+  // Санитаризация загрязнённого счётчика ошибок (если старый баг записал размер mistakesPool в mistakesCountToday)
   let healedMistakesToday = foundTodaySaved ? maxMistakesToday : 0;
   try {
-    const healFlag = `kraft_mistakes_healed_v1_${todayKey}`;
-    if (!localStorage.getItem(healFlag)) {
-      const scopedRaw = localStorage.getItem(`daily_stats_${normLang.toLowerCase()}_${todayKey}`);
-      const scopedParsed = scopedRaw ? JSON.parse(scopedRaw) : null;
-      const todayExplicitMistakeIds = Array.isArray(scopedParsed?.mistakes) ? scopedParsed.mistakes : [];
-      if (healedMistakesToday > 0 && todayExplicitMistakeIds.length === 0 && mergedPool.length > 0 && healedMistakesToday >= mergedPool.length) {
-        healedMistakesToday = 0;
-      }
-      localStorage.setItem(healFlag, '1');
+    const scopedRaw = localStorage.getItem(`daily_stats_${normLang.toLowerCase()}_${todayKey}`);
+    const scopedParsed = scopedRaw ? JSON.parse(scopedRaw) : null;
+    const todayExplicitMistakeIds = Array.isArray(scopedParsed?.mistakes) ? scopedParsed.mistakes : null;
+    healedMistakesToday = sanitizeTodayMistakesCount(
+      healedMistakesToday,
+      todayExplicitMistakeIds,
+      mergedPool.length
+    );
+    if (scopedParsed && typeof scopedParsed.mistakesCount === 'number' && scopedParsed.mistakesCount !== healedMistakesToday) {
+      const cleanedScoped = {
+        ...scopedParsed,
+        mistakesCount: healedMistakesToday,
+        accuracy: computeStrictAccuracy(Math.max(finalCardsDone, scopedParsed.correctCount || 0), healedMistakesToday)
+      };
+      safeSetStorage(`daily_stats_${normLang.toLowerCase()}_${todayKey}`, JSON.stringify(cleanedScoped));
     }
   } catch {}
 
@@ -1377,17 +1502,21 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       words_learned_today: newWordsLearnedToday
     };
 
-    // Keep today's entry up-to-date in multi-day history
-    const totalAnswers = newCorrectCount + newMistakesToday;
-    const currentAcc = totalAnswers === 0 
-      ? 100 
-      : Math.max(0, Math.min(100, Math.round((newCorrectCount / totalAnswers) * 100)));
+    // Keep today's entry up-to-date in multi-day history & kraft_daily_stats
+    const currentAcc = computeStrictAccuracy(newCorrectCount, newMistakesToday);
     const currentRecord = getDayRecord(targetLang, today);
+    const nextFocusMins = Math.floor((nextStats.activeSeconds || 0) / 60);
+    syncKraftDailyStatEntry(today, {
+      cardsDone: newCardsDone,
+      correct: newCorrectCount,
+      mistakes: newMistakesToday,
+      focusMinutes: nextFocusMins,
+    });
     saveDayRecord(targetLang, {
       date: today,
       cardsReviewed: newCardsDone,
       targetCards: 200,
-      focusMinutes: Math.floor((nextStats.activeSeconds || 0) / 60),
+      focusMinutes: nextFocusMins,
       accuracy: currentAcc,
       mistakesCount: newMistakesToday,
       wordsMastered: isNewMastered ? (currentRecord.wordsMastered || 0) + 1 : (currentRecord.wordsMastered || 0),

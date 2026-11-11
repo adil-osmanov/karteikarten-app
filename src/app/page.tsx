@@ -28,7 +28,7 @@ import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, remov
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
-import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
@@ -57,15 +57,7 @@ function cn(...inputs: ClassValue[]) {
 
 // Получение локальной даты пользователя YYYY-MM-DD
 export function getDeviceLocalDate(): string {
-  try {
-    return new Date().toLocaleDateString('en-CA');
-  } catch {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
+  return getLocalDateString(new Date());
 }
 
 export const getLocalDateKey = (): string => getDeviceLocalDate();
@@ -148,16 +140,17 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
   const mistakes = Array.isArray(mem?.mistakes) && mem.mistakes.length > 0
     ? mem.mistakes
     : (Array.isArray(parsed?.mistakes) ? parsed.mistakes : []);
-  const mistakesCount = Math.max(
+  const memMistakes = sanitizeTodayMistakesCount(
     typeof mem?.mistakesCount === 'number' ? mem.mistakesCount : 0,
-    typeof parsed?.mistakesCount === 'number' ? parsed.mistakesCount : mistakes.length
+    Array.isArray(mem?.mistakes) ? mem.mistakes : null
   );
+  const parsedMistakes = sanitizeTodayMistakesCount(
+    typeof parsed?.mistakesCount === 'number' ? parsed.mistakesCount : mistakes.length,
+    Array.isArray(parsed?.mistakes) ? parsed.mistakes : null
+  );
+  const mistakesCount = Math.max(memMistakes, parsedMistakes);
   const correctCount = learnedToday;
-  const totalCount = Math.max(
-    typeof mem?.totalCount === 'number' ? mem.totalCount : 0,
-    typeof parsed?.totalCount === 'number' ? parsed.totalCount : 0,
-    correctCount + mistakesCount
-  );
+  const totalCount = correctCount + mistakesCount;
 
   const result: LanguageDailyProgress = {
     learnedToday,
@@ -167,7 +160,7 @@ export function getLanguageDailyStats(lang: string): LanguageDailyProgress {
     mistakes,
     mistakesCount,
     focusMinutes: Math.floor(focusSeconds / 60),
-    accuracy: totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 100
+    accuracy: computeStrictAccuracy(correctCount, mistakesCount)
   };
 
   memoryDailyStats[cleanLang] = { date: today, data: result };
@@ -346,16 +339,19 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
     isDayRowToday && typeof dayRowActivity?.correctCount === 'number' ? dayRowActivity.correctCount : 0
   );
 
-  const cloudMistakes = typeof dailyRowActivity?.mistakesCount === 'number'
+  const rawCloudMistakes = typeof dailyRowActivity?.mistakesCount === 'number'
     ? dailyRowActivity.mistakesCount
     : (isDayRowToday && typeof dayRowActivity?.mistakesCountToday === 'number'
         ? dayRowActivity.mistakesCountToday
         : (current.mistakesCount || 0));
+  const cloudMistakes = sanitizeTodayMistakesCount(
+    rawCloudMistakes,
+    Array.isArray(dailyRowActivity?.mistakes) ? dailyRowActivity.mistakes : null,
+    Array.isArray(dayRowActivity?.mistakesPool) ? dayRowActivity.mistakesPool.length : 0
+  );
 
   const cloudTotal = cloudCorrect + cloudMistakes;
-  const cloudAccuracy = cloudTotal > 0
-    ? Math.max(0, Math.min(100, Math.round((cloudCorrect / cloudTotal) * 100)))
-    : 100;
+  const cloudAccuracy = computeStrictAccuracy(cloudCorrect, cloudMistakes);
 
   if (typeof window !== 'undefined') {
     const updated: LanguageDailyProgress = {
@@ -375,6 +371,12 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
     updated.focusMinutes = Math.floor(updated.focusSeconds / 60);
 
     persistDailyStatsLocal(cleanLang, today, updated);
+    syncKraftDailyStatEntry(today, {
+      cardsDone: finalCount,
+      correct: cloudCorrect,
+      mistakes: cloudMistakes,
+      focusMinutes: updated.focusMinutes,
+    });
 
     if (dayRowActivity || finalCount > 0) {
       reconcileStatsFromCloud(upperLang, {
@@ -527,9 +529,22 @@ export function updateLanguageDailyStats(
   }
 
   current.focusMinutes = Math.floor(current.focusSeconds / 60);
-  current.accuracy = current.totalCount > 0 ? Math.round((current.correctCount / current.totalCount) * 100) : 100;
+  current.accuracy = computeStrictAccuracy(current.correctCount, current.mistakesCount || 0);
 
   persistDailyStatsLocal(cleanLang, today, current);
+  syncKraftDailyStatEntry(today, {
+    cardsDone: current.learnedToday,
+    correct: current.correctCount,
+    mistakes: current.mistakesCount || 0,
+    focusMinutes: current.focusMinutes,
+  });
+  saveDayRecord(upperLang, {
+    date: today,
+    cardsReviewed: current.learnedToday,
+    focusMinutes: current.focusMinutes,
+    accuracy: current.accuracy,
+    mistakesCount: current.mistakesCount || 0,
+  });
 
   // Sync to Supabase multi-device (iPhone, Mac, Chrome, Safari)
   syncDailyStatsToCloud(cleanLang, current.learnedToday, current);

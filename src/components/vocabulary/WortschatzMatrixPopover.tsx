@@ -57,13 +57,20 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
 
   const {
     counts: stats,
-    totalWords: totalMastered,
     activeLevel: currentLevel,
     currentLanguage,
     wordLabel,
     wordsLearnedToday,
     todayCounts,
   } = useWortschatzMatrix(appLanguage);
+
+  const totalMasteredWords =
+    (stats?.A1 || 0) +
+    (stats?.A2 || 0) +
+    (stats?.B1 || 0) +
+    (stats?.B2 || 0) +
+    (stats?.C1 || 0) +
+    ((stats as Record<string, number | undefined>)?.C2 || 0);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -108,7 +115,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
 
   const targetWordsForLang = C1_TARGET_WORDS[currentLang] || 10000;
   const percentTotal =
-    targetWordsForLang > 0 ? Math.min(100, (totalMastered / targetWordsForLang) * 100) : 0;
+    targetWordsForLang > 0 ? Math.min(100, (totalMasteredWords / targetWordsForLang) * 100) : 0;
   const percentToday =
     targetWordsForLang > 0 ? ((wordsLearnedToday / targetWordsForLang) * 100).toFixed(2) : '0.00';
 
@@ -130,7 +137,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
               className="hover:text-blue-500 dark:hover:text-blue-400 cursor-pointer transition-colors duration-150"
               title="Gelernte Wörter anzeigen"
             >
-              {totalMastered.toLocaleString(localeStr)}
+              {totalMasteredWords.toLocaleString(localeStr)}
             </span>
             <span className="text-sm font-normal text-zinc-400 dark:text-zinc-500 select-none">
               / {targetWordsForLang.toLocaleString(localeStr)}
@@ -159,7 +166,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
           const count = stats[levelKey] || 0;
           const levelTodayCount = todayCounts?.[levelKey] || 0;
           const sharePercent =
-            totalMastered > 0 ? Math.min(Math.round((count / totalMastered) * 100), 100) : 0;
+            totalMasteredWords > 0 ? Math.min(Math.round((count / totalMasteredWords) * 100), 100) : 0;
 
           return (
             <div
@@ -218,10 +225,13 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
           suppressHydrationWarning
           className="text-xs font-semibold tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors tabular-nums"
         >
-          {totalMastered.toLocaleString(localeStr)} {wordLabel}
+          {totalMasteredWords.toLocaleString(localeStr)} {wordLabel}
         </span>
-        <span className="hidden sm:inline text-xs text-zinc-400 dark:text-zinc-500 font-mono">
-          • {totalMastered === 0 ? 'A1' : currentLevel || 'A1'}
+        <span
+          suppressHydrationWarning
+          className="hidden sm:inline text-xs text-zinc-400 dark:text-zinc-500 font-mono"
+        >
+          • {totalMasteredWords === 0 ? 'A1' : currentLevel || 'B1'}
         </span>
         <ChevronDown
           className={`w-3 h-3 text-zinc-400 shrink-0 transition-transform duration-200 ${

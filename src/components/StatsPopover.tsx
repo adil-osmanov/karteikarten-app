@@ -4,7 +4,11 @@ import {
   getTodayCompletedCardsCount, 
   normalizeLanguage, 
   getCurrentWeekDailyStats, 
-  getTodayKey, 
+  getTodayKey,
+  getLocalDateString,
+  computeStrictAccuracy,
+  sanitizeTodayMistakesCount,
+  getKraftDailyStatsMap,
   normalizeFocusSeconds,
   normalizeFocusMinutes,
   DayRecord 
@@ -233,11 +237,11 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const isSelectedToday = selectedDate === todayKey;
 
   // Today's live calculation values
+  const kraftDailyMap = getKraftDailyStatsMap();
   const currentLangStats = langStats || (() => {
     if (typeof window === 'undefined') return null;
     try {
-      const d = new Date();
-      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const today = getLocalDateString(new Date());
       const raw = localStorage.getItem(`daily_stats_${currentLang.toLowerCase()}_${today}`);
       return raw ? JSON.parse(raw) : null;
     } catch {
@@ -248,7 +252,8 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const todayLiveCards = Math.max(
     getTodayCompletedCardsCount(currentLang),
     stats?.cardsDone || 0,
-    typeof currentLangStats?.learnedToday === 'number' ? currentLangStats.learnedToday : 0
+    typeof currentLangStats?.learnedToday === 'number' ? currentLangStats.learnedToday : 0,
+    kraftDailyMap[todayKey]?.cardsDone || 0
   );
 
   const rawTodaySeconds = Math.max(
@@ -257,27 +262,27 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   );
   const todayLiveSeconds = normalizeFocusSeconds(rawTodaySeconds, todayLiveCards, true);
 
-  const todayMistakesCount = (() => {
-    if (typeof currentLangStats?.mistakesCount === 'number') {
-      const explicitIds = Array.isArray(currentLangStats?.mistakes) ? currentLangStats.mistakes.length : null;
-      if (explicitIds === 0 && Array.isArray(stats?.mistakesPool) && stats.mistakesPool.length > 0 && currentLangStats.mistakesCount >= stats.mistakesPool.length) {
-        return typeof stats?.mistakesCountToday === 'number' ? stats.mistakesCountToday : 0;
-      }
-      return currentLangStats.mistakesCount;
-    }
-    return typeof stats?.mistakesCountToday === 'number' ? stats.mistakesCountToday : 0;
-  })();
+  const poolLength = Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0;
+  const sanitizedCloudMistakes = sanitizeTodayMistakesCount(
+    typeof currentLangStats?.mistakesCount === 'number' ? currentLangStats.mistakesCount : 0,
+    Array.isArray(currentLangStats?.mistakes) ? currentLangStats.mistakes : null,
+    poolLength
+  );
+  const sanitizedHookMistakes = sanitizeTodayMistakesCount(
+    typeof stats?.mistakesCountToday === 'number' ? stats.mistakesCountToday : 0,
+    null,
+    poolLength
+  );
+  const todayMistakesCount = Math.max(sanitizedCloudMistakes, sanitizedHookMistakes);
 
   const correctAnswersToday = Math.max(
     todayLiveCards,
     typeof currentLangStats?.correctCount === 'number' ? currentLangStats.correctCount : 0,
-    typeof stats?.correctCount === 'number' ? stats.correctCount : 0
+    typeof stats?.correctCount === 'number' ? stats.correctCount : 0,
+    kraftDailyMap[todayKey]?.correct || 0
   );
   const mistakesToday = Math.max(0, todayMistakesCount);
-  const totalAnswers = correctAnswersToday + mistakesToday;
-  const todayAccuracy = totalAnswers === 0
-    ? 100
-    : Math.max(0, Math.min(100, Math.round((correctAnswersToday / totalAnswers) * 100)));
+  const todayAccuracy = computeStrictAccuracy(correctAnswersToday, mistakesToday);
 
   // Find the selected day record
   const selectedRecord = historyDays.find(d => d.date === selectedDate) || {
@@ -319,23 +324,21 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
   const displayAccuracy = isSelectedToday 
     ? todayAccuracy 
-    : (() => {
-        const c = selectedRecord.cardsReviewed || 0;
-        const m = selectedRecord.mistakesCount || 0;
-        const total = c + m;
-        return total === 0 ? 100 : Math.max(0, Math.min(100, Math.round((c / total) * 100)));
-      })();
+    : computeStrictAccuracy(selectedRecord.cardsReviewed || 0, selectedRecord.mistakesCount || 0);
 
-  const weekMaxCards = Math.max(
-    25,
-    ...historyDays.map(d => (d.date === todayKey ? Math.max(d.cardsReviewed || 0, todayLiveCards) : (d.cardsReviewed || 0)))
-  );
+  const weekCardCounts = historyDays.map((d) => {
+    const kraftCount = kraftDailyMap[d.date]?.cardsDone || 0;
+    return d.date === todayKey
+      ? Math.max(d.cardsReviewed || 0, todayLiveCards, kraftCount)
+      : Math.max(d.cardsReviewed || 0, kraftCount);
+  });
+  const maxWeekCount = Math.max(0, ...weekCardCounts);
 
   const accuracyColor = displayAccuracy >= 80 
     ? 'text-emerald-600 dark:text-emerald-400' 
-    : displayAccuracy >= 50 
+    : displayAccuracy >= 60 
       ? 'text-amber-600 dark:text-amber-400' 
-      : 'text-rose-600 dark:text-rose-400';
+      : 'text-rose-600 dark:text-rose-500';
 
   return (
     <div 
@@ -387,17 +390,17 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
         {/* 7-дневный график активности в стиле Apple (Weekly Bar Strip) */}
         <div className="mb-4 p-2.5 rounded-2xl bg-zinc-50/90 dark:bg-white/[0.03] border border-black/[0.05] dark:border-white/[0.06]">
           <div className="flex items-center justify-between gap-1 sm:gap-1.5">
-            {historyDays.map((day) => {
+            {historyDays.map((day, idx) => {
               const isSelected = day.date === selectedDate;
               const isToday = day.date === todayKey;
-              const dayCards = isToday ? Math.max(day.cardsReviewed || 0, todayLiveCards) : (day.cardsReviewed || 0);
+              const dayCards = weekCardCounts[idx] ?? 0;
               const dayTarget = day.targetCards || 200;
               const dayLabel = getDayLabel(day.date, t.days);
 
-              // Bar fill height (scaled to week activity so 5 cards visibly lifts the bar)
-              const fillHeight = dayCards > 0
-                ? Math.min(100, Math.max(20, Math.round((dayCards / weekMaxCards) * 100)))
-                : 0;
+              // Proportional bar height relative to week's max activity (min 15% when count > 0 so e.g. 5 cards is clearly filled)
+              const fillHeight = maxWeekCount > 0
+                ? Math.max(dayCards > 0 ? 15 : 0, Math.round((dayCards / maxWeekCount) * 100))
+                : (dayCards > 0 ? 15 : 0);
 
               return (
                 <button
@@ -415,10 +418,10 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
                   <div className="w-3.5 h-20 bg-neutral-200 dark:bg-neutral-800/80 rounded-full overflow-hidden flex flex-col justify-end p-0.5">
                     {dayCards > 0 && (
                       <div
-                        className={`w-full rounded-full transition-all duration-500 min-h-[14px] ${
+                        className={`w-full rounded-full transition-all duration-500 ${
                           isToday
-                            ? 'bg-gradient-to-t from-blue-600 to-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.6)]'
-                            : 'bg-gradient-to-t from-emerald-500 to-teal-400'
+                            ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.55)]'
+                            : 'bg-emerald-500'
                         }`}
                         style={{ height: `${fillHeight}%` }}
                       />

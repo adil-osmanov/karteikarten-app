@@ -367,7 +367,7 @@ export async function fetchMasteredWordsCountFromCloud(): Promise<number | null>
       .from('user_mastered_words')
       .select('*', { count: 'exact', head: true });
 
-    if (!error && count !== null) {
+    if (!error && count !== null && count > 0) {
       setAuthoritativeMasteredCount(count);
       return count;
     }
@@ -431,7 +431,13 @@ function recomputeStatsFromMap(lang: AppLang): CEFRMatrixStats {
     counts[lvl] = (counts[lvl] || 0) + 1;
   });
 
-  const totalWords = map.size;
+  const totalWords =
+    (counts.A1 || 0) +
+    (counts.A2 || 0) +
+    (counts.B1 || 0) +
+    (counts.B2 || 0) +
+    (counts.C1 || 0) +
+    ((counts as Record<string, number>).C2 || 0);
   const activeLevel = calculateActiveLevel(counts);
 
   globalMatrixStatsByLang[lang] = {
@@ -1817,16 +1823,21 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
   }, [normLang]);
 
-  const resolvedTotalWords =
-    normLang === 'de' && masteredWordsCount !== null
-      ? masteredWordsCount
-      : stats.totalWords;
+  const totalMasteredWords =
+    (stats.counts.A1 || 0) +
+    (stats.counts.A2 || 0) +
+    (stats.counts.B1 || 0) +
+    (stats.counts.B2 || 0) +
+    (stats.counts.C1 || 0) +
+    ((stats.counts as Record<string, number | undefined>).C2 || 0);
+
+  const resolvedActiveLevel = calculateActiveLevel(stats.counts);
 
   return {
     counts: stats.counts,
-    totalWords: resolvedTotalWords,
-    masteredWordsCount,
-    activeLevel: stats.activeLevel,
+    totalWords: totalMasteredWords,
+    masteredWordsCount: totalMasteredWords,
+    activeLevel: resolvedActiveLevel,
     currentLanguage: normLang,
     wordLabel,
     totalGoal,
