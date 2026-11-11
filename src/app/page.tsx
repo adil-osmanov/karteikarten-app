@@ -3906,8 +3906,10 @@ export const getDynamicInputFontSize = (textLength: number) => {
 };
 
 export interface ParsedTargetPhrase {
+  leadingText: string;
   prefixContext: string;
   coreWord: string;
+  trailingText: string;
   suffixContext: string;
   cleanCoreWord: string;
   splitIndex: number;
@@ -3916,6 +3918,8 @@ export interface ParsedTargetPhrase {
   externalPrefix: string;
   inputTarget: string;
 }
+
+export type ParsedPhrase = ParsedTargetPhrase;
 
 export function TrennbarDottedBar({ className }: { className?: string } = {}) {
   return (
@@ -3937,9 +3941,8 @@ export function checkAnswer(userInput: string, targetWord: string): boolean {
 export const HELPER_TOKENS = ['jemanden', 'jemandem', 'etwas', 'jdn.', 'jdm.', 'etw.'] as const;
 const HELPER_TOKEN_SET = new Set(HELPER_TOKENS.map(t => t.toLowerCase()));
 
-// Частица 'sich' КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНА во внешнем префиксе!
-// Если слово возвратное (sich entscheiden, sich trauen, sich vor|stellen):
-// всё выражение с 'sich' является целевым для ввода в инпут.
+// Частица 'sich' без последующего предлога/объекта остаётся внутри coreWord ("sich entscheiden");
+// в конструкциях вроде "sich an jemanden erinnern" вся группа управления сохраняется в leadingText.
 export function isHelperToken(token: string): boolean {
   if (!token) return false;
   const clean = token.replace(/[()]/g, '').toLowerCase().trim();
@@ -3947,32 +3950,36 @@ export function isHelperToken(token: string): boolean {
 }
 
 export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string, forms?: string | null): ParsedTargetPhrase {
-  let cleanTarget = (rawTarget || '').replace(/\s+/g, ' ').trim();
-  let externalPrefix = (externalPrefixProp || '').trim();
+  const cleanRaw = (rawTarget || '').replace(/\s+/g, ' ').trim();
+  const propPrefix = (externalPrefixProp || '').trim();
 
-  if (!cleanTarget) {
+  if (!cleanRaw) {
     return {
-      prefixContext: externalPrefix,
+      leadingText: propPrefix,
+      prefixContext: propPrefix,
       coreWord: '',
+      trailingText: '',
       suffixContext: '',
       cleanCoreWord: '',
       splitIndex: -1,
       isTrennbar: false,
       article: null,
-      externalPrefix,
+      externalPrefix: propPrefix,
       inputTarget: ''
     };
   }
 
   // 1. Существительное с артиклем (der/die/das) — артикль и пробел обязательны для изучения и ввода!
-  const nounMatch = cleanTarget.match(/^(der|die|das)\s+([A-ZÄÖÜ][a-zA-ZäöüÄÖÜß-]*)$/i);
+  const nounMatch = cleanRaw.match(/^(der|die|das)\s+([A-ZÄÖÜ][a-zA-ZäöüÄÖÜß-]*)$/i);
   if (nounMatch) {
     const art = nounMatch[1].toLowerCase();
     const noun = nounMatch[2];
     const fullNoun = `${art} ${noun}`;
     return {
+      leadingText: '',
       prefixContext: '',
-      coreWord: cleanTarget,
+      coreWord: cleanRaw,
+      trailingText: '',
       suffixContext: '',
       cleanCoreWord: fullNoun,
       splitIndex: -1,
@@ -3983,19 +3990,10 @@ export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string
     };
   }
 
-  // 2. Проверяем наличие управления ТОЛЬКО из разрешенного списка EXTERNAL_GOVERNANCE_REGEX (без 'sich'!):
-  const match = cleanTarget.match(EXTERNAL_GOVERNANCE_REGEX);
-  if (match) {
-    if (!externalPrefix) {
-      externalPrefix = match[1]; // jemanden / jemandem / etwas / jemandem etwas
-    }
-    // Срезаем ТОЛЬКО jemanden/jemandem/etwas:
-    cleanTarget = cleanTarget.replace(EXTERNAL_GOVERNANCE_REGEX, '').trim();
-  }
+  // 2. Полный разбор конструкции без потери средних и хвостовых слов (jemanden vor jemandem schützen, sich an jemanden erinnern, warten auf etwas)
+  const { leadingText, coreWord: initialCoreWord, trailingText } = parseVerbComponents(cleanRaw, propPrefix);
 
-  // «sich» остается частью cleanTarget!
-  // cleanTarget теперь содержит: "sich entscheiden", "sich aus|ruhen" и т.д.
-  // Если слово еще не размечено палочкой, автоматически определяем отделяемую приставку (напр. reinschnuppern -> rein|schnuppern)
+  let cleanTarget = initialCoreWord;
   if (!cleanTarget.includes('|')) {
     cleanTarget = detectAndMarkSeparable(cleanTarget, forms);
   }
@@ -4004,27 +4002,31 @@ export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string
     const pipeIdx = cleanTarget.indexOf('|');
     const cleanRemaining = cleanTarget.replace(/\|/g, '');
     return {
-      prefixContext: externalPrefix,
+      leadingText,
+      prefixContext: leadingText,
       coreWord: cleanTarget,
-      suffixContext: '',
+      trailingText,
+      suffixContext: trailingText,
       cleanCoreWord: cleanRemaining,
       splitIndex: pipeIdx,
       isTrennbar: true,
       article: null,
-      externalPrefix,
+      externalPrefix: leadingText,
       inputTarget: cleanTarget
     };
   }
 
   return {
-    prefixContext: externalPrefix,
+    leadingText,
+    prefixContext: leadingText,
     coreWord: cleanTarget,
-    suffixContext: '',
+    trailingText,
+    suffixContext: trailingText,
     cleanCoreWord: cleanTarget.replace(/\|/g, ''),
     splitIndex: -1,
     isTrennbar: false,
     article: null,
-    externalPrefix,
+    externalPrefix: leadingText,
     inputTarget: cleanTarget
   };
 }
@@ -4148,10 +4150,10 @@ function RapidFlashcardMode({
 
   // Унифицированное разделение управления и ядра глагола
   const verbComponents = useMemo(() => {
-    return parseVerbComponents(currentCard?.targetWord || '', parsedTarget.prefixContext);
-  }, [currentCard?.targetWord, parsedTarget.prefixContext]);
+    return parseVerbComponents(currentCard?.targetWord || '', parsedTarget.leadingText);
+  }, [currentCard?.targetWord, parsedTarget.leadingText]);
 
-  const effectivePrefix = verbComponents.prefix || parsedTarget.prefixContext;
+  const effectivePrefix = parsedTarget.leadingText || verbComponents.prefix;
   const effectiveCoreWord = parsedTarget.coreWord || verbComponents.coreWord || currentCard?.targetWord || '';
 
   // Извлечение артикля, основного слова и множественного числа
@@ -4369,8 +4371,8 @@ function RapidFlashcardMode({
     }
 
     // Записываем эталонное немецкое слово прямо внутрь поля ввода (без дублирования управления)
-    const target = effectivePrefix
-      ? (verbComponents.coreWord || parsedTarget.cleanCoreWord || currentCard?.targetWord || '')
+    const target = (parsedTarget.leadingText || parsedTarget.trailingText || effectivePrefix)
+      ? (parsedTarget.cleanCoreWord || verbComponents.coreWord || currentCard?.targetWord || '')
       : (currentCard?.targetWord || '');
     setTypedValue(target.replace(/\|/g, '').trim());
 
@@ -4420,7 +4422,12 @@ function RapidFlashcardMode({
 
     const inputTarget = parsedTarget.inputTarget || parsedTarget.cleanCoreWord || '';
     const targetToMatch = inputTarget.replace(/\|/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    const targetFull = `${parsedTarget.externalPrefix} ${targetToMatch}`.replace(/\s+/g, ' ').trim().toLowerCase();
+    const targetFull = [parsedTarget.leadingText, targetToMatch, parsedTarget.trailingText]
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
 
     const normalizedInput = trimmedInput.replace(/\s+/g, ' ').toLowerCase();
     const isMatch = (normalizedInput.trim() === targetToMatch) || (normalizedInput.trim() === targetFull);
@@ -4898,161 +4905,105 @@ function RapidFlashcardMode({
               {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
             </h2>
 
-            {effectivePrefix ? (
-              <div className="w-full max-w-2xl flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-4 gap-y-2.5 sm:gap-y-3">
-                <span className="text-xl sm:text-2xl md:text-3xl font-medium text-neutral-500 dark:text-neutral-400 tracking-normal select-none whitespace-nowrap">
-                  {effectivePrefix}
-                </span>
-                <div className="inline-flex items-center justify-center max-w-full">
-                  <div
-                    onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
-                    className={cn(
-                      "relative inline-flex items-center justify-center min-h-[52px] h-13 sm:min-h-[64px] sm:h-16 px-4 sm:px-8 py-2 sm:py-3 rounded-2xl min-w-[200px] sm:min-w-[260px] max-w-full sm:max-w-xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
-                      isMobile && "select-none",
-                      isAnswered
-                        ? (!isSurrendered
-                            ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-semibold"
-                            : "border-red-500/40 text-red-600 dark:text-red-400 bg-red-500/5 font-semibold")
-                        : isErrorMismatch
-                          ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                          : "bg-black/[0.035] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.07] focus-within:border-blue-600 dark:focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
-                      isShaking && "animate-shake"
-                    )}
-                  >
-                    {isAnswered ? (
-                      <div className={cn(
-                        "inline-flex items-center justify-center font-medium tracking-tight select-none whitespace-nowrap",
-                        displayParts.totalLength > 22
-                          ? 'text-xl sm:text-2xl'
-                          : 'text-2xl md:text-3xl',
-                        !isSurrendered ? 'text-emerald-400' : 'text-red-400'
-                      )}>
-                        {displayParts.hasDivider ? (
-                          <>
-                            <span>{displayParts.prefix}</span>
-                            <TrennbarDottedBar />
-                            <span>{displayParts.stem}</span>
-                          </>
-                        ) : (
-                          formatSeparableWord(
-                            effectiveCoreWord,
-                            currentCard?.forms,
-                            !isSurrendered ? 'emerald' : 'red'
-                          )
-                        )}
-                      </div>
-                    ) : (
-                      <>
-                        <input
-                          ref={inputRef}
-                          type="text"
-                          value={typedValue}
-                          onChange={(e) => !isMobile && handleInputChange(e.target.value)}
-                          readOnly={isMobile || isAnswered}
-                          disabled={isAnswered}
-                          inputMode={isMobile ? "none" : undefined}
-                          tabIndex={isMobile ? -1 : 0}
-                          autoFocus={!isMobile}
-                          autoComplete="off"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          placeholder=""
-                          style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent text-base"
-                        />
-                        <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
-                          displayParts.totalLength > 22
-                            ? 'text-lg sm:text-2xl'
-                            : 'text-xl sm:text-2xl md:text-3xl'
-                        }`}>
-                          {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
-                          <span>{displayParts.prefix}</span>
-                          {displayParts.hasDivider && <TrennbarDottedBar />}
-                          {displayParts.stem && <span>{displayParts.stem}</span>}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {parsedTarget.suffixContext && (
-                  <span className="text-xl sm:text-2xl md:text-3xl font-medium text-neutral-400 dark:text-neutral-500 tracking-normal select-none whitespace-nowrap">
-                    {parsedTarget.suffixContext}
-                  </span>
-                )}
-              </div>
-            ) : (
-              <div className="w-full max-w-xl flex items-center justify-center">
-                <div
-                  onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
-                  className={cn(
-                    "relative inline-flex items-center justify-center min-h-[52px] h-13 sm:min-h-[64px] sm:h-16 px-4 sm:px-8 py-2 sm:py-3 rounded-2xl w-full max-w-[280px] sm:w-auto sm:min-w-[260px] sm:max-w-xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
-                    isMobile && "select-none",
-                    isAnswered
-                      ? (!isSurrendered
-                          ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-semibold"
-                          : "border-red-500/40 text-red-600 dark:text-red-400 bg-red-500/5 font-semibold")
-                      : isErrorMismatch
-                        ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                        : "bg-black/[0.035] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.07] focus-within:border-blue-600 dark:focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
-                    isShaking && "animate-shake"
+            {(() => {
+              const leadingText = parsedTarget.leadingText || effectivePrefix;
+              const trailingText = parsedTarget.trailingText;
+              const hasOuterContext = Boolean(leadingText || trailingText);
+
+              return (
+                <div className="w-full max-w-2xl flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-4 gap-y-2.5 sm:gap-y-3">
+                  {/* 1. Начальная часть конструкции (если есть, напр. "jemanden vor jemandem") */}
+                  {leadingText && (
+                    <span className="text-xl sm:text-2xl md:text-3xl font-medium text-neutral-500 dark:text-neutral-400 tracking-normal select-none text-center">
+                      {leadingText}
+                    </span>
                   )}
-                >
-                  {isAnswered ? (
-                    <div className={cn(
-                      "inline-flex items-center justify-center font-medium tracking-tight select-none whitespace-nowrap",
-                      displayParts.totalLength > 22
-                        ? 'text-xl sm:text-2xl'
-                        : 'text-2xl md:text-3xl',
-                      !isSurrendered ? 'text-emerald-400' : 'text-red-400'
-                    )}>
-                      {displayParts.hasDivider ? (
-                        <>
-                          <span>{displayParts.prefix}</span>
-                          <TrennbarDottedBar />
-                          <span>{displayParts.stem}</span>
-                        </>
+
+                  {/* 2. Основное слово / инпут / плашка ответа */}
+                  <div className={cn("inline-flex items-center justify-center", hasOuterContext ? "max-w-full" : "w-full max-w-xl")}>
+                    <div
+                      onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
+                      className={cn(
+                        "relative inline-flex items-center justify-center min-h-[52px] h-13 sm:min-h-[64px] sm:h-16 px-4 sm:px-8 py-2 sm:py-3 rounded-2xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
+                        hasOuterContext
+                          ? "min-w-[200px] sm:min-w-[260px] max-w-full sm:max-w-xl"
+                          : "w-full max-w-[280px] sm:w-auto sm:min-w-[260px] sm:max-w-xl",
+                        isMobile && "select-none",
+                        isAnswered
+                          ? (!isSurrendered
+                              ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-semibold"
+                              : "border-red-500/40 text-red-600 dark:text-red-400 bg-red-500/5 font-semibold")
+                          : isErrorMismatch
+                            ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
+                            : "bg-black/[0.035] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.07] focus-within:border-blue-600 dark:focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
+                        isShaking && "animate-shake"
+                      )}
+                    >
+                      {isAnswered ? (
+                        <div className={cn(
+                          "inline-flex items-center justify-center font-medium tracking-tight select-none whitespace-nowrap",
+                          displayParts.totalLength > 22
+                            ? 'text-xl sm:text-2xl'
+                            : 'text-2xl md:text-3xl',
+                          !isSurrendered ? 'text-emerald-400' : 'text-red-400'
+                        )}>
+                          {displayParts.hasDivider ? (
+                            <>
+                              <span>{displayParts.prefix}</span>
+                              <TrennbarDottedBar />
+                              <span>{displayParts.stem}</span>
+                            </>
+                          ) : (
+                            formatSeparableWord(
+                              effectiveCoreWord,
+                              currentCard?.forms,
+                              !isSurrendered ? 'emerald' : 'red'
+                            )
+                          )}
+                        </div>
                       ) : (
-                        formatSeparableWord(
-                          effectiveCoreWord,
-                          currentCard?.forms,
-                          !isSurrendered ? 'emerald' : 'red'
-                        )
+                        <>
+                          <input
+                            ref={inputRef}
+                            type="text"
+                            value={typedValue}
+                            onChange={(e) => !isMobile && handleInputChange(e.target.value)}
+                            readOnly={isMobile || isAnswered}
+                            disabled={isAnswered}
+                            inputMode={isMobile ? "none" : undefined}
+                            tabIndex={isMobile ? -1 : 0}
+                            autoFocus={!isMobile}
+                            autoComplete="off"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            placeholder=""
+                            style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent text-base"
+                          />
+                          <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
+                            displayParts.totalLength > 22
+                              ? 'text-lg sm:text-2xl'
+                              : 'text-xl sm:text-2xl md:text-3xl'
+                          }`}>
+                            {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
+                            <span>{displayParts.prefix}</span>
+                            {displayParts.hasDivider && <TrennbarDottedBar />}
+                            {displayParts.stem && <span>{displayParts.stem}</span>}
+                          </div>
+                        </>
                       )}
                     </div>
-                  ) : (
-                    <>
-                      <input
-                        ref={inputRef}
-                        type="text"
-                        value={typedValue}
-                        onChange={(e) => !isMobile && handleInputChange(e.target.value)}
-                        readOnly={isMobile || isAnswered}
-                        disabled={isAnswered}
-                        inputMode={isMobile ? "none" : undefined}
-                        tabIndex={isMobile ? -1 : 0}
-                        autoFocus={!isMobile}
-                        autoComplete="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        placeholder=""
-                        style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent text-base"
-                      />
-                      <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
-                        displayParts.totalLength > 22
-                          ? 'text-lg sm:text-2xl'
-                          : 'text-xl sm:text-2xl md:text-3xl'
-                      }`}>
-                        {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
-                        <span>{displayParts.prefix}</span>
-                        {displayParts.hasDivider && <TrennbarDottedBar />}
-                        {displayParts.stem && <span>{displayParts.stem}</span>}
-                      </div>
-                    </>
+                  </div>
+
+                  {/* 3. Хвостовая часть конструкции (если предлог/управление стоит после глагола, напр. "auf etwas") */}
+                  {trailingText && (
+                    <span className="text-xl sm:text-2xl md:text-3xl font-medium text-neutral-500 dark:text-neutral-400 tracking-normal select-none text-center">
+                      {trailingText}
+                    </span>
                   )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Пример предложения и формы слова после ввода ответа (как в раундах 1-2) */}
             {isAnswered && (
