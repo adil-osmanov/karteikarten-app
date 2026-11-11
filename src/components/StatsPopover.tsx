@@ -319,7 +319,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const displayRemainingMinutes = displayMinutes % 60;
 
   const displayMistakes = isSelectedToday 
-    ? (Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : todayMistakesCount)
+    ? mistakesToday
     : selectedRecord.mistakesCount;
 
   const displayAccuracy = isSelectedToday 
@@ -332,7 +332,6 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
       ? Math.max(d.cardsReviewed || 0, todayLiveCards, kraftCount)
       : Math.max(d.cardsReviewed || 0, kraftCount);
   });
-  const maxWeekCount = Math.max(0, ...weekCardCounts);
 
   const accuracyColor = displayAccuracy >= 80 
     ? 'text-emerald-600 dark:text-emerald-400' 
@@ -397,10 +396,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
               const dayTarget = day.targetCards || 200;
               const dayLabel = getDayLabel(day.date, t.days);
 
-              // Proportional bar height relative to week's max activity (min 15% when count > 0 so e.g. 5 cards is clearly filled)
-              const fillHeight = maxWeekCount > 0
-                ? Math.max(dayCards > 0 ? 15 : 0, Math.round((dayCards / maxWeekCount) * 100))
-                : (dayCards > 0 ? 15 : 0);
+              // Дневная цель по умолчанию 200 карточек:
+              const GOAL = 200;
+
+              // Если карточек 0 — высота строго 0% (пустой слот дня):
+              const barHeightPercent = dayCards === 0
+                ? 0
+                : Math.min(100, Math.max(6, Math.round((dayCards / GOAL) * 100)));
 
               return (
                 <button
@@ -415,15 +417,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
                   title={`${dayLabel}: ${dayCards} / ${dayTarget}`}
                 >
                   {/* Чистая цельная скругленная капсула (pill) без делений */}
-                  <div className="w-3.5 h-20 bg-neutral-200 dark:bg-neutral-800/80 rounded-full overflow-hidden flex flex-col justify-end p-0.5">
+                  <div className="w-3.5 h-28 bg-neutral-200 dark:bg-white/[0.04] rounded-full overflow-hidden flex flex-col justify-end p-0.5">
                     {dayCards > 0 && (
                       <div
-                        className={`w-full rounded-full transition-all duration-500 ${
-                          isToday
-                            ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.55)]'
-                            : 'bg-emerald-500'
+                        className={`w-full rounded-full transition-all duration-500 bg-blue-500 ${
+                          isToday ? 'shadow-[0_0_10px_rgba(59,130,246,0.55)]' : ''
                         }`}
-                        style={{ height: `${fillHeight}%` }}
+                        style={{ height: `${barHeightPercent}%` }}
                       />
                     )}
                   </div>

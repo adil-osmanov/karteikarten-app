@@ -123,17 +123,14 @@ export function sanitizeTodayMistakesCount(
   const explicitLen = Array.isArray(explicitIds) ? explicitIds.length : null;
   const poolLen = typeof poolLength === 'number' ? poolLength : 0;
 
-  // Reject stale multi-day mistakesPool sizes or unbacked inflated values when 0 mistakes are logged for today
-  if (explicitLen === 0 && (count >= 20 || (poolLen > 0 && count >= poolLen))) {
+  // Reject clearly corrupt/unbacked inflated multi-day values when 0 mistakes are logged for today
+  if (explicitLen === 0 && count >= 20 && (poolLen === 0 || count >= poolLen)) {
     return 0;
   }
-  if (explicitLen === null && poolLen > 0 && count >= poolLen && count >= 20) {
+  if (explicitLen === null && count >= 50) {
     return 0;
   }
-  if (explicitLen === null && poolLen === 0 && count >= 50) {
-    return 0;
-  }
-  return count;
+  return explicitLen !== null ? Math.max(count, explicitLen) : count;
 }
 
 export const getTodayKey = (): string => {
