@@ -35,55 +35,115 @@ export const GERMAN_SEPARABLE_PREFIXES = [
   'heraus', 'herein', 'herauf', 'herbei', 'herum', 'heran', 'herab',
   'hinaus', 'hinein', 'hinauf', 'hinweg', 'hinzu', 'hinab',
   'runter', 'rüber', 'raus', 'rein', 'rum', 'ran',
-  'ab', 'an', 'auf', 'aus', 'bei', 'dar', 'ein', 'empor', 'fest', 'fort', 'frei',
+  'ab', 'an', 'auf', 'aus', 'bei', 'dar', 'ein', 'empor', 'fern', 'fest', 'fort', 'frei',
   'heim', 'her', 'hin', 'los', 'mit', 'nach', 'nieder', 'statt', 'teil',
   'vor', 'weg', 'zu', 'wieder'
 ].sort((a, b) => b.length - a.length);
 
+// Явный черный список неделимых глаголов, начинающихся на созвучные с приставками буквы
+export const INSEPARABLE_GUARD_VERBS = new Set([
+  'reinigen',
+  'reisen',
+  'reißen',
+  'reiten',
+  'reichen',
+  'reimen',
+  'reizen',
+  'beinhalten',
+  'beantragen',
+]);
+
 /**
- * Автоматически находит отделяемую приставку в глаголе на основе форм глагола
- * (напр. "schnuppert rein", "hat reingeschnuppert") или по известным отделяемым префиксам
- * и вставляет маркер "|".
+ * Извлекает подтвержденные отделяемые приставки из форм глагола (Präsens/Partizip II).
+ * Если Partizip II начинается с `ge-` (напр. "hat gereinigt"), глагол строго неделимый.
  */
-export function detectAndMarkSeparable(word: string, forms?: string | null): string {
-  if (!word || typeof word !== 'string') return word || '';
-  if (word.includes('|')) return word;
-
+function extractConfirmedPrefixesFromForms(forms: string): {
+  confirmedPrefixes: string[];
+  participleWords: string[];
+} {
   const prefixPattern = GERMAN_SEPARABLE_PREFIXES.join('|');
+  const segments = forms
+    .split(/[·;,/\n()]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-  // 1. Поиск по формам глагола (e.g. "schnuppert rein", "hat reingeschnuppert")
-  if (forms && typeof forms === 'string') {
-    const prefixRegex = new RegExp(`\\b(?:[a-zA-ZäöüÄÖÜß]+)\\s+(?:sich\\s+)?(${prefixPattern})\\b`, 'i');
-    const geRegex = new RegExp(`\\b(${prefixPattern})ge[a-zA-ZäöüÄÖÜß]+\\b`, 'i');
+  const confirmed = new Set<string>();
+  const participleWords: string[] = [];
 
-    const match = forms.match(prefixRegex) || forms.match(geRegex);
-    if (match) {
-      const prefix = match[1].toLowerCase();
-      const tokens = word.split(' ');
-      const markedTokens = tokens.map((token) => {
-        const lower = token.toLowerCase();
-        if (lower.startsWith(prefix) && lower.length >= prefix.length + 3) {
-          return token.slice(0, prefix.length) + '|' + token.slice(prefix.length);
-        }
-        return token;
-      });
-      const res = markedTokens.join(' ');
-      if (res.includes('|')) return res;
+  const innerGeRegex = new RegExp(`^(?:(?:hat|ist|wird)(?:\\s+sich)?\\s+)?(${prefixPattern})ge[a-zA-ZäöüÄÖÜß]+$`, 'i');
+  const detachedPrefixRegex = new RegExp(`^[a-zA-ZäöüÄÖÜß]+(?:\\s+[a-zA-ZäöüÄÖÜß.]+){0,3}\\s+(${prefixPattern})$`, 'i');
+  const bareGeParticipleRegex = /^(?:(?:hat|ist|wird)(?:\s+sich)?\s+)?(ge[a-zA-ZäöüÄÖÜß]+)$/i;
+
+  for (const segment of segments) {
+    const geStartMatch = segment.match(bareGeParticipleRegex);
+    if (geStartMatch) {
+      participleWords.push(geStartMatch[1].toLowerCase());
+    }
+
+    const innerGeMatch = segment.match(innerGeRegex);
+    if (innerGeMatch) {
+      confirmed.add(innerGeMatch[1].toLowerCase());
+      continue;
+    }
+
+    const detachedMatch = segment.match(detachedPrefixRegex);
+    if (detachedMatch) {
+      confirmed.add(detachedMatch[1].toLowerCase());
     }
   }
 
-  // 2. Fallback: поиск по списку строго отделяемых приставок для глаголов (ending in en, eln, ern)
+  return {
+    confirmedPrefixes: Array.from(confirmed),
+    participleWords,
+  };
+}
+
+/**
+ * Автоматически находит отделяемую приставку в глаголе ТОЛЬКО если:
+ * 1. В слове уже нет явного маркера `|` (приоритет явного разделителя).
+ * 2. Токен не входит в черный список неделимых глаголов.
+ * 3. Формы глагола (Präsens / Partizip II) прямо доказывают отделяемость,
+ *    а Partizip II не начинается с `ge-` перед предполагаемой приставкой (напр. "hat gereinigt").
+ */
+export function detectAndMarkSeparable(word: string, forms?: string | null): string {
+  if (!word || typeof word !== 'string') return word || '';
+  // 1. Приоритет явного разделителя
+  if (word.includes('|')) return word;
+
+  // 2. Без форм глагола автоопределение не угадывает приставку вслепую
+  if (!forms || typeof forms !== 'string' || !forms.trim()) {
+    return word;
+  }
+
+  const { confirmedPrefixes, participleWords } = extractConfirmedPrefixesFromForms(forms);
+  if (confirmedPrefixes.length === 0) {
+    return word;
+  }
+
   const tokens = word.split(' ');
   const markedTokens = tokens.map((token) => {
     const lower = token.toLowerCase();
     if (!/(en|eln|ern)$/i.test(lower)) return token;
+    if (INSEPARABLE_GUARD_VERBS.has(lower)) return token;
 
-    for (const prefix of GERMAN_SEPARABLE_PREFIXES) {
-      if (lower.startsWith(prefix) && lower.length >= prefix.length + 3) {
-        // Убеждаемся, что основа глагола выглядит как реальный корень
-        return token.slice(0, prefix.length) + '|' + token.slice(prefix.length);
+    for (const prefix of confirmedPrefixes) {
+      if (!lower.startsWith(prefix) || lower.length < prefix.length + 3) {
+        continue;
       }
+
+      // Если в Partizip II `ge-` стоит в начале слова (напр. "gereinigt", "gereist", "gereicht")
+      // — это неделимый глагол (исключение только если сама приставка начинается на "ge-", напр. "gegenüberge...")
+      const hasInseparableLeadingGe = participleWords.some((pWord) => {
+        if (pWord.startsWith(`ge${prefix}`)) return true;
+        return !prefix.startsWith('ge') && pWord.startsWith('ge');
+      });
+      if (hasInseparableLeadingGe) {
+        continue;
+      }
+
+      return token.slice(0, prefix.length) + '|' + token.slice(prefix.length);
     }
+
     return token;
   });
 
