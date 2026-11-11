@@ -3662,6 +3662,39 @@ export function getCardTrainingMode(
   return 'standard_cloze';
 }
 
+export type ReviewFilterMode = 'all' | 'flashcards' | 'cloze' | 'grammar_prep' | 'grammar_verbs' | 'grammar_nvv';
+
+export function getCardReviewFilterMode(
+  card?: Flashcard,
+  deckId?: string,
+  decks: Deck[] = [],
+  books: BookMeta[] = []
+): Exclude<ReviewFilterMode, 'all'> {
+  const deck = deckId ? decks.find(d => d.id === deckId) : undefined;
+  const book = deck?.bookId ? books.find(b => b.id === deck.bookId) : undefined;
+  const mode = getCardTrainingMode(card, deckId, decks, books);
+
+  const bookIdLower = (deck?.bookId || '').toLowerCase();
+  const bookTitleLower = (book?.title || '').toLowerCase();
+  const deckNameLower = (deck?.name || '').toLowerCase();
+
+  if (
+    mode === 'redemittel' ||
+    bookIdLower.includes('nvv') ||
+    bookTitleLower.includes('nomen-verb') ||
+    bookTitleLower.includes('nvv') ||
+    bookTitleLower.includes('funktionsverb') ||
+    deckNameLower.includes('nomen-verb') ||
+    deckNameLower.includes('nvv')
+  ) {
+    return 'grammar_nvv';
+  }
+  if (mode === 'preposition_drill') return 'grammar_prep';
+  if (mode === 'starke_verben') return 'grammar_verbs';
+  if (mode === 'rapid_flashcards') return 'flashcards';
+  return 'cloze';
+}
+
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? React.useLayoutEffect : React.useEffect;
 
 function AutoFitGermanHeading({
@@ -4488,7 +4521,7 @@ function RapidFlashcardMode({
       className={cn(
         "relative w-full max-w-4xl lg:max-w-5xl mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
         isRound1or2
-          ? "min-h-[380px] h-[440px] sm:min-h-[540px] sm:h-[600px] sm:max-h-[600px]"
+          ? "min-h-[440px] h-[500px] sm:min-h-[540px] sm:h-[600px] sm:max-h-[600px]"
           : "min-h-[300px] sm:min-h-[540px] h-auto sm:h-[600px] sm:max-h-[600px]",
         isTransitioning
           ? 'opacity-0 transition-opacity duration-100 ease-out pointer-events-none'
@@ -4646,8 +4679,40 @@ function RapidFlashcardMode({
               )}
             </div>
 
-            {/* Низ: Пусто для чистоты */}
-            <div className="w-full flex justify-center shrink-0 min-h-[32px] sm:min-h-[52px]" />
+            {/* Низ: Тактильные кнопки оценки ✕ и ✓ в стиле Apple */}
+            <div className="w-full flex items-center justify-center gap-8 pt-4 pb-1 shrink-0 animate-in fade-in duration-150">
+              {/* Крестик: Повторить */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRateCard(false);
+                }}
+                className="h-14 w-14 sm:h-16 sm:w-16 rounded-full flex items-center justify-center bg-black/[0.04] dark:bg-white/[0.05] hover:bg-rose-500/15 border border-black/10 dark:border-white/10 hover:border-rose-500/40 text-neutral-500 dark:text-neutral-400 hover:text-rose-500 dark:hover:text-rose-400 active:scale-90 transition-all duration-150 shadow-lg cursor-pointer"
+                aria-label="Wiederholen"
+                title="Не знаю / Повторить"
+              >
+                <svg className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+
+              {/* Галочка: Знаю */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRateCard(true);
+                }}
+                className="h-14 w-14 sm:h-16 sm:w-16 rounded-full flex items-center justify-center bg-black/[0.04] dark:bg-white/[0.05] hover:bg-emerald-500/15 border border-black/10 dark:border-white/10 hover:border-emerald-500/40 text-neutral-500 dark:text-neutral-400 hover:text-emerald-500 dark:hover:text-emerald-400 active:scale-90 transition-all duration-150 shadow-lg cursor-pointer"
+                aria-label="Gewusst"
+                title="Знаю / Запомнил"
+              >
+                <svg className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              </button>
+            </div>
           </CardContainer>
         </div>
       ) : (
@@ -7519,13 +7584,19 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
   onBack, 
   onReviewMistakes,
   dueCount = 0,
-  onStartReview
+  onStartReview,
+  reviewMode = 'all',
+  onReviewModeChange,
+  reviewCounts
 }: { 
   activeBook?: BookMeta | null, 
   onBack?: () => void, 
   onReviewMistakes?: () => void,
   dueCount?: number,
-  onStartReview?: () => void
+  onStartReview?: () => void,
+  reviewMode?: ReviewFilterMode,
+  onReviewModeChange?: (mode: ReviewFilterMode) => void,
+  reviewCounts?: Record<ReviewFilterMode, number>
 }) {
   const [adminOpen, setAdminOpen] = useState(false);
   const [isLangOpen, setIsLangOpen] = useState(false);
@@ -7635,8 +7706,8 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
 
       <header 
         className={cn(
-          "sticky top-0 z-50 w-full select-none backdrop-blur-xl transition-colors duration-200 border-b transform-gpu [backface-visibility:hidden] pt-[env(safe-area-inset-top,0px)]",
-          "bg-[#ECECEF]/80 dark:bg-black/80 border-black/[0.05] dark:border-white/[0.08]"
+          "sticky top-0 z-50 w-full select-none transition-colors duration-200 border-b pt-[env(safe-area-inset-top,0px)]",
+          "bg-[#ECECEF] dark:bg-[#09090b] sm:dark:bg-black border-black/[0.06] dark:border-white/[0.06]"
         )}
       >
         <div className="w-full max-w-6xl mx-auto px-3 sm:px-8 py-2.5 sm:py-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-y-0">
@@ -7706,8 +7777,39 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             )}
           </div>
 
-          {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
-          <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-0.5 sm:pb-0">
+          {/* 2. ПО ЦЕНТРУ: ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМОВ + КНОПКА ПОВТОРА (Hero CTA) */}
+          <div className="w-full sm:w-auto order-3 sm:order-2 flex flex-col items-center justify-center shrink-0 pb-0.5 sm:pb-0">
+            {reviewCounts && onReviewModeChange && (
+              <div className="w-full max-w-md mx-auto mb-2.5 px-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                {([
+                  { id: 'all', label: 'Alle', count: reviewCounts.all },
+                  { id: 'flashcards', label: 'Karten', count: reviewCounts.flashcards },
+                  { id: 'cloze', label: 'Lücken', count: reviewCounts.cloze },
+                  { id: 'grammar_prep', label: 'Präpositionen', count: reviewCounts.grammar_prep },
+                  { id: 'grammar_verbs', label: 'Starke Verben', count: reviewCounts.grammar_verbs },
+                  { id: 'grammar_nvv', label: 'NVV', count: reviewCounts.grammar_nvv },
+                ] as const).map((mode) => {
+                  const isActive = reviewMode === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => onReviewModeChange(mode.id)}
+                      className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer flex items-center gap-1.5 select-none ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-black/[0.04] dark:bg-white/[0.05] text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-black/[0.08] dark:hover:bg-white/10 border border-black/[0.06] dark:border-white/5'
+                      }`}
+                    >
+                      <span>{mode.label}</span>
+                      <span className={`text-[10px] tabular-nums ${isActive ? 'text-blue-100' : 'text-neutral-500'}`}>
+                        {mode.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             {dueCount > 0 ? (
               <button
                 type="button"
@@ -7715,7 +7817,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                 className="w-full max-w-sm mx-auto sm:w-auto justify-center h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none active:scale-[0.98]
                   bg-blue-600 hover:bg-blue-500
                   text-white
-                  shadow-[0_0_24px_rgba(37,99,235,0.7)] hover:shadow-[0_0_32px_rgba(37,99,235,0.9)]
+                  shadow-[0_4px_18px_rgba(37,99,235,0.45)] hover:shadow-[0_4px_24px_rgba(37,99,235,0.65)]
                   border border-blue-400/40"
               >
                 <RotateCcw className="w-4 h-4 text-white shrink-0" />
@@ -11061,6 +11163,23 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState<'textbooks' | 'flashcards' | 'structures'>('textbooks');
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [bookModal, setBookModal] = useState<{ id?: string, category?: string } | null>(null);
+  const [reviewMode, setReviewMode] = useState<ReviewFilterMode>('all');
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('karten_review_filter_mode') as ReviewFilterMode | null;
+      if (saved && ['all', 'flashcards', 'cloze', 'grammar_prep', 'grammar_verbs', 'grammar_nvv'].includes(saved)) {
+        setReviewMode(saved);
+      }
+    } catch {}
+  }, []);
+
+  const handleReviewModeChange = useCallback((mode: ReviewFilterMode) => {
+    setReviewMode(mode);
+    try {
+      localStorage.setItem('karten_review_filter_mode', mode);
+    } catch {}
+  }, []);
 
   // Automatically reset category to 'textbooks' if current activeCategory is not available for new language
   useEffect(() => {
@@ -11746,11 +11865,17 @@ export default function App() {
     }
   }, [filteredDecksList, activeBook, groupedDecks, masteredCanonicalSet]);
 
-  const dueCards = useMemo(() => {
-    const activeDeckIds = new Set(filteredDecksList.map(d => d.id));
+  const allDueCards = useMemo(() => {
+    const validDecks = filterValidActiveDecks(decks, books);
+    const activeDeckIds = new Set(validDecks.map(d => d.id));
     const list: { deckId: string, card: Flashcard }[] = [];
-    filteredDecksList.forEach(deck => {
-      if (!activeDeckIds.has(deck.id)) return;
+    validDecks.forEach(deck => {
+      if (activeBookId) {
+        const dBookId = deck.bookId || (deck as any).book_id;
+        if (dBookId !== activeBookId) return;
+      } else {
+        if (deck.language && deck.language.toLowerCase() !== appLanguage.toLowerCase()) return;
+      }
       deck.cards?.forEach(card => {
         if ((card as any).isDeleted) return;
         const cardDeckId = (card as any).deckId || (card as any).deck_id || deck.id;
@@ -11762,28 +11887,33 @@ export default function App() {
       });
     });
     return deduplicateReviewSession(list);
-  }, [filteredDecksList]);
-
-  // Хедерный подсчет повторений: строго для текущего активного языка (appLanguage) и только существующих колод
-  const dueCardsCount = useMemo(() => {
-    const validDecks = filterValidActiveDecks(decks, books);
-    const activeDeckIds = new Set(validDecks.map(d => d.id));
-    const rawDue = validDecks
-      .filter(deck => {
-        if (activeBookId) {
-          const dBookId = deck.bookId || (deck as any).book_id;
-          return dBookId === activeBookId;
-        }
-        return !deck.language || deck.language.toLowerCase() === appLanguage.toLowerCase();
-      })
-      .flatMap(deck => (deck.cards || []).filter(c => {
-        if ((c as any).isDeleted) return false;
-        const cDeckId = (c as any).deckId || (c as any).deck_id || deck.id;
-        return activeDeckIds.has(cDeckId);
-      }))
-      .filter(card => isCardDueForReview(card));
-    return deduplicateReviewSession(rawDue).length;
   }, [decks, books, appLanguage, activeBookId]);
+
+  const reviewCounts = useMemo<Record<ReviewFilterMode, number>>(() => {
+    const counts: Record<ReviewFilterMode, number> = {
+      all: allDueCards.length,
+      flashcards: 0,
+      cloze: 0,
+      grammar_prep: 0,
+      grammar_verbs: 0,
+      grammar_nvv: 0,
+    };
+    for (const item of allDueCards) {
+      const bucket = getCardReviewFilterMode(item.card, item.deckId, decks, books);
+      counts[bucket] += 1;
+    }
+    return counts;
+  }, [allDueCards, decks, books]);
+
+  const dueCards = useMemo(() => {
+    if (reviewMode === 'all') return allDueCards;
+    return allDueCards.filter(
+      item => getCardReviewFilterMode(item.card, item.deckId, decks, books) === reviewMode
+    );
+  }, [allDueCards, reviewMode, decks, books]);
+
+  // Хедерный подсчет повторений: динамически зависит от выбранного режима фильтрации
+  const dueCardsCount = dueCards.length;
 
   // ДИАГНОСТИЧЕСКИЙ ЛОГ В КОНСОЛЬ (СТРОГО ОДИН РАЗ, 0 БАЙТ EGRESS)
   const decksLength = decks.length;
@@ -11798,10 +11928,10 @@ export default function App() {
       const allCards = decks.flatMap(d => d.cards || []);
       const masteredLemmas = getMasteredLemmasSet(appLanguage);
       console.log(
-        `📊 [SYNC CHECK] Карточек в Supabase: ${sbCount || allCards.length} | Карточек к повтору: ${dueCardsCount} | Слов в матрице: ${masteredLemmas.size}`
+        `📊 [SYNC CHECK] Карточек в Supabase: ${sbCount || allCards.length} | Карточек к повтору: ${allDueCards.length} | Слов в матрице: ${masteredLemmas.size}`
       );
     })();
-  }, [isLoaded, decksLength, dueCardsCount, appLanguage]);
+  }, [isLoaded, decksLength, allDueCards.length, appLanguage]);
 
   const displayDueCount = dueCardsCount;
 
@@ -11809,23 +11939,31 @@ export default function App() {
     setIsReviewingMistakes(false);
     initAudioCtx();
 
-    // 1. FAST IN-MEMORY PATH: Use local dueCards immediately (0 network requests)
+    // 1. FAST IN-MEMORY PATH: Use filtered dueCards immediately (0 network requests)
     if (dueCards.length > 0) {
       setReviewCards(shuffleArray(getUniqueReviewQueue(dueCards)));
+      return;
+    }
+
+    if (allDueCards.length > 0) {
+      // Пользователь выбрал конкретный фильтр, где сейчас 0 карточек
       return;
     }
 
     try {
       const targetLang = activeBook?.language || appLanguage;
       const freshCards = await fetchDueCardsFromCloud(targetLang, activeBookId || undefined);
-      if (freshCards.length > 0) {
-        setReviewCards(shuffleArray(getUniqueReviewQueue(freshCards)));
+      const filteredFresh = reviewMode === 'all'
+        ? freshCards
+        : freshCards.filter(item => getCardReviewFilterMode(item.card, item.deckId, decks, books) === reviewMode);
+      if (filteredFresh.length > 0) {
+        setReviewCards(shuffleArray(getUniqueReviewQueue(filteredFresh)));
         return;
       }
     } catch (e) {
       console.warn('Failed to load fresh due cards from cloud, falling back to local:', e);
     }
-  }, [appLanguage, activeBook, activeBookId, dueCards]);
+  }, [appLanguage, activeBook, activeBookId, dueCards, allDueCards.length, reviewMode, decks, books]);
 
   const archivedCards = useMemo(() => {
     const list: { deckId: string, deckName: string, card: Flashcard }[] = [];
@@ -12407,6 +12545,9 @@ export default function App() {
           onBack={() => startTransition(() => setActiveBookId(null))} 
           dueCount={displayDueCount}
           onStartReview={handleStartReviewDue}
+          reviewMode={reviewMode}
+          onReviewModeChange={handleReviewModeChange}
+          reviewCounts={reviewCounts}
           onReviewMistakes={() => {
             try {
               stopAllGermanSpeech();
@@ -12554,12 +12695,6 @@ export default function App() {
       <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-[calc(env(safe-area-inset-bottom,16px)+48px)] sm:pb-16 md:pb-28 overflow-x-hidden">
         {!activeBookId ? (
           <div className="relative pb-16">
-            {/* Студийный свет сверху (Gallery Spotlight) */}
-            <div 
-              className="absolute -top-12 inset-x-0 h-[450px] pointer-events-none -z-10 bg-[radial-gradient(ellipse_60%_40%_at_50%_0%,rgba(0,0,0,0.015)_0%,transparent_100%)] dark:bg-[radial-gradient(ellipse_60%_40%_at_50%_0%,rgba(255,255,255,0.04)_0%,transparent_100%)]" 
-              aria-hidden="true"
-            />
-            
             {/* Dynamic Apple Segmented Control with i18n - Memoized Anti-flicker */}
             <CategoryTabs
               activeTab={activeCategory}
