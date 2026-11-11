@@ -44,6 +44,7 @@ import {
   syncWithCloud,
   forcePushLocalToCloud,
   fetchCardsDelta,
+  syncCardsDelta,
   subscribeCloudSyncStatus,
   broadcastStateBus,
   subscribeStateBus,
@@ -1229,7 +1230,240 @@ export function updateCachedCardInMemory(cardId: string, updated: Partial<Flashc
 }
 
 const KRAFT_LAST_SYNC_KEY = 'kraft_last_sync_timestamp';
-const DELTA_SYNC_COOLDOWN_MS = 15 * 1000; // Быстрый и легкий Delta-Sync без задержек
+const DELTA_SYNC_COOLDOWN_MS = 2 * 1000; // Быстрый и легкий Delta-Sync по updated_at
+const inFlightDeckSyncs = new Map<string, Promise<void>>();
+const lastDeckOpenSyncAt = new Map<string, number>();
+
+function getStoredEaseMap(): Record<string, number> {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function normalizeRemoteCard(c: any, deckId: string, easeMap: Record<string, number>): Flashcard {
+  const masteryLevel = c.masteryLevel ?? c.mastery_level ?? 0;
+  const isArchived = Boolean(c.isArchived ?? c.is_archived);
+  return {
+    ...c,
+    id: c.id,
+    deckId,
+    deck_id: deckId,
+    targetWord: c.targetWord ?? c.target_word ?? '',
+    sentence: c.sentence ?? '',
+    translation: c.translation ?? '',
+    options: Array.isArray(c.options) ? c.options : [],
+    masteryLevel,
+    round: isArchived ? 4 : Math.max(1, Math.min(4, masteryLevel + 1)),
+    isLegendary: isArchived,
+    isArchived,
+    nextReviewDate: c.nextReviewDate !== undefined ? c.nextReviewDate : (c.next_review_date ?? null),
+    interval: c.interval ?? 0,
+    repetitions: c.repetitions ?? 0,
+    baseWordInfo: c.baseWordInfo || null,
+    forms: c.forms || '',
+    easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : (easeMap[c.id] ?? 2.2),
+    updated_at: c.updated_at || c.created_at || undefined,
+    created_at: c.created_at || undefined,
+  };
+}
+
+function mergeRemoteCardWithLocal(
+  localCard: Flashcard,
+  remoteCard: Flashcard
+): { merged: Flashcard; changed: boolean; localAheadSrs: boolean } {
+  const localMastery = localCard.masteryLevel ?? 0;
+  const localArchived = Boolean(localCard.isArchived);
+  const localReviewDate = localCard.nextReviewDate ?? null;
+  const localInterval = localCard.interval ?? 0;
+  const localReps = localCard.repetitions ?? 0;
+
+  const remoteMastery = remoteCard.masteryLevel ?? 0;
+  const remoteArchived = Boolean(remoteCard.isArchived);
+  const remoteReviewDate = remoteCard.nextReviewDate ?? null;
+  const remoteInterval = remoteCard.interval ?? 0;
+  const remoteReps = remoteCard.repetitions ?? 0;
+
+  // Строгое сведение SRS к максимальному прогрессу (Stale Overwrite Guard)
+  const finalMastery = Math.max(localMastery, remoteMastery);
+  const finalArchived = localArchived || remoteArchived || finalMastery >= 4;
+  const finalRound = finalArchived ? 4 : Math.max(1, Math.min(4, finalMastery + 1));
+  const finalReps = Math.max(localReps, remoteReps);
+  const finalInterval = Math.max(localInterval, remoteInterval);
+  const finalReviewDate = remoteReviewDate ?? localReviewDate;
+
+  const localUpdatedMs = localCard.updated_at ? Date.parse(localCard.updated_at) : 0;
+  const remoteUpdatedMs = remoteCard.updated_at ? Date.parse(remoteCard.updated_at) : 0;
+  const remoteHasContentChange =
+    remoteCard.targetWord !== localCard.targetWord ||
+    remoteCard.sentence !== localCard.sentence ||
+    remoteCard.translation !== localCard.translation ||
+    (remoteCard.forms || '') !== (localCard.forms || '') ||
+    (remoteCard.baseWordInfo || null) !== (localCard.baseWordInfo || null);
+
+  // Принимаем текстовые правки с сервера, если удаленная запись не старее локальной
+  const takeRemoteContent =
+    remoteHasContentChange && (!localUpdatedMs || remoteUpdatedMs >= localUpdatedMs);
+
+  const srsChanged =
+    finalMastery !== localMastery ||
+    finalArchived !== localArchived ||
+    finalRound !== (localCard.round ?? 1) ||
+    Boolean(localCard.isLegendary) !== finalArchived ||
+    finalReps !== localReps ||
+    finalInterval !== localInterval ||
+    finalReviewDate !== localReviewDate;
+
+  const localAheadSrs = localMastery > remoteMastery || (localArchived && !remoteArchived);
+
+  if (!srsChanged && !takeRemoteContent) {
+    return { merged: localCard, changed: false, localAheadSrs };
+  }
+
+  return {
+    changed: true,
+    localAheadSrs,
+    merged: {
+      ...localCard,
+      ...(takeRemoteContent
+        ? {
+            targetWord: remoteCard.targetWord,
+            sentence: remoteCard.sentence,
+            translation: remoteCard.translation,
+            options: remoteCard.options,
+            forms: remoteCard.forms,
+            baseWordInfo: remoteCard.baseWordInfo,
+            updated_at: remoteCard.updated_at || localCard.updated_at,
+          }
+        : {}),
+      masteryLevel: finalMastery,
+      round: finalRound,
+      isLegendary: finalArchived,
+      isArchived: finalArchived,
+      repetitions: finalReps,
+      interval: finalInterval,
+      nextReviewDate: finalReviewDate,
+    },
+  };
+}
+
+/**
+ * Обновляет локальное состояние колоды свежими карточками из Supabase (ON DECK OPEN / DELTA SYNC).
+ * Мгновенно пересчитывает счетчик `card_count` и сохраняет в Zustand + IndexedDB.
+ */
+export async function updateDeckCardsLocally(
+  deckId: string,
+  remoteDeckCards: any[],
+  options: { authoritative?: boolean } = {}
+): Promise<boolean> {
+  if (!deckId || !Array.isArray(remoteDeckCards)) return false;
+
+  const currentDecks = useStore.getState().decks;
+  const targetDeckIdx = currentDecks.findIndex((d) => d.id === deckId);
+  if (targetDeckIdx === -1) return false;
+
+  const easeMap = getStoredEaseMap();
+  const normalizedRemote = remoteDeckCards
+    .filter((c) => c && c.id && !c.isDeleted)
+    .map((c) => normalizeRemoteCard(c, deckId, easeMap));
+
+  const remoteById = new Map<string, Flashcard>();
+  for (const rc of normalizedRemote) {
+    remoteById.set(rc.id, rc);
+  }
+
+  const targetDeck = currentDecks[targetDeckIdx];
+  const currentCards = Array.isArray(targetDeck.cards) ? targetDeck.cards : [];
+  const seenIds = new Set<string>();
+  const nextCards: Flashcard[] = [];
+  let changed = false;
+
+  for (const lc of currentCards) {
+    const rc = remoteById.get(lc.id);
+    if (!rc) {
+      const isPendingInsert = Boolean((lc as any).pending_insert || (lc as any).isPendingInsert);
+      if (options.authoritative && !isPendingInsert) {
+        changed = true;
+        continue;
+      }
+      seenIds.add(lc.id);
+      nextCards.push(lc);
+      continue;
+    }
+
+    const { merged, changed: itemChanged } = mergeRemoteCardWithLocal(lc, rc);
+    if (itemChanged) changed = true;
+    seenIds.add(merged.id);
+    nextCards.push(merged);
+  }
+
+  for (const rc of normalizedRemote) {
+    if (!seenIds.has(rc.id)) {
+      seenIds.add(rc.id);
+      nextCards.push(rc);
+      changed = true;
+    }
+  }
+
+  if (!changed && (targetDeck.card_count ?? currentCards.length) === nextCards.length) {
+    return false;
+  }
+
+  const updatedDecks = currentDecks.map((d, idx) =>
+    idx === targetDeckIdx ? { ...d, cards: nextCards, card_count: nextCards.length } : d
+  );
+
+  cachedAllCards = [];
+  lastFetchAllCardsTime = 0;
+  useStore.setState({ decks: updatedDecks });
+  await setIDBItem('app_decks', updatedDecks).catch(() => {});
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('storage-update'));
+    window.dispatchEvent(new CustomEvent('stats-update'));
+  }
+  useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage).catch(() => {});
+  return true;
+}
+
+/**
+ * Гарантированная фоновая дозагрузка карточек конкретной колоды при её открытии.
+ */
+export async function syncDeckCardsOnOpen(deckId: string, force: boolean = false): Promise<void> {
+  if (!deckId) return;
+  if (typeof window !== 'undefined' && !navigator.onLine) return;
+
+  const existingPromise = inFlightDeckSyncs.get(deckId);
+  if (existingPromise) return existingPromise;
+
+  const now = Date.now();
+  const lastSync = lastDeckOpenSyncAt.get(deckId) || 0;
+  if (!force && now - lastSync < 1500) return;
+
+  const task = (async () => {
+    try {
+      const { data: remoteDeckCards, error } = await supabase
+        .from('cards')
+        .select('*')
+        .eq('deck_id', deckId)
+        .limit(1000);
+
+      if (!error && Array.isArray(remoteDeckCards)) {
+        lastDeckOpenSyncAt.set(deckId, Date.now());
+        await updateDeckCardsLocally(deckId, remoteDeckCards, { authoritative: true });
+      }
+    } catch (err) {
+      console.warn(`[DeckSync] On-open sync failed for deck ${deckId}:`, err);
+    } finally {
+      inFlightDeckSyncs.delete(deckId);
+    }
+  })();
+
+  inFlightDeckSyncs.set(deckId, task);
+  return task;
+}
 
 /**
  * Серверный подсчет количества карточек в Supabase БЕЗ передачи строк (0 байт egress тела).
@@ -1332,6 +1566,7 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
     interval: nextInterval,
     repetitions: nextRepetitions,
     nextReviewDate: numericReviewDate,
+    updated_at: new Date().toISOString(),
   };
 
   if (validCard.sentence !== undefined) primaryPayload.sentence = validCard.sentence;
@@ -1589,344 +1824,206 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       baseDecks = idb;
     }
   }
-  const totalLocalCards = baseDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
 
   isSyncingCardsFromSupabase = true;
   lastSyncCardsFromSupabaseTime = now;
 
   try {
-    // РЕЖИМ 1: ДЕЛЬТА-СИНХРОНИЗАЦИЯ (DELTA SYNC ONLY), если локальный кэш карточек уже существует
-    if (totalLocalCards > 0 && typeof window !== 'undefined') {
-      const nowIso = new Date().toISOString();
-
-      const deltaCards = await fetchCardsDelta();
-      localStorage.setItem('kraft_last_cards_sync_at', nowIso);
-      localStorage.setItem(KRAFT_LAST_SYNC_KEY, nowIso);
-
-      if (!Array.isArray(deltaCards) || deltaCards.length === 0) {
-        return;
-      }
-
-      const deltaMap = new Map<string, any>();
-      for (const c of deltaCards) {
-        if (c && c.id) deltaMap.set(c.id, c);
-      }
-
-      let hasDeltaChanges = false;
-      const cardsToPushToRemote: any[] = [];
-
-      const updatedDecks = baseDecks.map((deck) => {
-        if (!Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
-        let deckModified = false;
-        const nextCards = deck.cards.map((card) => {
-          const remote = deltaMap.get(card.id);
-
-          const localMastery = card.masteryLevel ?? 0;
-          const localArchived = Boolean(card.isArchived);
-          const localReviewDate = card.nextReviewDate ?? null;
-          const localInterval = card.interval ?? 0;
-          const localReps = card.repetitions ?? 0;
-
-          if (!remote) {
-            // Если на сервере нет записи, а локально карточка пройдена — пушим на сервер
-            if (localMastery > 0 || localArchived) {
-              cardsToPushToRemote.push({
-                id: card.id,
-                deck_id: (card as any).deck_id || (card as any).deckId || deck.id,
-                masteryLevel: localMastery,
-                isArchived: localArchived,
-                repetitions: localReps,
-                interval: localInterval,
-                nextReviewDate: localReviewDate,
-              });
-            }
-            return card;
-          }
-
-          const remoteMastery = remote.masteryLevel ?? remote.mastery_level ?? 0;
-          const remoteIsArchived = Boolean(remote.isArchived ?? remote.is_archived);
-          const remoteReviewDate = remote.nextReviewDate ?? remote.next_review_date ?? null;
-          const remoteInterval = remote.interval ?? 0;
-          const remoteReps = remote.repetitions ?? 0;
-
-          // Строгое сведение к максимальному прогрессу (Chrome vs Safari max-progress rule)
-          const finalMastery = Math.max(localMastery, remoteMastery);
-          const finalArchived = localArchived || remoteIsArchived || finalMastery >= 4;
-          const finalRound = finalArchived ? 4 : Math.max(1, Math.min(4, finalMastery + 1));
-          const finalReps = Math.max(localReps, remoteReps);
-          const finalInterval = Math.max(localInterval, remoteInterval);
-          const finalReviewDate = remoteReviewDate ?? localReviewDate;
-
-          const isDiff =
-            finalMastery !== localMastery ||
-            finalArchived !== localArchived ||
-            finalRound !== (card.round ?? 1) ||
-            Boolean(card.isLegendary) !== finalArchived ||
-            finalReps !== localReps ||
-            finalInterval !== localInterval ||
-            finalReviewDate !== localReviewDate;
-
-          if (isDiff) {
-            deckModified = true;
-            hasDeltaChanges = true;
-            return {
-              ...card,
-              masteryLevel: finalMastery,
-              round: finalRound,
-              isLegendary: finalArchived,
-              isArchived: finalArchived,
-              repetitions: finalReps,
-              interval: finalInterval,
-              nextReviewDate: finalReviewDate,
-              updated_at: nowIso,
-            };
-          }
-
-          // Если локальная карточка опережает сервер — пушим в облако, чтобы другие клиенты подтянулись
-          if (localMastery > remoteMastery || (localArchived && !remoteIsArchived)) {
-            cardsToPushToRemote.push({
-              id: card.id,
-              deck_id: (card as any).deck_id || (card as any).deckId || deck.id,
-              masteryLevel: finalMastery,
-              isArchived: finalArchived,
-              repetitions: finalReps,
-              interval: finalInterval,
-              nextReviewDate: finalReviewDate,
-            });
-          }
-
-          return card;
-        });
-
-        return deckModified ? { ...deck, cards: nextCards } : deck;
-      });
-
-      if (hasDeltaChanges) {
-        useStore.setState({ decks: updatedDecks });
-        await setIDBItem('app_decks', updatedDecks);
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.removeItem('cached_app_decks');
-            localStorage.removeItem('cache_decks_v2');
-          } catch {}
-          window.dispatchEvent(new Event('storage-update'));
-          window.dispatchEvent(new CustomEvent('stats-update'));
-        }
-        await useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
-        await autoBackfillMasteredWords(updatedDecks, currentBooks, useStore.getState().appLanguage);
-      }
-
-      // Неблокирующая отправка локальных изменений в облако через надёжный update
-      if (cardsToPushToRemote.length > 0) {
-        (async () => {
-          try {
-            for (let i = 0; i < cardsToPushToRemote.length; i += 10) {
-              const chunk = cardsToPushToRemote.slice(i, i + 10);
-              await Promise.all(
-                chunk.map((card) =>
-                  supabase
-                    .from('cards')
-                    .update({
-                      masteryLevel: card.masteryLevel,
-                      isArchived: card.isArchived,
-                      repetitions: card.repetitions,
-                      interval: card.interval,
-                      nextReviewDate: card.nextReviewDate,
-                    })
-                    .eq('id', card.id)
-                )
-              );
-            }
-          } catch (e) {
-            console.warn('[Sync] Non-blocking push notice:', e);
-          }
-        })();
-      }
-
-      return;
-    }
-
-    // РЕЖИМ 2: Первичная полная загрузка (ТОЛЬКО если локальная БД пуста или пользователь явно нажал принудительный синк)
-    const [remoteCards, remoteDecksRes] = await Promise.all([
-      fetchAllUserCards(true),
-      supabase.from('decks').select('*').order('created_at', { ascending: true })
+    // 1. Параллельно подтягиваем метаданные колод (чтобы новые колоды с ПК сразу появлялись на телефоне)
+    //    и дельта-изменения карточек по updated_at (включая карточки с masteryLevel === 0!).
+    const [remoteDecksRes, deltaResult] = await Promise.all([
+      supabase
+        .from('decks')
+        .select('id, name, category, level, book_id, language, card_count, materials, created_at')
+        .order('created_at', { ascending: true }),
+      syncCardsDelta(supabase),
     ]);
-    if (typeof window !== 'undefined') {
+
+    if (typeof window !== 'undefined' && deltaResult.ok) {
       try {
         localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
       } catch {}
     }
-    if (!remoteCards || remoteCards.length === 0) return;
 
-    // Если мы получили свежий список колод из Supabase — удаляем локальные колоды-призраки, которых больше нет в БД
     let decksListChanged = false;
-    if (remoteDecksRes?.data && Array.isArray(remoteDecksRes.data)) {
+    let workingDecks: Deck[] = [...baseDecks];
+
+    if (remoteDecksRes?.data && Array.isArray(remoteDecksRes.data) && remoteDecksRes.data.length > 0) {
       const remoteDeckIds = new Set(remoteDecksRes.data.map((d: any) => d.id));
-      const filteredLocalDecks = baseDecks.filter(d => remoteDeckIds.has(d.id));
-      if (filteredLocalDecks.length !== baseDecks.length) {
-        baseDecks = filteredLocalDecks;
+      const existingMap = new Map(workingDecks.map((d) => [d.id, d]));
+
+      // Удаляем только реально удаленные с сервера колоды (кроме тех, у которых есть несохраненные локальные карточки)
+      const filteredDecks = workingDecks.filter((d) => {
+        if (remoteDeckIds.has(d.id)) return true;
+        return Array.isArray(d.cards) && d.cards.some((c: any) => c.pending_insert || c.isPendingInsert);
+      });
+      if (filteredDecks.length !== workingDecks.length) {
         decksListChanged = true;
       }
-      const existingLocalIds = new Set(baseDecks.map(d => d.id));
+      workingDecks = filteredDecks;
+
       for (const rd of remoteDecksRes.data) {
-        if (!existingLocalIds.has(rd.id)) {
-          baseDecks.push({
+        const existing = existingMap.get(rd.id);
+        if (!existing) {
+          workingDecks.push({
             ...rd,
             cards: [],
+            card_count: rd.card_count ?? 0,
             language: rd.language || 'DE',
-            bookId: rd.book_id || 'default-de'
+            bookId: rd.book_id || (rd.language === 'EN' ? 'default-en' : 'default-de'),
           });
           decksListChanged = true;
+        } else {
+          const nextBookId = rd.book_id || existing.bookId;
+          const nextName = rd.name || existing.name;
+          const nextCategory = rd.category || existing.category;
+          const nextLevel = rd.level || existing.level;
+          if (
+            nextName !== existing.name ||
+            nextBookId !== existing.bookId ||
+            nextCategory !== existing.category ||
+            nextLevel !== existing.level
+          ) {
+            workingDecks = workingDecks.map((d) =>
+              d.id === rd.id
+                ? { ...d, name: nextName, bookId: nextBookId, category: nextCategory, level: nextLevel }
+                : d
+            );
+            decksListChanged = true;
+          }
         }
       }
     }
 
-    const validCurrentDecks = filterValidActiveDecks(baseDecks, currentBooks);
-    if (validCurrentDecks.length !== baseDecks.length) {
+    const validCurrentDecks = filterValidActiveDecks(workingDecks, currentBooks);
+    if (validCurrentDecks.length !== workingDecks.length) {
       decksListChanged = true;
     }
-    if (validCurrentDecks.length === 0) return;
 
-    const activeDeckIds = new Set(validCurrentDecks.map(d => d.id));
-
-    const remoteMap = new Map<string, any>();
-    const remoteByDeck = new Map<string, any[]>();
-    let easeMap: Record<string, number> = {};
-    if (typeof window !== 'undefined') {
-      try {
-        easeMap = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
-      } catch {}
+    const deltaCards = deltaResult.cards || [];
+    if (deltaCards.length === 0 && !decksListChanged) {
+      return;
     }
 
-    for (const c of remoteCards) {
-      const dId = c.deck_id || c.deckId;
-      if (!dId || !activeDeckIds.has(dId)) {
-        continue;
-      }
-      if (c.isDeleted) continue;
-      const normalizedCard = {
-        ...c,
-        id: c.id,
-        deckId: dId,
-        deck_id: dId,
-        targetWord: c.targetWord ?? c.target_word ?? '',
-        sentence: c.sentence ?? '',
-        translation: c.translation ?? '',
-        options: Array.isArray(c.options) ? c.options : [],
-        masteryLevel: c.masteryLevel ?? c.mastery_level ?? 0,
-        isArchived: Boolean(c.isArchived ?? c.is_archived),
-        nextReviewDate: c.nextReviewDate !== undefined ? c.nextReviewDate : (c.next_review_date ?? null),
-        interval: c.interval ?? 0,
-        repetitions: c.repetitions ?? 0,
-        baseWordInfo: c.baseWordInfo || null,
-        forms: c.forms || '',
-        easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : (easeMap[c.id] ?? 2.2),
-      };
-      remoteMap.set(c.id, normalizedCard);
-      if (!remoteByDeck.has(dId)) remoteByDeck.set(dId, []);
-      remoteByDeck.get(dId)!.push(normalizedCard);
+    const easeMap = getStoredEaseMap();
+    const activeDeckIds = new Set(validCurrentDecks.map((d) => d.id));
+    const deltaById = new Map<string, Flashcard>();
+    const deltaByDeckId = new Map<string, Flashcard[]>();
+
+    for (const raw of deltaCards) {
+      if (!raw || !raw.id || raw.isDeleted) continue;
+      const dId = raw.deck_id || raw.deckId;
+      if (!dId || !activeDeckIds.has(dId)) continue;
+      const normalized = normalizeRemoteCard(raw, dId, easeMap);
+      deltaById.set(normalized.id, normalized);
+      if (!deltaByDeckId.has(dId)) deltaByDeckId.set(dId, []);
+      deltaByDeckId.get(dId)!.push(normalized);
     }
 
-    let hasChanges = decksListChanged;
+    let hasDeltaChanges = decksListChanged;
+    const cardsToPushToRemote: any[] = [];
 
-    const nextDecks = validCurrentDecks.map(deck => {
-      const remoteDeckCards = remoteByDeck.get(deck.id) || [];
+    const updatedDecks = validCurrentDecks.map((deck) => {
       const currentDeckCards = Array.isArray(deck.cards) ? deck.cards : [];
-
-      let deckChanged = currentDeckCards.length !== remoteDeckCards.length && remoteDeckCards.length > 0;
-      if (deckChanged) hasChanges = true;
-      const updatedCards: Flashcard[] = [];
-
-      for (const card of currentDeckCards) {
-        const isPendingInsert = Boolean((card as any).pending_insert || (card as any).isPendingInsert);
-        const remote = remoteMap.get(card.id);
-
-        if (!remote && !isPendingInsert) {
-          deckChanged = true;
-          hasChanges = true;
-          continue;
-        }
-
-        if (!remote) {
-          updatedCards.push(card);
-          continue;
-        }
-
-        const remoteNextReviewDate = remote.nextReviewDate;
-        const remoteMastery = remote.masteryLevel ?? 0;
-        const remoteRepetitions = remote.repetitions ?? 0;
-        const remoteInterval = remote.interval ?? 0;
-        const remoteIsArchived = Boolean(remote.isArchived);
-
-        const localMastery = card.masteryLevel ?? 0;
-        const localArchived = Boolean(card.isArchived);
-        const localReps = card.repetitions ?? 0;
-
-        // Защита от отката при фоновой синхронизации (Stale Overwrite Guard)
-        if (localMastery > remoteMastery || (localArchived && !remoteIsArchived)) {
-          updatedCards.push(card);
-          continue;
-        }
-
-        if (remoteMastery > localMastery || (remoteIsArchived && !localArchived)) {
-          deckChanged = true;
-          hasChanges = true;
-          updatedCards.push({
-            ...card,
-            masteryLevel: remoteMastery,
-            round: remoteIsArchived ? 4 : Math.max(1, Math.min(4, remoteMastery + 1)),
-            repetitions: remoteRepetitions,
-            interval: remoteInterval,
-            isArchived: remoteIsArchived,
-            nextReviewDate: remoteNextReviewDate
-          });
-          continue;
-        }
-
-        const localTime = card.nextReviewDate ? new Date(card.nextReviewDate).getTime() : 0;
-        const remoteTime = remoteNextReviewDate ? new Date(remoteNextReviewDate).getTime() : 0;
-        const datesDifferent = Math.abs(localTime - remoteTime) > 1000;
-
-        if (remoteRepetitions > localReps || datesDifferent) {
-          deckChanged = true;
-          hasChanges = true;
-          updatedCards.push({
-            ...card,
-            masteryLevel: Math.max(localMastery, remoteMastery),
-            repetitions: Math.max(localReps, remoteRepetitions),
-            interval: remoteInterval || card.interval,
-            isArchived: localArchived || remoteIsArchived,
-            nextReviewDate: remoteNextReviewDate || card.nextReviewDate
-          });
-          continue;
-        }
-        updatedCards.push(card);
+      const deckDeltaCards = deltaByDeckId.get(deck.id) || [];
+      if (deckDeltaCards.length === 0 && !decksListChanged) {
+        return deck;
       }
 
-      for (const rCard of remoteDeckCards) {
-        if (!updatedCards.some(c => c.id === rCard.id)) {
-          updatedCards.push(rCard);
-          deckChanged = true;
-          hasChanges = true;
+      let deckModified = false;
+      const seenCardIds = new Set<string>();
+      const nextCards: Flashcard[] = [];
+
+      for (const localCard of currentDeckCards) {
+        const remoteCard = deltaById.get(localCard.id);
+        if (!remoteCard) {
+          seenCardIds.add(localCard.id);
+          nextCards.push(localCard);
+          continue;
+        }
+
+        const { merged, changed, localAheadSrs } = mergeRemoteCardWithLocal(localCard, remoteCard);
+        if (changed) {
+          deckModified = true;
+          hasDeltaChanges = true;
+        }
+        if (localAheadSrs) {
+          cardsToPushToRemote.push({
+            id: merged.id,
+            deck_id: deck.id,
+            masteryLevel: merged.masteryLevel,
+            isArchived: merged.isArchived,
+            repetitions: merged.repetitions,
+            interval: merged.interval,
+            nextReviewDate: merged.nextReviewDate,
+          });
+        }
+        seenCardIds.add(merged.id);
+        nextCards.push(merged);
+      }
+
+      // Добавляем ВСЕ новые карточки из deltaCards (включая карточки с masteryLevel === 0)
+      for (const freshCard of deckDeltaCards) {
+        if (!seenCardIds.has(freshCard.id)) {
+          seenCardIds.add(freshCard.id);
+          nextCards.push(freshCard);
+          deckModified = true;
+          hasDeltaChanges = true;
         }
       }
 
-      return deckChanged ? { ...deck, card_count: updatedCards.length, cards: updatedCards } : deck;
+      if (deckModified || (deck.card_count ?? currentDeckCards.length) !== nextCards.length) {
+        hasDeltaChanges = true;
+        return { ...deck, cards: nextCards, card_count: nextCards.length };
+      }
+      return deck;
     });
 
-    if (hasChanges) {
-      useStore.setState({ decks: nextDecks });
-      await setIDBItem('app_decks', nextDecks);
+    if (hasDeltaChanges) {
+      cachedAllCards = [];
+      lastFetchAllCardsTime = 0;
+      useStore.setState({ decks: updatedDecks });
+      await setIDBItem('app_decks', updatedDecks);
       if (typeof window !== 'undefined') {
         try {
           localStorage.removeItem('cached_app_decks');
           localStorage.removeItem('cache_decks_v2');
         } catch {}
+        window.dispatchEvent(new Event('storage-update'));
+        window.dispatchEvent(new CustomEvent('stats-update'));
       }
-      window.dispatchEvent(new Event('storage-update'));
-      useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
+      await useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
+      await autoBackfillMasteredWords(updatedDecks, currentBooks, useStore.getState().appLanguage);
     }
-    await autoBackfillMasteredWords(hasChanges ? nextDecks : validCurrentDecks, useStore.getState().books, useStore.getState().appLanguage);
+
+    // Неблокирующая отправка локальных SRS-опережений в облако с обновлением updated_at
+    if (cardsToPushToRemote.length > 0) {
+      (async () => {
+        try {
+          const pushIso = new Date().toISOString();
+          for (let i = 0; i < cardsToPushToRemote.length; i += 10) {
+            const chunk = cardsToPushToRemote.slice(i, i + 10);
+            await Promise.all(
+              chunk.map((card) =>
+                supabase
+                  .from('cards')
+                  .update({
+                    masteryLevel: card.masteryLevel,
+                    isArchived: card.isArchived,
+                    repetitions: card.repetitions,
+                    interval: card.interval,
+                    nextReviewDate: card.nextReviewDate,
+                    updated_at: pushIso,
+                  })
+                  .eq('id', card.id)
+              )
+            );
+          }
+        } catch (e) {
+          console.warn('[Sync] Non-blocking push notice:', e);
+        }
+      })();
+    }
   } catch (err) {
     console.warn("syncCardsFromSupabase failed:", err);
   } finally {
@@ -2616,6 +2713,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       throw new Error(`Ошибка сохранения в базу данных: ${deckError.message} (${deckError.details || ''})`);
     }
     
+    const insertTimestamp = new Date().toISOString();
     const cardsToInsert = (deck.cards || []).map(c => ({
       id: ensureUuid(c.id),
       deck_id: deckId,
@@ -2630,7 +2728,8 @@ export const useStore = create<DeckState>()((set, get) => ({
       interval: c.interval || 0,
       repetitions: c.repetitions || 0,
       easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : 2.2,
-      baseWordInfo: c.baseWordInfo || null
+      baseWordInfo: c.baseWordInfo || null,
+      updated_at: insertTimestamp
     })).filter(c => c.targetWord.length > 0);
     
     if (cardsToInsert.length > 0) {
@@ -2711,6 +2810,7 @@ export const useStore = create<DeckState>()((set, get) => ({
         console.error('[Supabase Delete Old Cards Error]:', delError);
       }
 
+      const insertTimestamp = new Date().toISOString();
       const cardsToInsert = replaceCards.map(c => ({
         id: ensureUuid(c.id),
         deck_id: validDeckId,
@@ -2725,7 +2825,8 @@ export const useStore = create<DeckState>()((set, get) => ({
         interval: c.interval || 0,
         repetitions: c.repetitions || 0,
         easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : 2.2,
-        baseWordInfo: c.baseWordInfo || null
+        baseWordInfo: c.baseWordInfo || null,
+        updated_at: insertTimestamp
       }));
 
       let { error: insertCardsError } = await supabase.from('cards').insert(cardsToInsert);
@@ -2752,7 +2853,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       const updatedDeck: Deck = {
         ...target,
         ...updates,
-        ...(insertedCards ? { cards: insertedCards } : {})
+        ...(insertedCards ? { cards: insertedCards, card_count: insertedCards.length } : {})
       };
       const newDecks = previousDecks.map(d => d.id === validDeckId ? updatedDeck : d);
       set({
@@ -2821,9 +2922,11 @@ export const useStore = create<DeckState>()((set, get) => ({
     const previousDecks = get().decks;
     const nextDecks = previousDecks.map(deck => {
       if (deck.id !== deckId) return deck;
+      const remainingCards = deck.cards.filter(c => c.id !== cardId);
       return {
         ...deck,
-        cards: deck.cards.filter(c => c.id !== cardId)
+        cards: remainingCards,
+        card_count: remainingCards.length
       };
     });
     cachedAllCards = [];
@@ -2873,7 +2976,9 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     // 3. Persist to Supabase cards table
     try {
-      const payload: Record<string, any> = {};
+      const payload: Record<string, any> = {
+        updated_at: new Date().toISOString(),
+      };
       if (updates.sentence !== undefined) payload.sentence = updates.sentence;
       if (updates.targetWord !== undefined) payload.targetWord = updates.targetWord;
       if (updates.translation !== undefined) payload.translation = updates.translation;
@@ -5439,6 +5544,7 @@ function RapidSession({
   }, []);
 
   const sessionInitKeyRef = useRef<string | null>(null);
+  const seenSessionCardIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const reviewKey = reviewCards ? reviewCards.map(r => r.card.id).join(',') : '';
@@ -5494,6 +5600,7 @@ function RapidSession({
         list = shuffleArray(rawList);
       }
     }
+    seenSessionCardIdsRef.current = new Set(list.map(item => item.card.id));
     // Restore saved round progress (0-3) of not-yet-archived words
     const initialProgress: Record<string, number> = {};
     list.forEach(({ card }) => {
@@ -5516,6 +5623,44 @@ function RapidSession({
     setLocked(false);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [deckId, reviewCards, isDrillMode]);
+
+  // Автоматически докидываем в активную сессию новые карточки, догруженные из Supabase при открытии колоды
+  useEffect(() => {
+    if (!deckId || reviewCards || isMistakesReviewMode) return;
+    const deck = decks.find(d => d.id === deckId);
+    if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return;
+
+    const newlySyncedCards = deck.cards.filter(
+      c => !seenSessionCardIdsRef.current.has(c.id) && !c.isArchived && (c.masteryLevel ?? 0) < 4
+    );
+    if (newlySyncedCards.length === 0) return;
+
+    const additions = newlySyncedCards.map(c => {
+      seenSessionCardIdsRef.current.add(c.id);
+      return {
+        deckId,
+        card: {
+          ...c,
+          round: c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1)),
+          isLegendary: false
+        }
+      };
+    });
+
+    setQueue(prev => (prev ? [...prev, ...additions] : additions));
+    setTotal(prev => prev + additions.length);
+    setSessionTotal(prev => prev + additions.length);
+    setWordProgress(prev => {
+      const next = { ...prev };
+      additions.forEach(({ card }) => {
+        next[card.id] = Math.max(0, Math.min(3, card.masteryLevel ?? 0));
+      });
+      return next;
+    });
+    setTotalSessionSteps(prev =>
+      prev + additions.reduce((acc, { card }) => acc + getCardRemainingSessionSteps(card, Math.max(0, Math.min(3, card.masteryLevel ?? 0))), 0)
+    );
+  }, [decks, deckId, reviewCards, isMistakesReviewMode]);
 
   // Pre-fetch TTS audio for the top 2 cards in the queue for instantaneous playback
   useEffect(() => {
@@ -5861,6 +6006,12 @@ function StudyEntry(props: {
   isMistakesReview?: boolean;
   trainingMode?: string;
 }) {
+  useEffect(() => {
+    if (props.deckId && !props.reviewCards) {
+      syncDeckCardsOnOpen(props.deckId).catch(() => {});
+    }
+  }, [props.deckId, props.reviewCards]);
+
   const isRapid = props.trainingMode === 'rapid_flashcards';
   const content = isRapid
     ? <RapidSession {...props} />
@@ -5967,6 +6118,7 @@ function StudyInterface({
   const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
   const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean } | null>(null);
   const sessionInitKeyRef = useRef<string | null>(null);
+  const seenSessionCardIdsRef = useRef<Set<string>>(new Set(activeCards.map(item => item.card.id)));
 
   useEffect(() => {
     const reviewKey = reviewCards ? reviewCards.map(r => r.card.id).join(',') : '';
@@ -5994,6 +6146,7 @@ function StudyInterface({
           }
         };
       });
+      seenSessionCardIdsRef.current = new Set(list.map(item => item.card.id));
       setActiveCards(list);
       setInitialTotal(uniqueReview.length);
       setTotalSessionSteps(list.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0));
@@ -6025,6 +6178,7 @@ function StudyInterface({
           }
         }));
         const shuffledRaw = shuffleArray(rawList);
+        seenSessionCardIdsRef.current = new Set(shuffledRaw.map(item => item.card.id));
         setActiveCards(shuffledRaw);
         setInitialTotal(shuffledRaw.length);
         setTotalSessionSteps(shuffledRaw.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0));
@@ -6035,6 +6189,36 @@ function StudyInterface({
       }
     }
   }, [deckId, reviewCards, isDrillMode]);
+
+  // Автоматически добавляем в активную сессию новые карточки, полученные при фоновой синхронизации колоды
+  useEffect(() => {
+    if (!deckId || reviewCards || isMistakesReviewMode) return;
+    const deck = decks.find(d => d.id === deckId);
+    if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) return;
+
+    const newlySyncedCards = deck.cards.filter(
+      c => !seenSessionCardIdsRef.current.has(c.id) && !c.isArchived && (c.masteryLevel ?? 0) < 4
+    );
+    if (newlySyncedCards.length === 0) return;
+
+    const additions = newlySyncedCards.map(c => {
+      seenSessionCardIdsRef.current.add(c.id);
+      return {
+        deckId,
+        card: {
+          ...c,
+          round: c.round ?? Math.max(1, Math.min(4, (c.masteryLevel ?? 0) + 1)),
+          isLegendary: false,
+        }
+      };
+    });
+
+    setActiveCards(prev => [...prev, ...additions]);
+    setInitialTotal(prev => prev + additions.length);
+    setTotalSessionSteps(prev =>
+      prev + additions.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0)
+    );
+  }, [decks, deckId, reviewCards, isMistakesReviewMode]);
 
   const isInitialArchivedDeckRef = useRef<boolean | null>(null);
   if (isInitialArchivedDeckRef.current === null) {
@@ -11404,6 +11588,10 @@ export default function App() {
   const [draggedBookId, setDraggedBookId] = useState<string | null>(null);
   const [dragOverBookId, setDragOverBookId] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
+  const activeDeckIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeDeckIdRef.current = activeDeckId;
+  }, [activeDeckId]);
   const [dictationDeckId, setDictationDeckId] = useState<string | null>(null);
   const [shadowingDeckId, setShadowingDeckId] = useState<string | null>(null);
   const [reviewCards, setReviewCards] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
@@ -11973,16 +12161,20 @@ export default function App() {
     };
     fetchData();
 
-    // 2. Cooldown 20 секунд для focus / visibilitychange (легкий Delta Sync, быстрое обновление между вкладками)
+    // 2. Мгновенная дельта-синхронизация при возврате во вкладку / разблокировке телефона
     let lastFocusSync = 0;
-    const FOCUS_COOLDOWN_MS = 20 * 1000; // 20 секунд
+    const FOCUS_COOLDOWN_MS = 2 * 1000; // Защита от двойного срабатывания focus + visibilitychange
 
     const handleFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       const now = Date.now();
-      if (now - lastFocusSync < FOCUS_COOLDOWN_MS) return; // Игнорируем
+      if (now - lastFocusSync < FOCUS_COOLDOWN_MS) return;
       lastFocusSync = now;
-      syncCardsFromSupabase(false).catch(() => {});
+      syncBooksFromSupabase().catch(() => {});
+      syncCardsFromSupabase(true).catch(() => {});
+      if (activeDeckIdRef.current) {
+        syncDeckCardsOnOpen(activeDeckIdRef.current, true).catch(() => {});
+      }
     };
 
     const handleTriggerCardSync = (e: Event) => {
@@ -11998,6 +12190,7 @@ export default function App() {
 
     window.addEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handleFocus);
     document.addEventListener('visibilitychange', handleFocus);
 
     // 3. Автоматический сброс дневного прогресса в 00:00 (проверка каждые 30 секунд)
@@ -12010,6 +12203,7 @@ export default function App() {
       unsubscribeStateBus();
       window.removeEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handleFocus);
       document.removeEventListener('visibilitychange', handleFocus);
     };
   }, [setDecks]);
@@ -13316,6 +13510,9 @@ const RU_TO_DE: Record<string, string> = {
 };
 
 function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void }) {
+  useEffect(() => {
+    if (deck?.id) syncDeckCardsOnOpen(deck.id).catch(() => {});
+  }, [deck?.id]);
   const isMobile = useIsMobile();
   useScrollLock(true);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -13605,6 +13802,9 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
 }
 
 function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void }) {
+  useEffect(() => {
+    if (deck?.id) syncDeckCardsOnOpen(deck.id).catch(() => {});
+  }, [deck?.id]);
   useScrollLock(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isSuccess, setIsSuccess] = useState<boolean | null>(null);

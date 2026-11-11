@@ -202,6 +202,7 @@ export function writeThroughCardUpdate(cardId: string, card: any, includeContent
     interval: nextInterval,
     repetitions: nextRepetitions,
     nextReviewDate: numericReviewDate,
+    updated_at: new Date().toISOString(),
   };
 
   if (includeContent) {
@@ -319,6 +320,7 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
                 interval: item.interval,
                 repetitions: item.repetitions,
                 nextReviewDate: item.nextReviewDate,
+                updated_at: new Date().toISOString(),
               })
               .eq('id', item.id)
           )
@@ -337,44 +339,119 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
 }
 
 // ============================================================================
-// INCREMENTAL DELTA-SYNC (CHROME <-> SAFARI SYNC)
+// INCREMENTAL TIMESTAMP DELTA-SYNC (PC <-> PHONE SYNC, ALL MASTERY LEVELS)
 // ============================================================================
 
-export async function fetchCardsDelta(_lastSync?: string | null): Promise<any[]> {
-  try {
-    const [res1, res2, res3] = await Promise.all([
-      supabase
-        .from('cards')
-        .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
-        .or('masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
-        .range(0, 999),
-      supabase
-        .from('cards')
-        .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
-        .or('masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
-        .range(1000, 1999),
-      supabase
-        .from('cards')
-        .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
-        .or('masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null')
-        .range(2000, 2999),
-    ]);
+export const LAST_CARDS_SYNC_KEY = 'kraft_last_cards_sync_at';
+const DELTA_SYNC_V2_READY_KEY = 'kraft_cards_delta_v2_ready';
 
-    const p1 = res1.data || [];
-    const p2 = res2.data || [];
-    const p3 = res3.data || [];
-    return [...p1, ...p2, ...p3];
+export interface CardsDeltaResult {
+  cards: any[];
+  checkpointIso: string | null;
+  ok: boolean;
+}
+
+/**
+ * Загружает ТОЛЬКО новые и изменённые карточки по `updated_at` (включая карточки с masteryLevel === 0).
+ * При первом запуске (или однократной миграции со старой логики без v2-флага)
+ * подтягивает карточки с прогрессом и все карточки, созданные/изменённые за последние 30 дней.
+ */
+export async function syncCardsDelta(
+  client: typeof supabase = supabase,
+  overrideLastSync?: string | null
+): Promise<CardsDeltaResult> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    return { cards: [], checkpointIso: null, ok: false };
+  }
+
+  try {
+    const hasV2 =
+      typeof window !== 'undefined' &&
+      Boolean(localStorage.getItem(DELTA_SYNC_V2_READY_KEY));
+
+    const lastSyncAt =
+      overrideLastSync !== undefined
+        ? overrideLastSync
+        : typeof window !== 'undefined' && hasV2
+        ? localStorage.getItem(LAST_CARDS_SYNC_KEY)
+        : null;
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+    const PAGE_SIZE = 1000;
+    const allRows: any[] = [];
+    let from = 0;
+
+    while (true) {
+      let query = client.from('cards').select('*');
+
+      if (lastSyncAt) {
+        query = query.gt('updated_at', lastSyncAt);
+      } else {
+        query = query.or(
+          `masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null,updated_at.gt.${thirtyDaysAgo}`
+        );
+      }
+
+      const { data, error } = await query
+        .order('updated_at', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        console.warn('[DeltaSync] Supabase delta query error:', error.message);
+        return { cards: allRows, checkpointIso: null, ok: false };
+      }
+
+      if (!data || data.length === 0) {
+        break;
+      }
+
+      allRows.push(...data);
+      if (data.length < PAGE_SIZE) {
+        break;
+      }
+      from += PAGE_SIZE;
+    }
+
+    // Сохраняем серверную отметку времени (или slight-skew-safe baseline при 0 строках)
+    let maxRemoteIso: string | null = null;
+    let maxRemoteMs = 0;
+    for (const row of allRows) {
+      if (row?.updated_at) {
+        const ms = Date.parse(row.updated_at);
+        if (!Number.isNaN(ms) && ms > maxRemoteMs) {
+          maxRemoteMs = ms;
+          maxRemoteIso = row.updated_at;
+        }
+      }
+    }
+
+    const fallbackCheckpoint = new Date(Date.now() - 15_000).toISOString();
+    const checkpointIso = maxRemoteIso || fallbackCheckpoint;
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(LAST_CARDS_SYNC_KEY, checkpointIso);
+        localStorage.setItem(DELTA_SYNC_V2_READY_KEY, '1');
+      } catch {}
+    }
+
+    return { cards: allRows, checkpointIso, ok: true };
   } catch (e) {
-    console.warn('[DeltaSync] Failed to fetch studied cards from Supabase:', e);
-    return [];
+    console.warn('[DeltaSync] Failed to fetch cards delta from Supabase:', e);
+    return { cards: [], checkpointIso: null, ok: false };
   }
 }
 
+export async function fetchCardsDelta(lastSync?: string | null): Promise<any[]> {
+  const result = await syncCardsDelta(supabase, lastSync);
+  return result.cards;
+}
+
 // ============================================================================
-// DELTA CLOUD RECONCILIATION (10-MINUTE COOLDOWN UNLESS EXPLICITLY FORCED)
+// DELTA CLOUD RECONCILIATION (SHORT DEDUPE COOLDOWN FOR INSTANT TAB SWITCHING)
 // ============================================================================
 
-const FOCUS_COOLDOWN_MS = 10 * 60 * 1000; // НЕ чаще 1 раза в 10 минут!
+const FOCUS_COOLDOWN_MS = 3 * 1000;
 
 export async function syncWithCloud(force: boolean = false): Promise<void> {
   const now = Date.now();
