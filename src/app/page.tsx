@@ -28,12 +28,12 @@ import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, remov
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
-import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
-import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots, getRarityShadowClasses } from "@/components/CardContainer";
+import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots, getRarityShadowClasses, type CardFlashFeedback } from "@/components/CardContainer";
 import { CardEditorModal } from "@/components/CardEditorModal";
 import { CategoryTabs, getTabsForLanguage, type TabConfig } from "@/components/CategoryTabs";
 export { CategoryTabs, getTabsForLanguage, type TabConfig };
@@ -259,6 +259,7 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
   let countFromDb: number | null = null;
   let dayRowActivity: any = null;
   let dailyRowActivity: any = null;
+  let histRowActivity: Record<string, any> | null = null;
 
   try {
     const data = await safeFetchUserStats([`DAILY_STATS_${upperLang}`, upperLang, `DAY_STATS_${upperLang}`]);
@@ -277,17 +278,22 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
       }
 
       let countFromHist = 0;
-      if (histRow?.daily_activity) {
+      if (histRow?.daily_activity && typeof histRow.daily_activity === 'object') {
+        histRowActivity = histRow.daily_activity;
         const raw = histRow.daily_activity[today];
         countFromHist = typeof raw === 'number' ? raw : (raw?.total || (typeof raw === 'string' ? parseInt(raw, 10) || 0 : 0));
       }
 
       let countFromDay = 0;
-      if (dayRow?.daily_activity && dayRow.daily_activity.date === today) {
-        dayRowActivity = dayRow.daily_activity;
-        const done = typeof dayRowActivity.cardsDone === 'number' ? dayRowActivity.cardsDone : 0;
-        const corr = typeof dayRowActivity.correctCount === 'number' ? dayRowActivity.correctCount : 0;
-        countFromDay = Math.max(done, corr);
+      if (dayRow?.daily_activity) {
+        if (dayRow.daily_activity.date === today) {
+          dayRowActivity = dayRow.daily_activity;
+          const done = typeof dayRowActivity.cardsDone === 'number' ? dayRowActivity.cardsDone : 0;
+          const corr = typeof dayRowActivity.correctCount === 'number' ? dayRowActivity.correctCount : 0;
+          countFromDay = Math.max(done, corr);
+        } else if (Array.isArray(dayRow.daily_activity.history)) {
+          dayRowActivity = dayRow.daily_activity;
+        }
       }
 
       countFromDb = Math.max(countFromDaily, countFromHist, countFromDay);
@@ -298,26 +304,57 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
   }
 
   const current = getLanguageDailyStats(cleanLang);
-  const finalCount = current.learnedToday;
+  const finalCount = Math.max(current.learnedToday, countFromDb ?? 0);
+
+  if (typeof window !== 'undefined') {
+    try {
+      if (finalCount > current.learnedToday) {
+        localStorage.setItem(`kraft_cards_learned_${today}`, String(finalCount));
+      }
+      // Синхронизируем прошлые дни недели из облачной карты daily_activity_{LANG} и DAY_STATS history
+      if (histRowActivity) {
+        const actKey = `daily_activity_${upperLang}`;
+        let localAct: Record<string, any> = {};
+        try {
+          const rawAct = localStorage.getItem(actKey);
+          if (rawAct) localAct = JSON.parse(rawAct);
+        } catch {}
+        let actUpdated = false;
+        Object.entries(histRowActivity).forEach(([dateKey, rawVal]) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
+          const num = typeof rawVal === 'number' ? rawVal : (rawVal?.total || (typeof rawVal === 'string' ? parseInt(rawVal, 10) || 0 : 0));
+          const prev = typeof localAct[dateKey] === 'number' ? localAct[dateKey] : 0;
+          if (num > prev) {
+            localAct[dateKey] = num;
+            saveDayRecord(upperLang, { date: dateKey, cardsReviewed: num });
+            actUpdated = true;
+          }
+        });
+        if (actUpdated) {
+          safeSetStorage(actKey, JSON.stringify(localAct));
+        }
+      }
+    } catch {}
+  }
 
   // Single Source of Truth from Supabase:
-  // If Supabase has dailyRowActivity / dayRowActivity, use its canonical mistakes and correct counts!
-  const cloudCorrect = typeof dailyRowActivity?.correctCount === 'number'
-    ? dailyRowActivity.correctCount
-    : (typeof dayRowActivity?.correctCount === 'number' ? dayRowActivity.correctCount : finalCount);
+  // If Supabase has dailyRowActivity / dayRowActivity for today, use its canonical mistakes and correct counts!
+  const isDayRowToday = dayRowActivity?.date === today;
+  const cloudCorrect = Math.max(
+    finalCount,
+    typeof dailyRowActivity?.correctCount === 'number' ? dailyRowActivity.correctCount : 0,
+    isDayRowToday && typeof dayRowActivity?.correctCount === 'number' ? dayRowActivity.correctCount : 0
+  );
 
   const cloudMistakes = typeof dailyRowActivity?.mistakesCount === 'number'
     ? dailyRowActivity.mistakesCount
-    : (typeof dayRowActivity?.mistakesCountToday === 'number'
+    : (isDayRowToday && typeof dayRowActivity?.mistakesCountToday === 'number'
         ? dayRowActivity.mistakesCountToday
         : (current.mistakesCount || 0));
 
-  const cloudTotal = typeof dailyRowActivity?.totalCount === 'number'
-    ? dailyRowActivity.totalCount
-    : (cloudCorrect + cloudMistakes);
-
+  const cloudTotal = cloudCorrect + cloudMistakes;
   const cloudAccuracy = cloudTotal > 0
-    ? Math.round((cloudCorrect / cloudTotal) * 100)
+    ? Math.max(0, Math.min(100, Math.round((cloudCorrect / cloudTotal) * 100)))
     : 100;
 
   if (typeof window !== 'undefined') {
@@ -3662,14 +3699,14 @@ export function getCardTrainingMode(
   return 'standard_cloze';
 }
 
-export type ReviewFilterMode = 'all' | 'flashcards' | 'cloze' | 'grammar_prep' | 'grammar_verbs' | 'grammar_nvv';
+export type ReviewFilterMode = 'all' | 'karten' | 'flashcards' | 'cloze' | 'grammar_prep' | 'grammar_verbs' | 'grammar_nvv';
 
 export function getCardReviewFilterMode(
   card?: Flashcard,
   deckId?: string,
   decks: Deck[] = [],
   books: BookMeta[] = []
-): Exclude<ReviewFilterMode, 'all'> {
+): Exclude<ReviewFilterMode, 'all' | 'karten'> {
   const deck = deckId ? decks.find(d => d.id === deckId) : undefined;
   const book = deck?.bookId ? books.find(b => b.id === deck.bookId) : undefined;
   const mode = getCardTrainingMode(card, deckId, decks, books);
@@ -3980,6 +4017,45 @@ export function parseTargetPhrase(rawTarget: string, externalPrefixProp?: string
 export const parseTargetWord = parseTargetPhrase;
 export const splitPrefix = parseTargetPhrase;
 
+function useCardFlashFeedback(resetKey?: string) {
+  const [flashFeedback, setFlashFeedback] = useState<CardFlashFeedback>('idle');
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearFlash = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setFlashFeedback('idle');
+  }, []);
+
+  useEffect(() => {
+    clearFlash();
+  }, [resetKey, clearFlash]);
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  }, []);
+
+  const triggerFlash = useCallback((type: 'success' | 'fail', durationMs = 240, onDone?: () => void) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setFlashFeedback(type);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      setFlashFeedback('idle');
+      onDone?.();
+    }, durationMs);
+  }, []);
+
+  return { flashFeedback, triggerFlash, clearFlash };
+}
+
+function getCardRemainingSessionSteps(card: Flashcard, fallbackMastery?: number): number {
+  if (card.isLegendary || (typeof card.round === 'number' && card.round >= 4)) return 1;
+  const r = card.round ?? Math.max(1, Math.min(4, (fallbackMastery ?? card.masteryLevel ?? 0) + 1));
+  return Math.max(1, 5 - r);
+}
+
 function RapidFlashcardMode({
   card: initialCard,
   progress,
@@ -4014,6 +4090,14 @@ function RapidFlashcardMode({
   };
 
   const isMobile = useIsMobile();
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobileViewport(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   const [isFlipped, setIsFlipped] = useState(false);
   const currentRound = currentCard.round ?? (
@@ -4037,7 +4121,8 @@ function RapidFlashcardMode({
   const [isErrorMismatch, setIsErrorMismatch] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [cardAnimClass, setCardAnimClass] = useState('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
+  const [skipFlipTransition, setSkipFlipTransition] = useState(false);
+  const { flashFeedback, triggerFlash, clearFlash } = useCardFlashFeedback(currentCard?.id);
   const inputRef = useRef<HTMLInputElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -4055,16 +4140,22 @@ function RapidFlashcardMode({
     setLocalMastery(mastery);
     const typingMode = Boolean(isLeg || round >= 3);
     setIsRound1or2(!typingMode);
+    // Сбрасываем разворот 180->0 без обратного вращения за 1 кадр, чтобы рамка оставалась монолитной
+    setSkipFlipTransition(true);
     setIsFlipped(false);
+    const rafId = requestAnimationFrame(() => {
+      setSkipFlipTransition(false);
+    });
     setIsAnswered(false);
     setIsSurrendered(false);
     setIsVaporizing(false);
     setTypedValue("");
     setIsErrorMismatch(false);
     setIsShaking(false);
-    setCardAnimClass('opacity-100 filter blur-0 scale-100 transition-all duration-180 ease-out');
+    clearFlash();
     setIsTransitioning(false);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+    return () => cancelAnimationFrame(rafId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentCard?.id, currentCard?.round, currentCard?.isLegendary]);
 
@@ -4208,15 +4299,13 @@ function RapidFlashcardMode({
     }
   }, [isRound1or2, currentCard?.id, locked, isAnswered, isMobile]);
 
-  // 5. Мгновенный переход без обратного переворота (No Reverse Flip on Next):
-  // Карточка быстро гаснет по opacity за 90 мс БЕЗ вращения назад, затем синхронно сменяется новой карточкой лицом вперед
+  // 5. Тактильная микро-вспышка (220 мс) + монолитный cross-fade без скачков и обратного кульбита
   const handleRateCard = useCallback((remembered: boolean) => {
     if (locked || isTransitioning) return;
     setIsTransitioning(true);
 
     if (remembered) {
       if (currentRound === 4) {
-        setIsVaporizing(true);
         triggerHaptic('success');
       } else {
         playSafeAudio(() => playSuccessSound());
@@ -4231,10 +4320,12 @@ function RapidFlashcardMode({
       setVisualRound(prev => Math.max(1, prev - 1));
     }
 
-    setTimeout(() => {
+    triggerFlash(remembered ? 'success' : 'fail', 220, () => {
+      setSkipFlipTransition(true);
+      setIsFlipped(false);
       onAnswer(remembered, false);
-    }, 90);
-  }, [locked, isTransitioning, currentRound, localMastery, onAnswer]);
+    });
+  }, [locked, isTransitioning, currentRound, localMastery, onAnswer, triggerFlash]);
 
   const toggleFlip = useCallback(() => {
     setIsFlipped(prev => !prev);
@@ -4264,11 +4355,12 @@ function RapidFlashcardMode({
       setIsLegendaryVisual(true);
     }
 
-    // Никаких авто-таймеров! Карточка ждет нажатия «Weiter» или Enter.
+    triggerFlash('success', 240);
+    // Никаких авто-таймеров перехода! Карточка ждет нажатия «Weiter» или Enter.
     playSafeAudio(() => playSuccessSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     triggerHaptic('success');
-  }, [isAnswered, visualRound, isLegendaryVisual, playCardAudio, currentCard?.targetWord]);
+  }, [isAnswered, visualRound, isLegendaryVisual, playCardAudio, currentCard?.targetWord, triggerFlash]);
 
   // ЭТАП 1: Фиксация ошибки на текущей карточке (без переключения и штрафов)
   const handleMistakeOrGiveUp = useCallback(() => {
@@ -4299,36 +4391,34 @@ function RapidFlashcardMode({
       : (currentCard?.targetWord || '');
     setTypedValue(target.replace(/\|/g, '').trim());
 
+    triggerFlash('fail', 240);
     // Звук ошибки и озвучка правильного немецкого ответа
     playSafeAudio(() => playErrorSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     triggerHaptic('error');
 
     // Карточка показывает правильный ответ и СПОКОЙНО ЖДЕТ, пока пользователь прочитает и нажмет «Weiter»
-  }, [locked, isAnswered, isLegendaryVisual, visualRound, effectivePrefix, verbComponents.coreWord, parsedTarget, currentCard?.targetWord, playCardAudio]);
+  }, [locked, isAnswered, isLegendaryVisual, visualRound, effectivePrefix, verbComponents.coreWord, parsedTarget, currentCard?.targetWord, playCardAudio, triggerFlash]);
 
-  // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter (мгновенное угасание за 90 мс без обратного кульбита)
+  // ЭТАП 2: Осознанный переход по кнопке «Weiter» или Enter (без мигания внешней рамки)
   const handleProceedNext = useCallback(() => {
     if (!isAnswered || isTransitioning) return;
     setIsTransitioning(true);
 
     const willBeVaporized = currentRound === 4 && !isSurrendered;
     if (willBeVaporized) {
-      setIsVaporizing(true);
       triggerHaptic('success');
     }
 
-    setTimeout(() => {
-      if (isSurrendered) {
-        const penalizedMastery = Math.max(0, Math.min(3, localMastery ?? 0));
-        try {
-          onHintPenalty?.(penalizedMastery);
-        } catch {}
-        onAnswer(false, false, true);
-      } else {
-        onAnswer(true, false, false);
-      }
-    }, 90);
+    if (isSurrendered) {
+      const penalizedMastery = Math.max(0, Math.min(3, localMastery ?? 0));
+      try {
+        onHintPenalty?.(penalizedMastery);
+      } catch {}
+      onAnswer(false, false, true);
+    } else {
+      onAnswer(true, false, false);
+    }
   }, [isAnswered, isTransitioning, isSurrendered, currentRound, localMastery, onHintPenalty, onAnswer]);
 
   // Проверка совпадения ввода с целевым словом или всей фразой
@@ -4486,7 +4576,26 @@ function RapidFlashcardMode({
         return;
       }
 
-      // 2. ПОВЕДЕНИЕ СТРЕЛОЧЕК (СТРОГО ПО ТРЕБОВАНИЮ):
+      // 2. ПОВЕДЕНИЕ СТРЕЛОЧЕК И ГОРЯЧИХ КЛАВИШ 1 / 2:
+      if (e.code === 'Digit1' || e.code === 'Numpad1' || e.key === '1') {
+        e.preventDefault();
+        if (!isFlipped) {
+          setIsFlipped(true);
+        } else {
+          handleRateCard(false);
+        }
+        return;
+      }
+      if (e.code === 'Digit2' || e.code === 'Numpad2' || e.key === '2') {
+        e.preventDefault();
+        if (!isFlipped) {
+          setIsFlipped(true);
+        } else {
+          handleRateCard(true);
+        }
+        return;
+      }
+
       if (e.code === 'ArrowRight' || e.code === 'ArrowLeft' || e.code === 'ArrowUp' || e.code === 'ArrowDown') {
         e.preventDefault();
         if (!isFlipped) {
@@ -4521,11 +4630,9 @@ function RapidFlashcardMode({
       className={cn(
         "relative w-full max-w-4xl lg:max-w-5xl mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
         isRound1or2
-          ? "min-h-[440px] h-[500px] sm:min-h-[540px] sm:h-[600px] sm:max-h-[600px]"
-          : "min-h-[300px] sm:min-h-[540px] h-auto sm:h-[600px] sm:max-h-[600px]",
-        isTransitioning
-          ? 'opacity-0 transition-opacity duration-100 ease-out pointer-events-none'
-          : 'opacity-100 transition-opacity duration-100 ease-out'
+          ? "min-h-[440px] h-[500px] md:min-h-[560px] sm:min-h-[520px] sm:h-[600px] sm:max-h-[600px]"
+          : "min-h-[340px] sm:min-h-[520px] md:min-h-[560px] h-auto sm:h-[600px] sm:max-h-[600px]",
+        isTransitioning && "pointer-events-none"
       )}
       style={{ perspective: 1400, WebkitPerspective: 1400 }}
     >
@@ -4537,7 +4644,7 @@ function RapidFlashcardMode({
           onClick={handleCardClick}
           className={cn(
             "w-full h-full relative cursor-pointer [transform-style:preserve-3d]",
-            isTransitioning ? 'transition-none duration-0' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
+            skipFlipTransition ? 'transition-none duration-0' : 'transition-transform duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)]'
           )}
           style={{
             transformStyle: 'preserve-3d',
@@ -4553,6 +4660,7 @@ function RapidFlashcardMode({
             isSealed={isMasteredGolden || isVaporizing}
             isLegendary={isLegendaryVisual}
             isVaporizing={isVaporizing}
+            flashFeedback={flashFeedback}
             style={{
               WebkitBackfaceVisibility: 'hidden',
               backfaceVisibility: 'hidden',
@@ -4589,8 +4697,11 @@ function RapidFlashcardMode({
               </div>
             </div>
 
-            {/* Центр: Слово + Множественное число / Формы */}
-            <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto select-text">
+            {/* Центр: Слово + Множественное число / Формы (с плавным cross-fade) */}
+            <div
+              key={currentCard.id}
+              className="w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+            >
               <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight break-words max-w-full">
                 {article && <span className={getArticleColor(article)}>{article} </span>}
                 {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
@@ -4613,6 +4724,7 @@ function RapidFlashcardMode({
             isSealed={isMasteredGolden || isVaporizing}
             isLegendary={isLegendaryVisual}
             isVaporizing={isVaporizing}
+            flashFeedback={flashFeedback}
             style={{
               WebkitBackfaceVisibility: 'hidden',
               backfaceVisibility: 'hidden',
@@ -4650,7 +4762,10 @@ function RapidFlashcardMode({
             </div>
 
             {/* Центр: Слово, перевод, чистый пример */}
-            <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto select-text overflow-y-auto">
+            <div
+              key={currentCard.id}
+              className="w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text overflow-y-auto transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+            >
               <div>
                 <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight break-words max-w-full">
                   {article && <span className={getArticleColor(article)}>{article} </span>}
@@ -4663,13 +4778,25 @@ function RapidFlashcardMode({
                 )}
               </div>
 
-              <p className="text-lg sm:text-xl md:text-2xl font-medium text-neutral-800 dark:text-neutral-200 mt-4 sm:mt-6">
+              <p
+                key={`${currentCard.id}-${isFlipped ? 'shown' : 'hidden'}-trans`}
+                className={cn(
+                  "text-lg sm:text-xl md:text-2xl font-medium text-neutral-800 dark:text-neutral-200 mt-4 sm:mt-6",
+                  isFlipped && "animate-in fade-in zoom-in-[0.98] duration-200"
+                )}
+              >
                 {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
               </p>
 
               {/* Чистая цитата примера */}
               {displaySentence && (
-                <div className="w-full max-w-lg mx-auto my-3 flex justify-center">
+                <div
+                  key={`${currentCard.id}-${isFlipped ? 'shown' : 'hidden'}-sent`}
+                  className={cn(
+                    "w-full max-w-lg mx-auto my-3 flex justify-center",
+                    isFlipped && "animate-in fade-in zoom-in-[0.98] duration-200"
+                  )}
+                >
                   <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
                     <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-neutral-600 dark:text-neutral-400 select-text">
                       {displaySentence}
@@ -4679,40 +4806,44 @@ function RapidFlashcardMode({
               )}
             </div>
 
-            {/* Низ: Тактильные кнопки оценки ✕ и ✓ в стиле Apple */}
-            <div className="w-full flex items-center justify-center gap-8 pt-4 pb-1 shrink-0 animate-in fade-in duration-150">
-              {/* Крестик: Повторить */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRateCard(false);
-                }}
-                className="h-14 w-14 sm:h-16 sm:w-16 rounded-full flex items-center justify-center bg-black/[0.04] dark:bg-white/[0.05] hover:bg-rose-500/15 border border-black/10 dark:border-white/10 hover:border-rose-500/40 text-neutral-500 dark:text-neutral-400 hover:text-rose-500 dark:hover:text-rose-400 active:scale-90 transition-all duration-150 shadow-lg cursor-pointer"
-                aria-label="Wiederholen"
-                title="Не знаю / Повторить"
-              >
-                <svg className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+            {/* Отображать ИСКЛЮЧИТЕЛЬНО на мобильных тач-экранах (< md), на десктопе не рендерится в DOM: */}
+            {isMobileViewport && (
+              <div className="flex md:hidden items-center justify-center gap-6 pt-6 pb-2 w-full shrink-0 animate-in fade-in duration-150">
+                {/* Крестик: Повторить */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRateCard(false);
+                  }}
+                  className="h-14 w-14 rounded-full flex items-center justify-center bg-black/[0.04] dark:bg-white/[0.05] hover:bg-rose-500/15 border border-black/10 dark:border-white/10 hover:border-rose-500/40 text-neutral-500 dark:text-neutral-400 hover:text-rose-500 dark:hover:text-rose-400 active:scale-90 transition-all duration-150 shadow-lg cursor-pointer"
+                  aria-label="Wiederholen"
+                  title="Не знаю / Повторить"
+                >
+                  <svg className="w-6 h-6 stroke-[2.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
 
-              {/* Галочка: Знаю */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRateCard(true);
-                }}
-                className="h-14 w-14 sm:h-16 sm:w-16 rounded-full flex items-center justify-center bg-black/[0.04] dark:bg-white/[0.05] hover:bg-emerald-500/15 border border-black/10 dark:border-white/10 hover:border-emerald-500/40 text-neutral-500 dark:text-neutral-400 hover:text-emerald-500 dark:hover:text-emerald-400 active:scale-90 transition-all duration-150 shadow-lg cursor-pointer"
-                aria-label="Gewusst"
-                title="Знаю / Запомнил"
-              >
-                <svg className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                </svg>
-              </button>
-            </div>
+                {/* Галочка: Знаю */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRateCard(true);
+                  }}
+                  className="h-14 w-14 rounded-full flex items-center justify-center bg-black/[0.04] dark:bg-white/[0.05] hover:bg-emerald-500/15 border border-black/10 dark:border-white/10 hover:border-emerald-500/40 text-neutral-500 dark:text-neutral-400 hover:text-emerald-500 dark:hover:text-emerald-400 active:scale-90 transition-all duration-150 shadow-lg cursor-pointer"
+                  aria-label="Gewusst"
+                  title="Знаю / Запомнил"
+                >
+                  <svg className="w-6 h-6 stroke-[2.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                </button>
+              </div>
+            )}
+            {/* Чистый десктопный отступ без кнопок */}
+            <div className="hidden md:flex w-full justify-center shrink-0 min-h-[32px] sm:min-h-[52px]" />
           </CardContainer>
         </div>
       ) : (
@@ -4724,6 +4855,7 @@ function RapidFlashcardMode({
           isSealed={isMasteredGolden || isVaporizing}
           isLegendary={isLegendaryVisual}
           isVaporizing={isVaporizing}
+          flashFeedback={flashFeedback}
         >
           {/* Шапка */}
           <div className="flex items-center justify-between w-full shrink-0">
@@ -4767,9 +4899,10 @@ function RapidFlashcardMode({
             </div>
           </div>
 
-          {/* Центр: Русский перевод и Cloze поле ввода */}
+          {/* Центр: Русский перевод и Cloze поле ввода (с плавным cross-fade) */}
           <div 
-            className="flex-1 w-full flex flex-col justify-center items-center text-center my-auto select-text transition-all duration-200 ease-out animate-in fade-in duration-150 py-2 sm:py-0"
+            key={currentCard.id}
+            className="w-full flex-1 flex flex-col justify-center items-center text-center my-auto select-text transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200 py-2 sm:py-0"
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
             <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-white mb-4 sm:mb-6 max-w-2xl leading-tight">
@@ -5127,6 +5260,50 @@ function SessionResultScreen({
   );
 }
 
+function SessionHeaderBar({
+  onBack,
+  completed,
+  total,
+  progressPercent,
+  showRepeatBadge = false,
+}: {
+  onBack: () => void;
+  completed: number;
+  total: number;
+  progressPercent: number;
+  showRepeatBadge?: boolean;
+}) {
+  return (
+    <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-2 sm:mb-3">
+      <div className="flex items-center justify-between mb-2">
+        <button
+          onClick={onBack}
+          className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer"
+          title="Zurück"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-2.5">
+          {showRepeatBadge && (
+            <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+              Wiederholung
+            </span>
+          )}
+          <span className="text-xs font-mono font-medium text-zinc-500 dark:text-zinc-400 select-none cursor-default py-1 px-2 tabular-nums">
+            {completed} / {total}
+          </span>
+        </div>
+      </div>
+      <div className="w-full h-1 bg-black/[0.08] dark:bg-white/[0.08] rounded-full overflow-hidden mb-1">
+        <div
+          className="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-all duration-300 ease-out dark:shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+          style={{ width: `${progressPercent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function RapidSession({
   deckId,
   reviewCards,
@@ -5178,6 +5355,7 @@ function RapidSession({
   const [queue, setQueue] = useState<{ deckId: string, card: Flashcard }[] | null>(null);
   const [wordProgress, setWordProgress] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
+  const [totalSessionSteps, setTotalSessionSteps] = useState(0);
   const [sessionTotal, setSessionTotal] = useState(0);
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
@@ -5202,8 +5380,10 @@ function RapidSession({
       };
     });
     const uniqueList = deduplicateCardsByLemma(list, false);
-    setQueue([...uniqueList].sort(() => Math.random() - 0.5));
+    const ordered = [...uniqueList].sort(() => Math.random() - 0.5);
+    setQueue(ordered);
     setTotal(uniqueList.length);
+    setTotalSessionSteps(ordered.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0));
     setSessionTotal(uniqueList.length);
     setMastered(0);
     setSessionCorrect(0);
@@ -5225,8 +5405,10 @@ function RapidSession({
       }
     }));
     const uniqueList = deduplicateCardsByLemma(list, false);
-    setQueue([...uniqueList].sort(() => Math.random() - 0.5));
+    const ordered = [...uniqueList].sort(() => Math.random() - 0.5);
+    setQueue(ordered);
     setTotal(uniqueList.length);
+    setTotalSessionSteps(ordered.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0));
     setSessionTotal(uniqueList.length);
     setMastered(0);
     setSessionCorrect(0);
@@ -5307,6 +5489,9 @@ function RapidSession({
     });
     setQueue(list);
     setTotal(list.length);
+    setTotalSessionSteps(
+      list.reduce((acc, { card }) => acc + getCardRemainingSessionSteps(card, initialProgress[card.id]), 0)
+    );
     setSessionTotal(list.length);
     setSessionCorrect(0);
     setSessionMistakes([]);
@@ -5526,33 +5711,25 @@ function RapidSession({
       }
     : current.card;
 
-  const safeTotal = Math.max(total || 0, 1);
   const safeCompleted = Math.max(mastered || 0, 0);
-  const progressPercentage = safeCompleted === 0 ? 0 : Math.min(100, (safeCompleted / safeTotal) * 100);
+  const remainingSteps = queue.reduce(
+    (acc, item) => acc + getCardRemainingSessionSteps(item.card, wordProgress[item.card.id]),
+    0
+  );
+  const effectiveTotalSteps = totalSessionSteps > 0 ? totalSessionSteps : Math.max(total || 0, 1);
+  const completedSteps = Math.max(0, effectiveTotalSteps - remainingSteps);
+  const sessionProgressPercent = effectiveTotalSteps > 0
+    ? Math.min(100, Math.round((completedSteps / effectiveTotalSteps) * 100))
+    : 0;
 
   return (
     <div className="flex flex-col w-full items-center pt-[env(safe-area-inset-top,8px)] sm:pt-3 pb-4 sm:pb-8 relative z-50">
-      <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-2 sm:mb-3">
-        <div className="flex items-center justify-between mb-2">
-          <button onClick={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <span
-            className="text-xs font-mono font-medium text-zinc-500 dark:text-zinc-400 select-none cursor-default py-1 px-2"
-          >
-            {safeCompleted} / {total}
-          </span>
-        </div>
-        <div className="relative w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-[width,opacity] duration-300 ease-out"
-            style={{
-              width: `${progressPercentage}%`,
-              opacity: progressPercentage === 0 ? 0 : 1,
-            }}
-          />
-        </div>
-      </div>
+      <SessionHeaderBar
+        onBack={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }}
+        completed={safeCompleted}
+        total={total}
+        progressPercent={sessionProgressPercent}
+      />
 
       <div className={cn(
         "w-full max-w-4xl lg:max-w-5xl mx-auto px-3 sm:px-4 flex flex-col items-center select-none relative min-h-0 sm:min-h-[540px]",
@@ -5767,6 +5944,9 @@ function StudyInterface({
     return 0;
   });
   const [masteredInSession, setMasteredInSession] = useState(0);
+  const [totalSessionSteps, setTotalSessionSteps] = useState(() =>
+    activeCards.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0)
+  );
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
   const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean } | null>(null);
@@ -5800,6 +5980,7 @@ function StudyInterface({
       });
       setActiveCards(list);
       setInitialTotal(uniqueReview.length);
+      setTotalSessionSteps(list.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0));
       setMasteredInSession(0);
       setSessionCorrect(0);
       setSessionMistakes([]);
@@ -5827,8 +6008,10 @@ function StudyInterface({
             isLegendary: false,
           }
         }));
-        setActiveCards(shuffleArray(rawList));
-        setInitialTotal(rawList.length);
+        const shuffledRaw = shuffleArray(rawList);
+        setActiveCards(shuffledRaw);
+        setInitialTotal(shuffledRaw.length);
+        setTotalSessionSteps(shuffledRaw.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0));
         setMasteredInSession(0);
         setSessionCorrect(0);
         setSessionMistakes([]);
@@ -6079,8 +6262,10 @@ function StudyInterface({
       };
     });
     const uniqueList = deduplicateCardsByLemma(list, false);
-    setActiveCards([...uniqueList].sort(() => Math.random() - 0.5));
+    const ordered = [...uniqueList].sort(() => Math.random() - 0.5);
+    setActiveCards(ordered);
     setInitialTotal(uniqueList.length);
+    setTotalSessionSteps(ordered.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0));
     setMasteredInSession(0);
     setTurn(t => t + 1);
     setIsMistakesReviewMode(true);
@@ -6102,8 +6287,10 @@ function StudyInterface({
       })),
       false
     );
-    setActiveCards(cardsToReview.sort(() => Math.random() - 0.5));
+    const ordered = cardsToReview.sort(() => Math.random() - 0.5);
+    setActiveCards(ordered);
     setInitialTotal(cardsToReview.length);
+    setTotalSessionSteps(ordered.reduce((acc, item) => acc + getCardRemainingSessionSteps(item.card), 0));
     setMasteredInSession(0);
     setSessionCorrect(0);
     setSessionMistakes([]);
@@ -6180,40 +6367,26 @@ function StudyInterface({
     );
   }
 
-  const safeSessionTotal = Math.max(initialTotal || 0, 1);
   const safeSessionCompleted = Math.max(masteredInSession || 0, 0);
-  const sessionProgressPercentage = safeSessionCompleted === 0 ? 0 : Math.min(100, (safeSessionCompleted / safeSessionTotal) * 100);
+  const remainingSessionSteps = activeCards.reduce(
+    (acc, item) => acc + getCardRemainingSessionSteps(item.card),
+    0
+  );
+  const effectiveTotalSessionSteps = totalSessionSteps > 0 ? totalSessionSteps : Math.max(initialTotal || 0, 1);
+  const completedSessionSteps = Math.max(0, effectiveTotalSessionSteps - remainingSessionSteps);
+  const sessionProgressPercentage = effectiveTotalSessionSteps > 0
+    ? Math.min(100, Math.round((completedSessionSteps / effectiveTotalSessionSteps) * 100))
+    : 0;
 
   return (
     <div className="flex flex-col w-full items-center pt-[env(safe-area-inset-top,8px)] sm:pt-3 pb-4 sm:pb-8 relative z-50">
-      <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-2 sm:mb-3">
-        <div className="flex items-center justify-between mb-2">
-          <button onClick={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-2.5">
-            {isInitialArchivedDeck && (
-              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                Wiederholung
-              </span>
-            )}
-            <span
-              className="text-xs font-mono font-medium text-zinc-500 dark:text-zinc-400 select-none cursor-default py-1 px-2"
-            >
-              {safeSessionCompleted} / {initialTotal}
-            </span>
-          </div>
-        </div>
-        <div className="relative w-full h-1.5 bg-gray-200/60 dark:bg-white/10 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-[width,opacity] duration-300 ease-out"
-            style={{
-              width: `${sessionProgressPercentage}%`,
-              opacity: sessionProgressPercentage === 0 ? 0 : 1,
-            }}
-          />
-        </div>
-      </div>
+      <SessionHeaderBar
+        onBack={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }}
+        completed={safeSessionCompleted}
+        total={initialTotal}
+        progressPercent={sessionProgressPercentage}
+        showRepeatBadge={isInitialArchivedDeck}
+      />
 
       <div className={cn(
         "w-full max-w-4xl lg:max-w-5xl mx-auto px-3 sm:px-4 flex flex-col items-center select-none relative min-h-0 sm:min-h-[540px]",
@@ -6599,13 +6772,13 @@ function StudyCard({
 
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
-  const [cardAnimClass, setCardAnimClass] = useState('opacity-100 scale-100 blur-0 transition-all duration-150 ease-out');
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
   const [isVaporizing, setIsVaporizing] = useState(false);
   const [isTransitionLocked, setIsTransitionLocked] = useState(false);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { flashFeedback, triggerFlash, clearFlash } = useCardFlashFeedback(card.id);
 
   const currentRound = card.round ?? (
     card.isLegendary === false 
@@ -6629,7 +6802,6 @@ function StudyCard({
     setIsVaporizing(false);
     setIsTransitionLocked(false);
     setIsTransitioning(false);
-    setCardAnimClass('opacity-100 scale-100 blur-0 transition-all duration-150 ease-out');
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     if (transitionTimerRef.current) {
@@ -6789,31 +6961,23 @@ function StudyCard({
     if (isTransitionLocked || isTransitioning) return;
     setIsTransitionLocked(true);
     setIsTransitioning(true);
+    clearFlash();
 
     const willBeVaporized = currentRound >= 4 && !hasErroredRef.current;
     if (willBeVaporized) {
       setLocalMastery(4);
-      setIsVaporizing(true);
       triggerHaptic('success');
     }
 
-    setCardAnimClass('opacity-0 scale-[0.985] blur-md pointer-events-none transition-all duration-150 ease-out');
-
-    transitionTimerRef.current = setTimeout(() => {
-      // ФАЗА 2: Карточка ПОЛНОСТЬЮ СКРЫТА (opacity: 0, blur).
-      setIsVaporizing(false);
+    setPhase("Question");
+    setSelectedOption(null);
+    setInputText("");
+    onNext();
+    requestAnimationFrame(() => {
       setIsTransitionLocked(false);
-      setPhase("Question");
-      setSelectedOption(null);
-      setInputText("");
-      onNext();
-
-      requestAnimationFrame(() => {
-        // ФАЗА 3: Новая карточка плавно проявляется из блюра
-        setIsTransitioning(false);
-      });
-    }, 150);
-  }, [isTransitionLocked, isTransitioning, currentRound, onNext]);
+      setIsTransitioning(false);
+    });
+  }, [isTransitionLocked, isTransitioning, currentRound, onNext, clearFlash]);
 
   const handleReveal = useCallback(() => {
     if (phase !== "Question") return;
@@ -6823,6 +6987,7 @@ function StudyCard({
     if (visualRound >= 4 || isLegendaryVisual) {
       setIsLegendaryVisual(true);
     }
+    triggerFlash('success', 240);
     playSafeAudio(() => playSuccessSound());
     const fullSentenceText = fullSentence || card.sentence || (card as any).text;
     if (fullSentenceText) {
@@ -6837,7 +7002,7 @@ function StudyCard({
     setTimeout(() => {
       nextButtonRef.current?.focus();
     }, 50);
-  }, [phase, visualRound, isLegendaryVisual, fullSentence, card, playAudio, onAnswer]);
+  }, [phase, visualRound, isLegendaryVisual, fullSentence, card, playAudio, onAnswer, triggerFlash]);
 
   const handleOptionClick = (option: string) => {
     if (phase !== "Question") return;
@@ -6846,6 +7011,7 @@ function StudyCard({
     
     // 1. Фиксируем результат без автопереключения
     setPhase("Answer");
+    triggerFlash(correct ? 'success' : 'fail', 240);
 
     if (!correct) {
       setLocalMastery(2); // Штраф при ошибке: ранг сбрасывается
@@ -6911,6 +7077,7 @@ function StudyCard({
       setIsLegendaryVisual(false);
     }
     setInputText(clozeWord || card.targetWord || "");
+    triggerFlash('fail', 240);
     playSafeAudio(() => playErrorSound());
     const fullSentenceText = fullSentence || card.sentence || (card as any).text;
     if (fullSentenceText) {
@@ -6951,6 +7118,7 @@ function StudyCard({
       }
 
       playSafeAudio(() => playSuccessSound());
+      triggerFlash('success', 240);
 
       // 2. Озвучиваем всё немецкое предложение целиком
       const fullSentenceText = fullSentence || card.sentence || (card as any).text;
@@ -7121,11 +7289,10 @@ function StudyCard({
         isSealed={isMasteredGolden || isVaporizing}
         isLegendary={isLegendaryVisual}
         isVaporizing={isVaporizing}
+        flashFeedback={flashFeedback}
         className={cn(
-          "min-h-[300px] sm:min-h-[540px] transition-all duration-150 ease-out",
-          isTransitioning
-            ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
-            : "opacity-100 scale-100 blur-0"
+          "min-h-[340px] sm:min-h-[520px] md:min-h-[560px]",
+          isTransitioning && "pointer-events-none"
         )}
         onClick={() => {
           if (!isMobile && !isRecognitionMode && phase === "Question" && inputRef.current) {
@@ -7204,13 +7371,16 @@ function StudyCard({
           </div>
         </div>
 
-        <div className="flex-1 w-full flex flex-col justify-center items-center text-center my-auto transition-all duration-200 ease-out animate-in fade-in duration-150">
+        <div
+          key={card.id}
+          className="w-full flex-1 flex flex-col justify-center items-center text-center my-auto transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+        >
           <div className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-4 sm:mb-6">
             {parts[0]}
             
             {phase === "Answer" ? (
               <span className={cn(
-                "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white transition-colors",
+                "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white transition-colors animate-in fade-in zoom-in-[0.98] duration-200",
                 parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
               )}>
                 {parsedTargetWord ? (
@@ -7279,7 +7449,7 @@ function StudyCard({
             </p>
 
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
-              <div className="mt-4 flex flex-col items-center gap-1.5 transition-opacity duration-200">
+              <div className="mt-4 flex flex-col items-center gap-1.5 transition-all duration-200 animate-in fade-in zoom-in-[0.98]">
                 <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm max-w-[95%]">
                   {renderFormattedGrammarRule(
                     card.grammarHint || 
@@ -7600,9 +7770,11 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
 }) {
   const [adminOpen, setAdminOpen] = useState(false);
   const [isLangOpen, setIsLangOpen] = useState(false);
+  const [isKartenFilterOpen, setIsKartenFilterOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const langRef = useRef<HTMLDivElement>(null);
+  const kartenFilterRef = useRef<HTMLDivElement>(null);
   const { appLanguage, setAppLanguage } = useStore();
   const effectiveLang = normalizeLanguage(activeBook?.language || appLanguage || 'DE');
   const { stats } = useDayStats({ language: effectiveLang });
@@ -7639,14 +7811,17 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
       if (langRef.current && !langRef.current.contains(e.target as Node)) {
         setIsLangOpen(false);
       }
+      if (kartenFilterRef.current && !kartenFilterRef.current.contains(e.target as Node)) {
+        setIsKartenFilterOpen(false);
+      }
     };
-    if (isLangOpen) {
+    if (isLangOpen || isKartenFilterOpen) {
       document.addEventListener("mousedown", handleClickOutside);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [isLangOpen]);
+  }, [isLangOpen, isKartenFilterOpen]);
 
   const [langStats, setLangStats] = useState<LanguageDailyProgress>(() => getLanguageDailyStats(effectiveLang));
 
@@ -7779,37 +7954,153 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
 
           {/* 2. ПО ЦЕНТРУ: ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМОВ + КНОПКА ПОВТОРА (Hero CTA) */}
           <div className="w-full sm:w-auto order-3 sm:order-2 flex flex-col items-center justify-center shrink-0 pb-0.5 sm:pb-0">
-            {reviewCounts && onReviewModeChange && (
-              <div className="w-full max-w-md mx-auto mb-2.5 px-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-                {([
-                  { id: 'all', label: 'Alle', count: reviewCounts.all },
-                  { id: 'flashcards', label: 'Karten', count: reviewCounts.flashcards },
-                  { id: 'cloze', label: 'Lücken', count: reviewCounts.cloze },
-                  { id: 'grammar_prep', label: 'Präpositionen', count: reviewCounts.grammar_prep },
-                  { id: 'grammar_verbs', label: 'Starke Verben', count: reviewCounts.grammar_verbs },
-                  { id: 'grammar_nvv', label: 'NVV', count: reviewCounts.grammar_nvv },
-                ] as const).map((mode) => {
-                  const isActive = reviewMode === mode.id;
-                  return (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      onClick={() => onReviewModeChange(mode.id)}
-                      className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer flex items-center gap-1.5 select-none ${
-                        isActive
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'bg-black/[0.04] dark:bg-white/[0.05] text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-black/[0.08] dark:hover:bg-white/10 border border-black/[0.06] dark:border-white/5'
-                      }`}
-                    >
-                      <span>{mode.label}</span>
-                      <span className={`text-[10px] tabular-nums ${isActive ? 'text-blue-100' : 'text-neutral-500'}`}>
-                        {mode.count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            {reviewCounts && onReviewModeChange && (() => {
+              const isKartenModeActive =
+                reviewMode === 'karten' ||
+                reviewMode === 'flashcards' ||
+                reviewMode === 'grammar_prep' ||
+                reviewMode === 'grammar_verbs' ||
+                reviewMode === 'grammar_nvv';
+
+              const kartenSubModes = [
+                { id: 'karten', label: 'Alle Karten', count: reviewCounts.karten },
+                { id: 'flashcards', label: 'Wortschatz', count: reviewCounts.flashcards },
+                { id: 'grammar_prep', label: 'Verben & Präpositionen', count: reviewCounts.grammar_prep },
+                { id: 'grammar_verbs', label: 'Starke Verben', count: reviewCounts.grammar_verbs },
+                { id: 'grammar_nvv', label: 'Nomen-Verb-Verbindungen', count: reviewCounts.grammar_nvv },
+              ] as const;
+
+              const activeKartenSub =
+                kartenSubModes.find((m) => m.id === reviewMode) || kartenSubModes[0];
+
+              const topModes = [
+                { id: 'all', label: 'Alle', count: reviewCounts.all, active: reviewMode === 'all' },
+                { id: 'karten', label: 'Karten', count: reviewCounts.karten, active: isKartenModeActive },
+                { id: 'cloze', label: 'Lücken', count: reviewCounts.cloze, active: reviewMode === 'cloze' },
+              ] as const;
+
+              return (
+                <div className="w-full flex flex-col items-center">
+                  <div
+                    role="tablist"
+                    aria-label="Lernmodus"
+                    className="inline-flex items-center p-1 rounded-full bg-black/[0.04] dark:bg-white/[0.05] border border-black/[0.06] dark:border-white/[0.08] gap-0.5 mb-2"
+                  >
+                    {topModes.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={mode.active}
+                        onClick={() => {
+                          if (mode.id === 'karten') {
+                            onReviewModeChange('karten');
+                          } else {
+                            setIsKartenFilterOpen(false);
+                            onReviewModeChange(mode.id);
+                          }
+                        }}
+                        className={`shrink-0 px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer flex items-center gap-1.5 select-none ${
+                          mode.active
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
+                        }`}
+                      >
+                        <span>{mode.label}</span>
+                        <span
+                          className={`text-[10px] tabular-nums ${
+                            mode.active ? 'text-blue-100' : 'text-neutral-500'
+                          }`}
+                        >
+                          {mode.count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {isKartenModeActive && (
+                    <div ref={kartenFilterRef} className="relative mb-2.5 z-40">
+                      <button
+                        type="button"
+                        onClick={() => setIsKartenFilterOpen((prev) => !prev)}
+                        aria-expanded={isKartenFilterOpen}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-white/80 dark:bg-zinc-900/80 border border-black/[0.08] dark:border-white/[0.1] text-neutral-700 dark:text-neutral-300 hover:text-neutral-950 dark:hover:text-white hover:border-black/15 dark:hover:border-white/20 shadow-xs transition-all cursor-pointer select-none"
+                      >
+                        <span className="text-neutral-400 dark:text-neutral-500">Typ:</span>
+                        <span>{activeKartenSub.label}</span>
+                        <span className="text-[10px] tabular-nums text-neutral-500 dark:text-neutral-400">
+                          ({activeKartenSub.count})
+                        </span>
+                        <svg
+                          className={`w-3 h-3 text-neutral-400 transition-transform duration-150 ${
+                            isKartenFilterOpen ? 'rotate-180' : ''
+                          }`}
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </button>
+
+                      {isKartenFilterOpen && (
+                        <div className="absolute left-1/2 -translate-x-1/2 mt-1.5 w-60 rounded-2xl bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl border border-black/[0.08] dark:border-white/[0.1] shadow-xl p-1.5 animate-in fade-in zoom-in-[0.98] duration-150">
+                          {kartenSubModes.map((sub) => {
+                            const isSubActive = reviewMode === sub.id;
+                            return (
+                              <button
+                                key={sub.id}
+                                type="button"
+                                onClick={() => {
+                                  onReviewModeChange(sub.id);
+                                  setIsKartenFilterOpen(false);
+                                }}
+                                className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl text-xs transition-colors cursor-pointer text-left ${
+                                  isSubActive
+                                    ? 'bg-blue-600/10 text-blue-600 dark:text-blue-400 font-semibold'
+                                    : 'text-neutral-700 dark:text-neutral-300 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
+                                }`}
+                              >
+                                <span className="truncate">{sub.label}</span>
+                                <span className="flex items-center gap-1.5 shrink-0">
+                                  <span
+                                    className={`text-[10px] tabular-nums ${
+                                      isSubActive
+                                        ? 'text-blue-600 dark:text-blue-400'
+                                        : 'text-neutral-400 dark:text-neutral-500'
+                                    }`}
+                                  >
+                                    {sub.count}
+                                  </span>
+                                  {isSubActive && (
+                                    <svg
+                                      className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400"
+                                      viewBox="0 0 20 20"
+                                      fill="currentColor"
+                                      aria-hidden="true"
+                                    >
+                                      <path
+                                        fillRule="evenodd"
+                                        d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                                        clipRule="evenodd"
+                                      />
+                                    </svg>
+                                  )}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {dueCount > 0 ? (
               <button
                 type="button"
@@ -9999,11 +10290,19 @@ function PrepStudyCard({
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
+  const { flashFeedback, triggerFlash, clearFlash } = useCardFlashFeedback(card.id);
 
   useEffect(() => {
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
+    setIsSuccess(false);
+    setIsHilfe(false);
+    setHasErrored(false);
+    hasErroredRef.current = false;
+    setActiveSlot(0);
+    setWrongKasus(null);
+    clearFlash();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, card.round, card.isLegendary]);
 
@@ -10049,6 +10348,7 @@ function PrepStudyCard({
          }
        }
        setIsSuccess(true);
+       triggerFlash(isCorrect ? 'success' : 'fail', 240);
        playSafeAudio(() => playSuccessSound());
        playSafeAudio(() => playAudio());
        try {
@@ -10068,11 +10368,12 @@ function PrepStudyCard({
          setVisualRound(1);
          setIsLegendaryVisual(false);
        }
+       triggerFlash('fail', 240);
        playSafeAudio(() => playErrorSound());
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
     }
-  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio, localMastery, visualRound, isLegendaryVisual, isLegendary]);
+  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio, localMastery, visualRound, isLegendaryVisual, isLegendary, triggerFlash]);
 
   const onHilfe = useCallback(() => {
     setLocalMastery(2);
@@ -10080,6 +10381,7 @@ function PrepStudyCard({
     setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
+    triggerFlash('fail', 240);
     if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
@@ -10094,19 +10396,18 @@ function PrepStudyCard({
     try {
       onAnswer(card.id, false, true);
     } catch (e) {}
-  }, [card.id, onAnswer, playAudio, isLegendary, isLegendaryVisual, visualRound]);
+  }, [card.id, onAnswer, playAudio, isLegendary, isLegendaryVisual, visualRound, triggerFlash]);
 
   const [isTransitioning, setIsTransitioning] = useState(false);
   const handleProceedNext = useCallback(() => {
     if (isTransitioning) return;
     setIsTransitioning(true);
-    setTimeout(() => {
-      onNext();
-      requestAnimationFrame(() => {
-        setIsTransitioning(false);
-      });
-    }, 150);
-  }, [isTransitioning, onNext]);
+    clearFlash();
+    onNext();
+    requestAnimationFrame(() => {
+      setIsTransitioning(false);
+    });
+  }, [isTransitioning, onNext, clearFlash]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -10142,16 +10443,11 @@ function PrepStudyCard({
   return (
     <>
     <CardContainer 
-      key={card.id || (card as any)?.front}
       rarityRound={visualRound}
       isLegendary={isLegendaryVisual}
       isSealed={isMasteredGolden}
-      className={cn(
-        "transition-all duration-150 ease-out",
-        isTransitioning
-          ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
-          : "opacity-100 scale-100 blur-0"
-      )}
+      flashFeedback={flashFeedback}
+      className={cn(isTransitioning && "pointer-events-none")}
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -10193,7 +10489,10 @@ function PrepStudyCard({
       </div>
 
 
-      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
+      <div
+        key={card.id}
+        className="w-full flex-1 flex flex-col items-center justify-center max-w-xl mb-0 relative transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+      >
         <div className="text-center mb-10 w-full mt-10">
           <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
             {getCleanTranslation(translation)}
@@ -10205,6 +10504,7 @@ function PrepStudyCard({
           {/* Inputs on the Left */}
           <div className="flex flex-row items-center justify-center gap-3 sm:gap-6">
             <VerbSlot 
+              key={`${card.id}-0`}
               label="Verb" 
               target={cleanVerb} 
               splitIndex={splitIndex}
@@ -10217,6 +10517,7 @@ function PrepStudyCard({
               virtualBackspaceRef={virtualBackspaceRef0} 
             />
             <VerbSlot 
+              key={`${card.id}-1`}
               label="Präposition" 
               target={prep} 
               isActive={activeSlot === 1} 
@@ -10323,11 +10624,18 @@ function VerbStudyCard({
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
+  const { flashFeedback, triggerFlash, clearFlash } = useCardFlashFeedback(card.id);
 
   useEffect(() => {
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
+    setIsSuccess(false);
+    setIsHilfe(false);
+    setHasErrored(false);
+    hasErroredRef.current = false;
+    setActiveInput(0);
+    clearFlash();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, card.round, card.isLegendary]);
 
@@ -10354,13 +10662,12 @@ function VerbStudyCard({
   const handleProceedNext = useCallback(() => {
     if (isTransitioning) return;
     setIsTransitioning(true);
-    setTimeout(() => {
-      onNext();
-      requestAnimationFrame(() => {
-        setIsTransitioning(false);
-      });
-    }, 150);
-  }, [isTransitioning, onNext]);
+    clearFlash();
+    onNext();
+    requestAnimationFrame(() => {
+      setIsTransitioning(false);
+    });
+  }, [isTransitioning, onNext, clearFlash]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -10394,13 +10701,14 @@ function VerbStudyCard({
         }
       }
       setIsSuccess(true);
+      triggerFlash(isCorrect ? 'success' : 'fail', 240);
       playSafeAudio(() => playSuccessSound());
       playSafeAudio(() => playAudio());
       try {
         onAnswer(isCorrect, false);
       } catch (e) {}
     }
-  }, [isHilfe, playAudio, onAnswer, localMastery, visualRound, isLegendaryVisual]);
+  }, [isHilfe, playAudio, onAnswer, localMastery, visualRound, isLegendaryVisual, triggerFlash]);
 
   const handleSlotError = useCallback(() => {
     // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
@@ -10412,6 +10720,7 @@ function VerbStudyCard({
     setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
+    triggerFlash('fail', 240);
     if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
@@ -10426,22 +10735,17 @@ function VerbStudyCard({
     try {
       onAnswer(false, true);
     } catch (e) {}
-  }, [playAudio, onAnswer, isLegendary, isLegendaryVisual, visualRound]);
+  }, [playAudio, onAnswer, isLegendary, isLegendaryVisual, visualRound, triggerFlash]);
 
   const displayInfinitiv = formatSeparableWord(verbInfo.infinitiv || "", undefined, 'neutral');
 
   return (
     <CardContainer 
-      key={card.id || (card as any)?.front}
       rarityRound={visualRound}
       isLegendary={isLegendaryVisual}
       isSealed={isMasteredGolden}
-      className={cn(
-        "transition-all duration-150 ease-out",
-        isTransitioning
-          ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
-          : "opacity-100 scale-100 blur-0"
-      )}
+      flashFeedback={flashFeedback}
+      className={cn(isTransitioning && "pointer-events-none")}
     >
       <div className="w-full flex items-center justify-between absolute top-0 left-0 p-6 z-20">
         <div className="flex items-center gap-2 shrink-0">
@@ -10482,7 +10786,10 @@ function VerbStudyCard({
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-xl mb-0 relative">
+      <div
+        key={card.id}
+        className="w-full flex-1 flex flex-col items-center justify-center max-w-xl mb-0 relative transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+      >
         <div className="text-center mb-8 w-full mt-10">
           <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5 whitespace-nowrap select-none">
             {displayInfinitiv}
@@ -10777,11 +11084,15 @@ export function RedemittelStudyCard({
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
+  const { flashFeedback, triggerFlash, clearFlash } = useCardFlashFeedback(card.id);
 
   useEffect(() => {
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
+    setPlacedChunks([]);
+    setStatus('idle');
+    clearFlash();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, card.round, card.isLegendary]);
 
@@ -10817,6 +11128,7 @@ export function RedemittelStudyCard({
           setIsLegendaryVisual(true);
         }
         setStatus('success');
+        triggerFlash('success', 240);
         playSafeAudio(() => playSuccessSound());
         setIsAudioPlaying(true);
         playSafeAudio(() => playGermanSpeech(data.fullText, {
@@ -10827,6 +11139,7 @@ export function RedemittelStudyCard({
         } catch (e) {}
       } else {
         setStatus('error');
+        triggerFlash('fail', 240);
         if (isLegendary || isLegendaryVisual || visualRound >= 4) {
           setVisualRound(3);
           setIsLegendaryVisual(false);
@@ -10841,7 +11154,7 @@ export function RedemittelStudyCard({
         setStatus('idle');
       }
     }
-  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery, visualRound, isLegendaryVisual, isLegendary]);
+  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery, visualRound, isLegendaryVisual, isLegendary, triggerFlash]);
 
   const handleRemoveChunk = useCallback((chunk: RedemittelChunk) => {
     if (status === 'success' || status === 'surrender') return;
@@ -10875,6 +11188,7 @@ export function RedemittelStudyCard({
     const correctOrder = [...data.shuffledChunks].sort((a, b) => a.originalIndex - b.originalIndex);
     setPlacedChunks(correctOrder);
     setStatus('surrender');
+    triggerFlash('fail', 240);
     playSafeAudio(() => playErrorSound());
     setIsAudioPlaying(true);
     playSafeAudio(() => playGermanSpeech(data.fullText, {
@@ -10883,7 +11197,7 @@ export function RedemittelStudyCard({
     try {
       onAnswer(false, true);
     } catch (e) {}
-  }, [data.shuffledChunks, data.fullText, status, onAnswer, isLegendary, isLegendaryVisual, visualRound]);
+  }, [data.shuffledChunks, data.fullText, status, onAnswer, isLegendary, isLegendaryVisual, visualRound, triggerFlash]);
 
   // Available chunks for keyboard shortcuts and hotkey badge
   const availableChunks = useMemo(() => {
@@ -10896,13 +11210,12 @@ export function RedemittelStudyCard({
   const handleProceedNext = useCallback(() => {
     if (isTransitioning) return;
     setIsTransitioning(true);
-    setTimeout(() => {
-      onNext();
-      requestAnimationFrame(() => {
-        setIsTransitioning(false);
-      });
-    }, 150);
-  }, [isTransitioning, onNext]);
+    clearFlash();
+    onNext();
+    requestAnimationFrame(() => {
+      setIsTransitioning(false);
+    });
+  }, [isTransitioning, onNext, clearFlash]);
 
   // Keyboard shortcut support
   useEffect(() => {
@@ -10953,15 +11266,12 @@ export function RedemittelStudyCard({
 
   return (
       <CardContainer
-        key={card.id || (card as any)?.front}
         rarityRound={visualRound}
         isLegendary={isLegendaryVisual}
         isSealed={isMasteredGolden}
+        flashFeedback={flashFeedback}
         className={cn(
-          "transition-all duration-150 ease-out",
-          isTransitioning
-            ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
-            : "opacity-100 scale-100 blur-0",
+          isTransitioning && "pointer-events-none",
           status === 'error' && "!border-rose-500/40",
           status === 'surrender' && "!border-zinc-300 dark:!border-zinc-600/70"
         )}
@@ -11008,6 +11318,10 @@ export function RedemittelStudyCard({
           </div>
         </div>
 
+        <div
+          key={card.id}
+          className="w-full flex-1 flex flex-col justify-center transition-all duration-300 ease-out animate-in fade-in zoom-in-[0.98] duration-200"
+        >
         {/* 2. Заголовок-подсказка: Русский перевод (плавно скрывается во время сборки) */}
         <div className={cn(
           "text-center mb-6 px-4 transition-opacity duration-300 min-h-[1.75rem] flex items-center justify-center",
@@ -11128,6 +11442,7 @@ export function RedemittelStudyCard({
             )}
           </AnimatePresence>
         </div>
+        </div>
       </CardContainer>
   );
 }
@@ -11168,7 +11483,7 @@ export default function App() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem('karten_review_filter_mode') as ReviewFilterMode | null;
-      if (saved && ['all', 'flashcards', 'cloze', 'grammar_prep', 'grammar_verbs', 'grammar_nvv'].includes(saved)) {
+      if (saved && ['all', 'karten', 'flashcards', 'cloze', 'grammar_prep', 'grammar_verbs', 'grammar_nvv'].includes(saved)) {
         setReviewMode(saved);
       }
     } catch {}
@@ -11889,9 +12204,26 @@ export default function App() {
     return deduplicateReviewSession(list);
   }, [decks, books, appLanguage, activeBookId]);
 
+  const matchesReviewMode = useCallback(
+    (bucket: ReviewFilterMode, mode: ReviewFilterMode) => {
+      if (mode === 'all') return true;
+      if (mode === 'karten') {
+        return (
+          bucket === 'flashcards' ||
+          bucket === 'grammar_prep' ||
+          bucket === 'grammar_verbs' ||
+          bucket === 'grammar_nvv'
+        );
+      }
+      return bucket === mode;
+    },
+    []
+  );
+
   const reviewCounts = useMemo<Record<ReviewFilterMode, number>>(() => {
     const counts: Record<ReviewFilterMode, number> = {
       all: allDueCards.length,
+      karten: 0,
       flashcards: 0,
       cloze: 0,
       grammar_prep: 0,
@@ -11902,15 +12234,23 @@ export default function App() {
       const bucket = getCardReviewFilterMode(item.card, item.deckId, decks, books);
       counts[bucket] += 1;
     }
+    counts.karten =
+      counts.flashcards +
+      counts.grammar_prep +
+      counts.grammar_verbs +
+      counts.grammar_nvv;
     return counts;
   }, [allDueCards, decks, books]);
 
   const dueCards = useMemo(() => {
     if (reviewMode === 'all') return allDueCards;
-    return allDueCards.filter(
-      item => getCardReviewFilterMode(item.card, item.deckId, decks, books) === reviewMode
+    return allDueCards.filter((item) =>
+      matchesReviewMode(
+        getCardReviewFilterMode(item.card, item.deckId, decks, books),
+        reviewMode
+      )
     );
-  }, [allDueCards, reviewMode, decks, books]);
+  }, [allDueCards, reviewMode, decks, books, matchesReviewMode]);
 
   // Хедерный подсчет повторений: динамически зависит от выбранного режима фильтрации
   const dueCardsCount = dueCards.length;
@@ -11955,7 +12295,12 @@ export default function App() {
       const freshCards = await fetchDueCardsFromCloud(targetLang, activeBookId || undefined);
       const filteredFresh = reviewMode === 'all'
         ? freshCards
-        : freshCards.filter(item => getCardReviewFilterMode(item.card, item.deckId, decks, books) === reviewMode);
+        : freshCards.filter((item) =>
+            matchesReviewMode(
+              getCardReviewFilterMode(item.card, item.deckId, decks, books),
+              reviewMode
+            )
+          );
       if (filteredFresh.length > 0) {
         setReviewCards(shuffleArray(getUniqueReviewQueue(filteredFresh)));
         return;

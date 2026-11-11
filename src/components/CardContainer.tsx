@@ -3,6 +3,8 @@
 import React, { forwardRef } from 'react';
 import { cn } from '@/lib/utils';
 
+export type CardFlashFeedback = 'idle' | 'success' | 'fail';
+
 export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement> {
   children?: React.ReactNode;
   className?: string;
@@ -12,6 +14,7 @@ export interface CardContainerProps extends React.HTMLAttributes<HTMLDivElement>
   isSealed?: boolean;
   isLegendary?: boolean;
   isVaporizing?: boolean;
+  flashFeedback?: CardFlashFeedback;
 }
 
 /**
@@ -111,7 +114,7 @@ export const CARD_CONTAINER_SURFACE_CLASSES = cn(
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "relative w-full max-w-4xl lg:max-w-5xl min-h-[320px] sm:min-h-[540px] h-auto sm:h-[600px] sm:max-h-[600px] mx-auto p-5 sm:p-10 rounded-[28px] sm:rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden",
+  "relative w-full max-w-4xl lg:max-w-5xl min-h-[340px] sm:min-h-[520px] md:min-h-[560px] h-auto sm:h-[600px] sm:max-h-[600px] mx-auto p-5 sm:p-10 rounded-[28px] sm:rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden transition-all duration-200 ease-out",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 
@@ -177,20 +180,27 @@ export function ProgressDots({
 export const RoundDots = ProgressDots;
 
 export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
-  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, isLegendary, isVaporizing = false, style, ...props }, ref) => {
+  ({ children, className, is3DFace = false, rarityRound, isArchivingPulse, isSealed, isLegendary, isVaporizing = false, flashFeedback = 'idle', style, ...props }, ref) => {
     const r = rarityRound ?? 1;
     const isSeal = Boolean(isSealed || isVaporizing);
     // Each 3D face carries its own background, border, and shadow so nothing remains stationary on CardStage
     const rarityClasses = getRarityCardClasses(r, isArchivingPulse, isSeal, isLegendary);
+    const flashClasses =
+      flashFeedback === 'success'
+        ? "!border-emerald-500/60 !shadow-[0_0_40px_rgba(16,185,129,0.3),inset_0_1px_1px_rgba(255,255,255,0.15)] scale-[1.004]"
+        : flashFeedback === 'fail'
+          ? "!border-rose-500/50 !shadow-[0_0_35px_rgba(244,63,94,0.25)]"
+          : "";
 
     return (
       <div
         ref={ref}
         className={cn(
           is3DFace
-            ? cn("absolute inset-0 w-full h-full p-5 sm:p-10 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[28px] sm:rounded-[36px] overflow-hidden", CARD_CONTAINER_SURFACE_CLASSES)
+            ? cn("absolute inset-0 w-full h-full p-5 sm:p-10 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[28px] sm:rounded-[36px] overflow-hidden transition-all duration-200 ease-out", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
+          flashClasses,
           isVaporizing && "opacity-0 scale-[1.01] transition-all duration-150 ease-out pointer-events-none",
           className
         )}

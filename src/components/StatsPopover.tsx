@@ -189,15 +189,35 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const historyDays: DayRecord[] = useMemo(() => {
     if (!isOpen) return [];
     return getCurrentWeekDailyStats(currentLang);
-  }, [isOpen, currentLang, stats?.cardsDone, stats?.activeSeconds, stats?.mistakesCountToday]);
+  }, [
+    isOpen,
+    currentLang,
+    stats?.cardsDone,
+    stats?.correctCount,
+    stats?.activeSeconds,
+    stats?.mistakesCountToday,
+    langStats?.learnedToday,
+    langStats?.mistakesCount,
+    langStats?.focusSeconds,
+  ]);
 
-  // Weekly momentum totals (sum over the 7 days)
+  // Weekly momentum totals (sum over the 7 days, using live count for today)
+  const todayLiveForWeek = Math.max(
+    getTodayCompletedCardsCount(currentLang),
+    stats?.cardsDone || 0,
+    typeof langStats?.learnedToday === 'number' ? langStats.learnedToday : 0
+  );
+
   const { weekTotalCards, weekTotalHours } = useMemo(() => {
-    const totalCards = historyDays.reduce((sum, d) => sum + (d.cardsReviewed || 0), 0);
+    const totalCards = historyDays.reduce((sum, d) => {
+      const c = d.date === todayKey ? Math.max(d.cardsReviewed || 0, todayLiveForWeek) : (d.cardsReviewed || 0);
+      return sum + c;
+    }, 0);
     const totalMinutes = historyDays.reduce((sum, d) => {
+      const c = d.date === todayKey ? Math.max(d.cardsReviewed || 0, todayLiveForWeek) : (d.cardsReviewed || 0);
       const eff = Math.max(
         d.focusMinutes || 0,
-        (d.cardsReviewed || 0) > 0 ? Math.max(1, Math.round(((d.cardsReviewed || 0) * 4.5) / 60)) : 0
+        c > 0 ? Math.max(1, Math.round((c * 4.5) / 60)) : 0
       );
       return sum + eff;
     }, 0);
@@ -206,7 +226,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
       weekTotalCards: totalCards,
       weekTotalHours: hours
     };
-  }, [historyDays]);
+  }, [historyDays, todayKey, todayLiveForWeek]);
 
   if (!isOpen) return null;
 
@@ -225,7 +245,11 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     }
   })();
 
-  const todayLiveCards = Math.max(getTodayCompletedCardsCount(currentLang), stats?.cardsDone || 0);
+  const todayLiveCards = Math.max(
+    getTodayCompletedCardsCount(currentLang),
+    stats?.cardsDone || 0,
+    typeof currentLangStats?.learnedToday === 'number' ? currentLangStats.learnedToday : 0
+  );
 
   const rawTodaySeconds = Math.max(
     typeof currentLangStats?.focusSeconds === 'number' ? currentLangStats.focusSeconds : 0,
@@ -233,18 +257,27 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   );
   const todayLiveSeconds = normalizeFocusSeconds(rawTodaySeconds, todayLiveCards, true);
 
-  const todayMistakesCount = typeof currentLangStats?.mistakesCount === 'number'
-    ? currentLangStats.mistakesCount
-    : (typeof stats?.mistakesCountToday === 'number' ? stats.mistakesCountToday : 0);
+  const todayMistakesCount = (() => {
+    if (typeof currentLangStats?.mistakesCount === 'number') {
+      const explicitIds = Array.isArray(currentLangStats?.mistakes) ? currentLangStats.mistakes.length : null;
+      if (explicitIds === 0 && Array.isArray(stats?.mistakesPool) && stats.mistakesPool.length > 0 && currentLangStats.mistakesCount >= stats.mistakesPool.length) {
+        return typeof stats?.mistakesCountToday === 'number' ? stats.mistakesCountToday : 0;
+      }
+      return currentLangStats.mistakesCount;
+    }
+    return typeof stats?.mistakesCountToday === 'number' ? stats.mistakesCountToday : 0;
+  })();
 
-  const todayCorrect = typeof currentLangStats?.correctCount === 'number'
-    ? currentLangStats.correctCount
-    : (typeof stats?.correctCount === 'number' ? stats.correctCount : todayLiveCards);
-
-  const totalAnswers = (todayCorrect || 0) + (todayMistakesCount || 0);
+  const correctAnswersToday = Math.max(
+    todayLiveCards,
+    typeof currentLangStats?.correctCount === 'number' ? currentLangStats.correctCount : 0,
+    typeof stats?.correctCount === 'number' ? stats.correctCount : 0
+  );
+  const mistakesToday = Math.max(0, todayMistakesCount);
+  const totalAnswers = correctAnswersToday + mistakesToday;
   const todayAccuracy = totalAnswers === 0
     ? 100
-    : Math.max(0, Math.min(100, Math.round(((todayCorrect || 0) / totalAnswers) * 100)));
+    : Math.max(0, Math.min(100, Math.round((correctAnswersToday / totalAnswers) * 100)));
 
   // Find the selected day record
   const selectedRecord = historyDays.find(d => d.date === selectedDate) || {
@@ -260,7 +293,11 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   // Metrics for the currently selected date
   const displayCardsDone = isSelectedToday ? todayLiveCards : selectedRecord.cardsReviewed;
   const displayTarget = selectedRecord.targetCards || 200;
-  const displayProgressPercent = Math.min(Math.round((displayCardsDone / displayTarget) * 100), 100);
+  const rawProgressPercent = displayTarget > 0 ? (displayCardsDone / displayTarget) * 100 : 0;
+  const displayProgressPercent = Math.min(Math.round(rawProgressPercent), 100);
+  const displayProgressPercentLabel = rawProgressPercent > 0 && rawProgressPercent < 10
+    ? Number(rawProgressPercent.toFixed(1))
+    : Math.min(Math.round(rawProgressPercent), 100);
 
   const rawRecordMinutes = selectedRecord.focusMinutes || 0;
   const effectiveRecordMinutes = normalizeFocusMinutes(
@@ -286,8 +323,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
         const c = selectedRecord.cardsReviewed || 0;
         const m = selectedRecord.mistakesCount || 0;
         const total = c + m;
-        return total === 0 ? 100 : (typeof selectedRecord.accuracy === 'number' ? selectedRecord.accuracy : Math.round((c / total) * 100));
+        return total === 0 ? 100 : Math.max(0, Math.min(100, Math.round((c / total) * 100)));
       })();
+
+  const weekMaxCards = Math.max(
+    25,
+    ...historyDays.map(d => (d.date === todayKey ? Math.max(d.cardsReviewed || 0, todayLiveCards) : (d.cardsReviewed || 0)))
+  );
 
   const accuracyColor = displayAccuracy >= 80 
     ? 'text-emerald-600 dark:text-emerald-400' 
@@ -348,13 +390,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
             {historyDays.map((day) => {
               const isSelected = day.date === selectedDate;
               const isToday = day.date === todayKey;
-              const dayCards = isToday ? todayLiveCards : day.cardsReviewed;
+              const dayCards = isToday ? Math.max(day.cardsReviewed || 0, todayLiveCards) : (day.cardsReviewed || 0);
               const dayTarget = day.targetCards || 200;
               const dayLabel = getDayLabel(day.date, t.days);
 
-              // Bar fill height (proportional to daily target)
+              // Bar fill height (scaled to week activity so 5 cards visibly lifts the bar)
               const fillHeight = dayCards > 0
-                ? Math.min(100, Math.max(10, Math.round((dayCards / dayTarget) * 100)))
+                ? Math.min(100, Math.max(20, Math.round((dayCards / weekMaxCards) * 100)))
                 : 0;
 
               return (
@@ -370,17 +412,17 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
                   title={`${dayLabel}: ${dayCards} / ${dayTarget}`}
                 >
                   {/* Чистая цельная скругленная капсула (pill) без делений */}
-                  <div className="w-3 h-20 bg-neutral-200 dark:bg-neutral-800/80 rounded-full overflow-hidden flex flex-col justify-end p-0.5">
-                    <div
-                      className={`w-full rounded-full transition-all duration-500 ${
-                        isToday
-                          ? 'bg-gradient-to-t from-blue-600 to-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.6)]'
-                          : dayCards > 0
-                            ? 'bg-gradient-to-t from-emerald-500 to-teal-400'
-                            : 'h-0 opacity-0'
-                      }`}
-                      style={{ height: `${fillHeight}%` }}
-                    />
+                  <div className="w-3.5 h-20 bg-neutral-200 dark:bg-neutral-800/80 rounded-full overflow-hidden flex flex-col justify-end p-0.5">
+                    {dayCards > 0 && (
+                      <div
+                        className={`w-full rounded-full transition-all duration-500 min-h-[14px] ${
+                          isToday
+                            ? 'bg-gradient-to-t from-blue-600 to-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.6)]'
+                            : 'bg-gradient-to-t from-emerald-500 to-teal-400'
+                        }`}
+                        style={{ height: `${fillHeight}%` }}
+                      />
+                    )}
                   </div>
 
                   {/* Подпись дня недели */}
@@ -484,7 +526,10 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
               {t.progressLabel} ({isSelectedToday ? t.today : getDayLabel(selectedDate, t.days)})
             </span>
             <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
-              {displayCardsDone} <span className="font-normal text-zinc-400 dark:text-zinc-500">/ {displayTarget}</span>
+              {displayCardsDone}{' '}
+              <span className="font-normal text-zinc-400 dark:text-zinc-500">
+                / {displayTarget} ({displayProgressPercentLabel}%)
+              </span>
             </div>
           </div>
           <div className="w-full h-1.5 rounded-full bg-black/[0.06] dark:bg-zinc-800 overflow-hidden">

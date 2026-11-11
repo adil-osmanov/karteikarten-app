@@ -214,7 +214,10 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
         title="Wortschatz-Matrix öffnen"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
-        <span className="text-xs font-semibold tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors tabular-nums">
+        <span
+          suppressHydrationWarning
+          className="text-xs font-semibold tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors tabular-nums"
+        >
           {totalMastered.toLocaleString(localeStr)} {wordLabel}
         </span>
         <span className="hidden sm:inline text-xs text-zinc-400 dark:text-zinc-500 font-mono">
