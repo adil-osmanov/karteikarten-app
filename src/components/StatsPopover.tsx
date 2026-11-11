@@ -235,9 +235,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
   const todayMistakesCount = typeof currentLangStats?.mistakesCount === 'number'
     ? currentLangStats.mistakesCount
-    : (typeof stats?.mistakesCountToday === 'number'
-        ? stats.mistakesCountToday
-        : (Array.isArray(stats?.mistakesPool) ? stats.mistakesPool.length : 0));
+    : (typeof stats?.mistakesCountToday === 'number' ? stats.mistakesCountToday : 0);
 
   const todayCorrect = typeof currentLangStats?.correctCount === 'number'
     ? currentLangStats.correctCount
@@ -299,15 +297,16 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 dark:bg-black/60 animate-in fade-in duration-100 select-none overscroll-contain touch-none"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 sm:bg-black/40 dark:bg-black/60 backdrop-blur-sm sm:backdrop-blur-none animate-in fade-in duration-150 select-none overscroll-contain touch-none"
       onClick={onClose}
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => e.stopPropagation()}
     >
       <div 
-        className="stats-modal-content w-full max-w-[400px] rounded-[28px] bg-white dark:bg-zinc-900 border border-black/[0.08] dark:border-white/10 p-5 sm:p-6 shadow-2xl text-zinc-900 dark:text-white relative animate-in zoom-in-95 duration-100 font-sans"
+        className="stats-modal-content w-full sm:max-w-[400px] max-h-[90dvh] overflow-y-auto rounded-t-[28px] sm:rounded-[28px] bg-white dark:bg-[#121216] sm:dark:bg-zinc-900 border-t sm:border border-black/[0.08] dark:border-white/10 p-6 pb-[calc(env(safe-area-inset-bottom,16px)+24px)] sm:p-6 shadow-2xl text-zinc-900 dark:text-white relative animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-200 font-sans"
         onClick={(e) => e.stopPropagation()}
       >
+        <div className="w-10 h-1.5 bg-zinc-300 dark:bg-white/20 rounded-full mx-auto mb-5 sm:hidden" />
         {/* Шапка модалки */}
         <div className="flex items-center justify-between pb-3.5 border-b border-black/[0.06] dark:border-white/[0.08]">
           <div>

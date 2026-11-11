@@ -112,18 +112,18 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
         ref={buttonRef}
         type="button"
         onClick={() => setIsMatrixOpen(!isMatrixOpen)}
-        className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white hover:bg-white hover:border-black/[0.14] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-xs transition-all duration-150 select-none active:scale-95 cursor-pointer"
+        className="group h-8 sm:h-9 flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 rounded-full bg-white hover:bg-white hover:border-black/[0.14] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-xs transition-all duration-150 select-none active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
         title="Wortschatz-Matrix öffnen"
       >
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-        <span className="text-xs font-semibold tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+        <span className="text-xs font-semibold tracking-tight group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors tabular-nums">
           {totalMastered.toLocaleString(localeStr)} {wordLabel}
         </span>
-        <span className="text-xs text-zinc-400 dark:text-zinc-500 font-mono">
+        <span className="hidden sm:inline text-xs text-zinc-400 dark:text-zinc-500 font-mono">
           • {totalMastered === 0 ? 'A1' : currentLevel || 'A1'}
         </span>
         <ChevronDown
-          className={`w-3 h-3 text-zinc-400 transition-transform duration-200 ${
+          className={`w-3 h-3 text-zinc-400 shrink-0 transition-transform duration-200 ${
             isMatrixOpen ? 'rotate-180 text-blue-500' : 'group-hover:translate-y-0.5'
           }`}
         />
@@ -132,15 +132,24 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
       {/* ПОПОВЕР МАТРИЦЫ СЛОВАРНОГО ЗАПАСА */}
       <AnimatePresence>
         {isMatrixOpen && (
-          <motion.div
-            ref={popoverRef}
-            initial={{ opacity: 0, y: 6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.98 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-            style={{ willChange: 'transform, opacity' }}
-            className="fixed inset-x-4 top-20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 w-80 sm:w-96 p-5 rounded-3xl shadow-2xl backdrop-blur-2xl border bg-white/95 border-black/10 text-zinc-900 dark:bg-[#141416]/98 dark:border-white/[0.08] dark:text-zinc-100 z-50 select-none text-left transform-gpu will-change-transform"
-          >
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMatrixOpen(false)}
+              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm sm:hidden"
+            />
+            <motion.div
+              ref={popoverRef}
+              initial={{ opacity: 0, y: 24, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.98 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              style={{ willChange: 'transform, opacity' }}
+              className="fixed inset-x-0 bottom-0 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:bottom-auto sm:mt-2 w-full sm:w-96 max-h-[85dvh] overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom,16px)+24px)] sm:p-5 rounded-t-[28px] sm:rounded-3xl shadow-2xl backdrop-blur-2xl border-t sm:border bg-white/95 border-black/10 text-zinc-900 dark:bg-[#121216] sm:dark:bg-[#141416]/98 dark:border-white/[0.08] dark:text-zinc-100 z-50 select-none text-left transform-gpu will-change-transform"
+            >
+              <div className="w-10 h-1.5 bg-zinc-300 dark:bg-white/20 rounded-full mx-auto mb-5 sm:hidden" />
             {/* ШАПКА МАТРИЦЫ: СЧЕТЧИК СЛОВ, ГАРАНТИРОВАННЫЙ БЕЙДЖ ЗА СЕГОДНЯ И % ОТ ЦЕЛИ C1 */}
             <div className="flex items-start justify-between mb-5">
               <div className="flex flex-col gap-1.5">
@@ -227,6 +236,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
               })}
             </div>
           </motion.div>
+          </>
         )}
       </AnimatePresence>
 

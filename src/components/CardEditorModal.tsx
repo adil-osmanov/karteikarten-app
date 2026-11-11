@@ -160,7 +160,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
                 value={targetWord}
                 onChange={(e) => setTargetWord(e.target.value)}
                 placeholder="z.B. sich entscheiden, aus|ruhen"
-                className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
+                className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-base sm:text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
               />
             </div>
             <div className="space-y-1.5">
@@ -172,7 +172,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
                 value={translation}
                 onChange={(e) => setTranslation(e.target.value)}
                 placeholder="Übersetzung..."
-                className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
+                className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-base sm:text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
               />
             </div>
           </div>
@@ -187,7 +187,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
               onChange={(e) => setSentence(e.target.value)}
               rows={2}
               placeholder="Beispielsatz..."
-              className="w-full px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 resize-none transition-colors"
+              className="w-full px-4 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-base sm:text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 resize-none transition-colors"
             />
           </div>
 
@@ -268,7 +268,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
                   value={grammaticalTag}
                   onChange={(e) => setGrammaticalTag(e.target.value)}
                   placeholder="z.B. Präposition + Akkusativ"
-                  className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
+                  className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-base sm:text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 transition-colors"
                 />
               </div>
             )}

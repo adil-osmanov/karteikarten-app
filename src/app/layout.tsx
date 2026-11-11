@@ -2,6 +2,11 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#fbfbfd" },
     { media: "(prefers-color-scheme: dark)", color: "#000000" },
@@ -74,7 +79,7 @@ export default function RootLayout({
         />
       </head>
 
-      <body className="min-h-screen bg-[#fbfbfd] dark:bg-black text-zinc-900 dark:text-[#F5F5F7] font-sans antialiased selection:bg-blue-600/20 dark:selection:bg-blue-500/30 transition-colors duration-200">
+      <body className="min-h-[100dvh] bg-[#fbfbfd] dark:bg-black text-zinc-900 dark:text-[#F5F5F7] font-sans antialiased selection:bg-blue-600/20 dark:selection:bg-blue-500/30 transition-colors duration-200">
         {children}
       </body>
     </html>

@@ -103,7 +103,7 @@ export function getRarityCardClasses(round?: number, isArchivingPulse?: boolean,
  * Dark Mode: Deep OLED monolith (dark:bg-[#121214]/80 dark:backdrop-blur-3xl).
  */
 export const CARD_CONTAINER_SURFACE_CLASSES = cn(
-  "rounded-[36px] select-none",
+  "rounded-[28px] sm:rounded-[36px] select-none",
   // Light Mode (300g Bristol Cardstock)
   "bg-[#FAF9F6] text-[#1D1D1F]",
   // Dark Mode (Deep OLED Monolith)
@@ -111,7 +111,7 @@ export const CARD_CONTAINER_SURFACE_CLASSES = cn(
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "relative w-full max-w-4xl lg:max-w-5xl min-h-[500px] md:min-h-[540px] h-[600px] max-h-[600px] mx-auto p-10 rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden",
+  "relative w-full max-w-4xl lg:max-w-5xl min-h-[320px] sm:min-h-[540px] h-auto sm:h-[600px] sm:max-h-[600px] mx-auto p-5 sm:p-10 rounded-[28px] sm:rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 
@@ -188,14 +188,14 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
         ref={ref}
         className={cn(
           is3DFace
-            ? cn("absolute inset-0 w-full h-full p-10 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[36px] overflow-hidden", CARD_CONTAINER_SURFACE_CLASSES)
+            ? cn("absolute inset-0 w-full h-full p-5 sm:p-10 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[28px] sm:rounded-[36px] overflow-hidden", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
           isVaporizing && "opacity-0 scale-[1.01] transition-all duration-150 ease-out pointer-events-none",
           className
         )}
         style={{
-          contain: 'layout size',
+          contain: is3DFace ? 'layout size' : 'layout',
           ...(is3DFace
             ? {
                 WebkitBackfaceVisibility: 'hidden',

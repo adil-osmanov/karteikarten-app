@@ -4486,7 +4486,10 @@ function RapidFlashcardMode({
   return (
     <div 
       className={cn(
-        "relative w-full max-w-4xl lg:max-w-5xl min-h-[500px] md:min-h-[540px] h-[600px] max-h-[600px] mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
+        "relative w-full max-w-4xl lg:max-w-5xl mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
+        isRound1or2
+          ? "min-h-[380px] h-[440px] sm:min-h-[540px] sm:h-[600px] sm:max-h-[600px]"
+          : "min-h-[300px] sm:min-h-[540px] h-auto sm:h-[600px] sm:max-h-[600px]",
         isTransitioning
           ? 'opacity-0 transition-opacity duration-100 ease-out pointer-events-none'
           : 'opacity-100 transition-opacity duration-100 ease-out'
@@ -4555,7 +4558,7 @@ function RapidFlashcardMode({
 
             {/* Центр: Слово + Множественное число / Формы */}
             <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto select-text">
-              <h2 className="text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight">
+              <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight break-words max-w-full">
                 {article && <span className={getArticleColor(article)}>{article} </span>}
                 {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
               </h2>
@@ -4567,7 +4570,7 @@ function RapidFlashcardMode({
             </div>
 
             {/* Низ: Пусто для чистоты */}
-            <div className="w-full flex justify-center shrink-0 min-h-[52px]" />
+            <div className="w-full flex justify-center shrink-0 min-h-[32px] sm:min-h-[52px]" />
           </CardContainer>
 
           {/* ОБРАТНАЯ СТОРОНА (ПЕРЕВОД + ПРИМЕР + КНОПКА ДИНАМИКА) */}
@@ -4614,9 +4617,9 @@ function RapidFlashcardMode({
             </div>
 
             {/* Центр: Слово, перевод, чистый пример */}
-            <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto select-text">
+            <div className="flex-1 w-full flex flex-col items-center justify-center text-center my-auto select-text overflow-y-auto">
               <div>
-                <h2 className="text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight">
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight break-words max-w-full">
                   {article && <span className={getArticleColor(article)}>{article} </span>}
                   {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                 </h2>
@@ -4627,7 +4630,7 @@ function RapidFlashcardMode({
                 )}
               </div>
 
-              <p className="text-xl md:text-2xl font-medium text-neutral-800 dark:text-neutral-200 mt-6">
+              <p className="text-lg sm:text-xl md:text-2xl font-medium text-neutral-800 dark:text-neutral-200 mt-4 sm:mt-6">
                 {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
               </p>
 
@@ -4644,7 +4647,7 @@ function RapidFlashcardMode({
             </div>
 
             {/* Низ: Пусто для чистоты */}
-            <div className="w-full flex justify-center shrink-0 min-h-[52px]" />
+            <div className="w-full flex justify-center shrink-0 min-h-[32px] sm:min-h-[52px]" />
           </CardContainer>
         </div>
       ) : (
@@ -4701,23 +4704,23 @@ function RapidFlashcardMode({
 
           {/* Центр: Русский перевод и Cloze поле ввода */}
           <div 
-            className="flex-1 w-full flex flex-col justify-center items-center text-center my-auto select-text transition-all duration-200 ease-out animate-in fade-in duration-150"
+            className="flex-1 w-full flex flex-col justify-center items-center text-center my-auto select-text transition-all duration-200 ease-out animate-in fade-in duration-150 py-2 sm:py-0"
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
-            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-white mb-6 max-w-2xl leading-tight">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-white mb-4 sm:mb-6 max-w-2xl leading-tight">
               {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
             </h2>
 
             {effectivePrefix ? (
-              <div className="w-full max-w-2xl flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-                <span className="text-2xl md:text-3xl font-medium text-neutral-500 dark:text-neutral-400 tracking-normal select-none whitespace-nowrap">
+              <div className="w-full max-w-2xl flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-4 gap-y-2.5 sm:gap-y-3">
+                <span className="text-xl sm:text-2xl md:text-3xl font-medium text-neutral-500 dark:text-neutral-400 tracking-normal select-none whitespace-nowrap">
                   {effectivePrefix}
                 </span>
-                <div className="inline-flex items-center justify-center">
+                <div className="inline-flex items-center justify-center max-w-full">
                   <div
                     onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                     className={cn(
-                      "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
+                      "relative inline-flex items-center justify-center min-h-[52px] h-13 sm:min-h-[64px] sm:h-16 px-4 sm:px-8 py-2 sm:py-3 rounded-2xl min-w-[200px] sm:min-w-[260px] max-w-full sm:max-w-xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
                       isMobile && "select-none",
                       isAnswered
                         ? (!isSurrendered
@@ -4768,12 +4771,12 @@ function RapidFlashcardMode({
                           spellCheck={false}
                           placeholder=""
                           style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent"
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent text-base"
                         />
                         <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
                           displayParts.totalLength > 22
-                            ? 'text-xl sm:text-2xl'
-                            : 'text-2xl md:text-3xl'
+                            ? 'text-lg sm:text-2xl'
+                            : 'text-xl sm:text-2xl md:text-3xl'
                         }`}>
                           {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
                           <span>{displayParts.prefix}</span>
@@ -4785,7 +4788,7 @@ function RapidFlashcardMode({
                   </div>
                 </div>
                 {parsedTarget.suffixContext && (
-                  <span className="text-2xl md:text-3xl font-medium text-neutral-400 dark:text-neutral-500 tracking-normal select-none whitespace-nowrap">
+                  <span className="text-xl sm:text-2xl md:text-3xl font-medium text-neutral-400 dark:text-neutral-500 tracking-normal select-none whitespace-nowrap">
                     {parsedTarget.suffixContext}
                   </span>
                 )}
@@ -4795,7 +4798,7 @@ function RapidFlashcardMode({
                 <div
                   onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                   className={cn(
-                    "relative inline-flex items-center justify-center min-h-[64px] h-16 px-8 py-3 rounded-2xl min-w-[260px] max-w-xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
+                    "relative inline-flex items-center justify-center min-h-[52px] h-13 sm:min-h-[64px] sm:h-16 px-4 sm:px-8 py-2 sm:py-3 rounded-2xl w-full max-w-[280px] sm:w-auto sm:min-w-[260px] sm:max-w-xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
                     isMobile && "select-none",
                     isAnswered
                       ? (!isSurrendered
@@ -4846,12 +4849,12 @@ function RapidFlashcardMode({
                         spellCheck={false}
                         placeholder=""
                         style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-text pointer-events-auto caret-transparent text-transparent bg-transparent text-base"
                       />
                       <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
                         displayParts.totalLength > 22
-                          ? 'text-xl sm:text-2xl'
-                          : 'text-2xl md:text-3xl'
+                          ? 'text-lg sm:text-2xl'
+                          : 'text-xl sm:text-2xl md:text-3xl'
                       }`}>
                         {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
                         <span>{displayParts.prefix}</span>
@@ -4886,7 +4889,7 @@ function RapidFlashcardMode({
           </div>
 
           {/* Низ: Кнопка Weiter */}
-          <div className="w-full flex justify-center mt-6 min-h-[56px]">
+          <div className="w-full flex justify-center mt-4 sm:mt-6 min-h-[44px] sm:min-h-[56px]">
             {isAnswered && (
               <button
                 type="button"
@@ -5463,8 +5466,8 @@ function RapidSession({
   const progressPercentage = safeCompleted === 0 ? 0 : Math.min(100, (safeCompleted / safeTotal) * 100);
 
   return (
-    <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
-      <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-3">
+    <div className="flex flex-col w-full items-center pt-[env(safe-area-inset-top,8px)] sm:pt-3 pb-4 sm:pb-8 relative z-50">
+      <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-2 sm:mb-3">
         <div className="flex items-center justify-between mb-2">
           <button onClick={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
@@ -5487,8 +5490,8 @@ function RapidSession({
       </div>
 
       <div className={cn(
-        "w-full max-w-4xl lg:max-w-5xl mx-auto px-4 flex flex-col items-center select-none relative min-h-[500px] md:min-h-[540px]",
-        (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[320px] md:pb-6" : ""
+        "w-full max-w-4xl lg:max-w-5xl mx-auto px-3 sm:px-4 flex flex-col items-center select-none relative min-h-0 sm:min-h-[540px]",
+        (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[260px] sm:pb-6" : ""
       )}>
         <RapidFlashcardMode
           card={liveCard}
@@ -5577,7 +5580,7 @@ function RapidStudyCard({
     : (isReview || card.isArchived);
 
   return (
-    <div className="w-full flex justify-center relative min-h-[500px] md:min-h-[540px]">
+    <div className="w-full flex justify-center relative min-h-0 sm:min-h-[540px]">
       <RapidFlashcardMode
         card={card}
         progress={progress}
@@ -5606,7 +5609,7 @@ function StudyEntry(props: {
     : <StudyInterface {...props} />;
 
   return (
-    <main className="min-h-screen w-full bg-[#ECECEF] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 transition-colors duration-200">
+    <main className="min-h-[100dvh] w-full pt-[env(safe-area-inset-top,8px)] pb-[env(safe-area-inset-bottom,16px)] bg-[#ECECEF] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 transition-colors duration-200">
       {content}
     </main>
   );
@@ -6117,8 +6120,8 @@ function StudyInterface({
   const sessionProgressPercentage = safeSessionCompleted === 0 ? 0 : Math.min(100, (safeSessionCompleted / safeSessionTotal) * 100);
 
   return (
-    <div className="flex flex-col w-full items-center pt-2 sm:pt-3 pb-8 relative z-50">
-      <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-3">
+    <div className="flex flex-col w-full items-center pt-[env(safe-area-inset-top,8px)] sm:pt-3 pb-4 sm:pb-8 relative z-50">
+      <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-2 sm:mb-3">
         <div className="flex items-center justify-between mb-2">
           <button onClick={() => { flushDailyStatsToCloud(studyLanguage); onBack(); }} className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors p-1.5 -ml-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 cursor-pointer" title="Zurück">
             <ArrowLeft className="w-5 h-5" />
@@ -6148,8 +6151,8 @@ function StudyInterface({
       </div>
 
       <div className={cn(
-        "w-full max-w-4xl lg:max-w-5xl mx-auto px-4 flex flex-col items-center select-none relative min-h-[500px] md:min-h-[540px]",
-        isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[320px] md:pb-6" : ""
+        "w-full max-w-4xl lg:max-w-5xl mx-auto px-3 sm:px-4 flex flex-col items-center select-none relative min-h-0 sm:min-h-[540px]",
+        isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[260px] sm:pb-6" : ""
       )}>
         {currentCardTrainingMode === 'preposition_drill' ? (
           <PrepStudyCard
@@ -7054,7 +7057,7 @@ function StudyCard({
         isLegendary={isLegendaryVisual}
         isVaporizing={isVaporizing}
         className={cn(
-          "min-h-[500px] md:min-h-[540px] transition-all duration-150 ease-out",
+          "min-h-[300px] sm:min-h-[540px] transition-all duration-150 ease-out",
           isTransitioning
             ? "opacity-0 scale-[0.985] blur-md pointer-events-none"
             : "opacity-100 scale-100 blur-0"
@@ -7065,7 +7068,7 @@ function StudyCard({
           }
         }}
       >
-        <div className="flex items-center justify-between w-full h-12 shrink-0 mb-6">
+        <div className="flex items-center justify-between w-full h-10 sm:h-12 shrink-0 mb-4 sm:mb-6">
           {/* Кнопки звука и скорости */}
           <div className="flex items-center gap-2 shrink-0">
             <button 
@@ -7137,7 +7140,7 @@ function StudyCard({
         </div>
 
         <div className="flex-1 w-full flex flex-col justify-center items-center text-center my-auto transition-all duration-200 ease-out animate-in fade-in duration-150">
-          <div className="text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-6">
+          <div className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-4 sm:mb-6">
             {parts[0]}
             
             {phase === "Answer" ? (
@@ -7189,7 +7192,7 @@ function StudyCard({
                       onKeyDown={handleKeyDown}
                       style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
                       className={cn(
-                        "absolute inset-0 opacity-0 cursor-default w-full h-full caret-transparent text-transparent bg-transparent",
+                        "absolute inset-0 opacity-0 cursor-default w-full h-full caret-transparent text-transparent bg-transparent text-base",
                         isMobile && "pointer-events-none select-none"
                       )}
                       autoComplete="off"
@@ -7230,7 +7233,7 @@ function StudyCard({
         </div>
 
         {/* 3. Нижняя панель действий (СТРОГО ВНУТРИ КАРТОЧКИ) */}
-        <div className="w-full flex justify-center shrink-0 mt-8 pt-2 min-h-[52px]">
+        <div className="w-full flex justify-center shrink-0 mt-4 sm:mt-8 pt-2 min-h-[44px] sm:min-h-[52px]">
           {isMultipleChoice && phase === "Question" ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
               {resolvedOptions.map((opt, idx) => {
@@ -7632,34 +7635,34 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
 
       <header 
         className={cn(
-          "sticky top-0 z-50 w-full select-none backdrop-blur-xl transition-colors duration-200 border-b transform-gpu [backface-visibility:hidden]",
+          "sticky top-0 z-50 w-full select-none backdrop-blur-xl transition-colors duration-200 border-b transform-gpu [backface-visibility:hidden] pt-[env(safe-area-inset-top,0px)]",
           "bg-[#ECECEF]/80 dark:bg-black/80 border-black/[0.05] dark:border-white/[0.08]"
         )}
       >
-        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 py-2.5 sm:py-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-y-2.5 sm:gap-y-0">
+        <div className="w-full max-w-6xl mx-auto px-3 sm:px-8 py-2.5 sm:py-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-y-0">
           
           {/* 1. ЛЕВЫЙ УГОЛ: ЯЗЫКОВАЯ ПИЛЮЛЯ / BACK PILL */}
-          <div className="flex items-center justify-start flex-1 min-w-0 order-1 sm:order-1">
+          <div className="flex items-center justify-start sm:flex-1 min-w-0 shrink-0 order-1 sm:order-1">
             {activeBook ? (
               <button
                 onClick={onBack}
-                className="px-3.5 py-1.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                className="h-8 sm:h-9 px-2.5 sm:px-3.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center justify-center gap-2 active:scale-95 cursor-pointer select-none whitespace-nowrap shrink-0"
                 title="Zurück zur Übersicht"
               >
-                <ArrowLeft className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
-                <span className="truncate max-w-[130px] sm:max-w-[200px]">{activeBook.title}</span>
+                <ArrowLeft className="w-3.5 h-3.5 shrink-0 text-neutral-500 dark:text-neutral-400" />
+                <span className="hidden sm:inline truncate max-w-[180px]">{activeBook.title}</span>
               </button>
             ) : (
               <div ref={langRef} className="relative">
                 <button
                   type="button"
                   onClick={() => setIsLangOpen(prev => !prev)}
-                  className="px-3.5 py-1.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+                  className="h-8 sm:h-9 px-2.5 sm:px-3.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-1.5 sm:gap-2 active:scale-95 cursor-pointer select-none whitespace-nowrap shrink-0"
                   title="Sprache wählen"
                 >
                   <span className="text-base leading-none select-none">{currentLang.flag}</span>
                   <span className="font-bold text-xs tracking-tight text-neutral-800 dark:text-neutral-200">{appLanguage}</span>
-                  <ChevronDown className={cn("w-3 h-3 text-neutral-400 dark:text-neutral-400 transition-transform duration-200", isLangOpen && "rotate-180")} />
+                  <ChevronDown className={cn("w-3 h-3 text-neutral-400 dark:text-neutral-400 transition-transform duration-200 shrink-0", isLangOpen && "rotate-180")} />
                 </button>
 
                 <AnimatePresence>
@@ -7704,19 +7707,19 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
           </div>
 
           {/* 2. ПО ЦЕНТРУ: КНОПКА ПОВТОРА (Hero CTA) */}
-          <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-1 sm:pb-0">
+          <div className="w-full sm:w-auto order-3 sm:order-2 flex items-center justify-center shrink-0 pb-0.5 sm:pb-0">
             {dueCount > 0 ? (
               <button
                 type="button"
                 onClick={onStartReview}
-                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none active:scale-[0.98]
+                className="w-full max-w-sm mx-auto sm:w-auto justify-center h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none active:scale-[0.98]
                   bg-blue-600 hover:bg-blue-500
                   text-white
                   shadow-[0_0_24px_rgba(37,99,235,0.7)] hover:shadow-[0_0_32px_rgba(37,99,235,0.9)]
                   border border-blue-400/40"
               >
                 <RotateCcw className="w-4 h-4 text-white shrink-0" />
-                <span className="font-semibold tracking-wider uppercase">
+                <span className="font-semibold tracking-wider uppercase whitespace-nowrap">
                   {dueCount} {getRepeatButtonLabel(effectiveLang || appLanguage)}
                 </span>
               </button>
@@ -7724,10 +7727,10 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
               <button
                 type="button"
                 disabled
-                className="h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none uppercase text-xs"
+                className="w-full max-w-sm mx-auto sm:w-auto justify-center h-11 px-7 rounded-full text-sm font-semibold tracking-wide inline-flex items-center gap-2.5 border border-black/5 dark:border-white/5 bg-zinc-100 dark:bg-white/[0.04] text-zinc-400 dark:text-zinc-500 cursor-default opacity-70 select-none uppercase text-xs"
               >
                 <RotateCcw className="w-4 h-4 text-zinc-400 shrink-0" />
-                <span className="font-semibold tracking-wider uppercase">
+                <span className="font-semibold tracking-wider uppercase whitespace-nowrap">
                   0 {getRepeatButtonLabel(effectiveLang || appLanguage)}
                 </span>
               </button>
@@ -7735,7 +7738,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
           </div>
 
           {/* 3. ПРАВЫЙ УГОЛ: НАВИГАЦИОННАЯ ПАНЕЛЬ APPLE */}
-          <div className="flex items-center justify-end flex-1 gap-2 order-2 sm:order-3">
+          <div className="flex items-center justify-end sm:flex-1 gap-1.5 sm:gap-2 shrink-0 order-2 sm:order-3">
             {/* Wortschatz-Matrix (CEFR Умная матрица словарного запаса) */}
             <WortschatzMatrixPopover language={appLanguage} />
 
@@ -7749,10 +7752,10 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                   setIsStatsOpen(true);
                 }
               }}
-              className="px-3.5 py-1.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-2 active:scale-95 cursor-pointer select-none"
+              className="h-8 sm:h-9 px-2.5 sm:px-3.5 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md text-xs font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 flex items-center gap-1.5 sm:gap-2 active:scale-95 cursor-pointer select-none whitespace-nowrap shrink-0"
               title="Статистика дня"
             >
-              <svg className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg className="w-3.5 h-3.5 shrink-0 text-neutral-500 dark:text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="m12 3-9 5 9 5 9-5-9-5z" />
                 <path d="m3 12 9 5 9-5" />
                 <path d="m3 17 9 5 9-5" />
@@ -7766,7 +7769,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
             <button 
               type="button"
               onClick={toggleTheme}
-              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 active:scale-95 cursor-pointer"
+              className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 active:scale-95 cursor-pointer"
               aria-label="Toggle theme"
               title={isDark ? "Heller Modus" : "Dunkler Modus"}
             >
@@ -7950,7 +7953,7 @@ const DeckCard = React.memo(({
     <div 
       onClick={() => { initAudioCtx(); onCardClick(deck.id); }}
       className={cn(
-        "relative p-5 rounded-3xl flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[152px] transition-[opacity,background-color,border-color,transform] duration-150 ease-out transform-gpu [backface-visibility:hidden]",
+        "relative p-4 sm:p-5 rounded-2xl sm:rounded-3xl flex flex-col justify-between group overflow-hidden select-none cursor-pointer h-full min-h-[128px] sm:min-h-[152px] transition-[opacity,background-color,border-color,transform] duration-150 ease-out transform-gpu [backface-visibility:hidden]",
         // Светлая тема (тактильная бумага Apple 300g с мягкой многослойной тенью на полотне #F5F5F7):
         "bg-white border border-black/[0.07] shadow-[0_2px_8px_rgba(0,0,0,0.04),0_12px_24px_-4px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_32px_rgba(0,0,0,0.08)] hover:border-black/10 hover:-translate-y-0.5",
         // Темная тема:
@@ -8241,8 +8244,8 @@ function BookEditorModal({ book, onClose, onSave }: { book?: BookMeta | { catego
         <h2 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">{existingBook ? 'Buch bearbeiten' : 'Neues Buch'}</h2>
         
         <div className="space-y-3">
-          <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
-          <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
+          <input type="text" placeholder="Titel" value={title} onChange={e => setTitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-base text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
+          <input type="text" placeholder="Untertitel (optional)" value={subtitle} onChange={e => setSubtitle(e.target.value)} className="w-full px-4 py-3 bg-gray-50 dark:bg-black/50 border border-gray-200 dark:border-white/10 rounded-xl text-base text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-blue-600 dark:border-blue-500 transition-colors font-medium" />
           
           <div className="flex flex-col gap-2 pt-2">
             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Kategorie</label>
@@ -11834,7 +11837,7 @@ export default function App() {
     return list;
   }, [filteredDecksList]);
 
-  if (!isMounted) return <main className="min-h-screen bg-[#ECECEF] dark:bg-black" />;
+  if (!isMounted) return <main className="min-h-[100dvh] bg-[#ECECEF] dark:bg-black" />;
 
 
   if (activeDeckId) {
@@ -12377,7 +12380,7 @@ export default function App() {
     : ((activeBook?.accentColor && activeBook.accentColor.startsWith('#')) ? activeBook.accentColor : '#3B82F6');
 
   return (
-    <div className="min-h-screen relative w-full bg-[#ECECEF] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
+    <div className="min-h-[100dvh] relative w-full pb-[env(safe-area-inset-bottom,0px)] bg-[#ECECEF] dark:bg-black text-[#1D1D1F] dark:text-zinc-100 selection:bg-blue-600/20 dark:selection:bg-blue-500/30 overflow-x-hidden">
       {/* Кинозерно (Аппаратный шум) */}
       <div 
         className="fixed inset-0 pointer-events-none opacity-[0.015] mix-blend-overlay z-[9999]"
@@ -12548,7 +12551,7 @@ export default function App() {
         onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
       />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-28 overflow-x-hidden">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-[calc(env(safe-area-inset-bottom,16px)+48px)] sm:pb-16 md:pb-28 overflow-x-hidden">
         {!activeBookId ? (
           <div className="relative pb-16">
             {/* Студийный свет сверху (Gallery Spotlight) */}
@@ -12566,7 +12569,7 @@ export default function App() {
 
             {/* Единая абсолютно симметричная сетка книг для выбранной категории */}
             <div 
-              className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 transform-gpu [backface-visibility:hidden]"
+              className="grid grid-cols-2 gap-3.5 px-1 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4 lg:gap-8 transform-gpu [backface-visibility:hidden]"
             >
               {isLoadingBooks && filteredCategoryBooks.length === 0 ? (
                 [1, 2, 3, 4].map((i) => (

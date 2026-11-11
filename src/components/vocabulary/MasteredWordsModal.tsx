@@ -246,7 +246,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Поиск по выученным словам..."
-                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-9 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:border-amber-400/50 transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-9 py-2 text-base sm:text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:border-amber-400/50 transition-colors"
               />
               {searchQuery && (
                 <button
