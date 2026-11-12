@@ -11,19 +11,20 @@ import {
   extractConciseTranslation,
   purgeJunkExportierenWord,
   type CEFRLevel,
+  type MatrixCEFRLevel,
   type AppLang,
 } from '@/hooks/useWortschatzMatrix';
-import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
+import { normalizeMasteredLemma, isExcludedStandaloneLemma } from '@/lib/utils/lemmaNormalizer';
 import { formatSeparableWord } from '@/lib/utils/formatSeparableWord';
 
 export interface MasteredWordsModalProps {
   isOpen: boolean;
   onClose: () => void;
   language?: string;
-  initialLevelFilter?: CEFRLevel | 'Alle';
+  initialLevelFilter?: MatrixCEFRLevel | 'Alle';
 }
 
-const FILTER_LEVELS: Array<'Alle' | CEFRLevel> = ['Alle', 'A1', 'A2', 'B1', 'B2', 'C1'];
+const FILTER_LEVELS: Array<'Alle' | MatrixCEFRLevel> = ['Alle', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
 export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   isOpen,
@@ -33,7 +34,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
 }) => {
   const [mounted, setMounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedLevel, setSelectedLevel] = useState<'Alle' | CEFRLevel>(initialLevelFilter);
+  const [selectedLevel, setSelectedLevel] = useState<'Alle' | MatrixCEFRLevel>(initialLevelFilter);
   const [updateTick, setUpdateTick] = useState(0);
 
   useEffect(() => {
@@ -97,7 +98,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     decks.forEach((deck) => {
       deck.cards?.forEach((c) => {
         if (c.id) byId.set(c.id, c);
-        const lKey = normalizeLemmaKey(c.targetWord || '');
+        const lKey = normalizeMasteredLemma(c.targetWord || '');
         if (lKey) {
           if (!byLemma.has(lKey)) {
             byLemma.set(lKey, c);
@@ -134,12 +135,13 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         return (
           !w.includes('exportieren') &&
           !tr.includes('деяние') &&
+          !isExcludedStandaloneLemma(normalizeMasteredLemma(entry.originalWord)) &&
           !isFunctionalParticle(entry.originalWord) &&
-          !isFunctionalParticle(normalizeLemmaKey(entry.originalWord))
+          !isFunctionalParticle(normalizeMasteredLemma(entry.originalWord))
         );
       })
       .map((entry) => {
-        const lKey = normalizeLemmaKey(entry.originalWord);
+        const lKey = normalizeMasteredLemma(entry.originalWord);
         const card = (entry.cardId && cardsById.get(entry.cardId)) || cardsByLemma.get(lKey) || null;
 
         let translation =
@@ -162,7 +164,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           translation = '';
         }
 
-        const level = (entry.level || card?.level || 'B1') as CEFRLevel;
+        const level = (entry.level || card?.level || 'B1') as MatrixCEFRLevel;
         const nextReviewDate =
           card?.nextReviewDate ?? (card as any)?.next_review_date ?? entry.nextReviewDate ?? null;
 

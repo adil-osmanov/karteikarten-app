@@ -24,9 +24,9 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, purgeOrphanedMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
-import { normalizeLemmaKey, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
+import { normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -2059,7 +2059,7 @@ export function calculateNextSRSState(
       interval: nextInterval,
       easeFactor: nextEase,
       nextReviewDate,
-      first_mastered_at: card.first_mastered_at || (nextMastery >= 4 ? new Date().toISOString() : undefined)
+      first_mastered_at: card.first_mastered_at || (nextMastery >= 1 ? new Date().toISOString() : undefined)
     };
   } else {
     // При ошибке: сброс интервала на 1 день (86400000 мс), repetitions = 0
@@ -2998,7 +2998,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       // Синхронизация явного уровня карточки с user_mastered_words при наличии записи
       if (updates.level && updates.targetWord) {
         try {
-          const lemmaKey = normalizeLemmaKey(updates.targetWord);
+          const lemmaKey = normalizeMasteredLemma(updates.targetWord);
           const { data: { user } } = await supabase.auth.getUser();
           if (user?.id && lemmaKey) {
             await supabase
@@ -3148,17 +3148,14 @@ export const useStore = create<DeckState>()((set, get) => ({
     get().decrementDueCardsCount();
 
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const targetLemmaKey = normalizeLemmaKey(rawWord);
+    const targetLemmaKey = normalizeMasteredLemma(rawWord);
 
-    // CEFR Wortschatz-Matrix: Автоматическая дедупликация и фиксация / списание слова
-    const singleLemma = targetLemmaKey || normalizeGermanLemma(rawWord);
-    const safeLemma = singleLemma.split(' ')[0].trim();
-
-    if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
-      if (safeLemma && safeLemma.length >= 2) {
+    // CEFR Wortschatz-Matrix: Мгновенный +1 при переходе mastery 0 -> >= 1 (строго append-only)
+    if (isCorrect && !isHilfe && (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 1))) {
+      if (targetLemmaKey && targetLemmaKey.length >= 2) {
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-        if (!isGrammarDeckOrBook(currentDeck, currentBook) && !isFunctionalParticle(rawWord)) {
+        if (!isGrammarDeckOrBook(currentDeck, currentBook, validCard) && !isFunctionalParticle(rawWord)) {
           const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
           const deckOrBookLevel =
             currentDeck?.level ||
@@ -3172,19 +3169,11 @@ export const useStore = create<DeckState>()((set, get) => ({
             bookId: currentDeck?.bookId,
             language: cardLang,
             timestamp: Date.now(),
-            isReview: Boolean(isReviewSession || wasMasteredBefore),
+            isReview: Boolean(isReviewSession || (targetCard.masteryLevel ?? 0) >= 1 || targetCard.isArchived),
             first_mastered_at: validCard.first_mastered_at || targetCard.first_mastered_at,
             created_at: validCard.created_at || targetCard.created_at,
           });
         }
-      }
-    } else if (wasMasteredBefore && (!isCorrect || isHilfe || !validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel < 4))) {
-      // Demotion! Списание при ошибке («Wiederholen / Не знаю»)
-      if (safeLemma) {
-        const currentDeck = get().decks.find(d => d.id === deckId);
-        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-        const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-        removeMasteredLemma(safeLemma, cardLang);
       }
     }
 
@@ -3253,16 +3242,13 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     const validCard = card;
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const targetLemmaKey = normalizeLemmaKey(rawWord);
+    const targetLemmaKey = normalizeMasteredLemma(rawWord);
 
-    const singleLemma = targetLemmaKey || normalizeGermanLemma(rawWord);
-    const safeLemma = singleLemma.split(' ')[0].trim();
-
-    if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 4)) {
-      if (safeLemma && safeLemma.length >= 2) {
+    if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 1)) {
+      if (targetLemmaKey && targetLemmaKey.length >= 2) {
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-        if (!isGrammarDeckOrBook(currentDeck, currentBook) && !isFunctionalParticle(rawWord)) {
+        if (!isGrammarDeckOrBook(currentDeck, currentBook, validCard) && !isFunctionalParticle(rawWord)) {
           const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
           const deckOrBookLevel =
             currentDeck?.level ||
@@ -3276,18 +3262,11 @@ export const useStore = create<DeckState>()((set, get) => ({
             bookId: currentDeck?.bookId,
             language: cardLang,
             timestamp: Date.now(),
-            isReview: Boolean(wasMasteredBefore),
-            first_mastered_at: validCard.first_mastered_at || targetCard.first_mastered_at,
+            isReview: Boolean((targetCard.masteryLevel ?? 0) >= 1 || targetCard.isArchived),
+            first_mastered_at: validCard.first_mastered_at || targetCard.first_mastered_at || ((targetCard.masteryLevel ?? 0) === 0 ? new Date().toISOString() : undefined),
             created_at: validCard.created_at || targetCard.created_at,
           });
         }
-      }
-    } else if (wasMasteredBefore && score < 4) {
-      if (safeLemma) {
-        const currentDeck = get().decks.find(d => d.id === deckId);
-        const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
-        const cardLang = currentDeck?.language || currentBook?.language || get().appLanguage || 'DE';
-        removeMasteredLemma(safeLemma, cardLang);
       }
     }
 
@@ -12277,7 +12256,6 @@ export default function App() {
 
           const syncedDecks = useStore.getState().decks;
           await autoBackfillMasteredWords(syncedDecks, useStore.getState().books, useStore.getState().appLanguage);
-          await purgeOrphanedMasteredWords(syncedDecks, useStore.getState().books, useStore.getState().appLanguage);
           if (typeof window !== 'undefined') {
             localStorage.setItem('last_library_cloud_sync', String(Date.now()));
           }

@@ -10,6 +10,68 @@ const SEPARABLE_PREFIXES = new Set([
   'weg', 'weiter', 'wieder', 'zu', 'zurecht', 'zurück', 'zusammen', 'zwischen'
 ]);
 
+const EXCLUDED_STANDALONE_LEMMAS = new Set([
+  'der', 'die', 'das', 'dem', 'den', 'des', 'ein', 'eine', 'einen', 'einem', 'einer', 'eines',
+  'sich', 'mich', 'dich', 'uns', 'euch', 'mir', 'dir', 'ihm', 'ihr', 'ihnen', 'ihn', 'sie', 'er', 'es', 'wir',
+  'jemanden', 'jemandem', 'jemandes', 'jemand', 'etwas', 'jdn', 'jdm', 'jmdn', 'jmdm', 'jmd', 'etw',
+  'an', 'in', 'auf', 'aus', 'bei', 'mit', 'nach', 'von', 'zu', 'über', 'unter', 'vor', 'hinter', 'um', 'für', 'durch', 'gegen', 'ohne',
+  'und', 'aber', 'oder', 'denn', 'weil', 'dass', 'ob', 'als', 'wie',
+]);
+
+/**
+ * Единая каноническая нормализация лемм для подсчёта выученных слов (Wortschatz-Matrix)
+ * и строгой дедупликации между книгами/уроками.
+ */
+export function normalizeMasteredLemma(rawWord: string): string {
+  if (!rawWord || typeof rawWord !== 'string') return '';
+  let s = rawWord.toLowerCase().trim();
+
+  // Убираем разделитель отделяемых приставок: mit|teilen -> mitteilen
+  s = s.replace(/[|·\u2506\u250A]/g, '');
+
+  // Инверсия отделяемых приставок с многоточием ("schrauben ... auf" -> "aufschrauben")
+  const ellipsisMatch = s.match(/^([a-zäöüß]+)\s*(?:\.{2,}|…+)\s*([a-zäöüß]+)$/i);
+  if (ellipsisMatch) {
+    return `${ellipsisMatch[2]}${ellipsisMatch[1]}`.toLowerCase();
+  }
+
+  // Убираем пояснения в скобках
+  s = s.replace(/\(.*?\)|\[.*?\]/g, ' ').trim();
+
+  // Сначала убираем предложное управление целиком ("vor jemandem", "auf etwas", "über etw.", "mit Dat")
+  s = s.replace(
+    /(?:^|\s)(?:an|auf|aus|bei|durch|für|gegen|hinter|in|mit|nach|neben|ohne|über|um|unter|von|vor|zu|zwischen)\s+(?:jemanden|jemandem|jemandes|jemand|etwas|jmdn\.?|jmdm\.?|jmd\.?|jdn\.?|jdm\.?|etw\.?|akk\.?|dat\.?|gen\.?)(?=\s|$|[.,/#!$%^&*;:{}=\-_`~?])/gi,
+    ' '
+  );
+
+  // Убираем артикли в начале
+  s = s.replace(/^(der|die|das|dem|den|des|ein|eine|einen|einem|einer|eines)\s+/gi, '');
+
+  // Убираем возвратные местоимения и управление падежами
+  s = s.replace(
+    /(?:^|\s)(sich|mich|dich|uns|euch|jemanden|jemandem|jemandes|jemand|etwas|jmdn\.?|jmdm\.?|jdn\.?|jdm\.?|jmd\.?|etw\.?)(?=\s|$|[.,/#!$%^&*;:{}=\-_`~?])/gi,
+    ' '
+  );
+
+  // Убираем знаки препинания и схлопываем пробелы
+  s = s.replace(/[.,/#!$%^&*;:{}=\-_`~?]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Если осталось ровно 2 токена и второй — отделяемая приставка после глагола ("schrauben auf" -> "aufschrauben")
+  const parts = s.split(' ');
+  if (parts.length === 2 && SEPARABLE_PREFIXES.has(parts[1]) && /(en|eln|ern|t|st|e)$/.test(parts[0])) {
+    return `${parts[1]}${parts[0]}`;
+  }
+
+  return s;
+}
+
+export function isExcludedStandaloneLemma(rawOrNormalized: string): boolean {
+  const norm = normalizeMasteredLemma(rawOrNormalized);
+  if (!norm || norm.length < 2) return true;
+  if (EXCLUDED_STANDALONE_LEMMAS.has(norm)) return true;
+  return false;
+}
+
 /**
  * Единая функция нормализации немецкой леммы для выявления дубликатов
  * независимо от формы записи (артиклей, местоимений, вертикальных черт и инверсии приставки).
@@ -17,34 +79,17 @@ const SEPARABLE_PREFIXES = new Set([
 export function normalizeLemmaKey(rawWord: string): string {
   if (!rawWord) return '';
 
-  let cleaned = rawWord.trim().toLowerCase();
+  const trimmed = rawWord.trim().toLowerCase();
 
-  // 1. Убираем скобки вроде (von + D.)
-  cleaned = cleaned.replace(/\(.*?\)/g, ' ');
-
-  // 2. Убираем артикли в начале
-  cleaned = cleaned.replace(/^(der|die|das|dem|den|des|ein|eine|einen|einem|eines)\s+/i, '');
-
-  // 3. Убираем маркеры управления и местоимения
-  cleaned = cleaned.replace(/\b(jemanden|jemandem|jemand|etwas|jmdn\.?|jmdm\.?|jdn\.?|jdm\.?|jmd\.?|etw\.?)\b/gi, ' ');
-  cleaned = cleaned.replace(/\b(sich)\b/gi, ' ');
-
-  // 4. Обрабатываем инверсию отделяемых приставок с многоточием ("schrauben ... auf" -> "aufschrauben")
-  const ellipsisMatch = cleaned.trim().match(/^([a-zäöüß]+)\s*(?:\.{2,}|…+)\s*([a-zäöüß]+)$/i);
+  // Обрабатываем инверсию отделяемых приставок с многоточием ("schrauben ... auf" -> "aufschrauben")
+  const ellipsisMatch = trimmed.match(/^([a-zäöüß]+)\s*(?:\.{2,}|…+)\s*([a-zäöüß]+)$/i);
   if (ellipsisMatch) {
-    const stem = ellipsisMatch[1];
-    const prefix = ellipsisMatch[2];
-    return `${prefix}${stem}`.toLowerCase();
+    return `${ellipsisMatch[2]}${ellipsisMatch[1]}`.toLowerCase();
   }
 
-  // 5. Убираем черту отделяемой приставки и лишние знаки
-  cleaned = cleaned.replace(/[|·\u2506\u250A]/g, '');
-  cleaned = cleaned.replace(/[\/\\,\.\-…]/g, ' ');
+  let cleaned = normalizeMasteredLemma(rawWord);
 
-  // 6. Схлопываем множественные пробелы
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
-
-  // 7. Если осталось ровно 2 токена и второй — отделяемая приставка после глагола ("schrauben auf" -> "aufschrauben")
+  // Если осталось ровно 2 токена и второй — отделяемая приставка после глагола ("schrauben auf" -> "aufschrauben")
   const parts = cleaned.split(' ');
   if (parts.length === 2 && SEPARABLE_PREFIXES.has(parts[1]) && /(en|eln|ern|t|st|e)$/.test(parts[0])) {
     cleaned = `${parts[1]}${parts[0]}`;

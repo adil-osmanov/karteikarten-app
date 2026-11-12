@@ -2,11 +2,15 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, safeUpsertUserStats, safeFetchUserStats } from '@/lib/supabase';
-import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
-import { CEFRLevel, detectWordLevel } from '@/lib/vocabulary/cefrLevelDetector';
+import {
+  normalizeMasteredLemma,
+  isExcludedStandaloneLemma,
+} from '@/lib/utils/lemmaNormalizer';
+import { CEFRLevel, detectWordLevel, parseDeckLevel } from '@/lib/vocabulary/cefrLevelDetector';
 import { getIDBItem, setIDBItem } from '@/hooks/useDayStats';
 
 export type AppLang = 'de' | 'en' | 'ru' | 'es';
+export type MatrixCEFRLevel = CEFRLevel | 'C2';
 export type { CEFRLevel };
 
 export const C1_TARGET_WORDS: Record<string, number> = {
@@ -24,10 +28,11 @@ export const WORD_LABELS_BY_LANG: Record<string, string> = {
 };
 
 export const CEFR_LEVEL_KEYS: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1'];
+export const MATRIX_LEVEL_KEYS: MatrixCEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
 export interface MasteredWordEntry {
   originalWord: string;
-  level: CEFRLevel;
+  level: MatrixCEFRLevel;
   masteredAt: number;
   first_mastered_at?: string;
   created_at?: string;
@@ -40,15 +45,15 @@ export interface MasteredWordEntry {
 }
 
 export interface CEFRMatrixStats {
-  counts: Record<CEFRLevel, number>;
+  counts: Record<MatrixCEFRLevel, number>;
   totalWords: number;
-  activeLevel: CEFRLevel;
+  activeLevel: MatrixCEFRLevel;
 }
 
 export interface TodayProgress {
   wordsLearnedToday: number;
   percentLearnedToday: string;
-  todayCounts: Record<CEFRLevel, number>;
+  todayCounts: Record<MatrixCEFRLevel, number>;
 }
 
 const SUPPORTED_LANGS: AppLang[] = ['de', 'en', 'ru', 'es'];
@@ -112,16 +117,18 @@ export function isFunctionalParticle(rawWord?: string | null): boolean {
   const trimmed = rawWord.trim();
   if (trimmed.length < 2) return true;
 
-  // Исключаем контекстные задания с пропусками или целые предложения
-  if (trimmed.includes('___') || trimmed.includes('...') || /[.?!:;]/.test(trimmed)) return true;
-  if (trimmed.split(/\s+/).length > 4) return true;
+  // Исключаем контекстные задания с пропусками или длинные предложения (но не "etw." / "(mit Dat.)")
+  if (trimmed.includes('___')) return true;
+  if (trimmed.split(/\s+/).length > 6) return true;
 
-  const clean = trimmed.toLowerCase().replace(/\|/g, '');
-  if (EXCLUDED_GRAMMAR_FORMS.has(clean)) return true;
-  if (FUNCTIONAL_PARTICLES.has(clean) || CONJUGATED_VERB_FORMS.has(clean)) return true;
+  const normalized = normalizeMasteredLemma(trimmed);
+  if (!normalized || normalized.length < 2) return true;
+  if (isExcludedStandaloneLemma(normalized)) return true;
 
-  // Если одиночное изолированное слово из черного списка
-  const parts = clean.split(/\s+/);
+  if (EXCLUDED_GRAMMAR_FORMS.has(normalized)) return true;
+  if (FUNCTIONAL_PARTICLES.has(normalized) || CONJUGATED_VERB_FORMS.has(normalized)) return true;
+
+  const parts = normalized.split(/\s+/);
   if (parts.length === 1 && (EXCLUDED_GRAMMAR_FORMS.has(parts[0]) || FUNCTIONAL_PARTICLES.has(parts[0]))) {
     return true;
   }
@@ -131,10 +138,10 @@ export function isFunctionalParticle(rawWord?: string | null): boolean {
 
 /**
  * Проверяет, относится ли колода, книга или карточка к режиму «Kontext» или грамматике.
- * В Wortschatz-Matrix включаются ТОЛЬКО слова из режима карточек (Karteikarten / лексические колоды).
- * ПОЛНОСТЬЮ ИСКЛЮЧАЮТСЯ:
- * 1. Карточки/упражнения из режима «Kontext» (mode === 'kontext', deck.isContext === true, card.source === 'context')
- * 2. Грамматические модули и тренажёры (Grammatik, Strukturen & NVV, starke Verben, Präpositionen)
+ * В Wortschatz-Matrix включаются ТОЛЬКО лексические слова (учебные колоды Wörter и rapid_flashcards).
+ * ИСКЛЮЧАЮТСЯ:
+ * 1. Карточки/колоды из режима «Kontext» (mode === 'kontext', isContext === true, source === 'context')
+ * 2. Грамматические модули и тренажёры (Grammatik-колоды в учебниках, Strukturen & NVV, Starke Verben, Präpositionen, Redemittel)
  */
 export function isContextOrGrammarDeck(deck?: any, parentBook?: any, card?: any): boolean {
   if (!deck && !parentBook && !card) return false;
@@ -159,12 +166,7 @@ export function isContextOrGrammarDeck(deck?: any, parentBook?: any, card?: any)
     return true;
   }
 
-  // 1.1 Исключаем карточки с пропусками предложений (___ или ...)
-  if (card?.sentence && (card.sentence.includes('___') || card.sentence.includes('...'))) {
-    return true;
-  }
-
-  // 2. Исключаем грамматические модули и тренажеры форм
+  // 2. Исключаем грамматические модули и тренажёры структур
   if (deck?.isGrammar === true || (deck as any)?.is_grammar === true) return true;
   if (deck?.type === 'grammar' || deck?.type === 'structures') return true;
   if (parentBook?.category === 'structures' || parentBook?.category === 'grammar') return true;
@@ -180,6 +182,18 @@ export function isContextOrGrammarDeck(deck?: any, parentBook?: any, card?: any)
 
   const deckTitle = (deck?.name || deck?.title || '').toLowerCase();
   const bookTitle = (parentBook?.title || '').toLowerCase();
+  const deckCategory = (deck?.category || '').toLowerCase();
+  const isRapidFlashcardsBook =
+    bTrainingMode === 'rapid_flashcards' ||
+    parentBook?.category === 'flashcards' ||
+    parentBook?.category === 'deck';
+
+  // В учебниках (standard_cloze) колоды вкладки «Grammatik» содержат грамматические упражнения;
+  // в rapid_flashcards колонке category исторически стоит дефолт 'Grammatik', хотя внутри лексика.
+  if (!isRapidFlashcardsBook && (deckCategory === 'grammatik' || deckCategory === 'grammar')) {
+    return true;
+  }
+
   const combined = `${deckTitle} ${bookTitle}`;
 
   // Исключаем по названию режим контекста
@@ -210,7 +224,8 @@ export function isContextOrGrammarDeck(deck?: any, parentBook?: any, card?: any)
       deckTitle.includes('wortschatz') ||
       deckTitle.includes('wörter') ||
       deckTitle.includes('woerter') ||
-      deckTitle.includes('karteikarten')
+      deckTitle.includes('karteikarten') ||
+      deckCategory.includes('wört')
     ) {
       const isExplicitGrammarBook =
         bookTitle.includes('grammatik') ||
@@ -322,57 +337,21 @@ const uniqueMasteredWordsByLang: Record<AppLang, Map<string, MasteredWordEntry>>
 };
 
 const globalMatrixStatsByLang: Record<AppLang, CEFRMatrixStats> = {
-  de: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
-  en: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
-  ru: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
-  es: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 }, totalWords: 0, activeLevel: 'A1' },
+  de: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 }, totalWords: 0, activeLevel: 'A1' },
+  en: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 }, totalWords: 0, activeLevel: 'A1' },
+  ru: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 }, totalWords: 0, activeLevel: 'A1' },
+  es: { counts: { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 }, totalWords: 0, activeLevel: 'A1' },
 };
 
 const listeners = new Set<(lang: AppLang, stats: CEFRMatrixStats) => void>();
-const MASTERED_COUNT_CACHE_KEY = 'kraft_mastered_count_cache';
-let authoritativeMasteredCount: number | null = null;
-const countListeners = new Set<(count: number | null) => void>();
+export const MASTERED_SNAPSHOT_KEY = 'kraft_mastered_snapshot_v2';
 
-function getCachedMasteredWordsCount(): number | null {
-  if (authoritativeMasteredCount !== null) return authoritativeMasteredCount;
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = localStorage.getItem(MASTERED_COUNT_CACHE_KEY);
-      if (raw !== null) {
-        const parsed = parseInt(raw, 10);
-        if (!isNaN(parsed) && parsed >= 0) {
-          authoritativeMasteredCount = parsed;
-          return parsed;
-        }
-      }
-    } catch {}
-  }
-  return null;
-}
-
-function setAuthoritativeMasteredCount(count: number) {
-  authoritativeMasteredCount = count;
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(MASTERED_COUNT_CACHE_KEY, String(count));
-    } catch {}
-  }
-  countListeners.forEach((listener) => listener(count));
-}
-
-export async function fetchMasteredWordsCountFromCloud(): Promise<number | null> {
-  try {
-    // Единый источник истины (Source of Truth): таблица user_mastered_words в Supabase
-    const { count, error } = await supabase
-      .from('user_mastered_words')
-      .select('*', { count: 'exact', head: true });
-
-    if (!error && count !== null && count > 0) {
-      setAuthoritativeMasteredCount(count);
-      return count;
-    }
-  } catch {}
-  return getCachedMasteredWordsCount();
+export interface MasteredSnapshotPayload {
+  total: number;
+  byLevel: Record<MatrixCEFRLevel, number>;
+  lemmas: string[];
+  entries?: Record<string, MasteredWordEntry>;
+  updatedAt: number;
 }
 
 function getStorageKeys(lang: AppLang) {
@@ -383,8 +362,37 @@ function getStorageKeys(lang: AppLang) {
   };
 }
 
+function createEmptyLevelCounts(): Record<MatrixCEFRLevel, number> {
+  return { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 };
+}
+
+function resolveMasteredLevel(
+  lemma: string,
+  deckLevel?: string | null,
+  cardLevel?: string | null,
+  lang: AppLang = 'de'
+): MatrixCEFRLevel {
+  if (cardLevel && cardLevel.toUpperCase().trim() === 'C2') {
+    return 'C2';
+  }
+  if (deckLevel) {
+    const upper = deckLevel.toUpperCase().trim();
+    if (upper === 'C2' || /(?:^|[^A-Z0-9])C2(?:[^A-Z0-9]|$)/.test(upper)) {
+      if (!upper.includes('C1')) return 'C2';
+    }
+  }
+  const hasExplicitDeckLevel = Boolean(deckLevel && parseDeckLevel(deckLevel));
+  const hasExplicitCardLevel = Boolean(cardLevel && ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].includes(cardLevel.toUpperCase().trim()));
+  const detected = detectWordLevel(lemma, deckLevel, cardLevel, lang);
+  if (hasExplicitCardLevel || hasExplicitDeckLevel) {
+    return detected;
+  }
+  // Для слов без явного контекста колоды/карточки используем детектор или дефолт B1
+  return detected || 'B1';
+}
+
 function notifyListeners(lang: AppLang) {
-  const currentStats = {
+  const currentStats: CEFRMatrixStats = {
     counts: { ...globalMatrixStatsByLang[lang].counts },
     totalWords: globalMatrixStatsByLang[lang].totalWords,
     activeLevel: globalMatrixStatsByLang[lang].activeLevel,
@@ -392,14 +400,14 @@ function notifyListeners(lang: AppLang) {
   listeners.forEach((listener) => listener(lang, currentStats));
 }
 
-function calculateActiveLevel(counts: Record<CEFRLevel, number>): CEFRLevel {
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+function calculateActiveLevel(counts: Record<MatrixCEFRLevel, number>): MatrixCEFRLevel {
+  const total = MATRIX_LEVEL_KEYS.reduce((acc, lvl) => acc + (counts[lvl] || 0), 0);
   if (total === 0) return 'A1';
 
   // Выбираем уровень с наибольшим числом освоенных слов (при равенстве — более высокий уровень)
-  let bestLevel: CEFRLevel = 'A1';
+  let bestLevel: MatrixCEFRLevel = 'A1';
   let maxCount = -1;
-  for (const lvl of CEFR_LEVEL_KEYS) {
+  for (const lvl of MATRIX_LEVEL_KEYS) {
     const c = counts[lvl] || 0;
     if (c >= maxCount && c > 0) {
       maxCount = c;
@@ -412,32 +420,38 @@ function calculateActiveLevel(counts: Record<CEFRLevel, number>): CEFRLevel {
 function recomputeStatsFromMap(lang: AppLang): CEFRMatrixStats {
   const map = uniqueMasteredWordsByLang[lang];
 
-  // Очистка стоп-слов / грамматических частиц и мусорных слов
+  // Очистка стоп-слов / грамматических частиц и мусорных записей
   for (const [k, v] of Array.from(map.entries())) {
-    const isJunkExportieren = 
+    const isJunkExportieren =
       k.toLowerCase().includes('exportieren') ||
       v.originalWord.toLowerCase().includes('exportieren') ||
       (v.translation && v.translation.toLowerCase().includes('деяние'));
 
-    if (isFunctionalParticle(k) || isFunctionalParticle(v.originalWord) || isJunkExportieren) {
+    if (
+      isExcludedStandaloneLemma(k) ||
+      isFunctionalParticle(k) ||
+      isFunctionalParticle(v.originalWord) ||
+      isJunkExportieren
+    ) {
       map.delete(k);
     }
   }
 
-  const counts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
+  const counts = createEmptyLevelCounts();
 
   map.forEach((entry) => {
-    const lvl = CEFR_LEVEL_KEYS.includes(entry.level) ? entry.level : 'B1';
+    const lvl: MatrixCEFRLevel = MATRIX_LEVEL_KEYS.includes(entry.level) ? entry.level : 'B1';
     counts[lvl] = (counts[lvl] || 0) + 1;
   });
 
+  // Инвариант: totalWords === размер уникального Set лемм === сумма A1 + A2 + B1 + B2 + C1 + C2
   const totalWords =
     (counts.A1 || 0) +
     (counts.A2 || 0) +
     (counts.B1 || 0) +
     (counts.B2 || 0) +
     (counts.C1 || 0) +
-    ((counts as Record<string, number>).C2 || 0);
+    (counts.C2 || 0);
   const activeLevel = calculateActiveLevel(counts);
 
   globalMatrixStatsByLang[lang] = {
@@ -453,16 +467,44 @@ function persistMatrixToStorage(lang: AppLang) {
   if (typeof window === 'undefined') return;
   try {
     const { cacheKeyV4 } = getStorageKeys(lang);
+    const map = uniqueMasteredWordsByLang[lang];
     const entriesObj: Record<string, MasteredWordEntry> = {};
-    uniqueMasteredWordsByLang[lang].forEach((val, key) => {
+    const lemmas: string[] = [];
+    map.forEach((val, key) => {
       entriesObj[key] = val;
+      lemmas.push(key);
     });
-    const payload = {
-      stats: globalMatrixStatsByLang[lang],
+    const stats = globalMatrixStatsByLang[lang];
+    const nowTs = Date.now();
+
+    // 1. Сохраняем единый снимок в kraft_mastered_snapshot_v2
+    let snapshotAll: Record<string, MasteredSnapshotPayload> = {};
+    try {
+      const existingRaw = localStorage.getItem(MASTERED_SNAPSHOT_KEY);
+      if (existingRaw) {
+        const parsed = JSON.parse(existingRaw);
+        if (parsed && typeof parsed === 'object') snapshotAll = parsed;
+      }
+    } catch {}
+
+    snapshotAll[lang] = {
+      total: stats.totalWords,
+      byLevel: { ...stats.counts },
+      lemmas,
       entries: entriesObj,
-      updatedAt: Date.now(),
+      updatedAt: nowTs,
     };
-    localStorage.setItem(cacheKeyV4, JSON.stringify(payload));
+    localStorage.setItem(MASTERED_SNAPSHOT_KEY, JSON.stringify(snapshotAll));
+
+    // 2. Зеркалим в legacy-ключ wortschatz_matrix_v4_${lang} для совместимости
+    localStorage.setItem(
+      cacheKeyV4,
+      JSON.stringify({
+        stats,
+        entries: entriesObj,
+        updatedAt: nowTs,
+      })
+    );
   } catch (e) {
     console.warn('[Wortschatz-Matrix] Storage persist warning:', e);
   }
@@ -547,6 +589,97 @@ const hasAttemptedCloudSyncByLang: Record<AppLang, boolean> = {
   es: false,
 };
 
+const inFlightSyncPromiseByLang: Record<AppLang, Promise<void> | null> = {
+  de: null,
+  en: null,
+  ru: null,
+  es: null,
+};
+
+function syncMasteredUserStatsSnapshot(lang: AppLang, statsRowKey?: string): Promise<void> {
+  const map = uniqueMasteredWordsByLang[lang];
+  const counts = globalMatrixStatsByLang[lang]?.counts || createEmptyLevelCounts();
+  const lemmas = Array.from(map.keys());
+  const lemmaLevels: Record<string, MatrixCEFRLevel> = {};
+  const lemmaDates: Record<string, string> = {};
+  map.forEach((entry, key) => {
+    lemmaLevels[key] = entry.level;
+    if (entry.first_mastered_at) {
+      lemmaDates[key] = entry.first_mastered_at;
+    }
+  });
+
+  return safeUpsertUserStats({
+    language: statsRowKey || `MASTERED_WORDS_${lang.toUpperCase()}`,
+    daily_activity: {
+      counts,
+      totalWords: map.size,
+      lemmas,
+      words: lemmas,
+      lemmaLevels,
+      lemmaDates,
+      updatedAt: Date.now(),
+    },
+  })
+    .then(() => undefined)
+    .catch(() => undefined);
+}
+
+function hydrateEntriesIntoMap(
+  lang: AppLang,
+  entriesObj: Record<string, any>,
+  legacyTimestamps: Record<string, number>
+) {
+  const map = uniqueMasteredWordsByLang[lang];
+  Object.entries(entriesObj).forEach(([key, val]: [string, any]) => {
+    const raw = val?.originalWord || key || '';
+    const normKey = normalizeMasteredLemma(raw) || normalizeMasteredLemma(key);
+    if (!normKey || normKey.length < 2) return;
+    if (isExcludedStandaloneLemma(normKey) || isFunctionalParticle(raw) || isFunctionalParticle(normKey)) return;
+
+    const level = resolveMasteredLevel(normKey, null, val?.level, lang);
+    const masteredAt = Number(val?.masteredAt || legacyTimestamps[normKey] || 0);
+    const first_mastered_at = val?.first_mastered_at;
+    const created_at = val?.created_at;
+    const existing = map.get(normKey);
+
+    if (!existing) {
+      map.set(normKey, {
+        originalWord: val?.originalWord || normKey,
+        level,
+        masteredAt,
+        first_mastered_at,
+        created_at,
+        bookId: val?.bookId,
+        translation: val?.translation,
+        cardId: val?.cardId,
+        nextReviewDate: val?.nextReviewDate,
+        sentence: val?.sentence,
+        sentenceTranslation: val?.sentenceTranslation,
+      });
+    } else {
+      const earliestTs =
+        masteredAt > 0 && existing.masteredAt > 0
+          ? Math.min(masteredAt, existing.masteredAt)
+          : existing.masteredAt || masteredAt;
+
+      map.set(normKey, {
+        originalWord: val?.originalWord || existing.originalWord || normKey,
+        level: val?.level ? level : existing.level,
+        masteredAt: earliestTs,
+        first_mastered_at: existing.first_mastered_at || first_mastered_at,
+        created_at: existing.created_at || created_at,
+        bookId: val?.bookId || existing.bookId,
+        translation: val?.translation || existing.translation,
+        cardId: val?.cardId || existing.cardId,
+        nextReviewDate: val?.nextReviewDate || existing.nextReviewDate,
+        sentence: val?.sentence || existing.sentence,
+        sentenceTranslation: val?.sentenceTranslation || existing.sentenceTranslation,
+      });
+    }
+  });
+}
+
 function initMatrixStore(lang: AppLang) {
   if (typeof window === 'undefined') return;
   if (isInitializedByLang[lang]) return;
@@ -555,7 +688,6 @@ function initMatrixStore(lang: AppLang) {
   const { cacheKeyV4, legacyTimestampsKey } = getStorageKeys(lang);
 
   try {
-    // Читаем legacy-таймстемпы, чтобы не потерять прогресс за сегодня при миграции на v4
     const legacyTimestamps: Record<string, number> = {};
     try {
       const rawLegacyTs = localStorage.getItem(legacyTimestampsKey);
@@ -563,7 +695,7 @@ function initMatrixStore(lang: AppLang) {
         const parsedTs = JSON.parse(rawLegacyTs);
         if (parsedTs && typeof parsedTs === 'object') {
           Object.entries(parsedTs).forEach(([k, v]) => {
-            const normKey = normalizeLemmaKey(k);
+            const normKey = normalizeMasteredLemma(k);
             if (normKey && typeof v === 'number' && v > 0) {
               legacyTimestamps[normKey] = v;
             }
@@ -572,62 +704,47 @@ function initMatrixStore(lang: AppLang) {
       }
     } catch {}
 
+    const map = uniqueMasteredWordsByLang[lang];
+
+    // 1. Мгновенная гидрация из единого снимка kraft_mastered_snapshot_v2 (без моргания "0 Wörter" на F5)
+    try {
+      const rawSnapshot = localStorage.getItem(MASTERED_SNAPSHOT_KEY);
+      if (rawSnapshot) {
+        const parsedAll = JSON.parse(rawSnapshot);
+        const snap: MasteredSnapshotPayload | undefined = parsedAll?.[lang];
+        if (snap && typeof snap === 'object') {
+          map.clear();
+          if (snap.entries && typeof snap.entries === 'object') {
+            hydrateEntriesIntoMap(lang, snap.entries, legacyTimestamps);
+          } else if (Array.isArray(snap.lemmas)) {
+            snap.lemmas.forEach((rawLemma) => {
+              const normKey = normalizeMasteredLemma(rawLemma);
+              if (!normKey || normKey.length < 2) return;
+              if (isExcludedStandaloneLemma(normKey) || isFunctionalParticle(normKey)) return;
+              if (!map.has(normKey)) {
+                map.set(normKey, {
+                  originalWord: normKey,
+                  level: resolveMasteredLevel(normKey, null, null, lang),
+                  masteredAt: legacyTimestamps[normKey] || 0,
+                });
+              }
+            });
+          }
+          recomputeStatsFromMap(lang);
+          return;
+        }
+      }
+    } catch {}
+
+    // 2. Fallback/миграция из legacy-кэша wortschatz_matrix_v4_${lang}
     const rawV4 = localStorage.getItem(cacheKeyV4);
     if (rawV4) {
       const parsed = JSON.parse(rawV4);
       if (parsed?.entries && typeof parsed.entries === 'object') {
-        const map = uniqueMasteredWordsByLang[lang];
         map.clear();
-        Object.entries(parsed.entries).forEach(([key, val]: [string, any]) => {
-          const raw = val?.originalWord || key || '';
-          const normKey = normalizeLemmaKey(raw);
-          if (!normKey || normKey.length < 2) return;
-          if (isFunctionalParticle(raw) || isFunctionalParticle(normKey)) return;
-          const level: CEFRLevel = detectWordLevel(
-            raw || normKey,
-            null,
-            val?.level,
-            lang
-          );
-          const masteredAt = Number(val?.masteredAt || legacyTimestamps[normKey] || 0);
-          const first_mastered_at = val?.first_mastered_at;
-          const created_at = val?.created_at;
-          const existing = map.get(normKey);
-          if (!existing) {
-            map.set(normKey, {
-              originalWord: val?.originalWord || normKey,
-              level,
-              masteredAt,
-              first_mastered_at,
-              created_at,
-              bookId: val?.bookId,
-              translation: val?.translation,
-              cardId: val?.cardId,
-              nextReviewDate: val?.nextReviewDate,
-              sentence: val?.sentence,
-              sentenceTranslation: val?.sentenceTranslation,
-            });
-          } else {
-            const earliestTs = (masteredAt > 0 && existing.masteredAt > 0)
-              ? Math.min(masteredAt, existing.masteredAt)
-              : (existing.masteredAt || masteredAt);
-
-            map.set(normKey, {
-              originalWord: val?.originalWord || normKey,
-              level,
-              masteredAt: earliestTs,
-              first_mastered_at: existing.first_mastered_at || first_mastered_at,
-              created_at: existing.created_at || created_at,
-              bookId: val?.bookId || existing?.bookId,
-              translation: val?.translation || existing?.translation,
-              cardId: val?.cardId || existing?.cardId,
-              nextReviewDate: val?.nextReviewDate || existing?.nextReviewDate,
-              sentence: val?.sentence || existing?.sentence,
-              sentenceTranslation: val?.sentenceTranslation || existing?.sentenceTranslation,
-            });
-          }
-        });
+        hydrateEntriesIntoMap(lang, parsed.entries, legacyTimestamps);
         recomputeStatsFromMap(lang);
+        persistMatrixToStorage(lang);
       }
     }
   } catch (e) {
@@ -641,13 +758,16 @@ const MATRIX_CLOUD_SYNC_COOLDOWN_MS = 20 * 1000; // 20 seconds
 const REPAIR_TIMESTAMPS_COOLDOWN_MS = 60 * 60 * 1000; // 60 minutes
 
 /**
- * Синхронизация выученных слов из Supabase:
- * Собирает реально выученные карточки пользователя (masteryLevel >= 4 || isArchived === true)
- * и записи user_mastered_words, строго дедуплицируя по normalizeLemmaKey.
+ * Append-only синхронизация выученных слов из Supabase, IndexedDB и user_stats:
+ * объединяет карточки (masteryLevel > 0 || round > 1 || isArchived === true),
+ * user_mastered_words и user_stats строго без удаления ранее освоенных слов
+ * и дедуплицирует по каноническому normalizeMasteredLemma.
  */
 export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: boolean = false): Promise<void> {
   initMatrixStore(lang);
-  if (isSyncingByLang[lang]) return;
+  if (inFlightSyncPromiseByLang[lang]) {
+    return inFlightSyncPromiseByLang[lang]!;
+  }
   const now = Date.now();
   if (!force && now - (lastCloudSyncByLang[lang] || 0) < MATRIX_CLOUD_SYNC_COOLDOWN_MS) return;
 
@@ -655,219 +775,377 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
   lastCloudSyncByLang[lang] = now;
   hasAttemptedCloudSyncByLang[lang] = true;
 
-  try {
-    // 0. Strict Local-First: если в локальной памяти/IndexedDB уже есть колоды с карточками,
-    // матрица строится локально через autoBackfillMasteredWords без единого байта сетевого egress!
+  const runSync = async () => {
     try {
-      const localDecks = await getIDBItem<any[]>('app_decks');
-      if (Array.isArray(localDecks) && localDecks.length > 0) {
-        const totalCards = localDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
-        if (totalCards > 0) {
-          await autoBackfillMasteredWords(localDecks, undefined, lang);
-        }
-      }
-    } catch {}
-
-    const existingMap = uniqueMasteredWordsByLang[lang];
-
-    // 0. Загружаем снимок слов из user_stats (работает для всех клиентов без обязательной auth-сессии)
-    try {
-      const statsDaily = await safeFetchUserStats(`MASTERED_WORDS_${lang.toUpperCase()}`);
-
-      let addedWords = false;
-      if (statsDaily?.words && Array.isArray(statsDaily.words)) {
-        for (const w of statsDaily.words) {
-          if (w && typeof w === 'string') {
-            const key = normalizeLemmaKey(w);
-            if (key && key.length >= 2 && !existingMap.has(key)) {
-              existingMap.set(key, { originalWord: w, level: 'B1', masteredAt: Date.now() });
-              addedWords = true;
-            }
-          }
-        }
-      }
-      if (statsDaily?.entries && Array.isArray(statsDaily.entries)) {
-        for (const item of statsDaily.entries) {
-          if (item && item.originalWord) {
-            const key = normalizeLemmaKey(item.originalWord);
-            if (key && key.length >= 2 && !existingMap.has(key)) {
-              existingMap.set(key, item);
-              addedWords = true;
-            }
-          }
-        }
-      }
-
-      if (addedWords) {
-        recomputeStatsFromMap(lang);
-        persistMatrixToStorage(lang);
-        notifyListeners(lang);
-      }
-    } catch (e) {
-      console.warn('[Wortschatz-Matrix] safeFetchUserStats notice:', e);
-    }
-
-    // 1. Загружаем канонический счетчик и строки из user_mastered_words (Single Source of Truth)
-    await fetchMasteredWordsCountFromCloud();
-
-    const remoteMetaByKey = new Map<string, { level?: string | null; masteredAt: number; first_mastered_at?: string; created_at?: string; bookId?: string; rawLemma?: string }>();
-    try {
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData?.user?.id;
-      let umwFrom = 0;
-      const UMW_PAGE_SIZE = 1000;
-      let umwHasMore = true;
-      while (umwHasMore) {
-        let umwQuery = supabase
-          .from('user_mastered_words')
-          .select('lemma, cefr_level, source_book_id, first_mastered_at, created_at')
-          .range(umwFrom, umwFrom + UMW_PAGE_SIZE - 1);
-        if (userId) {
-          umwQuery = umwQuery.eq('user_id', userId);
-        }
-        const { data, error: umwErr } = await umwQuery;
-        if (umwErr || !Array.isArray(data) || data.length === 0) {
-          umwHasMore = false;
-        } else {
-          for (const row of data) {
-            const key = normalizeLemmaKey(row.lemma || '');
-            if (!key || key.length < 2) continue;
-            const ts = row.first_mastered_at ? new Date(row.first_mastered_at).getTime() : 0;
-            const prev = remoteMetaByKey.get(key);
-            if (!prev || (ts > 0 && (prev.masteredAt === 0 || ts < prev.masteredAt))) {
-              remoteMetaByKey.set(key, {
-                level: row.cefr_level,
-                first_mastered_at: row.first_mastered_at,
-                created_at: row.created_at,
-                bookId: row.source_book_id || undefined,
-                rawLemma: row.lemma,
-                masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
-              });
-            }
-          }
-          umwFrom += UMW_PAGE_SIZE;
-          umwHasMore = data.length === UMW_PAGE_SIZE;
-        }
-      }
-    } catch {}
-
-    // 2. Запрашиваем реально выученные карточки из таблицы cards в Supabase
-    let allMasteredCards: any[] = [];
-    let from = 0;
-    const PAGE_SIZE = 1000;
-    let hasMore = true;
-
-    while (hasMore) {
-      const { data: cardRows, error: cardErr } = await supabase
-        .from('cards')
-        .select('id, targetWord, sentence, translation, forms, baseWordInfo, masteryLevel, isArchived, nextReviewDate, interval, repetitions, decks!inner(id, name, category, language, level, book_id)')
-        .or('isArchived.eq.true,masteryLevel.gte.4')
-        .range(from, from + PAGE_SIZE - 1);
-
-      if (cardErr || !cardRows || cardRows.length === 0) {
-        hasMore = false;
-      } else {
-        allMasteredCards = allMasteredCards.concat(cardRows);
-        from += PAGE_SIZE;
-        hasMore = cardRows.length === PAGE_SIZE;
-      }
-    }
-
-    if (allMasteredCards.length > 0 || remoteMetaByKey.size > 0) {
+      const existingMap = uniqueMasteredWordsByLang[lang];
       const nextMap = new Map<string, MasteredWordEntry>();
 
-      for (const c of allMasteredCards) {
+      const mergeEntry = (
+        normKey: string,
+        incoming: MasteredWordEntry,
+        preferLevel: boolean = false
+      ) => {
+        if (!normKey || normKey.length < 2) return;
+        if (
+          isExcludedStandaloneLemma(normKey) ||
+          isFunctionalParticle(normKey) ||
+          isFunctionalParticle(incoming.originalWord)
+        ) {
+          return;
+        }
+        const prev = nextMap.get(normKey);
+        if (!prev) {
+          nextMap.set(normKey, incoming);
+          return;
+        }
+        const earliestTs =
+          incoming.masteredAt > 0 && prev.masteredAt > 0
+            ? Math.min(incoming.masteredAt, prev.masteredAt)
+            : prev.masteredAt || incoming.masteredAt;
+
+        nextMap.set(normKey, {
+          ...prev,
+          originalWord: incoming.originalWord || prev.originalWord,
+          level: preferLevel ? incoming.level : prev.level || incoming.level,
+          masteredAt: earliestTs,
+          first_mastered_at: prev.first_mastered_at || incoming.first_mastered_at,
+          created_at: prev.created_at || incoming.created_at,
+          bookId: incoming.bookId || prev.bookId,
+          translation: incoming.translation || prev.translation,
+          cardId: incoming.cardId || prev.cardId,
+          nextReviewDate: incoming.nextReviewDate ?? prev.nextReviewDate,
+          sentence: incoming.sentence || prev.sentence,
+          sentenceTranslation: incoming.sentenceTranslation || prev.sentenceTranslation,
+        });
+      };
+
+      // 0. Сохраняем все уже известные валидные слова в памяти (append-only база)
+      existingMap.forEach((val, oldKey) => {
+        const normKey = normalizeMasteredLemma(val?.originalWord || oldKey);
+        if (!normKey) return;
+        mergeEntry(normKey, {
+          ...val,
+          level: resolveMasteredLevel(normKey, null, val.level, lang),
+        });
+      });
+
+      // 1. Загружаем локальные карточки из IndexedDB (если есть невыгруженный офлайн-прогресс)
+      try {
+        const [localDecks, localBooks] = await Promise.all([
+          getIDBItem<any[]>('app_decks'),
+          getIDBItem<any[]>('app_books'),
+        ]);
+        const localBookMap = new Map<string, any>();
+        if (Array.isArray(localBooks)) {
+          localBooks.forEach((b) => b?.id && localBookMap.set(b.id, b));
+        }
+        if (Array.isArray(localDecks)) {
+          for (const deck of localDecks) {
+            if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) continue;
+            const dBookId = deck.bookId || deck.book_id;
+            const parentBook = dBookId ? localBookMap.get(dBookId) : undefined;
+            const dLang = normalizeLanguageCode(deck.language || parentBook?.language || 'de');
+            if (dLang !== lang) continue;
+            if (isContextOrGrammarDeck(deck, parentBook)) continue;
+
+            const deckLevel =
+              deck.level ||
+              (parentBook?.activeLevels?.length === 1 ? parentBook.activeLevels[0] : null) ||
+              deck.name ||
+              deck.title ||
+              parentBook?.title ||
+              null;
+
+            for (const c of deck.cards) {
+              if (isContextOrGrammarDeck(deck, parentBook, c)) continue;
+              const mastery = Number(c.masteryLevel ?? c.mastery_level ?? 0);
+              const round = Number(c.round ?? 1);
+              const archived = Boolean(c.isArchived ?? c.is_archived);
+              if (!(mastery > 0 || round > 1 || archived)) continue;
+
+              const rawWord = c.targetWord || c.target_word || c.missingWord || c.infinitive || c.front || '';
+              const normKey = normalizeMasteredLemma(rawWord);
+              if (!normKey || normKey.length < 2) continue;
+
+              const prev = existingMap.get(normKey);
+              const masteredAt = extractCardMasteredAt(c, prev?.masteredAt || 0);
+              const firstMasteredAt =
+                c.first_mastered_at ||
+                prev?.first_mastered_at ||
+                (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
+
+              mergeEntry(
+                normKey,
+                {
+                  originalWord: rawWord,
+                  level: resolveMasteredLevel(normKey, deckLevel, c.level || c.cefrLevel || c.cefr_level, lang),
+                  masteredAt,
+                  first_mastered_at: firstMasteredAt,
+                  created_at: c.created_at || c.createdAt || prev?.created_at,
+                  bookId: dBookId || prev?.bookId,
+                  translation: extractConciseTranslation(c) || c.translation || c.back || prev?.translation,
+                  cardId: c.id || prev?.cardId,
+                  nextReviewDate: c.nextReviewDate ?? c.next_review_date ?? prev?.nextReviewDate,
+                  sentence: c.sentence || c.exampleSentence || c.example || prev?.sentence,
+                  sentenceTranslation:
+                    c.sentenceTranslation || c.sentence_translation || prev?.sentenceTranslation,
+                },
+                true
+              );
+            }
+          }
+        }
+      } catch {}
+
+      // 2. Загружаем компактный снимок user_stats (работает и без auth-сессии)
+      let remoteStatsPayload: any = null;
+      try {
+        remoteStatsPayload = await safeFetchUserStats(`MASTERED_WORDS_${lang.toUpperCase()}`);
+        const remoteLemmas: string[] = Array.isArray(remoteStatsPayload?.lemmas)
+          ? remoteStatsPayload.lemmas
+          : Array.isArray(remoteStatsPayload?.words)
+          ? remoteStatsPayload.words
+          : [];
+        const remoteLevels: Record<string, string> =
+          remoteStatsPayload?.lemmaLevels && typeof remoteStatsPayload.lemmaLevels === 'object'
+            ? remoteStatsPayload.lemmaLevels
+            : {};
+        const remoteDates: Record<string, string> =
+          remoteStatsPayload?.lemmaDates && typeof remoteStatsPayload.lemmaDates === 'object'
+            ? remoteStatsPayload.lemmaDates
+            : {};
+
+        for (const w of remoteLemmas) {
+          if (!w || typeof w !== 'string') continue;
+          const normKey = normalizeMasteredLemma(w);
+          if (!normKey || normKey.length < 2) continue;
+          const dateStr = remoteDates[normKey] || remoteDates[w];
+          const ts = dateStr ? new Date(dateStr).getTime() : 0;
+          mergeEntry(normKey, {
+            originalWord: w,
+            level: resolveMasteredLevel(normKey, null, remoteLevels[normKey] || remoteLevels[w], lang),
+            masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
+            first_mastered_at: dateStr,
+          });
+        }
+
+        if (Array.isArray(remoteStatsPayload?.entries)) {
+          for (const item of remoteStatsPayload.entries) {
+            if (!item?.originalWord) continue;
+            const normKey = normalizeMasteredLemma(item.originalWord);
+            if (!normKey || normKey.length < 2) continue;
+            mergeEntry(normKey, {
+              ...item,
+              level: resolveMasteredLevel(normKey, null, item.level, lang),
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[Wortschatz-Matrix] safeFetchUserStats notice:', e);
+      }
+
+      // 3. Загружаем user_mastered_words из Supabase (БЕЗ несуществующей колонки created_at!)
+      const remoteMetaByKey = new Map<
+        string,
+        { level?: string | null; masteredAt: number; first_mastered_at?: string; bookId?: string; rawLemma?: string }
+      >();
+      let authUserId: string | null = null;
+      try {
+        authUserId = await getMatrixAuthUserId();
+        if (authUserId) {
+          let umwFrom = 0;
+          const UMW_PAGE_SIZE = 1000;
+          let umwHasMore = true;
+          while (umwHasMore) {
+            const { data, error: umwErr } = await supabase
+              .from('user_mastered_words')
+              .select('lemma, cefr_level, source_book_id, first_mastered_at')
+              .eq('user_id', authUserId)
+              .range(umwFrom, umwFrom + UMW_PAGE_SIZE - 1);
+
+            if (umwErr || !Array.isArray(data) || data.length === 0) {
+              umwHasMore = false;
+            } else {
+              for (const row of data) {
+                const key = normalizeMasteredLemma(row.lemma || '');
+                if (!key || key.length < 2) continue;
+                const ts = row.first_mastered_at ? new Date(row.first_mastered_at).getTime() : 0;
+                const prev = remoteMetaByKey.get(key);
+                if (!prev || (ts > 0 && (prev.masteredAt === 0 || ts < prev.masteredAt))) {
+                  remoteMetaByKey.set(key, {
+                    level: row.cefr_level,
+                    first_mastered_at: row.first_mastered_at,
+                    bookId: row.source_book_id || undefined,
+                    rawLemma: row.lemma,
+                    masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
+                  });
+                }
+              }
+              umwFrom += UMW_PAGE_SIZE;
+              umwHasMore = data.length === UMW_PAGE_SIZE;
+            }
+          }
+        }
+      } catch {}
+
+      // 4. Загружаем все изученные карточки (masteryLevel > 0 || isArchived = true) и книги из Supabase с пагинацией
+      const cloudBookMap = new Map<string, any>();
+      try {
+        const { data: bookRows } = await supabase
+          .from('books')
+          .select('id, language, title, training_mode, category');
+        if (Array.isArray(bookRows)) {
+          bookRows.forEach((b: any) => b?.id && cloudBookMap.set(b.id, b));
+        }
+      } catch {}
+
+      let allStudiedCards: any[] = [];
+      let from = 0;
+      const PAGE_SIZE = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: cardRows, error: cardErr } = await supabase
+          .from('cards')
+          .select(
+            'id, targetWord, sentence, translation, forms, baseWordInfo, masteryLevel, isArchived, nextReviewDate, interval, repetitions, decks!inner(id, name, category, language, level, book_id)'
+          )
+          .or('isArchived.eq.true,masteryLevel.gt.0')
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (cardErr || !cardRows || cardRows.length === 0) {
+          hasMore = false;
+        } else {
+          allStudiedCards = allStudiedCards.concat(cardRows);
+          from += PAGE_SIZE;
+          hasMore = cardRows.length === PAGE_SIZE;
+        }
+      }
+
+      for (const c of allStudiedCards) {
         const deckObj = Array.isArray(c.decks) ? c.decks[0] : c.decks;
-        const dLang = normalizeLanguageCode(deckObj?.language || 'de');
+        const parentBook = deckObj?.book_id ? cloudBookMap.get(deckObj.book_id) : undefined;
+        const dLang = normalizeLanguageCode(deckObj?.language || parentBook?.language || 'de');
         if (dLang !== lang) continue;
-        if (isContextOrGrammarDeck(deckObj, undefined, c)) continue;
+        if (isContextOrGrammarDeck(deckObj, parentBook, c)) continue;
 
         const rawWord = c.targetWord || '';
-        const normalizedKey = normalizeLemmaKey(rawWord);
+        const normalizedKey = normalizeMasteredLemma(rawWord);
         if (!normalizedKey || normalizedKey.length < 2) continue;
-        if (isFunctionalParticle(rawWord) || isFunctionalParticle(normalizedKey)) continue;
+        if (
+          isExcludedStandaloneLemma(normalizedKey) ||
+          isFunctionalParticle(rawWord) ||
+          isFunctionalParticle(normalizedKey)
+        ) {
+          continue;
+        }
 
         const prevEntry = existingMap.get(normalizedKey);
         const remoteMeta = remoteMetaByKey.get(normalizedKey);
         const priorTs = remoteMeta?.masteredAt || prevEntry?.masteredAt || 0;
         const masteredAt = extractCardMasteredAt(c, priorTs);
-        const firstMasteredAt = remoteMeta?.first_mastered_at || (c as any).first_mastered_at || prevEntry?.first_mastered_at || (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
-        const createdAt = (c as any).created_at || remoteMeta?.created_at || prevEntry?.created_at;
+        const firstMasteredAt =
+          remoteMeta?.first_mastered_at ||
+          c.first_mastered_at ||
+          prevEntry?.first_mastered_at ||
+          (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
 
-        const deckLevel = deckObj?.level || deckObj?.name || deckObj?.title || null;
-        const cardLevel = (c as any).level || remoteMeta?.level || null;
-        const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, lang);
+        const deckLevel =
+          deckObj?.level ||
+          deckObj?.name ||
+          deckObj?.title ||
+          parentBook?.title ||
+          null;
+        const cardLevel = c.level || remoteMeta?.level || null;
+        const level = resolveMasteredLevel(normalizedKey, deckLevel, cardLevel, lang);
 
         const conciseTrans = extractConciseTranslation(c);
         const cardTranslation = conciseTrans || c.translation || prevEntry?.translation;
         const cardNextReview = c.nextReviewDate ?? c.next_review_date ?? prevEntry?.nextReviewDate;
         const cardSentence = c.sentence || prevEntry?.sentence;
-        const cardSentenceTrans = (c as any).sentenceTranslation || (c as any).sentence_translation || prevEntry?.sentenceTranslation;
+        const cardSentenceTrans =
+          c.sentenceTranslation || c.sentence_translation || prevEntry?.sentenceTranslation;
 
-        const alreadyInNext = nextMap.get(normalizedKey);
-        if (!alreadyInNext) {
-          nextMap.set(normalizedKey, {
+        mergeEntry(
+          normalizedKey,
+          {
             originalWord: rawWord,
             level,
             masteredAt,
             first_mastered_at: firstMasteredAt,
-            created_at: createdAt,
+            created_at: remoteMeta?.first_mastered_at ? undefined : prevEntry?.created_at,
             bookId: deckObj?.book_id || prevEntry?.bookId,
             translation: cardTranslation,
             cardId: c.id || prevEntry?.cardId,
             nextReviewDate: cardNextReview,
             sentence: cardSentence,
             sentenceTranslation: cardSentenceTrans,
-          });
-        } else {
-          // Сохраняем САМУЮ РАННЮЮ дату первого освоения (не смещаем вперед при повторах)
-          const earliestMasteredAt = (masteredAt > 0 && alreadyInNext.masteredAt > 0)
-            ? Math.min(masteredAt, alreadyInNext.masteredAt)
-            : (alreadyInNext.masteredAt || masteredAt);
-
-          nextMap.set(normalizedKey, {
-            ...alreadyInNext,
-            masteredAt: earliestMasteredAt,
-            first_mastered_at: alreadyInNext.first_mastered_at || firstMasteredAt,
-            created_at: alreadyInNext.created_at || createdAt,
-            translation: cardTranslation || alreadyInNext.translation,
-            cardId: c.id || alreadyInNext.cardId,
-            nextReviewDate: cardNextReview || alreadyInNext.nextReviewDate,
-            sentence: cardSentence || alreadyInNext.sentence,
-            sentenceTranslation: cardSentenceTrans || alreadyInNext.sentenceTranslation,
-          });
-        }
+          },
+          true
+        );
       }
 
-      // Дополняем леммами из user_mastered_words (если каких-то карточек нет в выборке) без сохранения локального мусора
+      // Дополняем леммами из user_mastered_words (если каких-то карточек нет в выборке — append-only!)
       if (lang === 'de') {
         remoteMetaByKey.forEach((meta, key) => {
-          if (!nextMap.has(key) && !isFunctionalParticle(key)) {
-            const prevEntry = existingMap.get(key);
-            const level = detectWordLevel(key, null, meta.level || null, lang);
-            nextMap.set(key, {
-              originalWord: prevEntry?.originalWord || meta.rawLemma || key,
-              level,
-              masteredAt: meta.masteredAt || prevEntry?.masteredAt || 0,
-              first_mastered_at: meta.first_mastered_at || prevEntry?.first_mastered_at,
-              created_at: meta.created_at || prevEntry?.created_at,
-              bookId: meta.bookId || prevEntry?.bookId,
-              translation: prevEntry?.translation,
-              cardId: prevEntry?.cardId,
-              nextReviewDate: prevEntry?.nextReviewDate,
-              sentence: prevEntry?.sentence,
-              sentenceTranslation: prevEntry?.sentenceTranslation,
-            });
-          }
+          const prevEntry = existingMap.get(key);
+          mergeEntry(key, {
+            originalWord: prevEntry?.originalWord || meta.rawLemma || key,
+            level: resolveMasteredLevel(key, null, meta.level || prevEntry?.level || null, lang),
+            masteredAt: meta.masteredAt || prevEntry?.masteredAt || 0,
+            first_mastered_at: meta.first_mastered_at || prevEntry?.first_mastered_at,
+            created_at: prevEntry?.created_at,
+            bookId: meta.bookId || prevEntry?.bookId,
+            translation: prevEntry?.translation,
+            cardId: prevEntry?.cardId,
+            nextReviewDate: prevEntry?.nextReviewDate,
+            sentence: prevEntry?.sentence,
+            sentenceTranslation: prevEntry?.sentenceTranslation,
+          });
         });
       }
 
-      const hadOrphans = existingMap.size !== nextMap.size;
-      let hasChanged = hadOrphans;
+      // 5. Если есть авторизованный пользователь, дописываем (append-only) недостающие леммы в user_mastered_words
+      if (authUserId && lang === 'de' && nextMap.size > 0) {
+        const missingRows: Array<{
+          user_id: string;
+          lemma: string;
+          cefr_level: MatrixCEFRLevel;
+          source_book_id: string | null;
+          first_mastered_at: string;
+        }> = [];
+        nextMap.forEach((entry, lemma) => {
+          if (!remoteMetaByKey.has(lemma)) {
+            missingRows.push({
+              user_id: authUserId!,
+              lemma,
+              cefr_level: entry.level,
+              source_book_id: entry.bookId || null,
+              first_mastered_at:
+                entry.first_mastered_at ||
+                (entry.masteredAt > 0 ? new Date(entry.masteredAt).toISOString() : new Date().toISOString()),
+            });
+          }
+        });
+        for (let i = 0; i < missingRows.length; i += 200) {
+          const chunk = missingRows.slice(i, i + 200);
+          await supabase
+            .from('user_mastered_words')
+            .upsert(chunk, { onConflict: 'user_id,lemma', ignoreDuplicates: true });
+        }
+      }
+
+      // 6. Проверяем, изменились ли данные относительно текущего состояния в памяти, и делаем ОДИН атомарный рендер
+      let hasChanged = existingMap.size !== nextMap.size;
       if (!hasChanged) {
         for (const [k, v] of nextMap.entries()) {
           const prev = existingMap.get(k);
-          if (!prev || prev.level !== v.level || prev.masteredAt !== v.masteredAt || prev.translation !== v.translation) {
+          if (
+            !prev ||
+            prev.level !== v.level ||
+            prev.masteredAt !== v.masteredAt ||
+            prev.translation !== v.translation
+          ) {
             hasChanged = true;
             break;
           }
@@ -876,26 +1154,29 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
 
       uniqueMasteredWordsByLang[lang] = nextMap;
       recomputeStatsFromMap(lang);
+
       if (hasChanged) {
         persistMatrixToStorage(lang);
         notifyListeners(lang);
       }
 
-      safeUpsertUserStats({
-        language: `MASTERED_WORDS_${lang.toUpperCase()}`,
-        daily_activity: {
-          counts: globalMatrixStatsByLang[lang]?.counts,
-          totalWords: nextMap.size,
-          words: Array.from(nextMap.keys()),
-          updatedAt: Date.now(),
-        },
-      }).catch(() => {});
+      const remoteTotal = Number(remoteStatsPayload?.totalWords ?? -1);
+      const remoteLemmaCount = Array.isArray(remoteStatsPayload?.lemmas)
+        ? remoteStatsPayload.lemmas.length
+        : -1;
+      if (hasChanged || remoteTotal !== nextMap.size || remoteLemmaCount !== nextMap.size) {
+        syncMasteredUserStatsSnapshot(lang);
+      }
+    } catch (err) {
+      console.warn('[Wortschatz-Matrix] syncMasteredWordsFromCloud notice:', err);
+    } finally {
+      isSyncingByLang[lang] = false;
+      inFlightSyncPromiseByLang[lang] = null;
     }
-  } catch (err) {
-    console.warn('[Wortschatz-Matrix] syncMasteredWordsFromCloud notice:', err);
-  } finally {
-    isSyncingByLang[lang] = false;
-  }
+  };
+
+  inFlightSyncPromiseByLang[lang] = runSync();
+  return inFlightSyncPromiseByLang[lang]!;
 }
 
 /**
@@ -943,18 +1224,19 @@ export async function recordMasteredLemma(
 
   initMatrixStore(currentLanguage);
 
-  if (isFunctionalParticle(rawWord)) return;
-  const normalizedKey = normalizeLemmaKey(rawWord);
+  const normalizedKey = normalizeMasteredLemma(rawWord);
   if (!normalizedKey || normalizedKey.length < 2) return;
-  if (isFunctionalParticle(normalizedKey)) return;
+  if (isExcludedStandaloneLemma(normalizedKey) || isFunctionalParticle(rawWord) || isFunctionalParticle(normalizedKey)) {
+    return;
+  }
 
-  const resolvedLevel = detectWordLevel(normalizedKey, deckLevel, cardLevel, currentLanguage);
+  const resolvedLevel = resolveMasteredLevel(normalizedKey, deckLevel, cardLevel, currentLanguage);
   const map = uniqueMasteredWordsByLang[currentLanguage];
   const existing = map.get(normalizedKey);
 
   // Если слово уже зарегистрировано:
   if (existing) {
-    // В режиме повторения дата первого освоения НЕ перезаписывается
+    // Повторение уже изученного слова НИКОГДА не увеличивает счетчик и не перезаписывает дату первого освоения
     if (isReview) {
       return;
     }
@@ -970,10 +1252,10 @@ export async function recordMasteredLemma(
     return;
   }
 
-  // Новое освоенное слово
+  // Новое освоенное слово (инкремент +1 при переходе mastery 0 -> >= 1)
   const firstMasteredAt = (typeof paramsOrWord === 'object' && paramsOrWord.first_mastered_at)
     ? paramsOrWord.first_mastered_at
-    : (isReview 
+    : (isReview
         ? ((typeof paramsOrWord === 'object' && paramsOrWord.created_at) ? paramsOrWord.created_at : new Date(timestamp - 86400000).toISOString())
         : new Date(timestamp).toISOString());
 
@@ -996,28 +1278,15 @@ export async function recordMasteredLemma(
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: currentLanguage } }));
   }
 
-  // Всегда сохраняем компактную статистику в user_stats (без передачи сотен килобайт entries)
-  try {
-    const counts = globalMatrixStatsByLang[currentLanguage].counts;
-    const currentMap = uniqueMasteredWordsByLang[currentLanguage];
-    const totalWords = currentMap.size;
-    safeUpsertUserStats({
-      language: `MASTERED_WORDS_${currentLanguage.toUpperCase()}`,
-      daily_activity: {
-        counts,
-        totalWords,
-        words: Array.from(currentMap.keys()),
-        updatedAt: Date.now(),
-      },
-    }).catch(() => {});
-  } catch {}
+  // Сохраняем компактную статистику в user_stats
+  syncMasteredUserStatsSnapshot(currentLanguage);
 
   // Сохраняем в Supabase user_mastered_words (при наличии авторизованного пользователя)
   try {
     const userId = await getMatrixAuthUserId();
     if (!userId) return;
 
-    const payload: any = {
+    const payload = {
       user_id: userId,
       lemma: normalizedKey,
       cefr_level: resolvedLevel,
@@ -1030,9 +1299,7 @@ export async function recordMasteredLemma(
       .upsert(payload, { onConflict: 'user_id,lemma' });
 
     if (error) {
-      console.error('[CRITICAL user_mastered_words 400]:', error.message, error.details, payload);
-    } else {
-      await fetchMasteredWordsCountFromCloud();
+      console.error('[CRITICAL user_mastered_words]:', error.message, error.details, payload);
     }
   } catch (err) {
     console.warn('[Wortschatz-Matrix] Remote upsert notice:', err);
@@ -1040,7 +1307,8 @@ export async function recordMasteredLemma(
 }
 
 /**
- * Удаляет слово из матрицы при сбросе прогресса карточки (ошибке на повторении).
+ * Удаляет слово из матрицы только при явном удалении карточки/словарной записи пользователем.
+ * При ошибках на повторении не вызывается (append-only прогресс).
  */
 export async function removeMasteredLemma(
   paramsOrWord: { rawWord: string; language?: string } | string,
@@ -1061,10 +1329,11 @@ export async function removeMasteredLemma(
 
   initMatrixStore(currentLanguage);
 
-  if (isFunctionalParticle(rawWord)) return;
-  const normalizedKey = normalizeLemmaKey(rawWord);
+  const normalizedKey = normalizeMasteredLemma(rawWord);
   if (!normalizedKey || normalizedKey.length < 2) return;
-  if (isFunctionalParticle(normalizedKey)) return;
+  if (isExcludedStandaloneLemma(normalizedKey) || isFunctionalParticle(rawWord) || isFunctionalParticle(normalizedKey)) {
+    return;
+  }
 
   const map = uniqueMasteredWordsByLang[currentLanguage];
   if (!map.has(normalizedKey)) return;
@@ -1078,6 +1347,8 @@ export async function removeMasteredLemma(
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: currentLanguage } }));
   }
 
+  syncMasteredUserStatsSnapshot(currentLanguage);
+
   try {
     const userId = await getMatrixAuthUserId();
     if (!userId) return;
@@ -1086,7 +1357,6 @@ export async function removeMasteredLemma(
       .from('user_mastered_words')
       .delete()
       .match({ user_id: userId, lemma: normalizedKey });
-    await fetchMasteredWordsCountFromCloud();
   } catch (err) {
     console.warn('[Wortschatz-Matrix] Remote delete notice:', err);
   }
@@ -1104,14 +1374,20 @@ export function getMasteredLemmasSet(langParam?: string | AppLang): Set<string> 
 export function getMasteredWordEntries(langParam?: string | AppLang): MasteredWordEntry[] {
   const normLang = normalizeLanguageCode(langParam);
   initMatrixStore(normLang);
-  return Array.from(uniqueMasteredWordsByLang[normLang].values()).filter(
-    (e) => !isFunctionalParticle(e.originalWord) && !isFunctionalParticle(normalizeLemmaKey(e.originalWord))
-  );
+  return Array.from(uniqueMasteredWordsByLang[normLang].values()).filter((e) => {
+    const norm = normalizeMasteredLemma(e.originalWord);
+    return (
+      Boolean(norm) &&
+      !isExcludedStandaloneLemma(norm) &&
+      !isFunctionalParticle(e.originalWord) &&
+      !isFunctionalParticle(norm)
+    );
+  });
 }
 
 /**
- * Пересчитывает матрицу строго по выученным карточкам пользователя (masteryLevel >= 4 || isArchived === true)
- * с дедупликацией через normalizeLemmaKey и определением уровня через detectWordLevel.
+ * Append-only пересчет матрицы по изученным карточкам (masteryLevel > 0 || round > 1 || isArchived === true)
+ * с дедупликацией через normalizeMasteredLemma и сохранением ранее освоенных слов.
  */
 export async function autoBackfillMasteredWords(
   providedDecks?: Array<{ id: string; bookId?: string; level?: string; language?: string; cards?: Array<any> }>,
@@ -1130,9 +1406,7 @@ export async function autoBackfillMasteredWords(
     books.forEach((b) => bookMap.set(b.id, b));
   }
 
-  // Пересчитываем для всех поддерживаемых языков, присутствующих в колодах
   const langsToProcess: AppLang[] = SUPPORTED_LANGS;
-
   let primaryCount = 0;
 
   for (const targetLang of langsToProcess) {
@@ -1153,7 +1427,6 @@ export async function autoBackfillMasteredWords(
       const dBookId = deck.bookId || (deck as any).book_id;
       const parentBook = dBookId ? bookMap.get(dBookId) : undefined;
 
-      // Исключаем грамматические колоды, режим «Kontext» и упражнения
       if (isContextOrGrammarDeck(deck, parentBook)) return;
 
       const deckLevel =
@@ -1165,13 +1438,13 @@ export async function autoBackfillMasteredWords(
         null;
 
       deck.cards?.forEach((card: any) => {
-        // Исключаем карточки режима «Kontext»
         if (isContextOrGrammarDeck(deck, parentBook, card)) return;
 
-        const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
+        const mastery = Number(card.masteryLevel ?? card.mastery_level ?? 0);
+        const round = Number(card.round ?? 1);
         const archived = Boolean(card.isArchived ?? card.is_archived);
-        const isMastered = mastery >= 4 || archived === true;
-        if (!isMastered) return;
+        const isStudied = mastery > 0 || round > 1 || archived === true;
+        if (!isStudied) return;
 
         const rawWord =
           card.targetWord ||
@@ -1180,22 +1453,28 @@ export async function autoBackfillMasteredWords(
           card.infinitive ||
           card.front ||
           '';
-        const normalizedKey = normalizeLemmaKey(rawWord);
+        const normalizedKey = normalizeMasteredLemma(rawWord);
         if (!normalizedKey || normalizedKey.length < 2) return;
-        if (isFunctionalParticle(rawWord) || isFunctionalParticle(normalizedKey)) return;
+        if (
+          isExcludedStandaloneLemma(normalizedKey) ||
+          isFunctionalParticle(rawWord) ||
+          isFunctionalParticle(normalizedKey)
+        ) {
+          return;
+        }
 
         const prevEntry = existingMap.get(normalizedKey);
         const prevTs = prevEntry?.masteredAt || 0;
         const masteredAt = extractCardMasteredAt(card, prevTs);
         const cardLevel = card.level || card.cefrLevel || card.cefr_level || null;
-        const level = detectWordLevel(normalizedKey, deckLevel, cardLevel, targetLang);
+        const level = resolveMasteredLevel(normalizedKey, deckLevel, cardLevel, targetLang);
 
         const existingEntry = deduplicatedMap.get(normalizedKey);
         const conciseTrans = extractConciseTranslation(card);
-        const cardTranslation = conciseTrans || card.translation || card.back || existingMap.get(normalizedKey)?.translation;
-        const cardNextReview = card.nextReviewDate ?? card.next_review_date ?? existingMap.get(normalizedKey)?.nextReviewDate;
-        const cardSentence = card.sentence || card.exampleSentence || card.example || existingMap.get(normalizedKey)?.sentence;
-        const cardSentenceTrans = card.sentenceTranslation || card.sentence_translation || existingMap.get(normalizedKey)?.sentenceTranslation;
+        const cardTranslation = conciseTrans || card.translation || card.back || prevEntry?.translation;
+        const cardNextReview = card.nextReviewDate ?? card.next_review_date ?? prevEntry?.nextReviewDate;
+        const cardSentence = card.sentence || card.exampleSentence || card.example || prevEntry?.sentence;
+        const cardSentenceTrans = card.sentenceTranslation || card.sentence_translation || prevEntry?.sentenceTranslation;
 
         const firstMasteredAt = card.first_mastered_at || prevEntry?.first_mastered_at || (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
         const createdAt = card.created_at || prevEntry?.created_at;
@@ -1215,7 +1494,6 @@ export async function autoBackfillMasteredWords(
             sentenceTranslation: cardSentenceTrans,
           });
         } else {
-          // Сохраняем самый ранний таймстемп
           const earliestMasteredAt = (masteredAt > 0 && existingEntry.masteredAt > 0)
             ? Math.min(masteredAt, existingEntry.masteredAt)
             : (existingEntry.masteredAt || masteredAt);
@@ -1235,13 +1513,14 @@ export async function autoBackfillMasteredWords(
       });
     });
 
-    // Строгое инкрементальное объединение: новые выученные слова добавляются,
-    // а ранее освоенные слова из других колод/книг НИКОГДА не сбрасываются и не удаляются!
+    // Строгое append-only объединение: ранее освоенные слова НИКОГДА не удаляются!
     let mapChanged = false;
+    const newlyAddedEntries: Array<{ lemma: string; entry: MasteredWordEntry }> = [];
     deduplicatedMap.forEach((entry, key) => {
       const existing = existingMap.get(key);
       if (!existing) {
         existingMap.set(key, entry);
+        newlyAddedEntries.push({ lemma: key, entry });
         mapChanged = true;
       } else {
         const earliestTs = (entry.masteredAt > 0 && existing.masteredAt > 0)
@@ -1267,19 +1546,29 @@ export async function autoBackfillMasteredWords(
     if (mapChanged) {
       persistMatrixToStorage(targetLang);
       notifyListeners(targetLang);
+      syncMasteredUserStatsSnapshot(targetLang);
 
-      // Синхронизируем очищенную статистику выученных слов в user_stats (компактный payload)
-      try {
-        safeUpsertUserStats({
-          language: `MASTERED_WORDS_${targetLang.toUpperCase()}`,
-          daily_activity: {
-            counts: globalMatrixStatsByLang[targetLang]?.counts,
-            totalWords: existingMap.size,
-            words: Array.from(existingMap.keys()),
-            updatedAt: Date.now(),
-          },
-        }).catch(() => {});
-      } catch {}
+      if (targetLang === 'de' && newlyAddedEntries.length > 0) {
+        try {
+          const userId = await getMatrixAuthUserId();
+          if (userId) {
+            const rows = newlyAddedEntries.map(({ lemma, entry }) => ({
+              user_id: userId,
+              lemma,
+              cefr_level: entry.level,
+              source_book_id: entry.bookId || null,
+              first_mastered_at:
+                entry.first_mastered_at ||
+                (entry.masteredAt > 0 ? new Date(entry.masteredAt).toISOString() : new Date().toISOString()),
+            }));
+            for (let i = 0; i < rows.length; i += 200) {
+              await supabase
+                .from('user_mastered_words')
+                .upsert(rows.slice(i, i + 200), { onConflict: 'user_id,lemma', ignoreDuplicates: true });
+            }
+          }
+        } catch {}
+      }
     }
 
     if (targetLang === normalizeLanguageCode(targetLangParam)) {
@@ -1291,81 +1580,15 @@ export async function autoBackfillMasteredWords(
 }
 
 /**
- * Очищает «сиротские» выученные слова (чьи карточки больше не принадлежат ни одной существующей колоде или книге)
+ * Append-only защита: удалять выученные слова из матрицы из-за неполного списка загруженных
+ * колод/книг строго запрещено. Возвращает 0.
  */
 export async function purgeOrphanedMasteredWords(
-  currentDecks: Array<{ id: string; cards?: Array<any> }>,
-  currentBooks?: Array<{ id: string; decks?: Array<any> }>,
-  langParam?: string | AppLang
+  _currentDecks: Array<{ id: string; cards?: Array<any> }>,
+  _currentBooks?: Array<{ id: string; decks?: Array<any> }>,
+  _langParam?: string | AppLang
 ): Promise<number> {
-  const normLang = normalizeLanguageCode(langParam);
-  initMatrixStore(normLang);
-
-  // 1. Собираем ID всех актуальных существующих карточек и их канонические леммы
-  const validCardIds = new Set<string>();
-  const validLemmaKeys = new Set<string>();
-  const collectCard = (c: any) => {
-    if (!c || c.isDeleted) return;
-    if (c.id) validCardIds.add(c.id);
-    const rawWord = c.targetWord || c.word || c.front || '';
-    const key = normalizeLemmaKey(rawWord);
-    if (key) validLemmaKeys.add(key);
-  };
-
-  (currentDecks || []).forEach((d: any) => {
-    if (!d || d.isDeleted) return;
-    (d.cards || []).forEach(collectCard);
-  });
-  (currentBooks || []).forEach((b: any) => {
-    if (!b || b.isDeleted) return;
-    (b.decks || []).forEach((d: any) => {
-      if (!d || d.isDeleted) return;
-      (d.cards || []).forEach(collectCard);
-    });
-  });
-
-  if (validCardIds.size === 0) return 0;
-
-  // 2. Фильтруем локальную матрицу uniqueMasteredWordsByLang
-  const currentMap = uniqueMasteredWordsByLang[normLang];
-  let changed = false;
-  const removedKeys: string[] = [];
-
-  currentMap.forEach((entry, key) => {
-    const missingCardId = Boolean(entry.cardId && !validCardIds.has(entry.cardId));
-    const missingLemma = !validLemmaKeys.has(key);
-    if (missingCardId || missingLemma) {
-      removedKeys.push(key);
-      changed = true;
-    }
-  });
-
-  removedKeys.forEach(k => currentMap.delete(k));
-
-  if (changed) {
-    recomputeStatsFromMap(normLang);
-    persistMatrixToStorage(normLang);
-    notifyListeners(normLang);
-
-    try {
-      safeUpsertUserStats({
-        language: `MASTERED_WORDS_${normLang.toUpperCase()}`,
-        daily_activity: {
-          counts: globalMatrixStatsByLang[normLang]?.counts,
-          totalWords: currentMap.size,
-          words: Array.from(currentMap.keys()),
-          updatedAt: Date.now(),
-        },
-      }).catch(() => {});
-    } catch {}
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
-      window.dispatchEvent(new Event('stats-update'));
-    }
-  }
-
-  return removedKeys.length;
+  return 0;
 }
 
 /**
@@ -1438,7 +1661,7 @@ export async function purgeJunkExportierenWord(): Promise<void> {
 }
 
 /**
- * Синхронизирует матрицу при явном удалении колоды, книги или карточки.
+ * Синхронизирует матрицу при явных действиях с колодами (строго append-only).
  */
 export async function reconcileMasteredWords(
   providedDecks?: Array<{ id: string; bookId?: string; level?: string; language?: string; cards?: Array<any> }>,
@@ -1447,9 +1670,6 @@ export async function reconcileMasteredWords(
 ) {
   if (!isExplicitDeletion) {
     return;
-  }
-  if (Array.isArray(providedDecks)) {
-    await purgeOrphanedMasteredWords(providedDecks, undefined, targetLangParam);
   }
   await autoBackfillMasteredWords(providedDecks, undefined, targetLangParam);
 }
@@ -1487,10 +1707,11 @@ export async function removeMasteredWordsByCardIds(
     window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
   }
 
+  syncMasteredUserStatsSnapshot(normLang);
+
   // Удаление из Supabase таблицы user_mastered_words
   try {
-    const { data: authData } = await supabase.auth.getUser();
-    const userId = authData?.user?.id;
+    const userId = await getMatrixAuthUserId();
     if (userId) {
       if (bookId) {
         await supabase
@@ -1506,7 +1727,6 @@ export async function removeMasteredWordsByCardIds(
           .eq('user_id', userId)
           .in('lemma', keysToRemove);
       }
-      await fetchMasteredWordsCountFromCloud();
     }
   } catch (err) {
     console.warn('[Wortschatz-Matrix] Remote cascade delete notice:', err);
@@ -1528,7 +1748,7 @@ export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgres
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const todayEnd = todayStart + 24 * 60 * 60 * 1000;
 
-  const todayCounts: Record<CEFRLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
+  const todayCounts = createEmptyLevelCounts();
   let wordsLearnedToday = 0;
 
   const map = uniqueMasteredWordsByLang[lang];
@@ -1557,7 +1777,7 @@ export function getWordsLearnedToday(langParam?: string | AppLang): TodayProgres
 
     if (isNewlyLearnedToday) {
       wordsLearnedToday++;
-      const lvl = CEFR_LEVEL_KEYS.includes(entry.level) ? entry.level : 'B1';
+      const lvl: MatrixCEFRLevel = MATRIX_LEVEL_KEYS.includes(entry.level) ? entry.level : 'B1';
       todayCounts[lvl] = (todayCounts[lvl] || 0) + 1;
     }
   });
@@ -1593,19 +1813,18 @@ export async function repairInflatedMasteredTimestamps(lang: AppLang = 'de'): Pr
   const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
   let hasRepairs = false;
 
-  // 1. Проверяем записи в таблице user_mastered_words в Supabase (Single Source of Truth)
+  // 1. Проверяем записи в таблице user_mastered_words в Supabase (БЕЗ несуществующей колонки created_at)
   try {
-    const { data: authData } = await supabase.auth.getUser();
-    const userId = authData?.user?.id;
+    const userId = await getMatrixAuthUserId();
     if (userId) {
       const { data: remoteRows } = await supabase
         .from('user_mastered_words')
-        .select('lemma, first_mastered_at, created_at')
+        .select('lemma, first_mastered_at')
         .eq('user_id', userId);
 
       if (Array.isArray(remoteRows)) {
         for (const row of remoteRows) {
-          const key = normalizeLemmaKey(row.lemma || '');
+          const key = normalizeMasteredLemma(row.lemma || '');
           const entry = map.get(key);
           if (entry && row.first_mastered_at) {
             const remoteTs = new Date(row.first_mastered_at).getTime();
@@ -1613,11 +1832,9 @@ export async function repairInflatedMasteredTimestamps(lang: AppLang = 'de'): Pr
               if (remoteTs < todayStart && entry.masteredAt >= todayStart) {
                 entry.masteredAt = remoteTs;
                 entry.first_mastered_at = row.first_mastered_at;
-                if (row.created_at) entry.created_at = row.created_at;
                 hasRepairs = true;
               } else if (!entry.first_mastered_at) {
                 entry.first_mastered_at = row.first_mastered_at;
-                entry.created_at = row.created_at || entry.created_at;
               }
             }
           }
@@ -1646,7 +1863,7 @@ export async function repairInflatedMasteredTimestamps(lang: AppLang = 'de'): Pr
         if (!Array.isArray(d?.cards)) continue;
         for (const c of d.cards) {
           const rawWord = c.targetWord || c.target_word || c.missingWord || c.infinitive || c.front || '';
-          const normKey = normalizeLemmaKey(rawWord);
+          const normKey = normalizeMasteredLemma(rawWord);
           const entry = map.get(normKey);
           if (!entry) continue;
 
@@ -1690,7 +1907,7 @@ function areMatrixStatsEqual(a: CEFRMatrixStats, b: CEFRMatrixStats): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   if (a.totalWords !== b.totalWords || a.activeLevel !== b.activeLevel) return false;
-  for (const lvl of CEFR_LEVEL_KEYS) {
+  for (const lvl of MATRIX_LEVEL_KEYS) {
     if ((a.counts?.[lvl] ?? 0) !== (b.counts?.[lvl] ?? 0)) return false;
   }
   return true;
@@ -1700,7 +1917,7 @@ function areTodayProgressEqual(a: TodayProgress, b: TodayProgress): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   if (a.wordsLearnedToday !== b.wordsLearnedToday || a.percentLearnedToday !== b.percentLearnedToday) return false;
-  for (const lvl of CEFR_LEVEL_KEYS) {
+  for (const lvl of MATRIX_LEVEL_KEYS) {
     if ((a.todayCounts?.[lvl] ?? 0) !== (b.todayCounts?.[lvl] ?? 0)) return false;
   }
   return true;
@@ -1708,17 +1925,14 @@ function areTodayProgressEqual(a: TodayProgress, b: TodayProgress): boolean {
 
 /**
  * React-хук для отображения матрицы Wortschatz-Matrix и суточного прогресса.
+ * Единый источник истины: totalMasteredCount === uniqueLemmas.size === сумма A1..C2.
  */
 export function useWortschatzMatrix(langParam?: string | AppLang) {
   const normLang = normalizeLanguageCode(langParam);
 
   const [stats, setStats] = useState<CEFRMatrixStats>(() => {
     initMatrixStore(normLang);
-    return { ...globalMatrixStatsByLang[normLang] };
-  });
-
-  const [masteredWordsCount, setMasteredWordsCount] = useState<number | null>(() => {
-    return getCachedMasteredWordsCount();
+    return { ...globalMatrixStatsByLang[normLang], counts: { ...globalMatrixStatsByLang[normLang].counts } };
   });
 
   const [todayProgress, setTodayProgress] = useState<TodayProgress>(() => {
@@ -1730,14 +1944,13 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     purgeJunkExportierenWord().catch(() => {});
 
     const applyLatestStats = () => {
-      const nextStats = { ...globalMatrixStatsByLang[normLang] };
+      const nextStats: CEFRMatrixStats = {
+        ...globalMatrixStatsByLang[normLang],
+        counts: { ...globalMatrixStatsByLang[normLang].counts },
+      };
       setStats((prev) => (areMatrixStatsEqual(prev, nextStats) ? prev : nextStats));
       const nextProgress = getWordsLearnedToday(normLang);
       setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
-      const cachedCount = getCachedMasteredWordsCount();
-      if (cachedCount !== null) {
-        setMasteredWordsCount((prev) => (prev === cachedCount ? prev : cachedCount));
-      }
     };
 
     repairInflatedMasteredTimestamps(normLang)
@@ -1747,39 +1960,40 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       .catch(() => {});
     applyLatestStats();
 
-    // Единый источник истины из Supabase (user_mastered_words) на старте на всех устройствах
-    fetchMasteredWordsCountFromCloud().catch(() => {});
-
-    // Гарантированно синхронизируем выученные слова из облака на старте (Chrome, Safari, Mobile)
+    // Гарантированно синхронизируем выученные слова из облака на старте (один атомарный цикл)
     if (!hasAttemptedCloudSyncByLang[normLang]) {
       syncMasteredWordsFromCloud(normLang);
     }
 
     const handleUpdate = (changedLang: AppLang, updated: CEFRMatrixStats) => {
       if (changedLang === normLang) {
-        const nextStats = { ...updated };
+        const nextStats: CEFRMatrixStats = {
+          ...updated,
+          counts: { ...updated.counts },
+        };
         setStats((prev) => (areMatrixStatsEqual(prev, nextStats) ? prev : nextStats));
         const nextProgress = getWordsLearnedToday(normLang);
         setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
       }
     };
 
-    const handleCountUpdate = (nextCount: number | null) => {
-      if (nextCount !== null) {
-        setMasteredWordsCount((prev) => (prev === nextCount ? prev : nextCount));
-      }
-    };
-
     listeners.add(handleUpdate);
-    countListeners.add(handleCountUpdate);
 
     const handleRefreshDaily = () => {
       applyLatestStats();
     };
 
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (!e.key || e.key === MASTERED_SNAPSHOT_KEY || e.key.startsWith('wortschatz_matrix_v4_')) {
+        isInitializedByLang[normLang] = false;
+        initMatrixStore(normLang);
+        applyLatestStats();
+      }
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener('stats-update', handleRefreshDaily);
-      window.addEventListener('storage', handleRefreshDaily);
+      window.addEventListener('storage', handleStorageEvent);
       window.addEventListener('storage-update', handleRefreshDaily);
     }
 
@@ -1788,9 +2002,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       if (document.visibilityState === 'visible') {
         if (visibilityDebounceTimer) clearTimeout(visibilityDebounceTimer);
         visibilityDebounceTimer = setTimeout(() => {
-          fetchMasteredWordsCountFromCloud().catch(() => {});
-          const nextProgress = getWordsLearnedToday(normLang);
-          setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
+          syncMasteredWordsFromCloud(normLang).catch(() => {});
         }, 2000);
       }
     };
@@ -1802,11 +2014,10 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     return () => {
       if (visibilityDebounceTimer) clearTimeout(visibilityDebounceTimer);
       listeners.delete(handleUpdate);
-      countListeners.delete(handleCountUpdate);
       if (typeof window !== 'undefined') {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         window.removeEventListener('stats-update', handleRefreshDaily);
-        window.removeEventListener('storage', handleRefreshDaily);
+        window.removeEventListener('storage', handleStorageEvent);
         window.removeEventListener('storage-update', handleRefreshDaily);
       }
     };
@@ -1818,25 +2029,26 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
   const refreshMatrix = useCallback(async () => {
     await repairInflatedMasteredTimestamps(normLang);
     await syncMasteredWordsFromCloud(normLang, true);
-    await fetchMasteredWordsCountFromCloud();
     const nextProgress = getWordsLearnedToday(normLang);
     setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
   }, [normLang]);
 
-  const totalMasteredWords =
+  // Единый инвариант: totalMasteredCount === сумма A1 + A2 + B1 + B2 + C1 + C2 === uniqueLemmas.size
+  const totalMasteredCount =
     (stats.counts.A1 || 0) +
     (stats.counts.A2 || 0) +
     (stats.counts.B1 || 0) +
     (stats.counts.B2 || 0) +
     (stats.counts.C1 || 0) +
-    ((stats.counts as Record<string, number | undefined>).C2 || 0);
+    (stats.counts.C2 || 0);
 
   const resolvedActiveLevel = calculateActiveLevel(stats.counts);
 
   return {
     counts: stats.counts,
-    totalWords: totalMasteredWords,
-    masteredWordsCount: totalMasteredWords,
+    totalMasteredCount,
+    totalWords: totalMasteredCount,
+    masteredWordsCount: totalMasteredCount,
     activeLevel: resolvedActiveLevel,
     currentLanguage: normLang,
     wordLabel,
