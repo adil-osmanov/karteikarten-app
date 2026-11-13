@@ -42,9 +42,15 @@ export interface MasteredWordEntry {
   first_mastered_at?: string;
   created_at?: string;
   bookId?: string;
+  bookTitle?: string;
+  deckId?: string;
+  deckName?: string;
   translation?: string;
   cardId?: string;
   nextReviewDate?: string | number | null;
+  interval?: number;
+  repetitions?: number;
+  forms?: string | null;
   sentence?: string;
   sentenceTranslation?: string;
 }
@@ -800,9 +806,15 @@ function hydrateEntriesIntoMap(
         first_mastered_at,
         created_at,
         bookId: val?.bookId,
+        bookTitle: val?.bookTitle,
+        deckId: val?.deckId,
+        deckName: val?.deckName,
         translation: val?.translation,
         cardId: val?.cardId,
         nextReviewDate: val?.nextReviewDate,
+        interval: typeof val?.interval === 'number' ? val.interval : undefined,
+        repetitions: typeof val?.repetitions === 'number' ? val.repetitions : undefined,
+        forms: val?.forms,
         sentence: val?.sentence,
         sentenceTranslation: val?.sentenceTranslation,
       });
@@ -819,9 +831,15 @@ function hydrateEntriesIntoMap(
         first_mastered_at: existing.first_mastered_at || first_mastered_at,
         created_at: existing.created_at || created_at,
         bookId: val?.bookId || existing.bookId,
+        bookTitle: val?.bookTitle || existing.bookTitle,
+        deckId: val?.deckId || existing.deckId,
+        deckName: val?.deckName || existing.deckName,
         translation: val?.translation || existing.translation,
         cardId: val?.cardId || existing.cardId,
         nextReviewDate: val?.nextReviewDate || existing.nextReviewDate,
+        interval: typeof val?.interval === 'number' ? Math.max(val.interval, existing.interval ?? 0) : existing.interval,
+        repetitions: typeof val?.repetitions === 'number' ? Math.max(val.repetitions, existing.repetitions ?? 0) : existing.repetitions,
+        forms: val?.forms || existing.forms,
         sentence: val?.sentence || existing.sentence,
         sentenceTranslation: val?.sentenceTranslation || existing.sentenceTranslation,
       });
@@ -1110,9 +1128,15 @@ export async function syncAuthoritativeMasteredWords(
       first_mastered_at: prev.first_mastered_at || incoming.first_mastered_at,
       created_at: prev.created_at || incoming.created_at,
       bookId: incoming.bookId || prev.bookId,
+      bookTitle: incoming.bookTitle || prev.bookTitle,
+      deckId: incoming.deckId || prev.deckId,
+      deckName: incoming.deckName || prev.deckName,
       translation: incoming.translation || prev.translation,
       cardId: incoming.cardId || prev.cardId,
       nextReviewDate: incoming.nextReviewDate ?? prev.nextReviewDate,
+      interval: Math.max(incoming.interval ?? 0, prev.interval ?? 0),
+      repetitions: Math.max(incoming.repetitions ?? 0, prev.repetitions ?? 0),
+      forms: incoming.forms || prev.forms,
     });
   };
 
@@ -1149,6 +1173,7 @@ export async function syncAuthoritativeMasteredWords(
     const cardLevel = c.level || hint?.level || null;
     const level = resolveMasteredLevel(normalizedKey, deckLevel, cardLevel, lang);
     const cardNextReview = c.nextReviewDate ?? c.next_review_date;
+    const cardForms = c.forms || c.baseWordInfo || null;
 
     mergeAuthoritativeEntry(normalizedKey, {
       originalWord: rawWord,
@@ -1157,9 +1182,15 @@ export async function syncAuthoritativeMasteredWords(
       first_mastered_at: firstMasteredAt,
       created_at: hint?.created_at,
       bookId: deckObj?.book_id || hint?.bookId,
+      bookTitle: parentBook?.title || undefined,
+      deckId: deckObj?.id || c.deck_id || undefined,
+      deckName: deckObj?.name || deckObj?.title || undefined,
       translation: cardTranslation,
       cardId: c.id,
       nextReviewDate: cardNextReview,
+      interval: Number(c.interval ?? 0),
+      repetitions: Number(c.repetitions ?? 0),
+      forms: typeof cardForms === 'string' ? cardForms : null,
     });
   }
 
@@ -1318,9 +1349,15 @@ export async function reloadMasteredWordsLightweight(
       first_mastered_at: row.first_mastered_at || prev?.first_mastered_at,
       created_at: prev?.created_at,
       bookId: row.source_book_id || prev?.bookId,
+      bookTitle: prev?.bookTitle,
+      deckId: prev?.deckId,
+      deckName: prev?.deckName,
       translation: prev?.translation,
       cardId: prev?.cardId,
       nextReviewDate: prev?.nextReviewDate,
+      interval: prev?.interval,
+      repetitions: prev?.repetitions,
+      forms: prev?.forms,
       sentence: prev?.sentence,
       sentenceTranslation: prev?.sentenceTranslation,
     });

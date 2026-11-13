@@ -13032,6 +13032,17 @@ export default function App() {
       syncCardsFromSupabase(isForced).catch(() => {});
     };
 
+    const handlePracticeSingleWord = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.card) {
+        initAudioCtx();
+        setIsReviewingMistakes(false);
+        setReviewCards(null);
+        setActiveDeckId(null);
+        setDrillCards([{ deckId: detail.deckId || 'mastered-quick-practice', card: detail.card }]);
+      }
+    };
+
     const unsubscribeStateBus = subscribeStateBus((msg) => {
       if (msg.type === 'REFRESH_DUE_COUNT' || msg.type === 'STATE_SYNC') {
         useStore.getState().refreshDueCardsCount().catch(() => {});
@@ -13039,6 +13050,7 @@ export default function App() {
     });
 
     window.addEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
+    window.addEventListener('kraft:practice-word', handlePracticeSingleWord);
     window.addEventListener('focus', handleFocus);
     window.addEventListener('pageshow', handleFocus);
     document.addEventListener('visibilitychange', handleFocus);
@@ -13052,6 +13064,7 @@ export default function App() {
       clearInterval(dailyResetInterval);
       unsubscribeStateBus();
       window.removeEventListener('trigger-supabase-card-sync', handleTriggerCardSync);
+      window.removeEventListener('kraft:practice-word', handlePracticeSingleWord);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pageshow', handleFocus);
       document.removeEventListener('visibilitychange', handleFocus);
