@@ -400,21 +400,71 @@ function notifyListeners(lang: AppLang) {
   listeners.forEach((listener) => listener(lang, currentStats));
 }
 
-function calculateActiveLevel(counts: Record<MatrixCEFRLevel, number>): MatrixCEFRLevel {
-  const total = MATRIX_LEVEL_KEYS.reduce((acc, lvl) => acc + (counts[lvl] || 0), 0);
-  if (total === 0) return 'A1';
+export interface VocabCefrEvaluation {
+  currentLevel: MatrixCEFRLevel;
+  nextLevel: MatrixCEFRLevel | null;
+  weightedScore: number;
+  wordsToNextLevel: number;
+  progressToNextPercent: number;
+}
 
-  // Выбираем уровень с наибольшим числом освоенных слов (при равенстве — более высокий уровень)
-  let bestLevel: MatrixCEFRLevel = 'A1';
-  let maxCount = -1;
-  for (const lvl of MATRIX_LEVEL_KEYS) {
-    const c = counts[lvl] || 0;
-    if (c >= maxCount && c > 0) {
-      maxCount = c;
-      bestLevel = lvl;
+const CEFR_WEIGHTS: Record<MatrixCEFRLevel, number> = {
+  A1: 1,
+  A2: 1.5,
+  B1: 2.5,
+  B2: 4,
+  C1: 6,
+  C2: 8,
+};
+
+const CEFR_EVALUATION_THRESHOLDS: Array<{
+  level: MatrixCEFRLevel;
+  min: number;
+  max: number;
+  next: MatrixCEFRLevel | null;
+}> = [
+  { level: 'A1', min: 0, max: 300, next: 'A2' },
+  { level: 'A2', min: 300, max: 750, next: 'B1' },
+  { level: 'B1', min: 750, max: 1600, next: 'B2' },
+  { level: 'B2', min: 1600, max: 3200, next: 'C1' },
+  { level: 'C1', min: 3200, max: 5500, next: 'C2' },
+  { level: 'C2', min: 5500, max: 10000, next: null },
+];
+
+export function evaluateVocabCefrLevel(countsByLevel: Record<string, number> = {}): VocabCefrEvaluation {
+  const weightedScore = Math.round(
+    (countsByLevel.A1 || 0) * CEFR_WEIGHTS.A1 +
+    (countsByLevel.A2 || 0) * CEFR_WEIGHTS.A2 +
+    (countsByLevel.B1 || 0) * CEFR_WEIGHTS.B1 +
+    (countsByLevel.B2 || 0) * CEFR_WEIGHTS.B2 +
+    (countsByLevel.C1 || 0) * CEFR_WEIGHTS.C1 +
+    (countsByLevel.C2 || 0) * CEFR_WEIGHTS.C2
+  );
+
+  let matched = CEFR_EVALUATION_THRESHOLDS[0];
+  for (const band of CEFR_EVALUATION_THRESHOLDS) {
+    if (weightedScore >= band.min) {
+      matched = band;
     }
   }
-  return bestLevel;
+
+  const wordsToNextLevel = matched.next ? Math.max(0, matched.max - weightedScore) : 0;
+  const bandSpan = matched.max - matched.min;
+  const progressToNextPercent = matched.next && bandSpan > 0
+    ? Math.max(0, Math.min(100, Math.round(((weightedScore - matched.min) / bandSpan) * 100)))
+    : 100;
+
+  return {
+    currentLevel: matched.level,
+    nextLevel: matched.next,
+    weightedScore,
+    wordsToNextLevel,
+    progressToNextPercent,
+  };
+}
+
+function calculateActiveLevel(counts: Record<MatrixCEFRLevel, number>): MatrixCEFRLevel {
+  return evaluateVocabCefrLevel(counts).currentLevel;
 }
 
 function recomputeStatsFromMap(lang: AppLang): CEFRMatrixStats {
@@ -596,8 +646,53 @@ const inFlightSyncPromiseByLang: Record<AppLang, Promise<void> | null> = {
   es: null,
 };
 
-function syncMasteredUserStatsSnapshot(lang: AppLang, statsRowKey?: string): Promise<void> {
+async function syncMasteredUserStatsSnapshot(lang: AppLang, statsRowKey?: string): Promise<void> {
+  const rowKey = statsRowKey || `MASTERED_WORDS_${lang.toUpperCase()}`;
   const map = uniqueMasteredWordsByLang[lang];
+
+  // Append-only safety: fetch existing cloud snapshot before writing so a stale/partial browser never shrinks cloud count
+  if (!hasAttemptedCloudSyncByLang[lang] && !statsRowKey) {
+    try {
+      const existingRemote = await safeFetchUserStats(rowKey);
+      const remoteLemmas: string[] = Array.isArray(existingRemote?.lemmas)
+        ? existingRemote.lemmas
+        : Array.isArray(existingRemote?.words)
+        ? existingRemote.words
+        : [];
+      const remoteLevels: Record<string, string> =
+        existingRemote?.lemmaLevels && typeof existingRemote.lemmaLevels === 'object'
+          ? existingRemote.lemmaLevels
+          : {};
+      const remoteDates: Record<string, string> =
+        existingRemote?.lemmaDates && typeof existingRemote.lemmaDates === 'object'
+          ? existingRemote.lemmaDates
+          : {};
+      let addedFromCloud = false;
+      for (const w of remoteLemmas) {
+        if (!w || typeof w !== 'string') continue;
+        const normKey = normalizeMasteredLemma(w);
+        if (!normKey || normKey.length < 2) continue;
+        if (isExcludedStandaloneLemma(normKey) || isFunctionalParticle(w) || isFunctionalParticle(normKey)) continue;
+        if (!map.has(normKey)) {
+          const dateStr = remoteDates[normKey] || remoteDates[w];
+          const ts = dateStr ? new Date(dateStr).getTime() : 0;
+          map.set(normKey, {
+            originalWord: w,
+            level: resolveMasteredLevel(normKey, null, remoteLevels[normKey] || remoteLevels[w], lang),
+            masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
+            first_mastered_at: dateStr,
+          });
+          addedFromCloud = true;
+        }
+      }
+      if (addedFromCloud) {
+        recomputeStatsFromMap(lang);
+        persistMatrixToStorage(lang);
+        notifyListeners(lang);
+      }
+    } catch {}
+  }
+
   const counts = globalMatrixStatsByLang[lang]?.counts || createEmptyLevelCounts();
   const lemmas = Array.from(map.keys());
   const lemmaLevels: Record<string, MatrixCEFRLevel> = {};
@@ -609,8 +704,8 @@ function syncMasteredUserStatsSnapshot(lang: AppLang, statsRowKey?: string): Pro
     }
   });
 
-  return safeUpsertUserStats({
-    language: statsRowKey || `MASTERED_WORDS_${lang.toUpperCase()}`,
+  await safeUpsertUserStats({
+    language: rowKey,
     daily_activity: {
       counts,
       totalWords: map.size,
@@ -620,9 +715,7 @@ function syncMasteredUserStatsSnapshot(lang: AppLang, statsRowKey?: string): Pro
       lemmaDates,
       updatedAt: Date.now(),
     },
-  })
-    .then(() => undefined)
-    .catch(() => undefined);
+  }).catch(() => undefined);
 }
 
 function hydrateEntriesIntoMap(
@@ -770,10 +863,10 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
   }
   const now = Date.now();
   if (!force && now - (lastCloudSyncByLang[lang] || 0) < MATRIX_CLOUD_SYNC_COOLDOWN_MS) return;
+  if (force && now - (lastCloudSyncByLang[lang] || 0) < 3000) return;
 
   isSyncingByLang[lang] = true;
   lastCloudSyncByLang[lang] = now;
-  hasAttemptedCloudSyncByLang[lang] = true;
 
   const runSync = async () => {
     try {
@@ -1153,6 +1246,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
       }
 
       uniqueMasteredWordsByLang[lang] = nextMap;
+      hasAttemptedCloudSyncByLang[lang] = true;
       recomputeStatsFromMap(lang);
 
       if (hasChanged) {
@@ -1165,7 +1259,7 @@ export async function syncMasteredWordsFromCloud(lang: AppLang = 'de', force: bo
         ? remoteStatsPayload.lemmas.length
         : -1;
       if (hasChanged || remoteTotal !== nextMap.size || remoteLemmaCount !== nextMap.size) {
-        syncMasteredUserStatsSnapshot(lang);
+        await syncMasteredUserStatsSnapshot(lang);
       }
     } catch (err) {
       console.warn('[Wortschatz-Matrix] syncMasteredWordsFromCloud notice:', err);
@@ -1997,25 +2091,26 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       window.addEventListener('storage-update', handleRefreshDaily);
     }
 
-    let visibilityDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        if (visibilityDebounceTimer) clearTimeout(visibilityDebounceTimer);
-        visibilityDebounceTimer = setTimeout(() => {
-          syncMasteredWordsFromCloud(normLang).catch(() => {});
-        }, 2000);
-      }
+    let focusSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const triggerCloudSyncDebounced = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (focusSyncDebounceTimer) clearTimeout(focusSyncDebounceTimer);
+      focusSyncDebounceTimer = setTimeout(() => {
+        syncMasteredWordsFromCloud(normLang, true).catch(() => {});
+      }, 400);
     };
 
     if (typeof window !== 'undefined') {
-      document.addEventListener('visibilitychange', handleVisibilityChange);
+      document.addEventListener('visibilitychange', triggerCloudSyncDebounced);
+      window.addEventListener('focus', triggerCloudSyncDebounced);
     }
 
     return () => {
-      if (visibilityDebounceTimer) clearTimeout(visibilityDebounceTimer);
+      if (focusSyncDebounceTimer) clearTimeout(focusSyncDebounceTimer);
       listeners.delete(handleUpdate);
       if (typeof window !== 'undefined') {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        document.removeEventListener('visibilitychange', triggerCloudSyncDebounced);
+        window.removeEventListener('focus', triggerCloudSyncDebounced);
         window.removeEventListener('stats-update', handleRefreshDaily);
         window.removeEventListener('storage', handleStorageEvent);
         window.removeEventListener('storage-update', handleRefreshDaily);
@@ -2042,14 +2137,15 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     (stats.counts.C1 || 0) +
     (stats.counts.C2 || 0);
 
-  const resolvedActiveLevel = calculateActiveLevel(stats.counts);
+  const vocabEvaluation = evaluateVocabCefrLevel(stats.counts);
 
   return {
     counts: stats.counts,
     totalMasteredCount,
     totalWords: totalMasteredCount,
     masteredWordsCount: totalMasteredCount,
-    activeLevel: resolvedActiveLevel,
+    activeLevel: vocabEvaluation.currentLevel,
+    vocabEvaluation,
     currentLanguage: normLang,
     wordLabel,
     totalGoal,

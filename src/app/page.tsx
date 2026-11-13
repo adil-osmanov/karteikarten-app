@@ -5,7 +5,7 @@ import {
   Check, Trash2, BookOpen, Edit2, Upload, FileUp, 
   ArrowLeft, CheckCircle2, Volume2, AlertCircle, AlertTriangle,
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
-  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers,
+  Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers, SquareStack, TextCursorInput,
   ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders, Camera, Pencil,
   Cloud, CloudOff
 } from "lucide-react";
@@ -28,7 +28,7 @@ import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardI
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
-import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry, syncPersistentMistakesFromCloud } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
@@ -50,6 +50,7 @@ import {
   subscribeStateBus,
   type CloudSyncStatus
 } from "@/lib/sync/cloudStateSync";
+import { getSchemaCapabilities, markSchemaCapabilityFalse } from "@/lib/sync/schemaCapabilities";
 export { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, getCleanTranslation, detectAndMarkSeparable };
 
 function cn(...inputs: ClassValue[]) {
@@ -1101,6 +1102,7 @@ export interface BookMeta {
   coverType?: 'color' | 'image';
   coverValue?: string;
   accentColor?: string;
+  exclude_from_review?: boolean;
 }
 
 const useScrollLock = (lock: boolean) => {
@@ -1141,6 +1143,7 @@ export interface Flashcard {
   round?: number;
   isLegendary?: boolean;
   mistakeCount?: number;
+  has_mistake?: boolean;
   linkedCardIds?: string[];
   additionalTranslations?: string[];
   alternateExamples?: string[];
@@ -1264,6 +1267,7 @@ function normalizeRemoteCard(c: any, deckId: string, easeMap: Record<string, num
     repetitions: c.repetitions ?? 0,
     baseWordInfo: c.baseWordInfo || null,
     forms: c.forms || '',
+    has_mistake: Boolean(c.has_mistake ?? (c as any).hasMistake),
     easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : (easeMap[c.id] ?? 2.2),
     updated_at: c.updated_at || c.created_at || undefined,
     created_at: c.created_at || undefined,
@@ -1286,13 +1290,22 @@ function mergeRemoteCardWithLocal(
   const remoteInterval = remoteCard.interval ?? 0;
   const remoteReps = remoteCard.repetitions ?? 0;
 
-  // Строгое сведение SRS к максимальному прогрессу (Stale Overwrite Guard)
+  const localAheadSrs =
+    localMastery > remoteMastery ||
+    (localArchived && !remoteArchived) ||
+    (localMastery === remoteMastery && localReps > remoteReps);
+
+  // Строгое сведение SRS: при равном mastery берем прогресс с большим reps/свежей датой
   const finalMastery = Math.max(localMastery, remoteMastery);
   const finalArchived = localArchived || remoteArchived || finalMastery >= 4;
   const finalRound = finalArchived ? 4 : Math.max(1, Math.min(4, finalMastery + 1));
   const finalReps = Math.max(localReps, remoteReps);
   const finalInterval = Math.max(localInterval, remoteInterval);
-  const finalReviewDate = remoteReviewDate ?? localReviewDate;
+  const finalReviewDate = localAheadSrs
+    ? (localReviewDate ?? remoteReviewDate)
+    : (remoteReviewDate ?? localReviewDate);
+  const finalHasMistake =
+    remoteCard.has_mistake !== undefined ? Boolean(remoteCard.has_mistake) : Boolean(localCard.has_mistake);
 
   const localUpdatedMs = localCard.updated_at ? Date.parse(localCard.updated_at) : 0;
   const remoteUpdatedMs = remoteCard.updated_at ? Date.parse(remoteCard.updated_at) : 0;
@@ -1305,7 +1318,7 @@ function mergeRemoteCardWithLocal(
 
   // Принимаем текстовые правки с сервера, если удаленная запись не старее локальной
   const takeRemoteContent =
-    remoteHasContentChange && (!localUpdatedMs || remoteUpdatedMs >= localUpdatedMs);
+    remoteHasContentChange && (!localUpdatedMs || !remoteUpdatedMs || remoteUpdatedMs >= localUpdatedMs);
 
   const srsChanged =
     finalMastery !== localMastery ||
@@ -1314,9 +1327,8 @@ function mergeRemoteCardWithLocal(
     Boolean(localCard.isLegendary) !== finalArchived ||
     finalReps !== localReps ||
     finalInterval !== localInterval ||
-    finalReviewDate !== localReviewDate;
-
-  const localAheadSrs = localMastery > remoteMastery || (localArchived && !remoteArchived);
+    finalReviewDate !== localReviewDate ||
+    finalHasMistake !== Boolean(localCard.has_mistake);
 
   if (!srsChanged && !takeRemoteContent) {
     return { merged: localCard, changed: false, localAheadSrs };
@@ -1345,6 +1357,7 @@ function mergeRemoteCardWithLocal(
       repetitions: finalReps,
       interval: finalInterval,
       nextReviewDate: finalReviewDate,
+      has_mistake: finalHasMistake,
     },
   };
 }
@@ -1547,7 +1560,48 @@ export async function fetchAllUserCards(force: boolean = false): Promise<any[]> 
   return cachedAllCards;
 }
 
+const EXCLUDED_BOOKS_STORAGE_KEY = 'kraft_excluded_book_ids';
+const EXCLUDED_BOOKS_TS_KEY = 'kraft_excluded_books_timestamp';
+
+export function getLocalExcludedBookIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(EXCLUDED_BOOKS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string' && id.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setLocalExcludedBookIds(ids: string[], ts?: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    safeSetStorage(EXCLUDED_BOOKS_STORAGE_KEY, JSON.stringify(unique));
+    if (ts) {
+      safeSetStorage(EXCLUDED_BOOKS_TS_KEY, String(ts));
+    }
+  } catch {}
+}
+
+export function isDeckExcludedFromReview(
+  deck: Deck | { bookId?: string; book_id?: string; exclude_from_review?: boolean },
+  books: BookMeta[],
+  excludedBookIdsSet?: Set<string>
+): boolean {
+  if (!deck) return false;
+  if (deck.exclude_from_review) return true;
+  const bId = (deck as any).bookId || (deck as any).book_id;
+  if (!bId) return false;
+  if (excludedBookIdsSet && excludedBookIdsSet.has(bId)) return true;
+  const parent = books.find((b) => b.id === bId);
+  return Boolean(parent?.exclude_from_review);
+}
+
 export async function updateCardInSupabase(cardId: string, validCard: any): Promise<boolean> {
+  const caps = await getSchemaCapabilities();
   const nextMastery = validCard.masteryLevel ?? validCard.mastery_level ?? 0;
   const isArchived = Boolean(validCard.isArchived ?? validCard.is_archived);
   const nextInterval = validCard.interval ?? 0;
@@ -1566,7 +1620,10 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
     interval: nextInterval,
     repetitions: nextRepetitions,
     nextReviewDate: numericReviewDate,
-    updated_at: new Date().toISOString(),
+    ...(caps.cardsUpdatedAt ? { updated_at: new Date().toISOString() } : {}),
+    ...(caps.cardsHasMistake && typeof validCard.has_mistake === 'boolean'
+      ? { has_mistake: validCard.has_mistake }
+      : {}),
   };
 
   if (validCard.sentence !== undefined) primaryPayload.sentence = validCard.sentence;
@@ -1579,6 +1636,25 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
     .from('cards')
     .update(primaryPayload)
     .eq('id', cardId);
+
+  if (error && (error.code === '42703' || error.message?.includes('does not exist'))) {
+    if (error.message?.includes('updated_at')) {
+      markSchemaCapabilityFalse('cardsUpdatedAt');
+      delete primaryPayload.updated_at;
+    }
+    if (error.message?.includes('has_mistake')) {
+      markSchemaCapabilityFalse('cardsHasMistake');
+      delete primaryPayload.has_mistake;
+    }
+    const cleanRetry = await supabase
+      .from('cards')
+      .update(primaryPayload)
+      .eq('id', cardId);
+    if (!cleanRetry.error) {
+      return true;
+    }
+    error = cleanRetry.error;
+  }
 
   if (error) {
     const isoReviewDate = numericReviewDate ? new Date(numericReviewDate).toISOString() : null;
@@ -1624,13 +1700,17 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
   }
 
   const validDecks = filterValidActiveDecks(inMemoryDecks || [], inMemoryBooks || []);
-  const activeDeckIds = new Set(validDecks.map(d => d.id));
+  const excludedSet = new Set(getLocalExcludedBookIds());
+  const reviewEligibleDecks = validDecks.filter(
+    (d) => !isDeckExcludedFromReview(d, inMemoryBooks || [], excludedSet)
+  );
+  const activeDeckIds = new Set(reviewEligibleDecks.map(d => d.id));
 
   const totalCardsInMemory = validDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
 
   if (validDecks.length > 0 && totalCardsInMemory > 0) {
     const dueList: Flashcard[] = [];
-    validDecks.forEach(deck => {
+    reviewEligibleDecks.forEach(deck => {
       if (!activeDeckIds.has(deck.id)) return;
       if (bookId) {
         const dBookId = deck.bookId || (deck as any).book_id;
@@ -1678,13 +1758,20 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
 
   const inMemoryDecks = useStore.getState().decks;
   const inMemoryBooks = useStore.getState().books;
+  const excludedSet = new Set(getLocalExcludedBookIds());
+  inMemoryBooks.forEach((b) => {
+    if (b?.exclude_from_review) excludedSet.add(b.id);
+  });
   const validDecks = filterValidActiveDecks(inMemoryDecks || [], inMemoryBooks || []);
-  const activeDeckIds = new Set(validDecks.map(d => d.id));
+  const reviewEligibleDecks = validDecks.filter(
+    (d) => !isDeckExcludedFromReview(d, inMemoryBooks || [], excludedSet)
+  );
+  const activeDeckIds = new Set(reviewEligibleDecks.map(d => d.id));
   const totalCardsInMemory = validDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
 
   if (validDecks.length > 0 && totalCardsInMemory > 0) {
     const list: { deckId: string, card: Flashcard }[] = [];
-    validDecks.forEach(deck => {
+    reviewEligibleDecks.forEach(deck => {
       if (!activeDeckIds.has(deck.id)) return;
       const dBookId = deck.bookId || (deck as any).book_id;
       if (bookId && dBookId !== bookId) return;
@@ -1735,7 +1822,9 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       const mapped = data
         .filter((row: any) => {
           const dId = row.deck_id || row.decks?.id;
+          const bId = row.decks?.book_id;
           if (!dId) return false;
+          if (bId && excludedSet.has(bId)) return false;
           if (activeDeckIds.size > 0 && !activeDeckIds.has(dId)) return false;
           return isCardDueForReview(row);
         })
@@ -1774,12 +1863,30 @@ let lastSyncCardsFromSupabaseTime = 0;
 
 export async function syncBooksFromSupabase(): Promise<void> {
   try {
-    const { data: cloudBooks, error } = await supabase.from('books').select('*').order('created_at', { ascending: true });
+    const caps = await getSchemaCapabilities();
+    const [{ data: cloudBooks, error }, globalCloudState] = await Promise.all([
+      supabase.from('books').select('*').order('created_at', { ascending: true }),
+      safeFetchUserStats('GLOBAL_APP_STATE').catch(() => null),
+    ]);
     if (error || !cloudBooks || cloudBooks.length === 0) return;
-    
+
+    const excludedSet = new Set(getLocalExcludedBookIds());
+    if (globalCloudState && Array.isArray(globalCloudState.excludedBookIds)) {
+      const localTs = typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0;
+      const cloudTs = globalCloudState.excludedBooksTimestamp || globalCloudState.updatedAt || 0;
+      if (cloudTs >= localTs) {
+        excludedSet.clear();
+        globalCloudState.excludedBookIds.forEach((id: string) => id && excludedSet.add(id));
+        setLocalExcludedBookIds(Array.from(excludedSet), cloudTs);
+      }
+    }
+
     const mappedCloudBooks: BookMeta[] = cloudBooks.map((b: any) => {
       let dedicatedCover = null;
       try { dedicatedCover = localStorage.getItem(`book_cover_${b.id}`); } catch(e) {}
+      const isExcluded = caps.booksExclude
+        ? Boolean(b.exclude_from_review) || excludedSet.has(b.id)
+        : excludedSet.has(b.id) || Boolean(b.exclude_from_review);
       return {
         id: b.id,
         language: b.language || 'DE',
@@ -1792,7 +1899,8 @@ export async function syncBooksFromSupabase(): Promise<void> {
         activeLevels: b.activeLevels || b.activelevels || ['A1'],
         coverType: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover ? 'image' : (b.coverType || b.covertype),
         coverValue: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || b.coverValue || b.covervalue,
-        accentColor: b.accentColor || b.accentcolor
+        accentColor: b.accentColor || b.accentcolor,
+        exclude_from_review: isExcluded,
       };
     });
 
@@ -1806,6 +1914,9 @@ export async function syncBooksFromSupabase(): Promise<void> {
     useStore.getState().setBooks(merged);
     await setIDBItem('app_books', merged);
     safeSetStorage('cached_app_books', JSON.stringify(merged));
+    if (globalCloudState) {
+      applyCloudAppState(globalCloudState);
+    }
   } catch (e) {
     console.warn('[Sync] Failed to sync books from Supabase:', e);
   }
@@ -1814,7 +1925,11 @@ export async function syncBooksFromSupabase(): Promise<void> {
 export async function syncCardsFromSupabase(force: boolean = false): Promise<void> {
   const now = Date.now();
   if (isSyncingCardsFromSupabase) return;
-  if (!force && lastSyncCardsFromSupabaseTime > 0 && now - lastSyncCardsFromSupabaseTime < DELTA_SYNC_COOLDOWN_MS) return;
+  const caps = await getSchemaCapabilities();
+  const minCooldown = caps.cardsUpdatedAt ? DELTA_SYNC_COOLDOWN_MS : 8000;
+  if (lastSyncCardsFromSupabaseTime > 0 && now - lastSyncCardsFromSupabaseTime < (force ? (caps.cardsUpdatedAt ? 1000 : 8000) : minCooldown)) {
+    return;
+  }
 
   const currentBooks = useStore.getState().books;
   let baseDecks = useStore.getState().decks;
@@ -1831,10 +1946,13 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
   try {
     // 1. Параллельно подтягиваем метаданные колод (чтобы новые колоды с ПК сразу появлялись на телефоне)
     //    и дельта-изменения карточек по updated_at (включая карточки с masteryLevel === 0!).
+    const deckSelectCols = caps.decksExclude
+      ? 'id, name, category, level, book_id, language, card_count, materials, exclude_from_review, created_at'
+      : 'id, name, category, level, book_id, language, card_count, materials, created_at';
     const [remoteDecksRes, deltaResult] = await Promise.all([
       supabase
         .from('decks')
-        .select('id, name, category, level, book_id, language, card_count, materials, created_at')
+        .select(deckSelectCols)
         .order('created_at', { ascending: true }),
       syncCardsDelta(supabase),
     ]);
@@ -1845,11 +1963,20 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       } catch {}
     }
 
+    const excludedBookSet = new Set(getLocalExcludedBookIds());
+    currentBooks.forEach((b) => {
+      if (b?.exclude_from_review) excludedBookSet.add(b.id);
+    });
+
     let decksListChanged = false;
     let workingDecks: Deck[] = [...baseDecks];
 
-    if (remoteDecksRes?.data && Array.isArray(remoteDecksRes.data) && remoteDecksRes.data.length > 0) {
-      const remoteDeckIds = new Set(remoteDecksRes.data.map((d: any) => d.id));
+    const remoteDecksList: any[] = Array.isArray(remoteDecksRes?.data)
+      ? (remoteDecksRes.data as unknown as any[])
+      : [];
+
+    if (remoteDecksList.length > 0) {
+      const remoteDeckIds = new Set(remoteDecksList.map((d: any) => d.id));
       const existingMap = new Map(workingDecks.map((d) => [d.id, d]));
 
       // Удаляем только реально удаленные с сервера колоды (кроме тех, у которых есть несохраненные локальные карточки)
@@ -1862,15 +1989,18 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       }
       workingDecks = filteredDecks;
 
-      for (const rd of remoteDecksRes.data) {
+      for (const rd of remoteDecksList) {
         const existing = existingMap.get(rd.id);
+        const fallbackBookId = rd.language === 'EN' ? 'default-en' : 'default-de';
         if (!existing) {
+          const nextBookId = rd.book_id || fallbackBookId;
           workingDecks.push({
             ...rd,
             cards: [],
             card_count: rd.card_count ?? 0,
             language: rd.language || 'DE',
-            bookId: rd.book_id || (rd.language === 'EN' ? 'default-en' : 'default-de'),
+            bookId: nextBookId,
+            exclude_from_review: Boolean(rd.exclude_from_review) || excludedBookSet.has(nextBookId),
           });
           decksListChanged = true;
         } else {
@@ -1878,15 +2008,19 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
           const nextName = rd.name || existing.name;
           const nextCategory = rd.category || existing.category;
           const nextLevel = rd.level || existing.level;
+          const nextExcluded = caps.decksExclude && typeof rd.exclude_from_review === 'boolean'
+            ? (rd.exclude_from_review || excludedBookSet.has(nextBookId))
+            : (excludedBookSet.has(nextBookId) || Boolean(existing.exclude_from_review));
           if (
             nextName !== existing.name ||
             nextBookId !== existing.bookId ||
             nextCategory !== existing.category ||
-            nextLevel !== existing.level
+            nextLevel !== existing.level ||
+            nextExcluded !== Boolean(existing.exclude_from_review)
           ) {
             workingDecks = workingDecks.map((d) =>
               d.id === rd.id
-                ? { ...d, name: nextName, bookId: nextBookId, category: nextCategory, level: nextLevel }
+                ? { ...d, name: nextName, bookId: nextBookId, category: nextCategory, level: nextLevel, exclude_from_review: nextExcluded }
                 : d
             );
             decksListChanged = true;
@@ -1996,10 +2130,11 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
       await autoBackfillMasteredWords(updatedDecks, currentBooks, useStore.getState().appLanguage);
     }
 
-    // Неблокирующая отправка локальных SRS-опережений в облако с обновлением updated_at
+    // Неблокирующая отправка локальных SRS-опережений в облако (с учетом поддерживаемых колонок)
     if (cardsToPushToRemote.length > 0) {
       (async () => {
         try {
+          const caps = await getSchemaCapabilities();
           const pushIso = new Date().toISOString();
           for (let i = 0; i < cardsToPushToRemote.length; i += 10) {
             const chunk = cardsToPushToRemote.slice(i, i + 10);
@@ -2013,7 +2148,7 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
                     repetitions: card.repetitions,
                     interval: card.interval,
                     nextReviewDate: card.nextReviewDate,
-                    updated_at: pushIso,
+                    ...(caps.cardsUpdatedAt ? { updated_at: pushIso } : {}),
                   })
                   .eq('id', card.id)
               )
@@ -2183,6 +2318,7 @@ export interface Deck {
   theory?: StructuredTheory | string | null;
   materials?: string[];
   card_count?: number;
+  exclude_from_review?: boolean;
 }
 
 let cachedUserId: string | null = null;
@@ -2205,7 +2341,7 @@ interface DeckState {
   deleteCard?: (deckId: string, cardId: string) => void;
   updateCardContent: (cardId: string, updates: Partial<Flashcard>) => Promise<boolean>;
   renameDeck: (deckId: string, newName: string) => void;
-  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean) => Promise<void>;
+  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean) => Promise<void>;
   setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => Promise<void>;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: (targetLang?: string) => void;
@@ -2216,6 +2352,7 @@ interface DeckState {
   addBook: (book: BookMeta) => void;
   updateBook: (book: BookMeta) => void;
   updateBookSettings: (bookId: string, updates: Partial<BookMeta>) => Promise<boolean>;
+  toggleBookExcludeFromReview: (bookId: string) => Promise<void>;
   deleteBook: (id: string) => void;
   syncError: string | null;
   setSyncError: (msg: string | null) => void;
@@ -2380,7 +2517,8 @@ export const useStore = create<DeckState>()((set, get) => ({
           (b.coverImage || '') === (nb.coverImage || '') &&
           (b.category || '') === (nb.category || '') &&
           (b.training_mode || '') === (nb.training_mode || '') &&
-          (b.language || '') === (nb.language || '')
+          (b.language || '') === (nb.language || '') &&
+          Boolean(b.exclude_from_review) === Boolean(nb.exclude_from_review)
         );
       });
     if (!isSame) {
@@ -2460,31 +2598,85 @@ export const useStore = create<DeckState>()((set, get) => ({
   },
   updateBookSettings: async (bookId, updates) => {
     const previousBooks = get().books;
+    const previousDecks = get().decks;
     const book = previousBooks.find(b => b.id === bookId);
     if (!book) throw new Error("Book not found");
-    
+
     const updatedBook = { ...book, ...updates };
     const newBooks = previousBooks.map(b => b.id === bookId ? updatedBook : b);
     set({ books: newBooks });
     await setIDBItem('app_books', newBooks);
     safeSetStorage('cached_app_books', JSON.stringify(newBooks));
-    
-    const { data, error } = await supabase.from('books').update(updates).eq('id', bookId).select('id');
+
+    const caps = await getSchemaCapabilities();
+    const hasExcludeUpdate = updates.exclude_from_review !== undefined;
+
+    if (hasExcludeUpdate) {
+      const nextExcluded = Boolean(updates.exclude_from_review);
+      const excludedIds = newBooks.filter((b) => Boolean(b.exclude_from_review)).map((b) => b.id);
+      const excludedTs = Date.now();
+      setLocalExcludedBookIds(excludedIds, excludedTs);
+
+      const newDecks = previousDecks.map((d) =>
+        (d.bookId || (d as any).book_id) === bookId ? { ...d, exclude_from_review: nextExcluded } : d
+      );
+      set({ decks: newDecks });
+      await setIDBItem('app_decks', newDecks).catch(() => {});
+
+      await syncAppStateToCloud({ excludedBookIds: excludedIds, excludedBooksTimestamp: excludedTs });
+      await get().refreshDueCardsCount().catch(() => {});
+      broadcastStateBus('REFRESH_DUE_COUNT');
+
+      if (caps.decksExclude) {
+        await supabase.from('decks').update({ exclude_from_review: nextExcluded }).eq('book_id', bookId);
+      }
+    }
+
+    const dbUpdates: Record<string, any> = { ...updates };
+    if (hasExcludeUpdate && !caps.booksExclude) {
+      delete dbUpdates.exclude_from_review;
+    }
+
+    if (Object.keys(dbUpdates).length === 0) {
+      return true;
+    }
+
+    const { data, error } = await supabase.from('books').update(dbUpdates).eq('id', bookId).select('id');
     if (error) {
+      if (hasExcludeUpdate && (error.code === '42703' || error.message?.includes('exclude_from_review'))) {
+        markSchemaCapabilityFalse('booksExclude');
+        return true;
+      }
       console.error("Supabase updateBookSettings error:", error);
-      set({ books: previousBooks });
+      set({ books: previousBooks, decks: previousDecks });
       await setIDBItem('app_books', previousBooks);
       safeSetStorage('cached_app_books', JSON.stringify(previousBooks));
       throw error;
     }
     if (!data || data.length === 0) {
+      if (hasExcludeUpdate) return true;
       console.error("Supabase updateBookSettings silent failure (RLS blocked update): 0 rows affected.");
-      set({ books: previousBooks });
+      set({ books: previousBooks, decks: previousDecks });
       await setIDBItem('app_books', previousBooks);
       safeSetStorage('cached_app_books', JSON.stringify(previousBooks));
       throw new Error("Update failed: Row Level Security blocked the operation, or book does not exist.");
     }
     return true;
+  },
+  toggleBookExcludeFromReview: async (bookId) => {
+    const book = get().books.find((b) => b.id === bookId);
+    if (!book) return;
+    const nextValue = !Boolean(book.exclude_from_review);
+    try {
+      await get().updateBookSettings(bookId, { exclude_from_review: nextValue });
+      if (typeof window !== 'undefined') {
+        toast.success(nextValue ? 'Aus Wiederholungen ausgenommen' : 'In Wiederholungen aktiviert');
+      }
+    } catch {
+      if (typeof window !== 'undefined') {
+        toast.error('Einstellung konnte nicht gespeichert werden');
+      }
+    }
   },
   updateBook: async (book) => {
     const previousBooks = get().books;
@@ -3033,7 +3225,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
   },
 
-  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean) => {
+  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean) => {
     const deck = get().decks.find((d) => d.id === deckId);
     let lang = targetLanguage;
     if (!lang && deck) {
@@ -3063,6 +3255,11 @@ export const useStore = create<DeckState>()((set, get) => ({
     const computedArchived = Boolean(srsUpdate.isArchived || computedMastery >= 4);
     const computedRound = computedArchived ? 4 : Math.max(1, Math.min(4, computedMastery + 1));
     const scheduledDateIso = srsUpdate.nextReviewDate ? new Date(srsUpdate.nextReviewDate).toISOString() : null;
+    const nextHasMistake = !isCorrect
+      ? true
+      : isMistakesReview
+      ? false
+      : Boolean(targetCard.has_mistake);
     const validCard: Flashcard = {
       ...targetCard,
       ...srsUpdate,
@@ -3073,6 +3270,7 @@ export const useStore = create<DeckState>()((set, get) => ({
       isArchived: computedArchived,
       round: computedRound,
       isLegendary: computedArchived,
+      has_mistake: nextHasMistake,
       updated_at: new Date().toISOString(),
     };
 
@@ -5858,8 +6056,8 @@ function RapidSession({
     setTurn(t => t + 1);
 
     // 2) Сохранение в стор и Supabase в фоне, не блокируя переключение UI
-    if (isReviewMode || liveCard.isArchived) {
-      void answerCard(current.deckId, id, correct, false, true, studyLanguage, isReviewMode);
+    if (isReviewMode || liveCard.isArchived || !correct || isReviewingMistakesSession) {
+      void answerCard(current.deckId, id, correct, false, true, studyLanguage, isReviewMode, isReviewingMistakesSession);
     } else {
       void setCardProgress(current.deckId, id, newScore, studyLanguage);
     }
@@ -6468,8 +6666,8 @@ function StudyInterface({
         isNewMastered 
       }
     );
-    if (isReviewSession || isReviewMode || isGraduated || (wasMasteredBefore && !isActualCorrect && currentRound >= 4)) {
-      await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, isReviewSession);
+    if (isReviewSession || isReviewMode || isGraduated || !isActualCorrect || isReviewingMistakesSession || (wasMasteredBefore && !isActualCorrect && currentRound >= 4)) {
+      await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, isReviewSession, isReviewingMistakesSession);
     } else {
       await setCardProgress(currentDeckId, currentCardSnapshot.id, nextMastery, studyLanguage);
     }
@@ -8287,9 +8485,27 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                 reviewMode === 'grammar_nvv';
 
               const topModes = [
-                { id: 'all', label: 'Alle', count: reviewCounts.all, active: reviewMode === 'all' },
-                { id: 'karten', label: 'Karten', count: reviewCounts.karten, active: isKartenModeActive },
-                { id: 'cloze', label: 'Lücken', count: reviewCounts.cloze, active: reviewMode === 'cloze' },
+                {
+                  id: 'all',
+                  title: 'Alle Modi',
+                  icon: <Layers className="w-3.5 h-3.5 shrink-0" />,
+                  count: reviewCounts.all,
+                  active: reviewMode === 'all',
+                },
+                {
+                  id: 'karten',
+                  title: 'Karteikarten',
+                  icon: <SquareStack className="w-3.5 h-3.5 shrink-0" />,
+                  count: reviewCounts.karten,
+                  active: isKartenModeActive,
+                },
+                {
+                  id: 'cloze',
+                  title: 'Lückentext',
+                  icon: <TextCursorInput className="w-3.5 h-3.5 shrink-0" />,
+                  count: reviewCounts.cloze,
+                  active: reviewMode === 'cloze',
+                },
               ] as const;
 
               return (
@@ -8305,17 +8521,19 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                         type="button"
                         role="tab"
                         aria-selected={mode.active}
+                        aria-label={`${mode.title} (${mode.count})`}
+                        title={mode.title}
                         onClick={() => onReviewModeChange(mode.id)}
-                        className={`shrink-0 px-3.5 py-1 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer flex items-center gap-1.5 select-none ${
+                        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 cursor-pointer flex items-center gap-1.5 select-none ${
                           mode.active
                             ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
+                            : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'
                         }`}
                       >
-                        <span>{mode.label}</span>
+                        {mode.icon}
                         <span
-                          className={`text-[10px] tabular-nums ${
-                            mode.active ? 'text-blue-100' : 'text-neutral-500'
+                          className={`text-[11px] font-semibold tabular-nums ${
+                            mode.active ? 'text-white' : 'text-neutral-500 dark:text-neutral-400'
                           }`}
                         >
                           {mode.count}
@@ -8457,7 +8675,7 @@ export function getBookCategory(book?: BookMeta | null): 'textbooks' | 'flashcar
   return 'flashcards';
 }
 
-const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete }: { book: BookMeta, priority?: boolean, onClick: () => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
+const BookCard = React.memo(({ book, priority = false, onClick, onToggleExcludeFromReview, onEdit, onDelete }: { book: BookMeta, priority?: boolean, onClick: () => void, onToggleExcludeFromReview?: (e: any) => void, onEdit: (e:any)=>void, onDelete: (e:any)=>void }) => {
   const initialCoverStr = book.coverImage || (book.coverType === 'image' ? book.coverValue : null);
   let lightCover = initialCoverStr;
   let darkCover = initialCoverStr;
@@ -8497,6 +8715,8 @@ const BookCard = React.memo(({ book, priority = false, onClick, onEdit, onDelete
           tintColor={tintColor}
           title={cleanTitle}
           priority={priority}
+          excludeFromReview={Boolean(book.exclude_from_review)}
+          onToggleExcludeFromReview={onToggleExcludeFromReview}
           onEdit={onEdit}
           onDelete={onDelete}
         />
@@ -10255,13 +10475,21 @@ function TheoryViewModal({ deckId, onClose, onStartSession, onEdit }: { deckId: 
 
 
 // --- CLOUD SYNC HELPER ---
-export const syncAppStateToCloud = async (override?: { bookOrder?: string[]; deckOrder?: string[]; bookOrderTimestamp?: number }) => {
+export const syncAppStateToCloud = async (override?: {
+  bookOrder?: string[];
+  deckOrder?: string[];
+  bookOrderTimestamp?: number;
+  excludedBookIds?: string[];
+  excludedBooksTimestamp?: number;
+}) => {
   if (typeof window === 'undefined') return;
   const state: any = { theory: {} };
   
   const currentDeckOrder = override?.deckOrder || useStore.getState().deckOrder || [];
   const currentBookOrder = override?.bookOrder || useStore.getState().bookOrder || [];
   const bookOrderTimestamp = override?.bookOrderTimestamp || (typeof window !== 'undefined' ? parseInt(localStorage.getItem('book_order_timestamp') || '0', 10) : 0) || Date.now();
+  const excludedBookIds = override?.excludedBookIds ?? getLocalExcludedBookIds();
+  const excludedBooksTimestamp = override?.excludedBooksTimestamp || (typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0) || Date.now();
   
   if (currentDeckOrder.length > 0) {
     state.deckOrder = currentDeckOrder;
@@ -10282,6 +10510,8 @@ export const syncAppStateToCloud = async (override?: { bookOrder?: string[]; dec
   }
   
   state.bookOrderTimestamp = bookOrderTimestamp;
+  state.excludedBookIds = excludedBookIds;
+  state.excludedBooksTimestamp = excludedBooksTimestamp;
 
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
@@ -10320,6 +10550,34 @@ export const applyCloudAppState = (cloudState: any) => {
   if (cloudState.deckOrder && Array.isArray(cloudState.deckOrder) && cloudState.deckOrder.length > 0) {
     safeSetStorage('deck_order', JSON.stringify(cloudState.deckOrder));
     useStore.getState().setDeckOrder(cloudState.deckOrder, true);
+  }
+
+  if (Array.isArray(cloudState.excludedBookIds)) {
+    const localExcludedTs = typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0;
+    const cloudExcludedTs = cloudState.excludedBooksTimestamp || cloudState.updatedAt || 0;
+    if (cloudExcludedTs >= localExcludedTs) {
+      const excludedIds: string[] = cloudState.excludedBookIds.filter((id: any) => typeof id === 'string' && id.length > 0);
+      setLocalExcludedBookIds(excludedIds, cloudExcludedTs);
+      const excludedSet = new Set(excludedIds);
+      const curBooks = useStore.getState().books;
+      if (curBooks.length > 0) {
+        const nextBooks = curBooks.map((b) => ({
+          ...b,
+          exclude_from_review: excludedSet.has(b.id) || Boolean(b.exclude_from_review && cloudExcludedTs === 0),
+        }));
+        useStore.getState().setBooks(nextBooks);
+        setIDBItem('app_books', nextBooks).catch(() => {});
+      }
+      const curDecks = useStore.getState().decks;
+      if (curDecks.length > 0) {
+        const nextDecks = curDecks.map((d) => {
+          const bId = d.bookId || (d as any).book_id;
+          return bId ? { ...d, exclude_from_review: excludedSet.has(bId) } : d;
+        });
+        useStore.setState({ decks: nextDecks });
+      }
+      useStore.getState().refreshDueCardsCount().catch(() => {});
+    }
   }
   
   if (cloudState.theory) {
@@ -12040,8 +12298,14 @@ export default function App() {
           try {
             await syncBooksFromSupabase();
             await syncCardsFromSupabase(true);
-            await syncCloudDailyStats(undefined, useStore.getState().appLanguage || 'de', true);
-            await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, true);
+            const curLangUpper = (useStore.getState().appLanguage || 'de').toUpperCase();
+            await syncCloudDailyStats(undefined, curLangUpper.toLowerCase(), true);
+            await syncPersistentMistakesFromCloud(curLangUpper);
+            await syncMasteredWordsFromCloud(curLangUpper.toLowerCase() as any, true);
+            const globalState = await safeFetchUserStats('GLOBAL_APP_STATE').catch(() => null);
+            if (globalState) {
+              applyCloudAppState(globalState);
+            }
           } catch (e) {
             console.warn('[App] Background delta sync error:', e);
           }
@@ -12059,7 +12323,18 @@ export default function App() {
           supabase.from('books').select('*').order('created_at', { ascending: true }),
           supabase.from('decks').select('*').order('created_at', { ascending: true }),
           fetchSupabaseCardsCount(),
-          safeFetchUserStats(['DE', 'EN', 'RU', 'DAY_STATS_DE', 'DAY_STATS_EN', 'DAY_STATS_RU', 'GLOBAL_APP_STATE'])
+          safeFetchUserStats([
+            'DE',
+            'EN',
+            'RU',
+            'DAY_STATS_DE',
+            'DAY_STATS_EN',
+            'DAY_STATS_RU',
+            'MISTAKES_POOL_DE',
+            'MISTAKES_POOL_EN',
+            'MISTAKES_POOL_RU',
+            'GLOBAL_APP_STATE',
+          ])
         ]).then(([booksRes, decksRes, count, statsList]) => ({ booksRes, decksRes, count, statsRes: { data: statsList } }));
 
         const { booksRes, decksRes, count, statsRes } = await Promise.race([fetchPromise, timeoutPromise]);
@@ -12118,15 +12393,46 @@ export default function App() {
           pushStats('EN');
           pushStats('RU');
 
-          // Reconcile daily stats and mistakes from Supabase cloud database
+          // Reconcile daily stats and persistent mistakes pool from Supabase cloud database
           ['DE', 'EN', 'RU'].forEach(l => {
             const cloudDayStat = statsRes.data.find((s: any) => s.language === `DAY_STATS_${l}`);
-            if (cloudDayStat && cloudDayStat.daily_activity) {
-              reconcileStatsFromCloud(l, cloudDayStat.daily_activity);
+            const cloudMistakesRow = statsRes.data.find((s: any) => s.language === `MISTAKES_POOL_${l}`);
+            if (cloudDayStat?.daily_activity || cloudMistakesRow?.daily_activity) {
+              const basePayload = cloudDayStat?.daily_activity && typeof cloudDayStat.daily_activity === 'object'
+                ? { ...cloudDayStat.daily_activity }
+                : {};
+              const mistakesPayload = cloudMistakesRow?.daily_activity;
+              if (mistakesPayload && typeof mistakesPayload === 'object') {
+                const resolvedMap = {
+                  ...(basePayload.resolvedMistakesMap || {}),
+                  ...(mistakesPayload.resolvedMap || {}),
+                };
+                basePayload.resolvedMistakesMap = resolvedMap;
+                if (Array.isArray(mistakesPayload.mistakes)) {
+                  const seen = new Map<string, any>();
+                  (Array.isArray(basePayload.mistakesPool) ? basePayload.mistakesPool : []).forEach((m: any) => {
+                    const k = m?.cardId || m?.id;
+                    if (k) seen.set(k, m);
+                  });
+                  mistakesPayload.mistakes.forEach((m: any) => {
+                    const k = m?.cardId || m?.id;
+                    if (k) seen.set(k, m);
+                  });
+                  basePayload.mistakesPool = Array.from(seen.values());
+                }
+              }
+              reconcileStatsFromCloud(l, basePayload);
             }
           });
           
           const globalStat = statsRes.data.find((s: any) => s.language === 'GLOBAL_APP_STATE');
+          if (globalStat?.daily_activity && Array.isArray(globalStat.daily_activity.excludedBookIds)) {
+            const localTs = typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0;
+            const cloudTs = globalStat.daily_activity.excludedBooksTimestamp || globalStat.daily_activity.updatedAt || 0;
+            if (cloudTs >= localTs) {
+              setLocalExcludedBookIds(globalStat.daily_activity.excludedBookIds, cloudTs);
+            }
+          }
           if (globalStat && globalStat.daily_activity) {
             applyCloudAppState(globalStat.daily_activity);
           }
@@ -12147,6 +12453,7 @@ export default function App() {
         }
         
         if (booksRes.data && booksRes.data.length > 0) {
+          const bootExcludedSet = new Set(getLocalExcludedBookIds());
           const mappedBooks = booksRes.data.map((b: any) => {
             let dedicatedCover = null;
             try { dedicatedCover = localStorage.getItem(`book_cover_${b.id}`); } catch(e) {}
@@ -12162,7 +12469,8 @@ export default function App() {
               activeLevels: b.activeLevels || b.activelevels || ['A1'],
               coverType: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover ? 'image' : (b.coverType || b.covertype),
               coverValue: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || b.coverValue || b.covervalue,
-              accentColor: b.accentColor || b.accentcolor
+              accentColor: b.accentColor || b.accentcolor,
+              exclude_from_review: Boolean(b.exclude_from_review) || bootExcludedSet.has(b.id),
             };
           });
 
@@ -12237,6 +12545,11 @@ export default function App() {
               } catch (e) {}
             }
             const deckCards = cardsByDeckId.get(d.id) || [];
+            const resolvedBookId = d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de');
+            const deckExcludedSet = new Set(getLocalExcludedBookIds());
+            useStore.getState().books.forEach((b) => {
+              if (b?.exclude_from_review) deckExcludedSet.add(b.id);
+            });
             return {
               ...d,
               theory: deckTheory,
@@ -12244,7 +12557,8 @@ export default function App() {
               card_count: deckCards.length || d.card_count || 15,
               cards: deckCards,
               language: d.language || langMap[d.id] || 'DE',
-              bookId: d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de')
+              bookId: resolvedBookId,
+              exclude_from_review: Boolean(d.exclude_from_review) || deckExcludedSet.has(resolvedBookId),
             };
           });
           const validDecks = filterValidActiveDecks(enhancedDecks as Deck[], useStore.getState().books);
@@ -12266,8 +12580,10 @@ export default function App() {
         setIsLoadingBooks(false);
         useStore.setState({ isLoaded: true });
         useStore.getState().refreshDueCardsCount().catch(() => {});
-        syncCloudDailyStats(undefined, useStore.getState().appLanguage || 'de', true).catch(() => {});
-        syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any).catch(() => {});
+        const finLangUpper = (useStore.getState().appLanguage || 'de').toUpperCase();
+        syncCloudDailyStats(undefined, finLangUpper.toLowerCase(), true).catch(() => {});
+        syncPersistentMistakesFromCloud(finLangUpper).catch(() => {});
+        syncMasteredWordsFromCloud(finLangUpper.toLowerCase() as any, true).catch(() => {});
       }
     };
     fetchData();
@@ -12281,8 +12597,12 @@ export default function App() {
       const now = Date.now();
       if (now - lastFocusSync < FOCUS_COOLDOWN_MS) return;
       lastFocusSync = now;
+      const langUpper = (useStore.getState().appLanguage || 'DE').toUpperCase();
       syncBooksFromSupabase().catch(() => {});
       syncCardsFromSupabase(true).catch(() => {});
+      syncCloudDailyStats(undefined, langUpper.toLowerCase(), true).catch(() => {});
+      syncPersistentMistakesFromCloud(langUpper).catch(() => {});
+      syncMasteredWordsFromCloud(langUpper.toLowerCase() as any, true).catch(() => {});
       if (activeDeckIdRef.current) {
         syncDeckCardsOnOpen(activeDeckIdRef.current, true).catch(() => {});
       }
@@ -12424,7 +12744,13 @@ export default function App() {
   }, [filteredDecksList, activeBook, groupedDecks, masteredCanonicalSet]);
 
   const allDueCards = useMemo(() => {
-    const validDecks = filterValidActiveDecks(decks, books);
+    const excludedSet = new Set(getLocalExcludedBookIds());
+    books.forEach((b) => {
+      if (b?.exclude_from_review) excludedSet.add(b.id);
+    });
+    const validDecks = filterValidActiveDecks(decks, books).filter(
+      (deck) => !isDeckExcludedFromReview(deck, books, excludedSet)
+    );
     const activeDeckIds = new Set(validDecks.map(d => d.id));
     const list: { deckId: string, card: Flashcard }[] = [];
     validDecks.forEach(deck => {
@@ -13321,6 +13647,7 @@ export default function App() {
                       onClick={() => handleBookClick(book.id)} 
                       onEdit={(e) => { e.stopPropagation(); handleBookEdit(book.id); }} 
                       onDelete={(e) => { e.stopPropagation(); handleBookDelete(book.id, book.title); }} 
+                      onToggleExcludeFromReview={(e) => { e.stopPropagation(); useStore.getState().toggleBookExcludeFromReview(book.id); }}
                     />
                   </div>
                 ))

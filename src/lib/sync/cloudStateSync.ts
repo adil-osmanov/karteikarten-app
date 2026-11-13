@@ -1,6 +1,7 @@
 import { supabase, safeUpsertUserStats } from '@/lib/supabase';
 import { getIDBItem, setIDBItem } from '@/hooks/useDayStats';
 import { normalizeLemmaKey } from '@/lib/utils/lemmaNormalizer';
+import { getSchemaCapabilities, markSchemaCapabilityFalse } from '@/lib/sync/schemaCapabilities';
 
 export type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 
@@ -144,13 +145,18 @@ export async function flushPendingQueue(): Promise<void> {
   const queue = await getPendingQueue();
   if (queue.length === 0) return;
 
+  const caps = await getSchemaCapabilities();
   const remaining: PendingCardUpdate[] = [];
 
   for (const item of queue) {
     try {
+      const sanitizedPayload = { ...item.payload };
+      if (!caps.cardsUpdatedAt) delete sanitizedPayload.updated_at;
+      if (!caps.cardsHasMistake) delete sanitizedPayload.has_mistake;
+
       const { error } = await supabase
         .from('cards')
-        .update(item.payload)
+        .update(sanitizedPayload)
         .eq('id', item.cardId);
 
       if (error) {
@@ -215,28 +221,62 @@ export function writeThroughCardUpdate(cardId: string, card: any, includeContent
 
   // Background non-blocking execution (zero delay for user UI, zero .select('*'))
   (async () => {
+    const caps = await getSchemaCapabilities();
+    const safePayload: Record<string, any> = {
+      masteryLevel: nextMastery,
+      isArchived: isArchived,
+      interval: nextInterval,
+      repetitions: nextRepetitions,
+      nextReviewDate: numericReviewDate,
+      ...(caps.cardsUpdatedAt ? { updated_at: primaryPayload.updated_at } : {}),
+      ...(caps.cardsHasMistake && typeof card.has_mistake === 'boolean'
+        ? { has_mistake: card.has_mistake }
+        : {}),
+    };
+
+    if (includeContent) {
+      if (card.sentence !== undefined) safePayload.sentence = card.sentence;
+      if (card.targetWord !== undefined) safePayload.targetWord = card.targetWord;
+      if (card.translation !== undefined) safePayload.translation = card.translation;
+      if (card.baseWordInfo !== undefined) safePayload.baseWordInfo = card.baseWordInfo;
+      if (card.forms !== undefined) safePayload.forms = card.forms;
+    }
+
     if (typeof window !== 'undefined' && !navigator.onLine) {
-      await enqueuePendingCard(cardId, primaryPayload);
+      await enqueuePendingCard(cardId, safePayload);
       setCloudSyncStatus('offline');
       return;
     }
 
     try {
-      const { error } = await supabase
+      let { error } = await supabase
         .from('cards')
-        .update(primaryPayload)
+        .update(safePayload)
         .eq('id', cardId);
+
+      if (error && (error.code === '42703' || error.message?.includes('does not exist'))) {
+        if (error.message?.includes('updated_at')) {
+          markSchemaCapabilityFalse('cardsUpdatedAt');
+          delete safePayload.updated_at;
+        }
+        if (error.message?.includes('has_mistake')) {
+          markSchemaCapabilityFalse('cardsHasMistake');
+          delete safePayload.has_mistake;
+        }
+        const retry = await supabase.from('cards').update(safePayload).eq('id', cardId);
+        error = retry.error;
+      }
 
       if (error) {
         console.error('Supabase update error:', error);
-        await enqueuePendingCard(cardId, primaryPayload);
+        await enqueuePendingCard(cardId, safePayload);
         setCloudSyncStatus('error');
       } else {
         setCloudSyncStatus('synced');
       }
     } catch (e) {
       console.error('Supabase update error (network):', e);
-      await enqueuePendingCard(cardId, primaryPayload);
+      await enqueuePendingCard(cardId, safePayload);
       setCloudSyncStatus('offline');
     }
   })();
@@ -328,6 +368,7 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
         }
       }
 
+      const caps = await getSchemaCapabilities();
       // Batch update in chunks of 50
       for (let i = 0; i < cardsToUpsert.length; i += 50) {
         const chunk = cardsToUpsert.slice(i, i + 50);
@@ -341,7 +382,7 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
                 interval: item.interval,
                 repetitions: item.repetitions,
                 nextReviewDate: item.nextReviewDate,
-                updated_at: new Date().toISOString(),
+                ...(caps.cardsUpdatedAt ? { updated_at: new Date().toISOString() } : {}),
               })
               .eq('id', item.id)
           )
@@ -386,6 +427,7 @@ export async function syncCardsDelta(
   }
 
   try {
+    const caps = await getSchemaCapabilities();
     const hasV2 =
       typeof window !== 'undefined' &&
       Boolean(localStorage.getItem(DELTA_SYNC_V2_READY_KEY));
@@ -401,23 +443,33 @@ export async function syncCardsDelta(
     const PAGE_SIZE = 1000;
     const allRows: any[] = [];
     let from = 0;
+    const selectCols = caps.cardsHasMistake
+      ? 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, has_mistake'
+      : 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms';
 
     while (true) {
-      let query = client.from('cards').select('*');
+      let query = client.from('cards').select(caps.cardsUpdatedAt ? `${selectCols}, updated_at` : selectCols);
 
-      if (lastSyncAt) {
-        query = query.gt('updated_at', lastSyncAt);
+      if (caps.cardsUpdatedAt) {
+        if (lastSyncAt) {
+          query = query.gt('updated_at', lastSyncAt);
+        } else {
+          query = query.or(
+            `masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null,updated_at.gt.${thirtyDaysAgo}`
+          );
+        }
+        query = query.order('updated_at', { ascending: true });
       } else {
-        query = query.or(
-          `masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null,updated_at.gt.${thirtyDaysAgo}`
-        );
+        // Schema without updated_at: deterministic full snapshot ordered by id (no HTTP 400!)
+        query = query.order('id', { ascending: true });
       }
 
-      const { data, error } = await query
-        .order('updated_at', { ascending: true })
-        .range(from, from + PAGE_SIZE - 1);
+      const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
 
       if (error) {
+        if (error.code === '42703' || error.message?.includes('updated_at')) {
+          markSchemaCapabilityFalse('cardsUpdatedAt');
+        }
         console.warn('[DeltaSync] Supabase delta query error:', error.message);
         return { cards: allRows, checkpointIso: null, ok: false };
       }

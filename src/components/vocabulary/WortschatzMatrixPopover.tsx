@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown } from 'lucide-react';
 import {
   useWortschatzMatrix,
+  evaluateVocabCefrLevel,
   C1_TARGET_WORDS,
   CEFRLevel,
   MatrixCEFRLevel,
@@ -60,11 +61,14 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
     counts: stats,
     totalMasteredCount,
     activeLevel: currentLevel,
+    vocabEvaluation,
     currentLanguage,
     wordLabel,
     wordsLearnedToday,
     todayCounts,
   } = useWortschatzMatrix(appLanguage);
+
+  const resolvedEvaluation = vocabEvaluation || evaluateVocabCefrLevel(stats);
 
   const displayLevels = BASE_DISPLAY_LEVELS.filter(
     (lvl) => lvl !== 'C2' || (stats?.C2 || 0) > 0
@@ -123,7 +127,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
   const matrixBody = (
     <>
       {/* ШАПКА МАТРИЦЫ: СЧЕТЧИК СЛОВ, ГАРАНТИРОВАННЫЙ БЕЙДЖ ЗА СЕГОДНЯ И % ОТ ЦЕЛИ C1 */}
-      <div className="flex items-start justify-between mb-5">
+      <div className="flex items-start justify-between mb-3.5">
         <div className="flex flex-col gap-1.5">
           <div className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white flex items-baseline gap-2">
             <span
@@ -156,6 +160,42 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
         <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20">
           {percentTotal.toFixed(1)}%
         </span>
+      </div>
+
+      {/* ВЗВЕШЕННАЯ ОЦЕНКА УРОВНЯ CEFR */}
+      <div className="mb-4 px-3 py-2 rounded-2xl bg-zinc-100/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.06] flex flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+          <span className="truncate">
+            {resolvedEvaluation.nextLevel ? (
+              <>
+                Geschätztes Niveau:{' '}
+                <strong className="font-semibold text-zinc-900 dark:text-white">
+                  {resolvedEvaluation.currentLevel}
+                </strong>{' '}
+                → noch{' '}
+                <span className="tabular-nums font-semibold text-blue-600 dark:text-blue-400">
+                  {resolvedEvaluation.wordsToNextLevel.toLocaleString(localeStr)}
+                </span>{' '}
+                Punkte bis {resolvedEvaluation.nextLevel}
+              </>
+            ) : (
+              <>
+                Geschätztes Niveau:{' '}
+                <strong className="font-semibold text-zinc-900 dark:text-white">C2</strong>{' '}
+                ({resolvedEvaluation.weightedScore.toLocaleString(localeStr)} Punkte)
+              </>
+            )}
+          </span>
+          <span className="shrink-0 font-mono text-[10px] text-zinc-400 dark:text-zinc-500 tabular-nums">
+            {resolvedEvaluation.progressToNextPercent}%
+          </span>
+        </div>
+        <div className="w-full h-1 rounded-full bg-zinc-200 dark:bg-white/10 overflow-hidden">
+          <div
+            className="h-full rounded-full bg-blue-500 transition-all duration-500"
+            style={{ width: `${resolvedEvaluation.progressToNextPercent}%` }}
+          />
+        </div>
       </div>
 
       {/* СТРОКИ УРОВНЕЙ A1..C1/C2 (ЧИСТО ИНФОРМАЦИОННЫЕ, НЕКЛИКАБЕЛЬНЫЕ, С РАЗДЕЛИТЕЛЯМИ) */}
@@ -229,7 +269,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
           suppressHydrationWarning
           className="hidden sm:inline text-xs text-zinc-400 dark:text-zinc-500 font-mono"
         >
-          • {totalMasteredCount === 0 ? 'A1' : currentLevel || 'B1'}
+          • {totalMasteredCount === 0 ? 'A1' : currentLevel || resolvedEvaluation.currentLevel}
         </span>
         <ChevronDown
           className={`w-3 h-3 text-zinc-400 shrink-0 transition-transform duration-200 ${

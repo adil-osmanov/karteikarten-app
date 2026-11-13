@@ -11,6 +11,7 @@ import {
   getKraftDailyStatsMap,
   normalizeFocusSeconds,
   normalizeFocusMinutes,
+  syncPersistentMistakesFromCloud,
   DayRecord 
 } from '@/hooks/useDayStats';
 
@@ -148,12 +149,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const todayKey = getTodayKey();
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
 
-  // Sync selectedDate on modal open
+  // Sync selectedDate and pull fresh persistent mistakes & stats on modal open
   useEffect(() => {
     if (isOpen) {
       setSelectedDate(getTodayKey());
+      syncPersistentMistakesFromCloud(currentLang).catch(() => {});
     }
-  }, [isOpen]);
+  }, [isOpen, currentLang]);
 
   // Lock scroll while modal is open
   useEffect(() => {
@@ -300,9 +302,6 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const displayTarget = selectedRecord.targetCards || 200;
   const rawProgressPercent = displayTarget > 0 ? (displayCardsDone / displayTarget) * 100 : 0;
   const displayProgressPercent = Math.min(Math.round(rawProgressPercent), 100);
-  const displayProgressPercentLabel = rawProgressPercent > 0 && rawProgressPercent < 10
-    ? Number(rawProgressPercent.toFixed(1))
-    : Math.min(Math.round(rawProgressPercent), 100);
 
   const rawRecordMinutes = selectedRecord.focusMinutes || 0;
   const effectiveRecordMinutes = normalizeFocusMinutes(
@@ -318,9 +317,8 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   const displayHours = Math.floor(displayMinutes / 60);
   const displayRemainingMinutes = displayMinutes % 60;
 
-  const displayMistakes = isSelectedToday 
-    ? mistakesToday
-    : selectedRecord.mistakesCount;
+  // Persistent unreviewed mistakes pool (cross-browser, never resets daily)
+  const persistentMistakesCount = poolLength;
 
   const displayAccuracy = isSelectedToday 
     ? todayAccuracy 
@@ -531,7 +529,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
             <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums tracking-tight">
               {displayCardsDone}{' '}
               <span className="font-normal text-zinc-400 dark:text-zinc-500">
-                / {displayTarget} ({displayProgressPercentLabel}%)
+                / {displayTarget}
               </span>
             </div>
           </div>
@@ -547,13 +545,13 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
           </div>
         </div>
 
-        {/* Блок ошибок */}
+        {/* Блок ошибок (персистентные неповторённые ошибки из БД) */}
         <div className="pt-3.5 border-t border-black/[0.06] dark:border-white/[0.08] flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
             <span>{t.mistakesLabel}</span>
-            {displayMistakes > 0 ? (
+            {persistentMistakesCount > 0 ? (
               <span className="inline-flex items-center justify-center min-w-[22px] h-5 px-1.5 rounded-full text-[11px] font-semibold bg-rose-500/10 text-rose-600 border border-rose-500/20 dark:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500/30 tabular-nums">
-                {displayMistakes}
+                {persistentMistakesCount}
               </span>
             ) : (
               <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 text-xs font-medium">
@@ -562,7 +560,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
             )}
           </div>
 
-          {isSelectedToday && displayMistakes > 0 && (
+          {persistentMistakesCount > 0 && (
             <button
               onClick={() => { onClose(); onReviewMistakes(); }}
               type="button"

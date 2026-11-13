@@ -12,6 +12,43 @@ const corsHeaders: Record<string, string> = {
   'Access-Control-Max-Age': '86400',
 };
 
+let cachedServerSchema: {
+  booksExclude: boolean;
+  decksExclude: boolean;
+  cardsUpdatedAt: boolean;
+  cardsHasMistake: boolean;
+  userDailyStats: boolean;
+  userMistakes: boolean;
+  checkedAt: number;
+} | null = null;
+
+async function detectServerSchema() {
+  const now = Date.now();
+  if (cachedServerSchema && now - cachedServerSchema.checkedAt < 60_000) {
+    return cachedServerSchema;
+  }
+
+  const [booksRes, decksRes, cardsUpdatedRes, cardsMistakeRes, dailyRes, mistakesRes] = await Promise.all([
+    serverSupabase.from('books').select('exclude_from_review').limit(1),
+    serverSupabase.from('decks').select('exclude_from_review').limit(1),
+    serverSupabase.from('cards').select('updated_at').limit(1),
+    serverSupabase.from('cards').select('has_mistake').limit(1),
+    serverSupabase.from('user_daily_stats').select('id').limit(1),
+    serverSupabase.from('user_mistakes').select('id').limit(1),
+  ]);
+
+  cachedServerSchema = {
+    booksExclude: !booksRes.error,
+    decksExclude: !decksRes.error,
+    cardsUpdatedAt: !cardsUpdatedRes.error,
+    cardsHasMistake: !cardsMistakeRes.error,
+    userDailyStats: !dailyRes.error,
+    userMistakes: !mistakesRes.error,
+    checkedAt: now,
+  };
+  return cachedServerSchema;
+}
+
 // OPTIONS: Preflight requests for WebKit/Safari & cross-origin callers
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -20,10 +57,14 @@ export async function OPTIONS() {
   });
 }
 
-// GET: Получить дневной прогресс или список состояний
+// GET: Получить дневной прогресс, схему или список состояний
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
+    if (searchParams.get('schema') === '1') {
+      const schema = await detectServerSchema();
+      return NextResponse.json({ ok: true, schema }, { headers: corsHeaders });
+    }
     const langKey = searchParams.get('lang');
     const multiLangs = searchParams.get('langs');
 
@@ -124,12 +165,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: updateErr.message }, { status: 500, headers: corsHeaders });
     }
 
-    // 3. Синхронизация user_daily_stats на стороне сервера при наличии
-    if (body.user_daily_stats && body.user_id) {
+    // 3. Серверное зеркалирование в user_daily_stats и user_mistakes (только если таблицы уже мигрированы)
+    const schema = await detectServerSchema();
+    if (schema.userDailyStats && body.user_daily_stats && body.user_id) {
       try {
         await serverSupabase
           .from('user_daily_stats')
           .upsert(body.user_daily_stats, { onConflict: 'user_id,language,date' });
+      } catch {}
+    }
+
+    if (schema.userMistakes && body.mistake_action && body.mistake_card_id) {
+      try {
+        const uid = body.user_id || 'default';
+        const mLang = body.mistake_lang || 'DE';
+        if (body.mistake_action === 'add') {
+          await serverSupabase.from('user_mistakes').upsert(
+            {
+              user_id: uid,
+              language: mLang,
+              card_id: String(body.mistake_card_id),
+              deck_id: body.mistake_deck_id || null,
+              target_word: body.mistake_target_word || null,
+              sentence: body.mistake_sentence || null,
+              translation: body.mistake_translation || null,
+              card_snapshot: body.mistake_snapshot || null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'user_id,language,card_id' }
+          );
+        } else if (body.mistake_action === 'resolve') {
+          await serverSupabase
+            .from('user_mistakes')
+            .delete()
+            .eq('user_id', uid)
+            .eq('language', mLang)
+            .eq('card_id', String(body.mistake_card_id));
+        }
       } catch {}
     }
 

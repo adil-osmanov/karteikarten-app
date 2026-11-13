@@ -10,6 +10,8 @@ interface AppleBookCoverProps {
   title: string;
   className?: string;
   priority?: boolean;
+  excludeFromReview?: boolean;
+  onToggleExcludeFromReview?: (e: React.MouseEvent) => void;
   onEdit?: (e: React.MouseEvent) => void;
   onDelete?: (e: React.MouseEvent) => void;
 }
@@ -22,6 +24,8 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
   title,
   className = '',
   priority = false,
+  excludeFromReview = false,
+  onToggleExcludeFromReview,
   onEdit,
   onDelete,
 }) => {
@@ -63,7 +67,7 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
               <img
                 src={light}
                 alt={title}
-                className={`w-full h-full object-cover select-none pointer-events-none ${dark && light !== dark ? 'dark:hidden' : ''}`}
+                className={`w-full h-full object-cover select-none pointer-events-none transition-[opacity,filter] duration-200 ${excludeFromReview ? 'opacity-65 contrast-90 saturate-75' : ''} ${dark && light !== dark ? 'dark:hidden' : ''}`}
                 loading={priority ? 'eager' : 'lazy'}
                 decoding="async"
               />
@@ -72,15 +76,32 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
               <img
                 src={dark}
                 alt={title}
-                className="w-full h-full object-cover select-none pointer-events-none hidden dark:block"
+                className={`w-full h-full object-cover select-none pointer-events-none transition-[opacity,filter] duration-200 hidden dark:block ${excludeFromReview ? 'opacity-65 contrast-90 saturate-75' : ''}`}
                 loading={priority ? 'eager' : 'lazy'}
                 decoding="async"
               />
             )}
           </>
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center select-none pointer-events-none">
+          <div className={`w-full h-full flex flex-col items-center justify-center p-4 text-center select-none pointer-events-none transition-opacity duration-200 ${excludeFromReview ? 'opacity-65' : ''}`}>
             <span className="text-white/80 font-bold text-sm line-clamp-3">{title}</span>
+          </div>
+        )}
+
+        {/* Индикатор исключения из повторений (левый верхний угол обложки) */}
+        {excludeFromReview && (
+          <div
+            className="absolute top-2.5 left-2.5 z-30 bg-black/60 backdrop-blur-md text-white/85 rounded-full p-1.5 border border-white/15 shadow-sm pointer-events-none"
+            title="Aus Wiederholungen ausgenommen"
+            aria-label="Aus Wiederholungen ausgenommen"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m17 2 4 4-4 4" />
+              <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+              <path d="m7 22-4-4 4-4" />
+              <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+              <line x1="2" y1="2" x2="22" y2="22" />
+            </svg>
           </div>
         )}
 
@@ -109,7 +130,7 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
         <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/0 to-transparent group-hover:via-white/10 dark:group-hover:via-white/5 transition-opacity duration-500 pointer-events-none z-10" />
 
         {/* Минималистичная кнопка действий «···» (три точки) */}
-        {(onEdit || onDelete) && (
+        {(onToggleExcludeFromReview || onEdit || onDelete) && (
           <div ref={menuRef} className="absolute top-2.5 right-2.5 z-40">
             <button 
               type="button"
@@ -130,8 +151,29 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
             {menuOpen && (
               <div 
                 onClick={(e) => e.stopPropagation()}
-                className="absolute right-0 top-8 w-36 py-1 bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 z-50 text-left animate-in fade-in zoom-in-95 duration-100"
+                className="absolute right-0 top-8 w-56 py-1 bg-white dark:bg-zinc-800 rounded-xl shadow-xl border border-black/10 dark:border-white/10 z-50 text-left animate-in fade-in zoom-in-95 duration-100"
               >
+                {onToggleExcludeFromReview && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      setMenuOpen(false);
+                      onToggleExcludeFromReview(e);
+                    }}
+                    className="w-full px-3 py-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5 text-zinc-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m17 2 4 4-4 4" />
+                      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+                      <path d="m7 22-4-4 4-4" />
+                      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+                      {!excludeFromReview && <line x1="2" y1="2" x2="22" y2="22" />}
+                    </svg>
+                    <span className="truncate">
+                      {excludeFromReview ? 'In Wiederholungen aktivieren' : 'Aus Wiederholungen ausnehmen'}
+                    </span>
+                  </button>
+                )}
                 {onEdit && (
                   <button
                     type="button"
@@ -141,7 +183,7 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
                     }}
                     className="w-full px-3 py-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2 cursor-pointer transition-colors"
                   >
-                    <svg className="w-3.5 h-3.5 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg className="w-3.5 h-3.5 text-zinc-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
                     </svg>
                     Bearbeiten
@@ -156,7 +198,7 @@ export const AppleBookCover: React.FC<AppleBookCoverProps> = ({
                     }}
                     className="w-full px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-500/10 flex items-center gap-2 cursor-pointer transition-colors"
                   >
-                    <svg className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg className="w-3.5 h-3.5 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="3 6 5 6 21 6"/>
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                     </svg>
