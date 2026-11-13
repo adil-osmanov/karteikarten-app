@@ -408,55 +408,53 @@ export interface VocabCefrEvaluation {
   progressToNextPercent: number;
 }
 
-const CEFR_WEIGHTS: Record<MatrixCEFRLevel, number> = {
-  A1: 1,
-  A2: 1.5,
-  B1: 2.5,
-  B2: 4,
-  C1: 6,
-  C2: 8,
-};
-
-const CEFR_EVALUATION_THRESHOLDS: Array<{
-  level: MatrixCEFRLevel;
-  min: number;
-  max: number;
-  next: MatrixCEFRLevel | null;
-}> = [
-  { level: 'A1', min: 0, max: 300, next: 'A2' },
-  { level: 'A2', min: 300, max: 750, next: 'B1' },
-  { level: 'B1', min: 750, max: 1600, next: 'B2' },
-  { level: 'B2', min: 1600, max: 3200, next: 'C1' },
-  { level: 'C1', min: 3200, max: 5500, next: 'C2' },
-  { level: 'C2', min: 5500, max: 10000, next: null },
-];
-
 export function evaluateVocabCefrLevel(countsByLevel: Record<string, number> = {}): VocabCefrEvaluation {
+  const a1 = countsByLevel.A1 || 0;
+  const a2 = countsByLevel.A2 || 0;
+  const b1 = countsByLevel.B1 || 0;
+  const b2 = countsByLevel.B2 || 0;
+  const c1 = countsByLevel.C1 || 0;
+  const c2 = countsByLevel.C2 || 0;
+
+  // Взвешенный балл (сложные слова дают умеренный бонус без искусственной инфляции):
   const weightedScore = Math.round(
-    (countsByLevel.A1 || 0) * CEFR_WEIGHTS.A1 +
-    (countsByLevel.A2 || 0) * CEFR_WEIGHTS.A2 +
-    (countsByLevel.B1 || 0) * CEFR_WEIGHTS.B1 +
-    (countsByLevel.B2 || 0) * CEFR_WEIGHTS.B2 +
-    (countsByLevel.C1 || 0) * CEFR_WEIGHTS.C1 +
-    (countsByLevel.C2 || 0) * CEFR_WEIGHTS.C2
+    a1 * 1.0 +
+    a2 * 1.1 +
+    b1 * 1.25 +
+    b2 * 1.5 +
+    c1 * 1.8 +
+    c2 * 2.0
   );
 
-  let matched = CEFR_EVALUATION_THRESHOLDS[0];
-  for (const band of CEFR_EVALUATION_THRESHOLDS) {
-    if (weightedScore >= band.min) {
-      matched = band;
+  // Реалистичные пороги CEFR (под общую шкалу 10.000 слов) + защита от перескока без базы нужного уровня:
+  const levels = [
+    { level: 'A1' as const, minScore: 0,    next: 'A2' as const, nextScore: 600,   hasRequiredWords: true },
+    { level: 'A2' as const, minScore: 600,  next: 'B1' as const, nextScore: 1500,  hasRequiredWords: true },
+    { level: 'B1' as const, minScore: 1500, next: 'B2' as const, nextScore: 3000,  hasRequiredWords: (b1 + b2 + c1 + c2) >= 400 },
+    { level: 'B2' as const, minScore: 3000, next: 'C1' as const, nextScore: 5200,  hasRequiredWords: (b2 + c1 + c2) >= 500 },
+    { level: 'C1' as const, minScore: 5200, next: 'C2' as const, nextScore: 8000,  hasRequiredWords: (c1 + c2) >= 400 },
+    { level: 'C2' as const, minScore: 8000, next: null,          nextScore: 10000, hasRequiredWords: c2 >= 300 },
+  ];
+
+  // Находим наивысший достигнутый уровень, для которого хватает и баллов, и профильных слов:
+  let currentIndex = 0;
+  for (let i = 0; i < levels.length; i++) {
+    if (weightedScore >= levels[i].minScore && levels[i].hasRequiredWords) {
+      currentIndex = i;
+    } else {
+      break;
     }
   }
 
-  const wordsToNextLevel = matched.next ? Math.max(0, matched.max - weightedScore) : 0;
-  const bandSpan = matched.max - matched.min;
-  const progressToNextPercent = matched.next && bandSpan > 0
-    ? Math.max(0, Math.min(100, Math.round(((weightedScore - matched.min) / bandSpan) * 100)))
+  const current = levels[currentIndex];
+  const wordsToNextLevel = current.next ? Math.max(0, current.nextScore - weightedScore) : 0;
+  const progressToNextPercent = current.next
+    ? Math.max(0, Math.min(100, Math.round(((weightedScore - current.minScore) / (current.nextScore - current.minScore)) * 100)))
     : 100;
 
   return {
-    currentLevel: matched.level,
-    nextLevel: matched.next,
+    currentLevel: current.level,
+    nextLevel: current.next,
     weightedScore,
     wordsToNextLevel,
     progressToNextPercent,
