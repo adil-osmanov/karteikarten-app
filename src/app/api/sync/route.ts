@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       const today = new Date().toISOString().split('T')[0];
       const langs = ['DE', 'EN', 'RU'];
       for (const l of langs) {
-        const { data: st } = await serverSupabase.from('user_stats').select('*').eq('language', l).maybeSingle();
+        const { data: st } = await serverSupabase.from('user_stats').select('daily_activity').eq('language', l).maybeSingle();
         if (st && st.daily_activity) {
           const act = { ...st.daily_activity, [today]: 0 };
           await serverSupabase.from('user_stats').update({ daily_activity: act }).eq('language', l);
@@ -142,15 +142,14 @@ export async function POST(req: NextRequest) {
     const langKey = body.language || 'DAY_STATS_DE';
     const activityPayload = body.daily_activity !== undefined ? body.daily_activity : body;
 
-    // 1. Попытка обновить существующую запись по language
-    const { data: updateData, error: updateErr } = await serverSupabase
+    // 1. Попытка обновить существующую запись по language без возврата payload (.select())
+    const { count, error: updateErr } = await serverSupabase
       .from('user_stats')
-      .update({ daily_activity: activityPayload })
-      .eq('language', langKey)
-      .select('language');
+      .update({ daily_activity: activityPayload }, { count: 'exact' })
+      .eq('language', langKey);
 
     // 2. Если запись еще не существовала — создаем новую
-    if (!updateErr && (!updateData || updateData.length === 0)) {
+    if (!updateErr && (count ?? 0) === 0) {
       const { error: insertErr } = await serverSupabase
         .from('user_stats')
         .insert({

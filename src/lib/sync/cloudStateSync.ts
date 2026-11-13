@@ -418,9 +418,19 @@ export interface CardsDeltaResult {
  * При первом запуске (или однократной миграции со старой логики без v2-флага)
  * подтягивает карточки с прогрессом и все карточки, созданные/изменённые за последние 30 дней.
  */
+export interface SyncCardsDeltaOptions {
+  allowFullFallback?: boolean;
+  targetDeckIds?: string[];
+  hasLocalCache?: boolean;
+}
+
+const FULL_CARDS_FALLBACK_KEY = 'kraft_last_full_cards_sync_at';
+const FULL_CARDS_FALLBACK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
 export async function syncCardsDelta(
   client: typeof supabase = supabase,
-  overrideLastSync?: string | null
+  overrideLastSync?: string | null,
+  options?: SyncCardsDeltaOptions
 ): Promise<CardsDeltaResult> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
     return { cards: [], checkpointIso: null, ok: false };
@@ -439,50 +449,88 @@ export async function syncCardsDelta(
         ? localStorage.getItem(LAST_CARDS_SYNC_KEY)
         : null;
 
+    // When DB lacks updated_at, NEVER scan all ~8,169 cards on F5/focus/startup!
+    // Only fetch explicit changed/new decks (targetDeckIds) or run full scan once per 24h / manual force.
+    if (!caps.cardsUpdatedAt) {
+      if (options?.targetDeckIds !== undefined && options.targetDeckIds.length === 0 && !options.allowFullFallback) {
+        return { cards: [], checkpointIso: null, ok: true };
+      }
+
+      if (!options?.targetDeckIds?.length && !options?.allowFullFallback && typeof window !== 'undefined') {
+        const lastFullMs = Number(localStorage.getItem(FULL_CARDS_FALLBACK_KEY) || '0');
+        const hasCache = options?.hasLocalCache ?? lastFullMs > 0;
+        if (hasCache && lastFullMs > 0 && Date.now() - lastFullMs < FULL_CARDS_FALLBACK_COOLDOWN_MS) {
+          return { cards: [], checkpointIso: null, ok: true };
+        }
+      }
+    }
+
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
     const PAGE_SIZE = 1000;
     const allRows: any[] = [];
-    let from = 0;
     const selectCols = caps.cardsHasMistake
       ? 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, has_mistake'
       : 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms';
 
-    while (true) {
-      let query = client.from('cards').select(caps.cardsUpdatedAt ? `${selectCols}, updated_at` : selectCols);
+    const targetChunks: (string[] | null)[] = [];
+    if (!caps.cardsUpdatedAt && options?.targetDeckIds && options.targetDeckIds.length > 0 && !options.allowFullFallback) {
+      const CHUNK = 40;
+      for (let i = 0; i < options.targetDeckIds.length; i += CHUNK) {
+        targetChunks.push(options.targetDeckIds.slice(i, i + CHUNK));
+      }
+    } else {
+      targetChunks.push(null);
+    }
 
-      if (caps.cardsUpdatedAt) {
-        if (lastSyncAt) {
-          query = query.gt('updated_at', lastSyncAt);
+    for (const deckChunk of targetChunks) {
+      let from = 0;
+      while (true) {
+        let query = client.from('cards').select(caps.cardsUpdatedAt ? `${selectCols}, updated_at` : selectCols);
+
+        if (caps.cardsUpdatedAt) {
+          if (lastSyncAt) {
+            query = query.gt('updated_at', lastSyncAt);
+          } else {
+            query = query.or(
+              `masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null,updated_at.gt.${thirtyDaysAgo}`
+            );
+          }
+          query = query.order('updated_at', { ascending: true });
         } else {
-          query = query.or(
-            `masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null,updated_at.gt.${thirtyDaysAgo}`
-          );
+          if (deckChunk) {
+            query = query.in('deck_id', deckChunk);
+          }
+          // Schema without updated_at: deterministic order by id (no HTTP 400!)
+          query = query.order('id', { ascending: true });
         }
-        query = query.order('updated_at', { ascending: true });
-      } else {
-        // Schema without updated_at: deterministic full snapshot ordered by id (no HTTP 400!)
-        query = query.order('id', { ascending: true });
-      }
 
-      const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
+        const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
 
-      if (error) {
-        if (error.code === '42703' || error.message?.includes('updated_at')) {
-          markSchemaCapabilityFalse('cardsUpdatedAt');
+        if (error) {
+          if (error.code === '42703' || error.message?.includes('updated_at')) {
+            markSchemaCapabilityFalse('cardsUpdatedAt');
+          }
+          console.warn('[DeltaSync] Supabase delta query error:', error.message);
+          return { cards: allRows, checkpointIso: null, ok: false };
         }
-        console.warn('[DeltaSync] Supabase delta query error:', error.message);
-        return { cards: allRows, checkpointIso: null, ok: false };
-      }
 
-      if (!data || data.length === 0) {
-        break;
-      }
+        if (!data || data.length === 0) {
+          break;
+        }
 
-      allRows.push(...data);
-      if (data.length < PAGE_SIZE) {
-        break;
+        allRows.push(...data);
+        if (data.length < PAGE_SIZE) {
+          break;
+        }
+        from += PAGE_SIZE;
       }
-      from += PAGE_SIZE;
+    }
+
+    // Track 24h timestamp if we executed a full fallback scan without deck filter
+    if (!caps.cardsUpdatedAt && typeof window !== 'undefined' && (options?.allowFullFallback || !options?.targetDeckIds?.length)) {
+      try {
+        localStorage.setItem(FULL_CARDS_FALLBACK_KEY, String(Date.now()));
+      } catch {}
     }
 
     // Сохраняем серверную отметку времени (или slight-skew-safe baseline при 0 строках)
@@ -524,7 +572,7 @@ export async function fetchCardsDelta(lastSync?: string | null): Promise<any[]> 
 // DELTA CLOUD RECONCILIATION (SHORT DEDUPE COOLDOWN FOR INSTANT TAB SWITCHING)
 // ============================================================================
 
-const FOCUS_COOLDOWN_MS = 3 * 1000;
+const FOCUS_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes hard cooldown to stop Supabase egress leaks
 
 export async function syncWithCloud(force: boolean = false): Promise<void> {
   const now = Date.now();

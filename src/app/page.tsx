@@ -7,7 +7,7 @@ import {
   Archive, ArchiveRestore, LifeBuoy, Search, ChevronRight, Sun, Moon, HelpCircle, RotateCw, RotateCcw, Flame, Plus,
   Clock, Mic, Keyboard, Snail, Play, X, Headphones, Database, Shuffle, Layers, SquareStack, TextCursorInput,
   ChevronDown, LogOut, Sparkles, Loader2, Image as ImageIcon, FileText, Sliders, Camera, Pencil,
-  Cloud, CloudOff
+  Cloud, CloudOff, RefreshCw
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster, toast } from 'sonner';
@@ -24,7 +24,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud, flushPendingMasteredSnapshots } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
@@ -222,8 +222,60 @@ export function recordCardProgress(
 let isSyncingDailyStats = false;
 let lastSyncDailyStatsTime: Record<string, number> = {};
 
-// Загрузка статистики из Supabase (Single Source of Truth в таблице user_stats, с жестким Cooldown 10 минут)
-const DAILY_STATS_COOLDOWN_MS = 10 * 60 * 1000;
+// Загрузка статистики из Supabase (Single Source of Truth в таблице user_stats, с жестким Cooldown 5 минут)
+const DAILY_STATS_COOLDOWN_MS = 5 * 60 * 1000;
+const LAST_STATS_CHECK_KEY_PREFIX = 'kraft_last_stats_check_at_';
+const LAST_BOOKS_SYNC_KEY = 'kraft_last_books_sync_at';
+const LAST_CARDS_CHECK_KEY = 'kraft_last_cards_check_at';
+const LAST_APP_STATE_SYNC_KEY = 'kraft_last_app_state_sync_at';
+const LAST_DECK_SYNC_KEY_PREFIX = 'kraft_deck_sync_at_';
+
+const pendingDailyActivityTimers: Record<string, ReturnType<typeof setTimeout> | null> = {};
+const pendingDailyActivityPayloads: Record<string, Record<string, any>> = {};
+const DAILY_PROGRESS_DEBOUNCE_MS = 30 * 1000;
+
+function flushPendingDailyActivityUpserts(): void {
+  Object.keys(pendingDailyActivityPayloads).forEach((upperLang) => {
+    if (pendingDailyActivityTimers[upperLang]) {
+      clearTimeout(pendingDailyActivityTimers[upperLang]!);
+      pendingDailyActivityTimers[upperLang] = null;
+    }
+    const payload = pendingDailyActivityPayloads[upperLang];
+    delete pendingDailyActivityPayloads[upperLang];
+    if (payload) {
+      safeUpsertUserStats({ language: upperLang, daily_activity: payload }).catch(() => {});
+    }
+  });
+}
+
+function scheduleDailyActivityUpsert(upperLang: string, progress: Record<string, any>): void {
+  pendingDailyActivityPayloads[upperLang] = progress;
+  if (pendingDailyActivityTimers[upperLang]) {
+    clearTimeout(pendingDailyActivityTimers[upperLang]!);
+  }
+  pendingDailyActivityTimers[upperLang] = setTimeout(() => {
+    pendingDailyActivityTimers[upperLang] = null;
+    const latest = pendingDailyActivityPayloads[upperLang];
+    delete pendingDailyActivityPayloads[upperLang];
+    if (latest) {
+      safeUpsertUserStats({ language: upperLang, daily_activity: latest }).catch(() => {});
+    }
+  }, DAILY_PROGRESS_DEBOUNCE_MS);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushPendingDailyActivityUpserts);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushPendingDailyActivityUpserts();
+    }
+  });
+}
+
+function isAnyStudySessionActiveGlobal(): boolean {
+  if (typeof window === 'undefined') return false;
+  return Number((window as any).__kraftActiveStudyCount || 0) > 0;
+}
 
 export async function syncCloudDailyStats(_userId?: string, lang: string = 'de', force: boolean = false): Promise<number> {
   const cleanLang = (lang || 'de').toLowerCase();
@@ -231,11 +283,19 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
   if (isSyncingDailyStats) {
     return getLanguageDailyStats(cleanLang).learnedToday;
   }
+  if (!force && isAnyStudySessionActiveGlobal()) {
+    return getLanguageDailyStats(cleanLang).learnedToday;
+  }
   if (!force && lastSyncDailyStatsTime[cleanLang] && now - lastSyncDailyStatsTime[cleanLang] < DAILY_STATS_COOLDOWN_MS) {
     return getLanguageDailyStats(cleanLang).learnedToday;
   }
-  // Local-first: если локальный кэш уже синхронизировался в последние 10 минут — не дергаем сеть
+  // Local-first: если локальный кэш уже синхронизировался в последние 5 минут (включая F5) — не дергаем сеть
   if (!force && typeof window !== 'undefined') {
+    const persistedStatsTs = Number(localStorage.getItem(`${LAST_STATS_CHECK_KEY_PREFIX}${cleanLang}`) || '0');
+    if (persistedStatsTs > 0 && now - persistedStatsTs < DAILY_STATS_COOLDOWN_MS) {
+      lastSyncDailyStatsTime[cleanLang] = persistedStatsTs;
+      return getLanguageDailyStats(cleanLang).learnedToday;
+    }
     const lastSyncIso = localStorage.getItem('kraft_last_sync_timestamp');
     if (lastSyncIso) {
       const lastSyncMs = new Date(lastSyncIso).getTime();
@@ -248,6 +308,11 @@ export async function syncCloudDailyStats(_userId?: string, lang: string = 'de',
 
   isSyncingDailyStats = true;
   lastSyncDailyStatsTime[cleanLang] = now;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(`${LAST_STATS_CHECK_KEY_PREFIX}${cleanLang}`, String(now));
+    } catch {}
+  }
 
   const upperLang = cleanLang.toUpperCase();
   const today = getDeviceLocalDate();
@@ -1233,7 +1298,8 @@ export function updateCachedCardInMemory(cardId: string, updated: Partial<Flashc
 }
 
 const KRAFT_LAST_SYNC_KEY = 'kraft_last_sync_timestamp';
-const DELTA_SYNC_COOLDOWN_MS = 2 * 1000; // Быстрый и легкий Delta-Sync по updated_at
+const DELTA_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // Hard 5-minute cooldown to prevent egress leaks
+const DECK_OPEN_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 const inFlightDeckSyncs = new Map<string, Promise<void>>();
 const lastDeckOpenSyncAt = new Map<string, number>();
 
@@ -1451,20 +1517,42 @@ export async function syncDeckCardsOnOpen(deckId: string, force: boolean = false
   const existingPromise = inFlightDeckSyncs.get(deckId);
   if (existingPromise) return existingPromise;
 
+  const localDeck = useStore.getState().decks.find((d) => d.id === deckId);
+  const hasLocalDeckCards = Boolean(localDeck && Array.isArray(localDeck.cards) && localDeck.cards.length > 0);
   const now = Date.now();
-  const lastSync = lastDeckOpenSyncAt.get(deckId) || 0;
-  if (!force && now - lastSync < 1500) return;
+  let persistedLastDeck = 0;
+  let persistedLastGlobalCardsCheck = 0;
+  if (typeof window !== 'undefined') {
+    try {
+      persistedLastDeck = Number(localStorage.getItem(`${LAST_DECK_SYNC_KEY_PREFIX}${deckId}`) || '0');
+      persistedLastGlobalCardsCheck = Number(localStorage.getItem(LAST_CARDS_CHECK_KEY) || '0');
+    } catch {}
+  }
+  const lastSync = Math.max(lastDeckOpenSyncAt.get(deckId) || 0, persistedLastDeck, persistedLastGlobalCardsCheck);
+  if (!force && hasLocalDeckCards && lastSync > 0 && now - lastSync < DECK_OPEN_SYNC_COOLDOWN_MS) return;
 
   const task = (async () => {
     try {
+      const caps = await getSchemaCapabilities();
+      const baseCardCols = caps.cardsHasMistake
+        ? 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, has_mistake'
+        : 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms';
+      const cardSelectCols = caps.cardsUpdatedAt ? `${baseCardCols}, updated_at` : baseCardCols;
+
       const { data: remoteDeckCards, error } = await supabase
         .from('cards')
-        .select('*')
+        .select(cardSelectCols)
         .eq('deck_id', deckId)
         .limit(1000);
 
       if (!error && Array.isArray(remoteDeckCards)) {
-        lastDeckOpenSyncAt.set(deckId, Date.now());
+        const syncedAt = Date.now();
+        lastDeckOpenSyncAt.set(deckId, syncedAt);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(`${LAST_DECK_SYNC_KEY_PREFIX}${deckId}`, String(syncedAt));
+          } catch {}
+        }
         await updateDeckCardsLocally(deckId, remoteDeckCards, { authoritative: true });
       }
     } catch (err) {
@@ -1485,7 +1573,7 @@ export async function fetchSupabaseCardsCount(): Promise<number> {
   try {
     const { count, error } = await supabase
       .from('cards')
-      .select('*', { count: 'exact', head: true });
+      .select('id', { count: 'exact', head: true });
     if (!error && typeof count === 'number') {
       lastSupabaseCardsCount = count;
       return count;
@@ -1861,14 +1949,56 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
 let isSyncingCardsFromSupabase = false;
 let lastSyncCardsFromSupabaseTime = 0;
 
-export async function syncBooksFromSupabase(): Promise<void> {
+export async function syncBooksFromSupabase(force: boolean = false): Promise<void> {
   try {
+    const now = Date.now();
+    if (!force && isAnyStudySessionActiveGlobal()) return;
+
+    let localBooks = useStore.getState().books;
+    if (!Array.isArray(localBooks) || localBooks.length === 0) {
+      const idbBooks = await getIDBItem<BookMeta[]>('app_books').catch(() => null);
+      if (Array.isArray(idbBooks) && idbBooks.length > 0) {
+        localBooks = idbBooks;
+      }
+    }
+
+    if (!force && localBooks.length > 0 && typeof window !== 'undefined') {
+      const lastBooksMs = Number(localStorage.getItem(LAST_BOOKS_SYNC_KEY) || '0');
+      if (lastBooksMs > 0 && now - lastBooksMs < DELTA_SYNC_COOLDOWN_MS) {
+        return;
+      }
+    }
+
     const caps = await getSchemaCapabilities();
+    const bookMetaCols = caps.booksExclude
+      ? 'id, language, title, subtitle, tintColor, activeLevels, coverType, accentColor, created_at, training_mode, category, exclude_from_review'
+      : 'id, language, title, subtitle, tintColor, activeLevels, coverType, accentColor, created_at, training_mode, category';
+
+    const shouldFetchGlobalState =
+      force ||
+      typeof window === 'undefined' ||
+      now - Number(localStorage.getItem(LAST_APP_STATE_SYNC_KEY) || '0') >= DELTA_SYNC_COOLDOWN_MS;
+
     const [{ data: cloudBooks, error }, globalCloudState] = await Promise.all([
-      supabase.from('books').select('*').order('created_at', { ascending: true }),
-      safeFetchUserStats('GLOBAL_APP_STATE').catch(() => null),
+      supabase.from('books').select(bookMetaCols).order('created_at', { ascending: true }),
+      shouldFetchGlobalState
+        ? safeFetchUserStats('GLOBAL_APP_STATE').catch(() => null)
+        : Promise.resolve(null),
     ]);
+
+    if (shouldFetchGlobalState && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(LAST_APP_STATE_SYNC_KEY, String(Date.now()));
+      } catch {}
+    }
+
     if (error || !cloudBooks || cloudBooks.length === 0) return;
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(LAST_BOOKS_SYNC_KEY, String(Date.now()));
+      } catch {}
+    }
 
     const excludedSet = new Set(getLocalExcludedBookIds());
     if (globalCloudState && Array.isArray(globalCloudState.excludedBookIds)) {
@@ -1881,30 +2011,75 @@ export async function syncBooksFromSupabase(): Promise<void> {
       }
     }
 
-    const mappedCloudBooks: BookMeta[] = cloudBooks.map((b: any) => {
-      let dedicatedCover = null;
+    const localBookMap = new Map<string, BookMeta>();
+    localBooks.forEach((lb) => lb?.id && localBookMap.set(lb.id, lb));
+
+    // Fetch Base64 cover artwork ONLY for brand-new books or image books missing a local cover (or manual force sync)
+    const missingCoverBookIds: string[] = [];
+    for (const b of cloudBooks as any[]) {
+      const existingLocal = localBookMap.get(b.id);
+      let dedicatedCover: string | null = null;
+      try {
+        dedicatedCover = localStorage.getItem(`book_cover_${b.id}`);
+      } catch {}
+      const cachedCover = existingLocal?.coverImage || existingLocal?.coverValue || dedicatedCover;
+      const needsCover = !existingLocal || ((b.coverType === 'image' || b.covertype === 'image') && !cachedCover) || force;
+      if (needsCover && !cachedCover) {
+        missingCoverBookIds.push(b.id);
+      } else if (force && needsCover) {
+        missingCoverBookIds.push(b.id);
+      }
+    }
+
+    const remoteCoversById = new Map<string, any>();
+    if (missingCoverBookIds.length > 0) {
+      const { data: coverRows } = await supabase
+        .from('books')
+        .select('id, coverImage, coverValue, cover_url_light, cover_url_dark')
+        .in('id', missingCoverBookIds);
+      if (Array.isArray(coverRows)) {
+        coverRows.forEach((cr: any) => cr?.id && remoteCoversById.set(cr.id, cr));
+      }
+    }
+
+    const mappedCloudBooks: BookMeta[] = (cloudBooks as any[]).map((b: any) => {
+      const existingLocal = localBookMap.get(b.id);
+      const remoteCoverRow = remoteCoversById.get(b.id);
+      let dedicatedCover: string | null = null;
       try { dedicatedCover = localStorage.getItem(`book_cover_${b.id}`); } catch(e) {}
+      const resolvedImage =
+        remoteCoverRow?.cover_url_light ||
+        remoteCoverRow?.coverImage ||
+        existingLocal?.coverImage ||
+        dedicatedCover ||
+        null;
+      const resolvedValue =
+        remoteCoverRow?.cover_url_light ||
+        remoteCoverRow?.coverImage ||
+        remoteCoverRow?.coverValue ||
+        existingLocal?.coverValue ||
+        dedicatedCover ||
+        undefined;
       const isExcluded = caps.booksExclude
         ? Boolean(b.exclude_from_review) || excludedSet.has(b.id)
         : excludedSet.has(b.id) || Boolean(b.exclude_from_review);
       return {
         id: b.id,
-        language: b.language || 'DE',
+        language: b.language || existingLocal?.language || 'DE',
         title: b.title,
         subtitle: b.subtitle,
-        category: b.category || 'book',
-        training_mode: b.training_mode || 'standard_cloze',
-        tintColor: b.tintColor || b.tintcolor || '#007AFF',
-        coverImage: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || null,
-        activeLevels: b.activeLevels || b.activelevels || ['A1'],
-        coverType: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover ? 'image' : (b.coverType || b.covertype),
-        coverValue: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || b.coverValue || b.covervalue,
-        accentColor: b.accentColor || b.accentcolor,
+        category: b.category || existingLocal?.category || 'book',
+        training_mode: b.training_mode || existingLocal?.training_mode || 'standard_cloze',
+        tintColor: b.tintColor || b.tintcolor || existingLocal?.tintColor || '#007AFF',
+        coverImage: resolvedImage,
+        activeLevels: b.activeLevels || b.activelevels || existingLocal?.activeLevels || ['A1'],
+        coverType: resolvedImage ? 'image' : (b.coverType || b.covertype || existingLocal?.coverType),
+        coverValue: resolvedValue,
+        accentColor: b.accentColor || b.accentcolor || existingLocal?.accentColor,
         exclude_from_review: isExcluded,
       };
     });
 
-    const localBooks = useStore.getState().books;
     const cloudIds = new Set(mappedCloudBooks.map(b => b.id));
     const merged = [...mappedCloudBooks];
     localBooks.forEach(lb => {
@@ -1922,14 +2097,13 @@ export async function syncBooksFromSupabase(): Promise<void> {
   }
 }
 
-export async function syncCardsFromSupabase(force: boolean = false): Promise<void> {
+export async function syncCardsFromSupabase(
+  force: boolean = false,
+  prefetchedRemoteDecks?: any[]
+): Promise<void> {
   const now = Date.now();
   if (isSyncingCardsFromSupabase) return;
-  const caps = await getSchemaCapabilities();
-  const minCooldown = caps.cardsUpdatedAt ? DELTA_SYNC_COOLDOWN_MS : 8000;
-  if (lastSyncCardsFromSupabaseTime > 0 && now - lastSyncCardsFromSupabaseTime < (force ? (caps.cardsUpdatedAt ? 1000 : 8000) : minCooldown)) {
-    return;
-  }
+  if (!force && isAnyStudySessionActiveGlobal()) return;
 
   const currentBooks = useStore.getState().books;
   let baseDecks = useStore.getState().decks;
@@ -1940,26 +2114,83 @@ export async function syncCardsFromSupabase(force: boolean = false): Promise<voi
     }
   }
 
+  let persistedLastCardsMs = 0;
+  if (typeof window !== 'undefined') {
+    try {
+      persistedLastCardsMs = Number(localStorage.getItem(LAST_CARDS_CHECK_KEY) || '0');
+    } catch {}
+  }
+  const effectiveLastCheck = Math.max(lastSyncCardsFromSupabaseTime, persistedLastCardsMs);
+  if (!force && !prefetchedRemoteDecks && baseDecks.length > 0 && effectiveLastCheck > 0 && now - effectiveLastCheck < DELTA_SYNC_COOLDOWN_MS) {
+    return;
+  }
+  if (force && lastSyncCardsFromSupabaseTime > 0 && now - lastSyncCardsFromSupabaseTime < 1500) {
+    return;
+  }
+
+  const caps = await getSchemaCapabilities();
+
   isSyncingCardsFromSupabase = true;
   lastSyncCardsFromSupabaseTime = now;
 
   try {
-    // 1. Параллельно подтягиваем метаданные колод (чтобы новые колоды с ПК сразу появлялись на телефоне)
-    //    и дельта-изменения карточек по updated_at (включая карточки с masteryLevel === 0!).
+    // 1. Легковесные метаданные колод (БЕЗ materials и theory!)
     const deckSelectCols = caps.decksExclude
-      ? 'id, name, category, level, book_id, language, card_count, materials, exclude_from_review, created_at'
-      : 'id, name, category, level, book_id, language, card_count, materials, created_at';
-    const [remoteDecksRes, deltaResult] = await Promise.all([
-      supabase
-        .from('decks')
-        .select(deckSelectCols)
-        .order('created_at', { ascending: true }),
-      syncCardsDelta(supabase),
-    ]);
+      ? 'id, name, category, level, book_id, language, card_count, exclude_from_review, created_at'
+      : 'id, name, category, level, book_id, language, card_count, created_at';
 
-    if (typeof window !== 'undefined' && deltaResult.ok) {
+    let remoteDecksRes: any;
+    let deltaResult: any;
+
+    if (caps.cardsUpdatedAt) {
+      [remoteDecksRes, deltaResult] = await Promise.all([
+        prefetchedRemoteDecks
+          ? Promise.resolve({ data: prefetchedRemoteDecks })
+          : supabase
+              .from('decks')
+              .select(deckSelectCols)
+              .order('created_at', { ascending: true }),
+        syncCardsDelta(supabase, force ? null : undefined, {
+          allowFullFallback: force,
+          hasLocalCache: baseDecks.length > 0,
+        }),
+      ]);
+    } else {
+      remoteDecksRes = prefetchedRemoteDecks
+        ? { data: prefetchedRemoteDecks }
+        : await supabase
+            .from('decks')
+            .select(deckSelectCols)
+            .order('created_at', { ascending: true });
+
+      const remoteList: any[] = Array.isArray(remoteDecksRes?.data) ? remoteDecksRes.data : [];
+      const existingDeckMap = new Map(baseDecks.map((d) => [d.id, d]));
+      const changedOrNewDeckIds: string[] = [];
+
+      for (const rd of remoteList) {
+        const existing = existingDeckMap.get(rd.id);
+        const localCount = Array.isArray(existing?.cards) ? existing!.cards.length : 0;
+        const remoteCount = typeof rd.card_count === 'number' ? rd.card_count : null;
+        if (!existing) {
+          changedOrNewDeckIds.push(rd.id);
+        } else if (localCount === 0 && (remoteCount === null || remoteCount > 0)) {
+          changedOrNewDeckIds.push(rd.id);
+        } else if (remoteCount !== null && remoteCount !== localCount) {
+          changedOrNewDeckIds.push(rd.id);
+        }
+      }
+
+      deltaResult = await syncCardsDelta(supabase, undefined, {
+        targetDeckIds: changedOrNewDeckIds,
+        allowFullFallback: force,
+        hasLocalCache: baseDecks.length > 0,
+      });
+    }
+
+    if (typeof window !== 'undefined' && deltaResult?.ok) {
       try {
         localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
+        localStorage.setItem(LAST_CARDS_CHECK_KEY, String(Date.now()));
       } catch {}
     }
 
@@ -2815,10 +3046,8 @@ export const useStore = create<DeckState>()((set, get) => ({
       localStorage.setItem('last_active_date', todayStr);
       localStorage.removeItem('daily_learned_count');
 
-      safeUpsertUserStats({
-        language: cleanLang.toUpperCase(),
-        daily_activity: progress
-      }).then(() => {});
+      // 30s batch debounce + flush on session exit/pagehide (0 network calls on individual card answers)
+      scheduleDailyActivityUpsert(cleanLang.toUpperCase(), progress);
 
       window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang } }));
       window.dispatchEvent(new Event('storage-update'));
@@ -6278,8 +6507,12 @@ function StudyEntry(props: {
 }) {
   useEffect(() => {
     if (props.deckId && !props.reviewCards) {
-      syncDeckCardsOnOpen(props.deckId).catch(() => {});
+      syncDeckCardsOnOpen(props.deckId, false).catch(() => {});
     }
+    return () => {
+      flushPendingDailyActivityUpserts();
+      flushPendingMasteredSnapshots();
+    };
   }, [props.deckId, props.reviewCards]);
 
   const isRapid = props.trainingMode === 'rapid_flashcards';
@@ -8151,7 +8384,31 @@ export const exportToMarkdown = (bookId?: string) => {
 };
 
 function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?: BookMeta | null }) {
-  const { decks } = useStore();
+  const { decks, appLanguage } = useStore();
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+
+  const handleManualCloudSync = async () => {
+    if (isManualSyncing) return;
+    setIsManualSyncing(true);
+    try {
+      const langLower = (appLanguage || 'de').toLowerCase() as 'de' | 'en' | 'ru';
+      const langUpper = langLower.toUpperCase();
+      await Promise.all([
+        syncBooksFromSupabase(true),
+        syncCardsFromSupabase(true),
+        syncCloudDailyStats(undefined, langLower, true),
+        syncPersistentMistakesFromCloud(langUpper, true),
+        syncMasteredWordsFromCloud(langLower, true, { fullReconcile: true }),
+      ]);
+      await syncWithCloud(true);
+      toast.success('Cloud-Sync erfolgreich abgeschlossen');
+    } catch (e) {
+      console.warn('[ManualSync] Failed:', e);
+      toast.error('Cloud-Sync fehlgeschlagen');
+    } finally {
+      setIsManualSyncing(false);
+    }
+  };
   
   const stats = useMemo(() => {
     let total = 0;
@@ -8210,6 +8467,14 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
         </div>
         
         <div className="flex flex-col gap-3">
+          <button
+            onClick={handleManualCloudSync}
+            disabled={isManualSyncing}
+            className="w-full bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/15 text-gray-900 dark:text-white font-semibold py-3.5 rounded-2xl transition-all active:scale-[0.98] text-sm flex items-center justify-center gap-2 disabled:opacity-60"
+          >
+            <RefreshCw className={`w-4 h-4 ${isManualSyncing ? 'animate-spin' : ''}`} />
+            {isManualSyncing ? 'Synchronisiere mit Cloud...' : 'Cloud-Sync jetzt ausführen'}
+          </button>
           <button 
             onClick={() => exportToMarkdown(activeBook?.id)}
             className="w-full bg-blue-600 dark:bg-white text-white dark:text-black font-semibold py-4 rounded-2xl transition-all shadow-[0_4px_14px_rgba(37,99,235,0.3)] dark:shadow-[0_4px_20px_rgba(255,255,255,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.4)] dark:hover:shadow-[0_4px_25px_rgba(255,255,255,0.4)] active:scale-[0.98] text-base flex items-center justify-center gap-2"
@@ -10483,7 +10748,7 @@ export const syncAppStateToCloud = async (override?: {
   excludedBooksTimestamp?: number;
 }) => {
   if (typeof window === 'undefined') return;
-  const state: any = { theory: {} };
+  const state: any = {};
   
   const currentDeckOrder = override?.deckOrder || useStore.getState().deckOrder || [];
   const currentBookOrder = override?.bookOrder || useStore.getState().bookOrder || [];
@@ -10512,14 +10777,6 @@ export const syncAppStateToCloud = async (override?: {
   state.bookOrderTimestamp = bookOrderTimestamp;
   state.excludedBookIds = excludedBookIds;
   state.excludedBooksTimestamp = excludedBooksTimestamp;
-
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith('deck_theory_')) {
-      state.theory[key] = localStorage.getItem(key);
-    }
-  }
-
   state.updatedAt = Date.now();
   
   try {
@@ -12293,19 +12550,15 @@ export default function App() {
           localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
         }
         useStore.getState().refreshDueCardsCount().catch(() => {});
-        // Немедленно запускаем фоновый дельта-синк для устранения рассинхрона между браузерами
+        // Фоновый дельта-синк строго с соблюдением 5-минутного кулдауна (F5 внутри 5 мин = 0 КБ!)
         (async () => {
           try {
-            await syncBooksFromSupabase();
-            await syncCardsFromSupabase(true);
+            await syncBooksFromSupabase(false);
+            await syncCardsFromSupabase(false);
             const curLangUpper = (useStore.getState().appLanguage || 'de').toUpperCase();
-            await syncCloudDailyStats(undefined, curLangUpper.toLowerCase(), true);
-            await syncPersistentMistakesFromCloud(curLangUpper);
-            await syncMasteredWordsFromCloud(curLangUpper.toLowerCase() as any, true);
-            const globalState = await safeFetchUserStats('GLOBAL_APP_STATE').catch(() => null);
-            if (globalState) {
-              applyCloudAppState(globalState);
-            }
+            await syncCloudDailyStats(undefined, curLangUpper.toLowerCase(), false);
+            await syncPersistentMistakesFromCloud(curLangUpper, false);
+            await syncMasteredWordsFromCloud(curLangUpper.toLowerCase() as any, false);
           } catch (e) {
             console.warn('[App] Background delta sync error:', e);
           }
@@ -12315,13 +12568,21 @@ export default function App() {
 
       // 4. Первичная загрузка из Supabase ТОЛЬКО при пустом локальном кэше (First Boot / Empty IDB)
       try {
+        const bootCaps = await getSchemaCapabilities();
+        const bootBookCols = bootCaps.booksExclude
+          ? 'id, language, title, subtitle, tintColor, coverImage, coverValue, coverType, accentColor, activeLevels, cover_url_light, cover_url_dark, training_mode, category, exclude_from_review, created_at'
+          : 'id, language, title, subtitle, tintColor, coverImage, coverValue, coverType, accentColor, activeLevels, cover_url_light, cover_url_dark, training_mode, category, created_at';
+        const bootDeckCols = bootCaps.decksExclude
+          ? 'id, name, category, level, book_id, language, card_count, exclude_from_review, created_at'
+          : 'id, name, category, level, book_id, language, card_count, created_at';
+
         const timeoutPromise = new Promise<{ booksRes: any, decksRes: any, count: number, statsRes: any }>((_, reject) => 
           setTimeout(() => reject(new Error('Supabase fetch timeout')), 20000)
         );
 
         const fetchPromise = Promise.all([
-          supabase.from('books').select('*').order('created_at', { ascending: true }),
-          supabase.from('decks').select('*').order('created_at', { ascending: true }),
+          supabase.from('books').select(bootBookCols).order('created_at', { ascending: true }),
+          supabase.from('decks').select(bootDeckCols).order('created_at', { ascending: true }),
           fetchSupabaseCardsCount(),
           safeFetchUserStats([
             'DE',
@@ -12335,7 +12596,20 @@ export default function App() {
             'MISTAKES_POOL_RU',
             'GLOBAL_APP_STATE',
           ])
-        ]).then(([booksRes, decksRes, count, statsList]) => ({ booksRes, decksRes, count, statsRes: { data: statsList } }));
+        ]).then(([booksRes, decksRes, count, statsList]) => {
+          if (typeof window !== 'undefined') {
+            const syncedAt = String(Date.now());
+            try {
+              localStorage.setItem(LAST_BOOKS_SYNC_KEY, syncedAt);
+              localStorage.setItem(LAST_APP_STATE_SYNC_KEY, syncedAt);
+              ['DE', 'EN', 'RU'].forEach((l) => {
+                localStorage.setItem(`kraft_day_stats_fetch_at_${l}`, syncedAt);
+                localStorage.setItem(`${LAST_STATS_CHECK_KEY_PREFIX}${l.toLowerCase()}`, syncedAt);
+              });
+            } catch {}
+          }
+          return { booksRes, decksRes, count, statsRes: { data: statsList } };
+        });
 
         const { booksRes, decksRes, count, statsRes } = await Promise.race([fetchPromise, timeoutPromise]);
 
@@ -12565,8 +12839,8 @@ export default function App() {
           setDecks(validDecks);
           await setIDBItem('app_decks', validDecks);
 
-          // Delta-Sync карточек при старте приложения (устранение рассинхрона между браузерами)
-          await syncCardsFromSupabase(false);
+          // Delta-Sync карточек при старте приложения (переиспользуем decksRes.data без повторного GET decks)
+          await syncCardsFromSupabase(false, decksRes.data);
 
           const syncedDecks = useStore.getState().decks;
           await autoBackfillMasteredWords(syncedDecks, useStore.getState().books, useStore.getState().appLanguage);
@@ -12581,30 +12855,31 @@ export default function App() {
         useStore.setState({ isLoaded: true });
         useStore.getState().refreshDueCardsCount().catch(() => {});
         const finLangUpper = (useStore.getState().appLanguage || 'de').toUpperCase();
-        syncCloudDailyStats(undefined, finLangUpper.toLowerCase(), true).catch(() => {});
-        syncPersistentMistakesFromCloud(finLangUpper).catch(() => {});
-        syncMasteredWordsFromCloud(finLangUpper.toLowerCase() as any, true).catch(() => {});
+        syncCloudDailyStats(undefined, finLangUpper.toLowerCase(), false).catch(() => {});
+        syncPersistentMistakesFromCloud(finLangUpper, false).catch(() => {});
+        syncMasteredWordsFromCloud(finLangUpper.toLowerCase() as any, false).catch(() => {});
       }
     };
     fetchData();
 
-    // 2. Мгновенная дельта-синхронизация при возврате во вкладку / разблокировке телефона
+    // 2. Безопасная фоновая дельта-синхронизация с жестким 5-минутным кулдауном (НИКОГДА во время тренировки)
     let lastFocusSync = 0;
-    const FOCUS_COOLDOWN_MS = 2 * 1000; // Защита от двойного срабатывания focus + visibilitychange
+    const FOCUS_COOLDOWN_MS = 5 * 60 * 1000;
 
     const handleFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (isAnyStudySessionActiveGlobal()) return;
       const now = Date.now();
       if (now - lastFocusSync < FOCUS_COOLDOWN_MS) return;
       lastFocusSync = now;
       const langUpper = (useStore.getState().appLanguage || 'DE').toUpperCase();
-      syncBooksFromSupabase().catch(() => {});
-      syncCardsFromSupabase(true).catch(() => {});
-      syncCloudDailyStats(undefined, langUpper.toLowerCase(), true).catch(() => {});
-      syncPersistentMistakesFromCloud(langUpper).catch(() => {});
-      syncMasteredWordsFromCloud(langUpper.toLowerCase() as any, true).catch(() => {});
+      syncBooksFromSupabase(false).catch(() => {});
+      syncCardsFromSupabase(false).catch(() => {});
+      syncCloudDailyStats(undefined, langUpper.toLowerCase(), false).catch(() => {});
+      syncPersistentMistakesFromCloud(langUpper, false).catch(() => {});
+      syncMasteredWordsFromCloud(langUpper.toLowerCase() as any, false).catch(() => {});
       if (activeDeckIdRef.current) {
-        syncDeckCardsOnOpen(activeDeckIdRef.current, true).catch(() => {});
+        syncDeckCardsOnOpen(activeDeckIdRef.current, false).catch(() => {});
       }
     };
 
@@ -13949,7 +14224,15 @@ const RU_TO_DE: Record<string, string> = {
 
 function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void }) {
   useEffect(() => {
-    if (deck?.id) syncDeckCardsOnOpen(deck.id).catch(() => {});
+    if (typeof window !== 'undefined') {
+      (window as any).__kraftActiveStudyCount = Number((window as any).__kraftActiveStudyCount || 0) + 1;
+    }
+    if (deck?.id) syncDeckCardsOnOpen(deck.id, false).catch(() => {});
+    return () => {
+      if (typeof window !== 'undefined') {
+        (window as any).__kraftActiveStudyCount = Math.max(0, Number((window as any).__kraftActiveStudyCount || 1) - 1);
+      }
+    };
   }, [deck?.id]);
   const isMobile = useIsMobile();
   useScrollLock(true);
@@ -14241,7 +14524,15 @@ function DictationPlayer({ deck, onClose }: { deck: Deck, onClose: () => void })
 
 function ShadowingPlayer({ deck, onClose }: { deck: Deck, onClose: () => void }) {
   useEffect(() => {
-    if (deck?.id) syncDeckCardsOnOpen(deck.id).catch(() => {});
+    if (typeof window !== 'undefined') {
+      (window as any).__kraftActiveStudyCount = Number((window as any).__kraftActiveStudyCount || 0) + 1;
+    }
+    if (deck?.id) syncDeckCardsOnOpen(deck.id, false).catch(() => {});
+    return () => {
+      if (typeof window !== 'undefined') {
+        (window as any).__kraftActiveStudyCount = Math.max(0, Number((window as any).__kraftActiveStudyCount || 1) - 1);
+      }
+    };
   }, [deck?.id]);
   useScrollLock(true);
   const [currentIndex, setCurrentIndex] = useState(0);

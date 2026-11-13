@@ -442,77 +442,77 @@ async function getDayStatsUserId(): Promise<string | null> {
   return cachedDayStatsUserId;
 }
 
-export async function syncStatsToSupabase(
-  lang: string,
-  stats: DailyStats,
-  immediate: boolean = false,
-  mistakeMutation?: { action: 'add' | 'resolve'; card: any }
-): Promise<void> {
-  const normLang = normalizeLanguage(lang);
-  const now = Date.now();
+const pendingMistakesDirtyByLang: Record<string, boolean> = {};
+const pendingStatsSnapshotByLang: Record<string, { stats: DailyStats; mistakeMutation?: { action: 'add' | 'resolve'; card: any } }> = {};
+const cloudSyncTimersByLang: Record<string, ReturnType<typeof setTimeout> | null> = {};
+const STATS_SYNC_DEBOUNCE_MS = 30 * 1000; // 30s batch debounce during study (0 KB egress on card answers)
 
-  // Throttling: do not spam Supabase unless immediate (e.g. mistake mutation, exit, or forced sync)
-  if (!immediate && now - (lastSupabaseSyncTime[normLang] || 0) < 300000) {
-    return;
-  }
+async function executeDayStatsCloudFlush(normLang: string): Promise<void> {
+  const pending = pendingStatsSnapshotByLang[normLang];
+  if (!pending) return;
+  const { stats, mistakeMutation } = pending;
+  const shouldPushMistakesPool = Boolean(pendingMistakesDirtyByLang[normLang]);
+  delete pendingStatsSnapshotByLang[normLang];
+  pendingMistakesDirtyByLang[normLang] = false;
 
-  const performSync = async () => {
+  try {
+    lastSupabaseSyncTime[normLang] = Date.now();
+    // Compact 14-day history only; NEVER duplicate mistakesPool (~128 KB!) inside DAY_STATS_*
+    const history = getDailyStatsHistory(normLang, 14);
+    const payload = {
+      date: stats.date,
+      activeSeconds: stats.activeSeconds || 0,
+      cardsDone: stats.cardsDone || 0,
+      correctCount: stats.correctCount || 0,
+      mistakesCountToday: stats.mistakesCountToday || 0,
+      words_learned_today: stats.words_learned_today || 0,
+      cards_reviewed_today: stats.cards_reviewed_today || 0,
+      history,
+    };
+    const syncPayload: any = {
+      language: `DAY_STATS_${normLang}`,
+      daily_activity: payload,
+    };
+
     try {
-      lastSupabaseSyncTime[normLang] = Date.now();
-      const history = getDailyStatsHistory(normLang, 30);
+      const userId = await getDayStatsUserId();
+      const todayRecord = getDayRecord(normLang, stats.date);
+      syncPayload.user_id = userId || 'default';
+      syncPayload.user_daily_stats = {
+        user_id: userId || 'default',
+        language: normLang,
+        date: stats.date,
+        cards_done: todayRecord.cardsReviewed,
+        correct_count: stats.correctCount || todayRecord.cardsReviewed,
+        mistakes_count: todayRecord.mistakesCount,
+        focus_minutes: todayRecord.focusMinutes,
+        words_learned_today: todayRecord.words_learned_today || 0,
+        cards_reviewed_today: todayRecord.cards_reviewed_today || 0,
+        updated_at: new Date().toISOString(),
+      };
+    } catch {}
+
+    if (mistakeMutation?.card) {
+      const snap = cleanCardSnapshot(mistakeMutation.card);
+      syncPayload.mistake_action = mistakeMutation.action;
+      syncPayload.mistake_lang = normLang;
+      syncPayload.mistake_card_id = snap?.id || mistakeMutation.card?.id || getMistakeCardKey(mistakeMutation.card);
+      syncPayload.mistake_deck_id = snap?.deckId || mistakeMutation.card?.deckId || null;
+      syncPayload.mistake_target_word = snap?.targetWord || null;
+      syncPayload.mistake_sentence = snap?.sentence || null;
+      syncPayload.mistake_translation = snap?.translation || null;
+      syncPayload.mistake_snapshot = snap || null;
+    }
+
+    const tasks: Promise<any>[] = [saveDayProgress(syncPayload)];
+
+    // Only write MISTAKES_POOL_* when mistakes/tombstones actually changed
+    if (shouldPushMistakesPool) {
       const resolvedMap = getResolvedMistakesMap(normLang);
       const cleanPool = Array.isArray(stats.mistakesPool)
         ? stats.mistakesPool.map(cleanCardSnapshot).filter(Boolean)
         : [];
-      const payload = {
-        date: stats.date,
-        activeSeconds: stats.activeSeconds || 0,
-        cardsDone: stats.cardsDone || 0,
-        correctCount: stats.correctCount || 0,
-        mistakesCountToday: stats.mistakesCountToday || 0,
-        words_learned_today: stats.words_learned_today || 0,
-        cards_reviewed_today: stats.cards_reviewed_today || 0,
-        mistakesPool: cleanPool,
-        resolvedMistakesMap: resolvedMap,
-        history,
-      };
-      const syncPayload: any = {
-        language: `DAY_STATS_${normLang}`,
-        daily_activity: payload,
-      };
-
-      try {
-        const userId = await getDayStatsUserId();
-        const todayRecord = getDayRecord(normLang, stats.date);
-        syncPayload.user_id = userId || 'default';
-        syncPayload.user_daily_stats = {
-          user_id: userId || 'default',
-          language: normLang,
-          date: stats.date,
-          cards_done: todayRecord.cardsReviewed,
-          correct_count: stats.correctCount || todayRecord.cardsReviewed,
-          mistakes_count: todayRecord.mistakesCount,
-          focus_minutes: todayRecord.focusMinutes,
-          words_learned_today: todayRecord.words_learned_today || 0,
-          cards_reviewed_today: todayRecord.cards_reviewed_today || 0,
-          updated_at: new Date().toISOString(),
-        };
-      } catch {}
-
-      if (mistakeMutation?.card) {
-        const snap = cleanCardSnapshot(mistakeMutation.card);
-        syncPayload.mistake_action = mistakeMutation.action;
-        syncPayload.mistake_lang = normLang;
-        syncPayload.mistake_card_id = snap?.id || mistakeMutation.card?.id || getMistakeCardKey(mistakeMutation.card);
-        syncPayload.mistake_deck_id = snap?.deckId || mistakeMutation.card?.deckId || null;
-        syncPayload.mistake_target_word = snap?.targetWord || null;
-        syncPayload.mistake_sentence = snap?.sentence || null;
-        syncPayload.mistake_translation = snap?.translation || null;
-        syncPayload.mistake_snapshot = snap || null;
-      }
-
-      await Promise.all([
-        saveDayProgress(syncPayload),
+      tasks.push(
         safeUpsertUserStats({
           language: `MISTAKES_POOL_${normLang}`,
           daily_activity: {
@@ -520,25 +520,70 @@ export async function syncStatsToSupabase(
             resolvedMap,
             updatedAt: Date.now(),
           },
-        }),
-      ]);
-    } catch {
-      // Тихий fallback: данные остаются в localStorage & IndexedDB
+        })
+      );
     }
+
+    await Promise.all(tasks);
+  } catch {
+    // Тихий fallback: данные остаются в localStorage & IndexedDB
+  }
+}
+
+export async function flushPendingDayStatsSync(lang?: string): Promise<void> {
+  const langs = lang ? [normalizeLanguage(lang)] : Object.keys(pendingStatsSnapshotByLang);
+  await Promise.all(
+    langs.map(async (normLang) => {
+      if (cloudSyncTimersByLang[normLang]) {
+        clearTimeout(cloudSyncTimersByLang[normLang]!);
+        cloudSyncTimersByLang[normLang] = null;
+      }
+      await executeDayStatsCloudFlush(normLang);
+    })
+  );
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    flushPendingDayStatsSync().catch(() => {});
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushPendingDayStatsSync().catch(() => {});
+    }
+  });
+}
+
+export async function syncStatsToSupabase(
+  lang: string,
+  stats: DailyStats,
+  immediate: boolean = false,
+  mistakeMutation?: { action: 'add' | 'resolve'; card: any }
+): Promise<void> {
+  const normLang = normalizeLanguage(lang);
+  if (mistakeMutation) {
+    pendingMistakesDirtyByLang[normLang] = true;
+  }
+  const prevMutation = pendingStatsSnapshotByLang[normLang]?.mistakeMutation;
+  pendingStatsSnapshotByLang[normLang] = {
+    stats,
+    mistakeMutation: mistakeMutation || prevMutation,
   };
 
   if (immediate) {
-    if (cloudSyncTimeout) {
-      clearTimeout(cloudSyncTimeout);
-      cloudSyncTimeout = null;
+    if (cloudSyncTimersByLang[normLang]) {
+      clearTimeout(cloudSyncTimersByLang[normLang]!);
+      cloudSyncTimersByLang[normLang] = null;
     }
-    await performSync();
+    await executeDayStatsCloudFlush(normLang);
   } else {
-    if (cloudSyncTimeout) clearTimeout(cloudSyncTimeout);
-    cloudSyncTimeout = setTimeout(() => {
-      performSync();
-      cloudSyncTimeout = null;
-    }, 5000);
+    if (cloudSyncTimersByLang[normLang]) {
+      clearTimeout(cloudSyncTimersByLang[normLang]!);
+    }
+    cloudSyncTimersByLang[normLang] = setTimeout(() => {
+      cloudSyncTimersByLang[normLang] = null;
+      executeDayStatsCloudFlush(normLang).catch(() => {});
+    }, STATS_SYNC_DEBOUNCE_MS);
   }
 }
 
@@ -576,8 +621,14 @@ export async function fetchStatsFromSupabase(lang: string): Promise<(DailyStats 
   }
 }
 
-export async function syncPersistentMistakesFromCloud(lang: string = 'DE'): Promise<any[]> {
+export async function syncPersistentMistakesFromCloud(lang: string = 'DE', force: boolean = false): Promise<any[]> {
   const normLang = normalizeLanguage(lang);
+  const now = Date.now();
+  const lastFetchMs = getPersistedDayStatsFetchMs(normLang);
+  if (!force && lastFetchMs > 0 && now - lastFetchMs < STATS_FETCH_COOLDOWN_MS) {
+    return getMistakesPool(normLang);
+  }
+  setPersistedDayStatsFetchMs(normLang, now);
   const cloudStats = await fetchStatsFromSupabase(normLang);
   if (cloudStats) {
     const updated = reconcileStatsFromCloud(normLang, cloudStats);
@@ -1391,7 +1442,7 @@ function initGlobalTimer() {
   window.addEventListener('blur', handleWindowBlur);
   window.addEventListener('focus', handleWindowFocus);
 
-  // Safari unload/pagehide flush to local & Supabase
+  // Safari unload/pagehide flush to local & pending dirty Supabase batches only (0 writes on clean reload)
   const flushAll = () => {
     pauseCardFocusTimer();
     Object.keys(statsByLang).forEach(l => {
@@ -1405,12 +1456,11 @@ function initGlobalTimer() {
         });
         safeSetStorage(getStorageKey(l), JSON.stringify(s));
         setStatsInIDB(l, s);
-        syncStatsToSupabase(l, s, true);
       }
     });
+    flushPendingDayStatsSync().catch(() => {});
   };
   window.addEventListener('pagehide', flushAll);
-  window.addEventListener('beforeunload', flushAll);
 }
 
 function areDailyStatsEqual(a: DailyStats, b: DailyStats): boolean {
@@ -1429,7 +1479,29 @@ function areDailyStatsEqual(a: DailyStats, b: DailyStats): boolean {
 }
 
 const lastCloudStatsFetchTimeByLang: Record<string, number> = {};
-const STATS_FETCH_COOLDOWN_MS = 4 * 1000; // Fast 4s cross-browser cooldown
+const STATS_FETCH_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes hard cooldown across F5/focus/components
+const DAY_STATS_FETCH_TS_PREFIX = 'kraft_day_stats_fetch_at_';
+
+function getPersistedDayStatsFetchMs(lang: string): number {
+  const norm = normalizeLanguage(lang);
+  const mem = lastCloudStatsFetchTimeByLang[norm] || 0;
+  if (typeof window === 'undefined') return mem;
+  try {
+    const raw = Number(localStorage.getItem(`${DAY_STATS_FETCH_TS_PREFIX}${norm}`) || '0');
+    return Number.isFinite(raw) ? Math.max(mem, raw) : mem;
+  } catch {
+    return mem;
+  }
+}
+
+function setPersistedDayStatsFetchMs(lang: string, ts: number): void {
+  const norm = normalizeLanguage(lang);
+  lastCloudStatsFetchTimeByLang[norm] = ts;
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(`${DAY_STATS_FETCH_TS_PREFIX}${norm}`, String(ts));
+  } catch {}
+}
 
 export function useDayStats(options?: { isStudying?: boolean; language?: string }) {
   const isStudying = options?.isStudying ?? false;
@@ -1476,15 +1548,16 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
     return () => { isCancelled = true; };
   }, [lang, updateLocalStatsIfChanged]);
 
-  // Supabase Cloud recovery: fetch canonical database stats & mistakes on mount, focus, visibilitychange, and live Realtime
+  // Supabase Cloud recovery: respect 5-min cooldown across F5 & study mounts; NO Realtime user_stats echo during study
   useEffect(() => {
     let isCancelled = false;
     const syncFromCloud = (force: boolean = false) => {
       const now = Date.now();
-      if (!force && lastCloudStatsFetchTimeByLang[lang] && now - lastCloudStatsFetchTimeByLang[lang] < STATS_FETCH_COOLDOWN_MS) {
+      const lastFetchMs = getPersistedDayStatsFetchMs(lang);
+      if (!force && lastFetchMs > 0 && now - lastFetchMs < STATS_FETCH_COOLDOWN_MS) {
         return;
       }
-      lastCloudStatsFetchTimeByLang[lang] = now;
+      setPersistedDayStatsFetchMs(lang, now);
       fetchStatsFromSupabase(lang).then(cloudStats => {
         if (isCancelled || !cloudStats) return;
         const updated = reconcileStatsFromCloud(lang, cloudStats);
@@ -1492,59 +1565,33 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       });
     };
 
-    syncFromCloud(true);
+    // During study mounts or F5 within 5 min, reuse cached state (0 KB read egress)
+    if (!isStudying) {
+      syncFromCloud(false);
+    }
 
     let visibilityDebounce: ReturnType<typeof setTimeout> | null = null;
     const handleVisibilityOrFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (isStudying || (activeStudyCounts[lang] || 0) > 0) return;
+      if (typeof window !== 'undefined' && Number((window as any).__kraftActiveStudyCount || 0) > 0) return;
       if (visibilityDebounce) clearTimeout(visibilityDebounce);
       visibilityDebounce = setTimeout(() => {
+        if (isStudying || (activeStudyCounts[lang] || 0) > 0) return;
         syncFromCloud(false);
-      }, 350);
+      }, 1000);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
-
-    // Supabase Realtime channel for instant cross-browser and cross-device sync
-    const channel = supabase
-      .channel(`realtime-daystats-${lang}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'user_stats',
-        filter: `language=eq.DAY_STATS_${normalizeLanguage(lang)}`
-      }, (payload: any) => {
-        if (payload?.new?.daily_activity && !isCancelled) {
-          const updated = reconcileStatsFromCloud(lang, payload.new.daily_activity);
-          updateLocalStatsIfChanged(updated);
-        }
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'user_stats',
-        filter: `language=eq.MISTAKES_POOL_${normalizeLanguage(lang)}`
-      }, (payload: any) => {
-        if (payload?.new?.daily_activity && !isCancelled) {
-          const act = payload.new.daily_activity;
-          const updated = reconcileStatsFromCloud(lang, {
-            mistakesPool: Array.isArray(act.mistakes) ? act.mistakes : [],
-            resolvedMistakesMap: act.resolvedMap || {},
-          });
-          updateLocalStatsIfChanged(updated);
-        }
-      })
-      .subscribe();
 
     return () => {
       isCancelled = true;
       if (visibilityDebounce) clearTimeout(visibilityDebounce);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('focus', handleVisibilityOrFocus);
-      supabase.removeChannel(channel);
     };
-  }, [lang, updateLocalStatsIfChanged]);
+  }, [isStudying, lang, updateLocalStatsIfChanged]);
 
   // Manage study activity timer & listener subscriptions
   useEffect(() => {
@@ -1552,6 +1599,9 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
 
     if (isStudying) {
       activeStudyCounts[lang] = (activeStudyCounts[lang] || 0) + 1;
+      if (typeof window !== 'undefined') {
+        (window as any).__kraftActiveStudyCount = Number((window as any).__kraftActiveStudyCount || 0) + 1;
+      }
       lastActivityTime = Date.now();
       startCardFocusTimer(lang);
     }
@@ -1578,6 +1628,12 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       window.removeEventListener('stats-update', handleCustomUpdate);
       if (isStudying) {
         activeStudyCounts[lang] = Math.max(0, (activeStudyCounts[lang] || 0) - 1);
+        if (typeof window !== 'undefined') {
+          (window as any).__kraftActiveStudyCount = Math.max(
+            0,
+            Number((window as any).__kraftActiveStudyCount || 1) - 1
+          );
+        }
         if ((activeStudyCounts[lang] || 0) === 0) {
           pauseCardFocusTimer(lang);
         }
@@ -1590,7 +1646,7 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
             focusMinutes: focusMins
           });
           setStatsInIDB(lang, current);
-          syncStatsToSupabase(lang, current, false);
+          flushPendingDayStatsSync(lang).catch(() => {});
         }
       }
     };
@@ -1734,8 +1790,8 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
 
     statsByLang[targetLang] = nextStats;
     notifyLang(targetLang);
-    // Persist mistakes mutations immediately across browsers, otherwise use standard throttle
-    syncStatsToSupabase(targetLang, nextStats, Boolean(mistakeMutation), mistakeMutation).catch(() => {});
+    // Batch both daily stats and mistake mutations with 30s debounce + flush on session exit/pagehide (0 KB egress per card answer)
+    syncStatsToSupabase(targetLang, nextStats, false, mistakeMutation).catch(() => {});
   }, [lang]);
 
   return { stats, setStats, recordCardResult };
