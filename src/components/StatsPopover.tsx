@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { X, CheckCircle2, RotateCcw, Clock, Target } from 'lucide-react';
+import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 import { 
   getTodayCompletedCardsCount, 
   getCanonicalTodayCardsDone,
@@ -171,36 +172,18 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     }
   }, [isOpen, currentLang]);
 
-  // Lock scroll while modal is open
+  useLockBodyScroll(isOpen);
+
+  // Close on Escape while open
   useEffect(() => {
     if (!isOpen) return;
-
-    const prevOverflow = document.body.style.overflow;
-    const prevTouchAction = document.body.style.touchAction;
-    const prevOverscroll = document.body.style.overscrollBehavior;
-
-    document.body.style.overflow = 'hidden';
-    document.body.style.touchAction = 'none';
-    document.body.style.overscrollBehavior = 'none';
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
 
-    const blockScroll = (e: Event) => {
-      e.preventDefault();
-    };
-
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('wheel', blockScroll, { passive: false });
-    window.addEventListener('touchmove', blockScroll, { passive: false });
-
     return () => {
-      document.body.style.overflow = prevOverflow;
-      document.body.style.touchAction = prevTouchAction;
-      document.body.style.overscrollBehavior = prevOverscroll;
-      window.removeEventListener('wheel', blockScroll);
-      window.removeEventListener('touchmove', blockScroll);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, onClose]);
@@ -351,7 +334,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
       onTouchMove={(e) => e.stopPropagation()}
     >
       <div 
-        className="stats-modal-content w-full sm:max-w-[400px] max-h-[90dvh] overflow-y-auto rounded-t-[28px] sm:rounded-[28px] bg-white dark:bg-[#121216] sm:dark:bg-zinc-900 border-t sm:border border-black/[0.08] dark:border-white/10 p-6 pb-[calc(env(safe-area-inset-bottom,16px)+24px)] sm:p-6 shadow-2xl text-zinc-900 dark:text-white relative animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-200 font-sans"
+        className="stats-modal-content w-full sm:max-w-[400px] max-h-[90dvh] overflow-y-auto overscroll-contain rounded-t-[28px] sm:rounded-[28px] bg-white dark:bg-[#121216] sm:dark:bg-zinc-900 border-t sm:border border-black/[0.08] dark:border-white/10 p-6 pb-[calc(env(safe-area-inset-bottom,16px)+24px)] sm:p-6 shadow-2xl text-zinc-900 dark:text-white relative animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-200 font-sans"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="w-10 h-1.5 bg-zinc-300 dark:bg-white/20 rounded-full mx-auto mb-5 sm:hidden" />

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Volume2, RotateCcw, BookOpen, Loader2, HelpCircle } from 'lucide-react';
+import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 
 export interface ComprehensionItem {
   id: number;
@@ -36,11 +37,11 @@ export function StoryReaderModal({
   const [userAnswers, setUserAnswers] = useState<Record<number, boolean>>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Lock body scroll when modal is open
+  useLockBodyScroll(isOpen);
+
+  // Close on Escape and cleanup audio when modal closes
   useEffect(() => {
     if (!isOpen) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -48,7 +49,6 @@ export function StoryReaderModal({
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      document.body.style.overflow = prevOverflow;
       window.removeEventListener('keydown', handleKeyDown);
       if (audioRef.current) {
         audioRef.current.pause();
@@ -267,7 +267,7 @@ export function StoryReaderModal({
         </div>
 
         {/* Scrollable area: Article + Goethe/telc Richtig/Falsch Block */}
-        <div className="flex-1 overflow-y-auto py-6 pr-2 space-y-8 select-text">
+        <div className="flex-1 overflow-y-auto overscroll-contain py-6 pr-2 space-y-8 select-text">
           {isGenerating ? (
             <div className="h-full flex flex-col items-center justify-center text-zinc-500 space-y-3 py-24">
               <Loader2 className="w-6 h-6 animate-spin text-sky-400" />

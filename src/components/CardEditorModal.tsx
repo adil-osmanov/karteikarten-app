@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
+import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 import type { Flashcard } from '@/app/page';
 import type { CEFRLevel } from '@/lib/vocabulary/cefrLevelDetector';
 
@@ -30,6 +31,8 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const targetInputRef = useRef<HTMLInputElement>(null);
+
+  useLockBodyScroll(Boolean(isOpen && card));
 
   useEffect(() => {
     if (isOpen && card) {
@@ -113,7 +116,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xl animate-in fade-in duration-150 select-none"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xl animate-in fade-in duration-150 select-none overscroll-none"
       onClick={(e) => {
         e.stopPropagation();
         onClose();

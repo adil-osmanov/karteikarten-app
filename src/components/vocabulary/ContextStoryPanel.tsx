@@ -122,9 +122,9 @@ export const ContextStoryPanel: React.FC<ContextStoryPanelProps> = ({
   return (
     <div
       data-testid="context-story-panel"
-      className="flex-1 overflow-y-auto px-5 sm:px-8 py-6 scrollbar-thin scrollbar-thumb-neutral-700/50 scrollbar-track-transparent"
+      className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 sm:px-8 pt-6 pb-10 scrollbar-thin scrollbar-thumb-neutral-700/50 scrollbar-track-transparent"
     >
-      <div className="max-w-2xl mx-auto flex flex-col min-h-full">
+      <div className="max-w-2xl mx-auto flex flex-col">
         {/* Top Minimal Back Navigation */}
         <div className="mb-6">
           <button

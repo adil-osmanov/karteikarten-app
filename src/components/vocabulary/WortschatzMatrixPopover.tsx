@@ -13,6 +13,7 @@ import {
   normalizeLanguageCode,
 } from '@/hooks/useWortschatzMatrix';
 import { MasteredWordsModal } from './MasteredWordsModal';
+import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 
 export { C1_TARGET_WORDS };
 
@@ -77,6 +78,8 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useLockBodyScroll(isMatrixOpen);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 639px)');
@@ -157,42 +160,26 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
           )}
         </div>
 
-        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+        <span className="text-xs font-medium text-zinc-400 dark:text-neutral-400 tabular-nums">
           {percentTotal.toFixed(1)}%
         </span>
       </div>
 
-      {/* ВЗВЕШЕННАЯ ОЦЕНКА УРОВНЯ CEFR */}
-      <div className="mb-4 px-3 py-2 rounded-2xl bg-zinc-100/80 dark:bg-white/[0.04] border border-black/[0.05] dark:border-white/[0.06] flex flex-col gap-1.5">
-        <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
-          <span className="truncate">
-            {resolvedEvaluation.nextLevel ? (
-              <>
-                Geschätztes Niveau:{' '}
-                <strong className="font-semibold text-zinc-900 dark:text-white">
-                  {resolvedEvaluation.currentLevel}
-                </strong>{' '}
-                → noch{' '}
-                <span className="tabular-nums font-semibold text-blue-600 dark:text-blue-400">
-                  {resolvedEvaluation.wordsToNextLevel.toLocaleString(localeStr)}
-                </span>{' '}
-                Punkte bis {resolvedEvaluation.nextLevel}
-              </>
-            ) : (
-              <>
-                Geschätztes Niveau:{' '}
-                <strong className="font-semibold text-zinc-900 dark:text-white">C2</strong>{' '}
-                ({resolvedEvaluation.weightedScore.toLocaleString(localeStr)} Punkte)
-              </>
-            )}
+      {/* ВОЗДУШНЫЙ БЛОК ПРОГРЕССА УРОВНЯ CEFR (APPLE HEALTH STYLE) */}
+      <div className="mb-5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-medium text-zinc-900 dark:text-white">
+            Niveau {resolvedEvaluation.currentLevel}
           </span>
-          <span className="shrink-0 font-mono text-[10px] text-zinc-400 dark:text-zinc-500 tabular-nums">
-            {resolvedEvaluation.progressToNextPercent}%
+          <span className="text-xs text-zinc-500 dark:text-neutral-400 tabular-nums">
+            {resolvedEvaluation.nextLevel
+              ? `noch ${resolvedEvaluation.wordsToNextLevel.toLocaleString(localeStr)} Punkte bis ${resolvedEvaluation.nextLevel}`
+              : `${resolvedEvaluation.weightedScore.toLocaleString(localeStr)} Punkte`}
           </span>
         </div>
-        <div className="w-full h-1 rounded-full bg-zinc-200 dark:bg-white/10 overflow-hidden">
+        <div className="w-full h-1.5 rounded-full bg-black/[0.06] dark:bg-white/[0.08] overflow-hidden mt-2">
           <div
-            className="h-full rounded-full bg-blue-500 transition-all duration-500"
+            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-sky-400 transition-all duration-500"
             style={{ width: `${resolvedEvaluation.progressToNextPercent}%` }}
           />
         </div>
@@ -312,7 +299,7 @@ export const WortschatzMatrixPopover: React.FC<WortschatzMatrixPopoverProps> = R
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 36 }}
                 transition={{ duration: 0.2, ease: 'easeOut' }}
-                className="relative w-full max-h-[85dvh] overflow-y-auto rounded-t-[32px] bg-white dark:bg-[#121215] border-t border-black/10 dark:border-white/10 p-6 pb-[calc(env(safe-area-inset-bottom,16px)+24px)] shadow-2xl z-10 text-zinc-900 dark:text-zinc-100 select-none text-left"
+                className="relative w-full max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-[32px] bg-white dark:bg-[#121215] border-t border-black/10 dark:border-white/10 p-6 pb-[calc(env(safe-area-inset-bottom,16px)+24px)] shadow-2xl z-10 text-zinc-900 dark:text-zinc-100 select-none text-left"
               >
                 <div className="w-12 h-1.5 bg-zinc-300 dark:bg-white/20 rounded-full mx-auto mb-5" />
                 {matrixBody}

@@ -35,6 +35,7 @@ import { TiltBookCard } from "@/components/TiltBookCard";
 import { AppleBookCover } from "@/components/AppleBookCover";
 import { CardContainer, AUDIO_BUTTON_CLASSES, ProgressDots, getRarityShadowClasses } from "@/components/CardContainer";
 import { CardEditorModal } from "@/components/CardEditorModal";
+import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
 import { CategoryTabs, getTabsForLanguage, type TabConfig } from "@/components/CategoryTabs";
 export { CategoryTabs, getTabsForLanguage, type TabConfig };
 import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, detectAndMarkSeparable } from "@/lib/utils/formatSeparableWord";
@@ -1177,14 +1178,7 @@ export interface BookMeta {
 }
 
 const useScrollLock = (lock: boolean) => {
-  useEffect(() => {
-    if (lock) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [lock]);
+  useLockBodyScroll(lock);
 };
 
 export interface Flashcard {
@@ -8518,6 +8512,7 @@ export const exportToMarkdown = (bookId?: string) => {
 };
 
 function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?: BookMeta | null }) {
+  useLockBodyScroll(true);
   const { decks, appLanguage } = useStore();
   const [isManualSyncing, setIsManualSyncing] = useState(false);
 
@@ -12434,14 +12429,7 @@ export default function App() {
     setActiveCategory(tabId);
   }, []);
 
-  useEffect(() => {
-    if (renameModal || deleteModal || bookModal || deleteBookModal) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [renameModal, deleteModal, bookModal, deleteBookModal]);
+  useLockBodyScroll(Boolean(renameModal || deleteModal || bookModal || deleteBookModal));
 
   useEffect(() => {
     checkAndResetDailyProgress();
