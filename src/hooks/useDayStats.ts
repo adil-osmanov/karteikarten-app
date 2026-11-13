@@ -54,11 +54,81 @@ export function computeStrictAccuracy(correct: number, mistakes: number): number
   return Math.max(0, Math.min(100, Math.round((c / totalAnswers) * 100)));
 }
 
+export const STATS_SYNC_EVENT = 'kraft:day-stats-updated';
+export const DAY_STATS_V2_KEY = 'kraft_daily_stats_v2';
+
 export interface KraftDailyStatEntry {
   cardsDone: number;
   correct: number;
   mistakes: number;
   focusMinutes?: number;
+}
+
+export interface DayStatsV2Entry {
+  date: string;
+  language: string;
+  cardsDone: number;
+  correctCount: number;
+  mistakesCount: number;
+  activeSeconds: number;
+  focusMinutes: number;
+}
+
+export function getDayStatsV2Map(): Record<string, DayStatsV2Entry> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(DAY_STATS_V2_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function syncDayStatsV2Entry(
+  dateStr: string,
+  lang: string,
+  updates: Partial<DayStatsV2Entry>
+): Record<string, DayStatsV2Entry> {
+  if (typeof window === 'undefined' || !dateStr) return {};
+  try {
+    const normLang = normalizeLanguage(lang);
+    const key = `${normLang}:${dateStr}`;
+    const map = getDayStatsV2Map();
+    const prev = map[key] || {
+      date: dateStr,
+      language: normLang,
+      cardsDone: 0,
+      correctCount: 0,
+      mistakesCount: 0,
+      activeSeconds: 0,
+      focusMinutes: 0,
+    };
+    const nextCardsDone = typeof updates.cardsDone === 'number'
+      ? Math.max(prev.cardsDone || 0, updates.cardsDone)
+      : (prev.cardsDone || 0);
+    const nextActiveSeconds = typeof updates.activeSeconds === 'number'
+      ? Math.max(prev.activeSeconds || 0, updates.activeSeconds)
+      : (prev.activeSeconds || 0);
+    const nextFocusMinutes = typeof updates.focusMinutes === 'number'
+      ? Math.max(prev.focusMinutes || 0, updates.focusMinutes)
+      : Math.max(prev.focusMinutes || 0, Math.floor(nextActiveSeconds / 60));
+
+    map[key] = {
+      date: dateStr,
+      language: normLang,
+      cardsDone: Math.max(0, nextCardsDone),
+      correctCount: Math.max(prev.correctCount || 0, typeof updates.correctCount === 'number' ? updates.correctCount : 0, nextCardsDone),
+      mistakesCount: Math.max(0, typeof updates.mistakesCount === 'number' ? updates.mistakesCount : (prev.mistakesCount || 0)),
+      activeSeconds: Math.max(0, nextActiveSeconds),
+      focusMinutes: Math.max(0, nextFocusMinutes),
+    };
+    safeSetStorage(DAY_STATS_V2_KEY, JSON.stringify(map));
+    return map;
+  } catch {
+    return {};
+  }
 }
 
 export function getKraftDailyStatsMap(): Record<string, KraftDailyStatEntry> {
@@ -105,7 +175,7 @@ export function syncKraftDailyStatEntry(
           ? { focusMinutes: prev.focusMinutes }
           : {}),
     };
-    localStorage.setItem('kraft_daily_stats', JSON.stringify(map));
+    safeSetStorage('kraft_daily_stats', JSON.stringify(map));
     return map;
   } catch {
     return {};
@@ -828,6 +898,34 @@ export function getTodayCompletedCardsCount(lang: string = 'DE'): number {
   }
 }
 
+export function getCanonicalTodayCardsDone(
+  lang: string = 'DE',
+  stats?: Partial<DailyStats> | null,
+  langStats?: { learnedToday?: number } | null
+): number {
+  const normLang = normalizeLanguage(lang);
+  const todayKey = getTodayKey();
+  const baseCount = getTodayCompletedCardsCount(normLang);
+  const statsCount = typeof stats?.cardsDone === 'number' ? stats.cardsDone : 0;
+  const langStatsCount = typeof langStats?.learnedToday === 'number' ? langStats.learnedToday : 0;
+  if (typeof window === 'undefined') {
+    return Math.max(0, baseCount, statsCount, langStatsCount);
+  }
+  const kraftCount = getKraftDailyStatsMap()[todayKey]?.cardsDone || 0;
+  const v2Count = getDayStatsV2Map()[`${normLang}:${todayKey}`]?.cardsDone || 0;
+  let scopedCount = 0;
+  try {
+    const scopedRaw = localStorage.getItem(`daily_stats_${normLang.toLowerCase()}_${todayKey}`);
+    if (scopedRaw) {
+      const parsed = JSON.parse(scopedRaw);
+      if (typeof parsed?.learnedToday === 'number' && parsed.learnedToday < 500) {
+        scopedCount = parsed.learnedToday;
+      }
+    }
+  } catch {}
+  return Math.max(0, baseCount, statsCount, langStatsCount, kraftCount, v2Count, scopedCount);
+}
+
 // --- HISTORICAL MULTI-DAY TRACKING & STORAGE ---
 export function getDayRecord(lang: string = 'DE', dateStr: string): DayRecord {
   const normLang = normalizeLanguage(lang);
@@ -1180,9 +1278,28 @@ function loadInitialStatsForLang(lang: string = 'DE'): DailyStats {
     localStorage.removeItem('app_daily_stats');
   } catch (e) {}
 
-  // Сегодняшний счетчик берется строго из getTodayCompletedCardsCount (ключ kraft_cards_learned_{today})
-  const finalCardsDone = realTodayCards;
-  const finalCorrectCount = Math.max(realTodayCards, maxCorrectCount);
+  // Объединяем счётчики сегодняшнего дня из всех локальных источников (kraft_cards_learned, app_daily_stats, kraft_daily_stats_v2)
+  const v2Entry = getDayStatsV2Map()[`${normLang}:${todayKey}`];
+  const kraftEntry = getKraftDailyStatsMap()[todayKey];
+  if (v2Entry && typeof v2Entry.cardsDone === 'number' && v2Entry.cardsDone < 500) {
+    maxCardsDone = Math.max(maxCardsDone, v2Entry.cardsDone);
+    maxCorrectCount = Math.max(maxCorrectCount, v2Entry.correctCount || v2Entry.cardsDone);
+    maxActiveSeconds = Math.max(maxActiveSeconds, v2Entry.activeSeconds || 0);
+    maxMistakesToday = Math.max(maxMistakesToday, v2Entry.mistakesCount || 0);
+    foundTodaySaved = true;
+  }
+  if (kraftEntry && typeof kraftEntry.cardsDone === 'number' && kraftEntry.cardsDone < 500) {
+    maxCardsDone = Math.max(maxCardsDone, kraftEntry.cardsDone);
+    maxCorrectCount = Math.max(maxCorrectCount, kraftEntry.correct || kraftEntry.cardsDone);
+    maxMistakesToday = Math.max(maxMistakesToday, kraftEntry.mistakes || 0);
+    foundTodaySaved = true;
+  }
+
+  const finalCardsDone = Math.max(realTodayCards, maxCardsDone);
+  const finalCorrectCount = Math.max(finalCardsDone, maxCorrectCount);
+  if (finalCardsDone > realTodayCards) {
+    safeSetStorage(`kraft_cards_learned_${todayKey}`, String(finalCardsDone));
+  }
 
   // Разовая нормализация сегодняшнего накрученного времени (52 мин за 22 карточки -> ~5 мин)
   let finalActiveSeconds = foundTodaySaved ? normalizeFocusSeconds(maxActiveSeconds, finalCardsDone, true) : 0;
@@ -1396,24 +1513,86 @@ function getOrCreateStats(lang: string = 'DE'): DailyStats {
     safeSetStorage(`app_daily_stats_${normLang}`, JSON.stringify(statsByLang[normLang]));
     safeSetStorage(`app_daily_stats_${normLang.toLowerCase()}`, JSON.stringify(statsByLang[normLang]));
     setStatsInIDB(normLang, statsByLang[normLang]);
+  } else if (typeof window !== 'undefined') {
+    // Reconcile against canonical today sources if another module updated localStorage synchronously
+    const liveToday = getTodayCompletedCardsCount(normLang);
+    const v2 = getDayStatsV2Map()[`${normLang}:${today}`];
+    const kraftToday = getKraftDailyStatsMap()[today];
+    const highestCards = Math.max(
+      current.cardsDone || 0,
+      liveToday,
+      v2 && typeof v2.cardsDone === 'number' && v2.cardsDone < 500 ? v2.cardsDone : 0,
+      kraftToday && typeof kraftToday.cardsDone === 'number' && kraftToday.cardsDone < 500 ? kraftToday.cardsDone : 0
+    );
+    const highestSeconds = Math.max(
+      current.activeSeconds || 0,
+      v2 && typeof v2.activeSeconds === 'number' ? v2.activeSeconds : 0
+    );
+    if (highestCards > (current.cardsDone || 0) || highestSeconds > (current.activeSeconds || 0)) {
+      statsByLang[normLang] = {
+        ...current,
+        cardsDone: highestCards,
+        correctCount: Math.max(current.correctCount || 0, highestCards, v2?.correctCount || 0),
+        activeSeconds: highestSeconds,
+      };
+    }
   }
   return statsByLang[normLang];
 }
 
 function notifyLang(lang: string, _options?: { skipCloudSync?: boolean }) {
   const normLang = normalizeLanguage(lang);
-  const current = getOrCreateStats(normLang);
+  const current = { ...getOrCreateStats(normLang) };
+  statsByLang[normLang] = current;
   if (typeof window !== 'undefined') {
+    const today = current.date || getTodayKey();
     const serialized = JSON.stringify(current);
     safeSetStorage(`app_daily_stats_${normLang}`, serialized);
     safeSetStorage(`app_daily_stats_${normLang.toLowerCase()}`, serialized);
+    if (current.cardsDone > getTodayCompletedCardsCount(normLang)) {
+      safeSetStorage(`kraft_cards_learned_${today}`, String(current.cardsDone));
+    }
+    syncDayStatsV2Entry(today, normLang, {
+      cardsDone: current.cardsDone || 0,
+      correctCount: current.correctCount || current.cardsDone || 0,
+      mistakesCount: current.mistakesCountToday || 0,
+      activeSeconds: current.activeSeconds || 0,
+      focusMinutes: Math.floor((current.activeSeconds || 0) / 60),
+    });
     setStatsInIDB(normLang, current);
-    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
+    window.dispatchEvent(new CustomEvent(STATS_SYNC_EVENT, { detail: { language: normLang, stats: current } }));
+    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang, count: current.cardsDone } }));
   }
   // No Supabase calls in notifyLang — purely local notification
   if (listenersByLang[normLang]) {
-    listenersByLang[normLang].forEach(fn => fn(current));
+    listenersByLang[normLang].forEach(fn => fn({ ...current }));
   }
+}
+
+export function emitDayStatsSync(lang: string = 'DE', overrides?: Partial<DailyStats>): DailyStats {
+  const normLang = normalizeLanguage(lang);
+  const current = getOrCreateStats(normLang);
+  const today = getTodayKey();
+  const nextCardsDone = Math.max(
+    current.cardsDone || 0,
+    typeof overrides?.cardsDone === 'number' ? overrides.cardsDone : 0,
+    getTodayCompletedCardsCount(normLang)
+  );
+  const nextStats: DailyStats = {
+    ...current,
+    date: today,
+    cardsDone: nextCardsDone,
+    correctCount: Math.max(current.correctCount || 0, typeof overrides?.correctCount === 'number' ? overrides.correctCount : 0, nextCardsDone),
+    activeSeconds: Math.max(current.activeSeconds || 0, typeof overrides?.activeSeconds === 'number' ? overrides.activeSeconds : 0),
+    mistakesCountToday: typeof overrides?.mistakesCountToday === 'number'
+      ? Math.max(current.mistakesCountToday || 0, overrides.mistakesCountToday)
+      : (current.mistakesCountToday || 0),
+    ...(typeof overrides?.cards_reviewed_today === 'number' ? { cards_reviewed_today: overrides.cards_reviewed_today } : {}),
+    ...(typeof overrides?.words_learned_today === 'number' ? { words_learned_today: overrides.words_learned_today } : {}),
+  };
+  statsByLang[normLang] = nextStats;
+  notifyLang(normLang, { skipCloudSync: true });
+  return nextStats;
 }
 
 function initGlobalTimer() {
@@ -1610,22 +1789,91 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       listenersByLang[lang] = new Set();
     }
 
-    const listener = (newStats: DailyStats) => updateLocalStatsIfChanged(newStats);
+    const listener = (newStats: DailyStats) => updateLocalStatsIfChanged({ ...newStats });
     listenersByLang[lang].add(listener);
 
     const handleCustomUpdate = (e: any) => {
       const target = normalizeLanguage(e?.detail?.language);
       if (!target || target === lang) {
-        updateLocalStatsIfChanged(getOrCreateStats(lang));
+        updateLocalStatsIfChanged({ ...getOrCreateStats(lang) });
       }
     };
+    const handleStorageUpdate = (e: StorageEvent) => {
+      if (
+        !e.key ||
+        e.key === DAY_STATS_V2_KEY ||
+        e.key === 'kraft_daily_stats' ||
+        e.key.startsWith('kraft_cards_learned_') ||
+        e.key.startsWith('app_daily_stats_') ||
+        e.key.startsWith('daily_stats_')
+      ) {
+        delete statsByLang[lang];
+        updateLocalStatsIfChanged({ ...getOrCreateStats(lang) });
+      }
+    };
+    window.addEventListener(STATS_SYNC_EVENT, handleCustomUpdate);
     window.addEventListener('stats-update', handleCustomUpdate);
+    window.addEventListener('storage', handleStorageUpdate);
+
+    // Live 60s focus ticker while actively studying (0 KB Supabase egress; updates Im Fokus without F5)
+    let focusInterval: ReturnType<typeof setInterval> | null = null;
+    if (isStudying) {
+      focusInterval = setInterval(() => {
+        if (typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible')) return;
+        const idleMs = Date.now() - lastActivityTime;
+        if (idleMs > 90 * 1000) return;
+
+        const current = getOrCreateStats(lang);
+        const cardsDone = current.cardsDone || getTodayCompletedCardsCount(lang);
+        const timer = cardTimerByLang[lang];
+        if (!timer || timer.isPaused || timer.cardStartTime <= 0) return;
+
+        const elapsedSecs = Math.round((timer.accumulatedMs + Math.max(0, Date.now() - timer.cardStartTime)) / 1000);
+        const boundedIncrement = Math.min(Math.max(0, elapsedSecs), MAX_CARD_SECONDS);
+        if (boundedIncrement <= 0) return;
+
+        timer.accumulatedMs = 0;
+        timer.cardStartTime = Date.now();
+
+        const nextSeconds = normalizeFocusSeconds(
+          (current.activeSeconds || 0) + boundedIncrement,
+          Math.max(1, cardsDone),
+          true
+        );
+        if (nextSeconds <= (current.activeSeconds || 0)) return;
+
+        const today = getTodayKey();
+        const nextStats: DailyStats = {
+          ...current,
+          date: today,
+          activeSeconds: nextSeconds,
+        };
+        statsByLang[lang] = nextStats;
+        const nextFocusMins = Math.floor(nextSeconds / 60);
+        syncKraftDailyStatEntry(today, {
+          cardsDone,
+          correct: current.correctCount || cardsDone,
+          mistakes: current.mistakesCountToday || 0,
+          focusMinutes: nextFocusMins,
+        });
+        saveDayRecord(lang, {
+          date: today,
+          cardsReviewed: cardsDone,
+          focusMinutes: nextFocusMins,
+          mistakesCount: current.mistakesCountToday || 0,
+        });
+        notifyLang(lang, { skipCloudSync: true });
+      }, 30000);
+    }
 
     return () => {
+      if (focusInterval) clearInterval(focusInterval);
       if (listenersByLang[lang]) {
         listenersByLang[lang].delete(listener);
       }
+      window.removeEventListener(STATS_SYNC_EVENT, handleCustomUpdate);
       window.removeEventListener('stats-update', handleCustomUpdate);
+      window.removeEventListener('storage', handleStorageUpdate);
       if (isStudying) {
         activeStudyCounts[lang] = Math.max(0, (activeStudyCounts[lang] || 0) - 1);
         if (typeof window !== 'undefined') {
@@ -1766,6 +2014,9 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       words_learned_today: newWordsLearnedToday
     };
 
+    // Persist in-memory snapshot BEFORE saveDayRecord so saveDayRecord reads fresh activeSeconds
+    statsByLang[targetLang] = nextStats;
+
     // Keep today's entry up-to-date in multi-day history & kraft_daily_stats
     const currentAcc = computeStrictAccuracy(newCorrectCount, newMistakesToday);
     const currentRecord = getDayRecord(targetLang, today);
@@ -1788,7 +2039,6 @@ export function useDayStats(options?: { isStudying?: boolean; language?: string 
       cards_reviewed_today: newCardsReviewedToday
     });
 
-    statsByLang[targetLang] = nextStats;
     notifyLang(targetLang);
     // Batch both daily stats and mistake mutations with 30s debounce + flush on session exit/pagehide (0 KB egress per card answer)
     syncStatsToSupabase(targetLang, nextStats, false, mistakeMutation).catch(() => {});

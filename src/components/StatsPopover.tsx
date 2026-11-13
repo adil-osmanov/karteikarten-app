@@ -2,6 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { X, CheckCircle2, RotateCcw, Clock, Target } from 'lucide-react';
 import { 
   getTodayCompletedCardsCount, 
+  getCanonicalTodayCardsDone,
+  STATS_SYNC_EVENT,
   normalizeLanguage, 
   getCurrentWeekDailyStats, 
   getTodayKey,
@@ -148,12 +150,24 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
 
   const todayKey = getTodayKey();
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
+  const [syncTick, setSyncTick] = useState(0);
 
   // Sync selectedDate and pull fresh persistent mistakes & stats on modal open
   useEffect(() => {
     if (isOpen) {
       setSelectedDate(getTodayKey());
       syncPersistentMistakesFromCloud(currentLang).catch(() => {});
+      const bump = () => setSyncTick((t) => t + 1);
+      window.addEventListener(STATS_SYNC_EVENT, bump);
+      window.addEventListener('stats-update', bump);
+      window.addEventListener('storage-update', bump);
+      window.addEventListener('storage', bump);
+      return () => {
+        window.removeEventListener(STATS_SYNC_EVENT, bump);
+        window.removeEventListener('stats-update', bump);
+        window.removeEventListener('storage-update', bump);
+        window.removeEventListener('storage', bump);
+      };
     }
   }, [isOpen, currentLang]);
 
@@ -198,6 +212,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
   }, [
     isOpen,
     currentLang,
+    syncTick,
     stats?.cardsDone,
     stats?.correctCount,
     stats?.activeSeconds,
@@ -207,12 +222,8 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     langStats?.focusSeconds,
   ]);
 
-  // Weekly momentum totals (sum over the 7 days, using live count for today)
-  const todayLiveForWeek = Math.max(
-    getTodayCompletedCardsCount(currentLang),
-    stats?.cardsDone || 0,
-    typeof langStats?.learnedToday === 'number' ? langStats.learnedToday : 0
-  );
+  // Weekly momentum totals (sum over the 7 days, using canonical live count for today)
+  const todayLiveForWeek = getCanonicalTodayCardsDone(currentLang, stats, langStats);
 
   const { weekTotalCards, weekTotalHours } = useMemo(() => {
     const totalCards = historyDays.reduce((sum, d) => {
@@ -251,12 +262,7 @@ export function StatsPopover({ isOpen, onClose, stats, langStats, language = 'DE
     }
   })();
 
-  const todayLiveCards = Math.max(
-    getTodayCompletedCardsCount(currentLang),
-    stats?.cardsDone || 0,
-    typeof currentLangStats?.learnedToday === 'number' ? currentLangStats.learnedToday : 0,
-    kraftDailyMap[todayKey]?.cardsDone || 0
-  );
+  const todayLiveCards = getCanonicalTodayCardsDone(currentLang, stats, currentLangStats);
 
   const rawTodaySeconds = Math.max(
     typeof currentLangStats?.focusSeconds === 'number' ? currentLangStats.focusSeconds : 0,

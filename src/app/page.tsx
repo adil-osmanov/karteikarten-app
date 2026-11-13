@@ -28,7 +28,7 @@ import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardI
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
-import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry, syncPersistentMistakesFromCloud } from "@/hooks/useDayStats";
+import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry, syncPersistentMistakesFromCloud, STATS_SYNC_EVENT, emitDayStatsSync, getCanonicalTodayCardsDone } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
 import { StoryReaderModal } from "@/components/StoryReaderModal";
 import { TiltBookCard } from "@/components/TiltBookCard";
@@ -567,9 +567,7 @@ export function updateLanguageDailyStats(
   const newCount = currentCount + inc;
 
   if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(`kraft_cards_learned_${today}`, String(newCount));
-    } catch {}
+    safeSetStorage(`kraft_cards_learned_${today}`, String(newCount));
   }
   current.learnedToday = newCount;
 
@@ -613,11 +611,19 @@ export function updateLanguageDailyStats(
     mistakesCount: current.mistakesCount || 0,
   });
 
+  // Sync unified useDayStats cache & broadcast STATS_SYNC_EVENT synchronously (0 KB egress)
+  emitDayStatsSync(upperLang, {
+    cardsDone: current.learnedToday,
+    correctCount: current.correctCount,
+    mistakesCountToday: current.mistakesCount || 0,
+    cards_reviewed_today: current.cards_reviewed_today,
+    words_learned_today: current.words_learned_today,
+  });
+
   // Sync to Supabase multi-device (iPhone, Mac, Chrome, Safari)
   syncDailyStatsToCloud(cleanLang, current.learnedToday, current);
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cleanLang, count: current.learnedToday } }));
     window.dispatchEvent(new Event('storage-update'));
   }
 
@@ -8646,11 +8652,13 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
       updateLangStatsIfChanged(getLanguageDailyStats(effectiveLang));
     };
 
+    window.addEventListener(STATS_SYNC_EVENT, handleStorageUpdate);
     window.addEventListener('stats-update', handleStorageUpdate);
     window.addEventListener('storage-update', handleStorageUpdate);
     window.addEventListener('storage', handleStorageUpdate);
 
     return () => {
+      window.removeEventListener(STATS_SYNC_EVENT, handleStorageUpdate);
       window.removeEventListener('stats-update', handleStorageUpdate);
       window.removeEventListener('storage-update', handleStorageUpdate);
       window.removeEventListener('storage', handleStorageUpdate);
@@ -8862,7 +8870,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
                 <path d="m3 17 9 5 9-5" />
               </svg>
               <span suppressHydrationWarning className="text-xs font-semibold tabular-nums tracking-tight font-sans">
-                {getTodayCompletedCardsCount(effectiveLang || appLanguage)} <span className="text-neutral-400 dark:text-neutral-500 font-normal">/ 200</span>
+                {getCanonicalTodayCardsDone(effectiveLang || appLanguage, stats, langStats)} <span className="text-neutral-400 dark:text-neutral-500 font-normal">/ 200</span>
               </span>
             </button>
 
