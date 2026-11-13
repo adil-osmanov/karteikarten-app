@@ -5,9 +5,9 @@ import { createPortal } from 'react-dom';
 import { X, Search, Layers } from 'lucide-react';
 import { useStore, type Flashcard } from '@/app/page';
 import {
-  getMasteredWordEntries,
+  useWortschatzMatrix,
+  isValidMasteredEntry,
   normalizeLanguageCode,
-  isFunctionalParticle,
   extractConciseTranslation,
   purgeJunkExportierenWord,
   type CEFRLevel,
@@ -45,6 +45,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   const decks = useStore((state) => state.decks);
 
   const currentLang: AppLang = normalizeLanguageCode(language);
+  const { masteredEntries } = useWortschatzMatrix(currentLang);
 
   // Синхронизация при смене начального фильтра или открытии
   useEffect(() => {
@@ -58,11 +59,15 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     }
   }, [isOpen, initialLevelFilter]);
 
-  // Подписка на обновление статистики и карточек
+  // Подписка на мгновенное обновление списка освоенных слов и статистики
   useEffect(() => {
     const handleStatsUpdate = () => setUpdateTick((t) => t + 1);
+    window.addEventListener('kraft:mastered-updated', handleStatsUpdate);
     window.addEventListener('stats-update', handleStatsUpdate);
-    return () => window.removeEventListener('stats-update', handleStatsUpdate);
+    return () => {
+      window.removeEventListener('kraft:mastered-updated', handleStatsUpdate);
+      window.removeEventListener('stats-update', handleStatsUpdate);
+    };
   }, []);
 
   // Закрытие по клавише Escape
@@ -116,30 +121,17 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return { cardsById: byId, cardsByLemma: byLemma, lemmaTranslationMap: lemmaMap };
   }, [decks, updateTick]);
 
-  // Получение сырого списка выученных слов из матрицы памяти
+  // Получение единого списка выученных слов напрямую из shared hook state
   const rawEntries = useMemo(() => {
     if (!isOpen) return [];
-    return getMasteredWordEntries(currentLang).filter(
-      (e) =>
-        !e.originalWord.toLowerCase().includes('exportieren') &&
-        !(e.translation && e.translation.toLowerCase().includes('деяние'))
+    return masteredEntries.filter((e) =>
+      isValidMasteredEntry(e.originalWord, normalizeMasteredLemma(e.originalWord), e.translation)
     );
-  }, [currentLang, isOpen, updateTick]);
+  }, [masteredEntries, isOpen]);
 
   // Обогащение записей краткими переводами, SRS-датами и объектами карточек
   const enrichedWords = useMemo(() => {
     return rawEntries
-      .filter((entry) => {
-        const w = (entry.originalWord || '').toLowerCase();
-        const tr = (entry.translation || '').toLowerCase();
-        return (
-          !w.includes('exportieren') &&
-          !tr.includes('деяние') &&
-          !isExcludedStandaloneLemma(normalizeMasteredLemma(entry.originalWord)) &&
-          !isFunctionalParticle(entry.originalWord) &&
-          !isFunctionalParticle(normalizeMasteredLemma(entry.originalWord))
-        );
-      })
       .map((entry) => {
         const lKey = normalizeMasteredLemma(entry.originalWord);
         const card = (entry.cardId && cardsById.get(entry.cardId)) || cardsByLemma.get(lKey) || null;
@@ -164,7 +156,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           translation = '';
         }
 
-        const level = (entry.level || card?.level || 'B1') as MatrixCEFRLevel;
+        const level = (entry.level || 'B1') as MatrixCEFRLevel;
         const nextReviewDate =
           card?.nextReviewDate ?? (card as any)?.next_review_date ?? entry.nextReviewDate ?? null;
 

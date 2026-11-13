@@ -24,7 +24,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
-import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud, flushPendingMasteredSnapshots } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud, flushPendingMasteredSnapshots } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeCanonicalLemma, normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
@@ -2378,7 +2378,7 @@ export async function syncCardsFromSupabase(
         window.dispatchEvent(new CustomEvent('stats-update'));
       }
       await useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
-      await autoBackfillMasteredWords(updatedDecks, currentBooks, useStore.getState().appLanguage);
+      await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, false);
     }
 
     // Неблокирующая отправка локальных SRS-опережений в облако (с учетом поддерживаемых колонок)
@@ -3794,7 +3794,6 @@ if (typeof window !== 'undefined') {
             localStorage.removeItem('cache_decks_v2');
             if (Array.isArray(state.decks) && state.decks.length > 0) {
               setIDBItem('app_decks', state.decks);
-              autoBackfillMasteredWords(state.decks, state.books, state.appLanguage).catch(() => {});
             }
           } catch (e) {}
         }, 400);
@@ -12335,10 +12334,20 @@ export default function App() {
   const [isPending, startTransition] = useTransition();
   const { syncError, setSyncError, decks, addDeck, deleteDeck, renameDeck, setDecks, isLoaded, appLanguage, setAppLanguage, books, setBooks, addBook, updateBook, deleteBook, deckOrder, setDeckOrder, bookOrder, setBookOrder, dueCardsCount: _storeDueCardsCount, refreshDueCardsCount } = useStore();
   const [isMounted, setIsMounted] = useState(false);
+  const [masteredSyncTick, setMasteredSyncTick] = useState(0);
+  useEffect(() => {
+    const bumpMastered = () => setMasteredSyncTick((t) => t + 1);
+    window.addEventListener('kraft:mastered-updated', bumpMastered);
+    window.addEventListener('stats-update', bumpMastered);
+    return () => {
+      window.removeEventListener('kraft:mastered-updated', bumpMastered);
+      window.removeEventListener('stats-update', bumpMastered);
+    };
+  }, []);
   const masteredCanonicalSet = useMemo(() => {
     const entries = getMasteredWordEntries(appLanguage);
     return buildMasteredCanonicalSet(entries, decks);
-  }, [appLanguage, decks]);
+  }, [appLanguage, decks, masteredSyncTick]);
   const [isLoadingBooks, setIsLoadingBooks] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     try {
@@ -12659,7 +12668,6 @@ export default function App() {
         if (idbDecks && idbDecks.length > 0 && idbCardCount > 0) {
           setDecks(idbDecks);
           hasLocalCardsCache = true;
-          autoBackfillMasteredWords(idbDecks, idbBooks || undefined, useStore.getState().appLanguage).catch(() => {});
         }
       } catch (e) {}
 
@@ -12979,8 +12987,7 @@ export default function App() {
           // Delta-Sync карточек при старте приложения (переиспользуем decksRes.data без повторного GET decks)
           await syncCardsFromSupabase(false, decksRes.data);
 
-          const syncedDecks = useStore.getState().decks;
-          await autoBackfillMasteredWords(syncedDecks, useStore.getState().books, useStore.getState().appLanguage);
+          await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, true);
           if (typeof window !== 'undefined') {
             localStorage.setItem('last_library_cloud_sync', String(Date.now()));
           }

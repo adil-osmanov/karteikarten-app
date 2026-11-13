@@ -349,7 +349,8 @@ const globalMatrixStatsByLang: Record<AppLang, CEFRMatrixStats> = {
 };
 
 const listeners = new Set<(lang: AppLang, stats: CEFRMatrixStats) => void>();
-export const MASTERED_SNAPSHOT_KEY = 'kraft_mastered_snapshot_v2';
+export const MASTERED_SNAPSHOT_KEY = 'kraft_mastered_snapshot_v3';
+const LEGACY_MASTERED_SNAPSHOT_KEY_V2 = 'kraft_mastered_snapshot_v2';
 
 export interface MasteredSnapshotPayload {
   total: number;
@@ -365,6 +366,61 @@ function getStorageKeys(lang: AppLang) {
     legacyCacheKeyV3: `cefr_mastered_cache_v3_${lang}`,
     legacyTimestampsKey: `cefr_mastered_timestamps_${lang}_v3`,
   };
+}
+
+/**
+ * Единый канонический фильтр валидности освоенного слова для всех слоёв
+ * (реконсиляция, матрица, пилюля в шапке и модалка выученных слов).
+ */
+export function isValidMasteredEntry(
+  originalWord: string,
+  canonicalKey?: string | null,
+  translation?: string | null
+): boolean {
+  const normKey = canonicalKey || normalizeCanonicalLemma(originalWord || '');
+  if (!normKey || normKey.length < 2) return false;
+  const lowerOrig = String(originalWord || '').toLowerCase();
+  const lowerNorm = normKey.toLowerCase();
+  const lowerTrans = String(translation || '').toLowerCase();
+  if (
+    lowerOrig.includes('exportieren') ||
+    lowerNorm.includes('exportieren') ||
+    lowerTrans.includes('деяние')
+  ) {
+    return false;
+  }
+  if (
+    isExcludedStandaloneLemma(normKey) ||
+    isFunctionalParticle(originalWord) ||
+    isFunctionalParticle(normKey)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export async function fetchAllRowsPaginated<T = any>(
+  queryBuilderFactory: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
+  pageSize: number = 1000
+): Promise<{ rows: T[]; error: any }> {
+  let from = 0;
+  const allRows: T[] = [];
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await queryBuilderFactory(from, to);
+    if (error) {
+      return { rows: allRows, error };
+    }
+    if (!Array.isArray(data) || data.length === 0) {
+      break;
+    }
+    allRows.push(...data);
+    if (data.length < pageSize) {
+      break;
+    }
+    from += pageSize;
+  }
+  return { rows: allRows, error: null };
 }
 
 function createEmptyLevelCounts(): Record<MatrixCEFRLevel, number> {
@@ -470,22 +526,23 @@ function calculateActiveLevel(counts: Record<MatrixCEFRLevel, number>): MatrixCE
   return evaluateVocabCefrLevel(counts).currentLevel;
 }
 
+function dispatchMasteredUpdatedEvent(lang: AppLang, source: string) {
+  if (typeof window === 'undefined') return;
+  const total = globalMatrixStatsByLang[lang]?.totalWords ?? uniqueMasteredWordsByLang[lang].size;
+  window.dispatchEvent(
+    new CustomEvent('kraft:mastered-updated', {
+      detail: { language: lang, total, source },
+    })
+  );
+  window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: lang, total } }));
+}
+
 function recomputeStatsFromMap(lang: AppLang): CEFRMatrixStats {
   const map = uniqueMasteredWordsByLang[lang];
 
-  // Очистка стоп-слов / грамматических частиц и мусорных записей
+  // Очистка стоп-слов / грамматических частиц и мусорных записей по единому правилу
   for (const [k, v] of Array.from(map.entries())) {
-    const isJunkExportieren =
-      k.toLowerCase().includes('exportieren') ||
-      v.originalWord.toLowerCase().includes('exportieren') ||
-      (v.translation && v.translation.toLowerCase().includes('деяние'));
-
-    if (
-      isExcludedStandaloneLemma(k) ||
-      isFunctionalParticle(k) ||
-      isFunctionalParticle(v.originalWord) ||
-      isJunkExportieren
-    ) {
+    if (!isValidMasteredEntry(v.originalWord, k, v.translation)) {
       map.delete(k);
     }
   }
@@ -530,7 +587,7 @@ function persistMatrixToStorage(lang: AppLang) {
     const stats = globalMatrixStatsByLang[lang];
     const nowTs = Date.now();
 
-    // 1. Сохраняем единый снимок в kraft_mastered_snapshot_v2
+    // Сохраняем единый актуальный снимок ТОЛЬКО в kraft_mastered_snapshot_v3 (для 0ms гидрации; перезаписывается ответом сервера)
     let snapshotAll: Record<string, MasteredSnapshotPayload> = {};
     try {
       const existingRaw = localStorage.getItem(MASTERED_SNAPSHOT_KEY);
@@ -549,15 +606,11 @@ function persistMatrixToStorage(lang: AppLang) {
     };
     localStorage.setItem(MASTERED_SNAPSHOT_KEY, JSON.stringify(snapshotAll));
 
-    // 2. Зеркалим в legacy-ключ wortschatz_matrix_v4_${lang} для совместимости
-    localStorage.setItem(
-      cacheKeyV4,
-      JSON.stringify({
-        stats,
-        entries: entriesObj,
-        updatedAt: nowTs,
-      })
-    );
+    // Очищаем устаревшие legacy-ключи старых версий (v2 / v4), чтобы не возникало рассинхрона
+    try {
+      localStorage.removeItem(LEGACY_MASTERED_SNAPSHOT_KEY_V2);
+      localStorage.removeItem(cacheKeyV4);
+    } catch {}
   } catch (e) {
     console.warn('[Wortschatz-Matrix] Storage persist warning:', e);
   }
@@ -654,8 +707,7 @@ const MASTERED_SNAPSHOT_DEBOUNCE_MS = 30 * 1000; // 30s batch debounce for MASTE
 
 export async function syncMasteredUserStatsSnapshot(
   lang: AppLang,
-  statsRowKey?: string,
-  options?: { allowRemoteRead?: boolean }
+  statsRowKey?: string
 ): Promise<void> {
   const rowKey = statsRowKey || `MASTERED_WORDS_${lang.toUpperCase()}`;
   const map = uniqueMasteredWordsByLang[lang];
@@ -664,49 +716,6 @@ export async function syncMasteredUserStatsSnapshot(
   if (!statsRowKey && masteredSnapshotTimerByLang[lang]) {
     clearTimeout(masteredSnapshotTimerByLang[lang]!);
     masteredSnapshotTimerByLang[lang] = null;
-  }
-
-  // Append-only safety: only fetch remote snapshot during explicit cloud sync, never during card answers
-  if (options?.allowRemoteRead && !hasAttemptedCloudSyncByLang[lang] && !statsRowKey) {
-    try {
-      const existingRemote = await safeFetchUserStats(rowKey);
-      const remoteLemmas: string[] = Array.isArray(existingRemote?.lemmas)
-        ? existingRemote.lemmas
-        : Array.isArray(existingRemote?.words)
-        ? existingRemote.words
-        : [];
-      const remoteLevels: Record<string, string> =
-        existingRemote?.lemmaLevels && typeof existingRemote.lemmaLevels === 'object'
-          ? existingRemote.lemmaLevels
-          : {};
-      const remoteDates: Record<string, string> =
-        existingRemote?.lemmaDates && typeof existingRemote.lemmaDates === 'object'
-          ? existingRemote.lemmaDates
-          : {};
-      let addedFromCloud = false;
-      for (const w of remoteLemmas) {
-        if (!w || typeof w !== 'string') continue;
-        const normKey = normalizeMasteredLemma(w);
-        if (!normKey || normKey.length < 2) continue;
-        if (isExcludedStandaloneLemma(normKey) || isFunctionalParticle(w) || isFunctionalParticle(normKey)) continue;
-        if (!map.has(normKey)) {
-          const dateStr = remoteDates[normKey] || remoteDates[w];
-          const ts = dateStr ? new Date(dateStr).getTime() : 0;
-          map.set(normKey, {
-            originalWord: w,
-            level: resolveMasteredLevel(normKey, null, remoteLevels[normKey] || remoteLevels[w], lang),
-            masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
-            first_mastered_at: dateStr,
-          });
-          addedFromCloud = true;
-        }
-      }
-      if (addedFromCloud) {
-        recomputeStatsFromMap(lang);
-        persistMatrixToStorage(lang);
-        notifyListeners(lang);
-      }
-    } catch {}
   }
 
   const counts = globalMatrixStatsByLang[lang]?.counts || createEmptyLevelCounts();
@@ -774,9 +783,8 @@ function hydrateEntriesIntoMap(
   const map = uniqueMasteredWordsByLang[lang];
   Object.entries(entriesObj).forEach(([key, val]: [string, any]) => {
     const raw = val?.originalWord || key || '';
-    const normKey = normalizeMasteredLemma(raw) || normalizeMasteredLemma(key);
-    if (!normKey || normKey.length < 2) return;
-    if (isExcludedStandaloneLemma(normKey) || isFunctionalParticle(raw) || isFunctionalParticle(normKey)) return;
+    const normKey = normalizeCanonicalLemma(raw) || normalizeCanonicalLemma(key);
+    if (!isValidMasteredEntry(raw, normKey, val?.translation)) return;
 
     const level = resolveMasteredLevel(normKey, null, val?.level, lang);
     const masteredAt = Number(val?.masteredAt || legacyTimestamps[normKey] || 0);
@@ -829,6 +837,12 @@ function initMatrixStore(lang: AppLang) {
   const { cacheKeyV4, legacyTimestampsKey } = getStorageKeys(lang);
 
   try {
+    // Удаляем устаревшие версии кэша (v2 / v4), чтобы устаревшие браузерные данные не просачивались в состояние
+    try {
+      localStorage.removeItem(LEGACY_MASTERED_SNAPSHOT_KEY_V2);
+      localStorage.removeItem(cacheKeyV4);
+    } catch {}
+
     const legacyTimestamps: Record<string, number> = {};
     try {
       const rawLegacyTs = localStorage.getItem(legacyTimestampsKey);
@@ -836,7 +850,7 @@ function initMatrixStore(lang: AppLang) {
         const parsedTs = JSON.parse(rawLegacyTs);
         if (parsedTs && typeof parsedTs === 'object') {
           Object.entries(parsedTs).forEach(([k, v]) => {
-            const normKey = normalizeMasteredLemma(k);
+            const normKey = normalizeCanonicalLemma(k);
             if (normKey && typeof v === 'number' && v > 0) {
               legacyTimestamps[normKey] = v;
             }
@@ -847,7 +861,7 @@ function initMatrixStore(lang: AppLang) {
 
     const map = uniqueMasteredWordsByLang[lang];
 
-    // 1. Мгновенная гидрация из единого снимка kraft_mastered_snapshot_v2 (без моргания "0 Wörter" на F5)
+    // Быстрая первоначальная гидрация ТОЛЬКО из kraft_mastered_snapshot_v3 (перезаписывается ответом сервера)
     try {
       const rawSnapshot = localStorage.getItem(MASTERED_SNAPSHOT_KEY);
       if (rawSnapshot) {
@@ -859,9 +873,8 @@ function initMatrixStore(lang: AppLang) {
             hydrateEntriesIntoMap(lang, snap.entries, legacyTimestamps);
           } else if (Array.isArray(snap.lemmas)) {
             snap.lemmas.forEach((rawLemma) => {
-              const normKey = normalizeMasteredLemma(rawLemma);
-              if (!normKey || normKey.length < 2) return;
-              if (isExcludedStandaloneLemma(normKey) || isFunctionalParticle(normKey)) return;
+              const normKey = normalizeCanonicalLemma(rawLemma);
+              if (!isValidMasteredEntry(rawLemma, normKey)) return;
               if (!map.has(normKey)) {
                 map.set(normKey, {
                   originalWord: normKey,
@@ -872,36 +885,19 @@ function initMatrixStore(lang: AppLang) {
             });
           }
           recomputeStatsFromMap(lang);
-          return;
         }
       }
     } catch {}
-
-    // 2. Fallback/миграция из legacy-кэша wortschatz_matrix_v4_${lang}
-    const rawV4 = localStorage.getItem(cacheKeyV4);
-    if (rawV4) {
-      const parsed = JSON.parse(rawV4);
-      if (parsed?.entries && typeof parsed.entries === 'object') {
-        map.clear();
-        hydrateEntriesIntoMap(lang, parsed.entries, legacyTimestamps);
-        recomputeStatsFromMap(lang);
-        persistMatrixToStorage(lang);
-      }
-    }
   } catch (e) {
     console.warn('[Wortschatz-Matrix] Hydration notice:', e);
   }
 }
 
-// Local-first persistent + in-memory cooldown guards to eliminate egress spikes
+// Защита от дублирующегося всплеска событий focus + visibilitychange (без многочасовых блокировок)
 let lastRepairTimestampByLang: Record<string, number> = {};
-const MATRIX_CLOUD_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes hard cooldown across F5/tab switches
 const REPAIR_TIMESTAMPS_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
-const FULL_RECONCILE_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours for full table reconciliation
-const LAST_MATRIX_SYNC_KEY_PREFIX = 'kraft_matrix_cloud_sync_at_';
-const LAST_FULL_RECONCILE_KEY_PREFIX = 'kraft_last_full_reconcile_at_';
+const SYNC_BURST_DEDUPE_MS = 400;
 const LAST_REPAIR_REMOTE_KEY_PREFIX = 'kraft_matrix_repair_remote_at_';
-const ARCHIVE_RECONCILE_VERSION_KEY_PREFIX = 'kraft_archive_reconcile_v1_';
 
 function getPersistedTimestamp(prefix: string, lang: AppLang): number {
   if (typeof window === 'undefined') return 0;
@@ -930,11 +926,422 @@ export interface SyncMasteredOptions {
   fullReconcile?: boolean;
 }
 
+function haveMasteredMapsChanged(
+  prevMap: Map<string, MasteredWordEntry>,
+  nextMap: Map<string, MasteredWordEntry>
+): boolean {
+  if (prevMap.size !== nextMap.size) return true;
+  for (const [k, v] of nextMap.entries()) {
+    const prev = prevMap.get(k);
+    if (
+      !prev ||
+      prev.level !== v.level ||
+      prev.masteredAt !== v.masteredAt ||
+      prev.translation !== v.translation ||
+      prev.originalWord !== v.originalWord
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
- * Строгая сверка и синхронизация выученных слов из Supabase, IndexedDB и user_stats:
- * учитываются ТОЛЬКО карточки в Архиве (isArchived === true), все леммы канонизируются
- * через normalizeCanonicalLemma, а устаревшие неархивированные / дублирующиеся записи
- * удаляются при стартап-реконсиляции.
+ * Авторитетная серверная синхронизация ("Server Wins Over Local Cache"):
+ * 1. Пагинированно (по 1000 строк) загружает books, decks и ВСЕ архивные cards (isArchived = true).
+ * 2. Канонизирует и дедуплицирует леммы через normalizeCanonicalLemma + isValidMasteredEntry.
+ * 3. Если есть authUserId — безопасно сверяет и очищает user_mastered_words (удал. лишние, upsert недостающих без .select()).
+ * 4. Атомарно перезаписывает память и kraft_mastered_snapshot_v3 (никогда не подтягивает устаревшие слова из localStorage/user_stats).
+ */
+export async function syncAuthoritativeMasteredWords(
+  client: any = supabase,
+  userIdParam?: string | null,
+  langParam: AppLang = 'de'
+): Promise<{ count: number; reconciled: boolean }> {
+  const lang = normalizeLanguageCode(langParam);
+  initMatrixStore(lang);
+
+  const existingMap = uniqueMasteredWordsByLang[lang];
+  const beforeCount = existingMap.size;
+
+  const authUserId =
+    userIdParam !== undefined ? userIdParam : await getMatrixAuthUserId().catch(() => null);
+
+  // Метаданные дат исключительно для сохранения раннего first_mastered_at у подтверждённых архивных слов
+  const timestampHintByKey = new Map<
+    string,
+    { level?: string | null; masteredAt: number; first_mastered_at?: string; bookId?: string; created_at?: string }
+  >();
+  existingMap.forEach((val, oldKey) => {
+    const normKey = normalizeCanonicalLemma(val?.originalWord || oldKey);
+    if (!normKey) return;
+    timestampHintByKey.set(normKey, {
+      level: val.level,
+      masteredAt: val.masteredAt || 0,
+      first_mastered_at: val.first_mastered_at,
+      bookId: val.bookId,
+      created_at: val.created_at,
+    });
+  });
+
+  // 1. Если есть authUserId, пагинированно читаем user_mastered_words (с .order('id'))
+  const remoteUmwRows: Array<{
+    id?: string;
+    lemma: string;
+    canonicalKey: string;
+    cefr_level?: string | null;
+    source_book_id?: string | null;
+    first_mastered_at?: string;
+  }> = [];
+  let umwFetchSucceeded = false;
+
+  if (authUserId) {
+    const { rows: umwData, error: umwErr } = await fetchAllRowsPaginated<any>(
+      (from, to) =>
+        client
+          .from('user_mastered_words')
+          .select('id, lemma, cefr_level, source_book_id, first_mastered_at')
+          .eq('user_id', authUserId)
+          .order('id', { ascending: true })
+          .range(from, to),
+      1000
+    );
+
+    if (!umwErr) {
+      umwFetchSucceeded = true;
+      for (const row of umwData) {
+        const rawLemma = String(row.lemma || '').trim();
+        const key = normalizeCanonicalLemma(rawLemma);
+        remoteUmwRows.push({
+          id: row.id,
+          lemma: rawLemma,
+          canonicalKey: key,
+          cefr_level: row.cefr_level,
+          source_book_id: row.source_book_id,
+          first_mastered_at: row.first_mastered_at,
+        });
+        if (!key || key.length < 2) continue;
+        const ts = row.first_mastered_at ? new Date(row.first_mastered_at).getTime() : 0;
+        const parsedTs = !isNaN(ts) && ts > 0 ? ts : 0;
+        const prev = timestampHintByKey.get(key);
+        if (!prev || (parsedTs > 0 && (prev.masteredAt === 0 || parsedTs < prev.masteredAt))) {
+          timestampHintByKey.set(key, {
+            level: row.cefr_level || prev?.level,
+            masteredAt: parsedTs || prev?.masteredAt || 0,
+            first_mastered_at: row.first_mastered_at || prev?.first_mastered_at,
+            bookId: row.source_book_id || prev?.bookId,
+            created_at: prev?.created_at,
+          });
+        }
+      }
+    }
+  }
+
+  // 2. Пагинированно читаем авторитетный источник истины: books, decks и cards (isArchived = true)
+  const [{ rows: bookRows, error: bookErr }, { rows: deckRows, error: deckErr }, { rows: allArchivedCards, error: cardsErr }] =
+    await Promise.all([
+      fetchAllRowsPaginated<any>(
+        (from, to) =>
+          client
+            .from('books')
+            .select('id, language, title, training_mode, category')
+            .order('id', { ascending: true })
+            .range(from, to),
+        1000
+      ),
+      fetchAllRowsPaginated<any>(
+        (from, to) =>
+          client
+            .from('decks')
+            .select('id, name, category, language, level, book_id')
+            .order('id', { ascending: true })
+            .range(from, to),
+        1000
+      ),
+      fetchAllRowsPaginated<any>(
+        (from, to) =>
+          client
+            .from('cards')
+            .select(
+              'id, deck_id, targetWord, translation, forms, baseWordInfo, masteryLevel, isArchived, nextReviewDate, interval, repetitions'
+            )
+            .eq('isArchived', true)
+            .order('id', { ascending: true })
+            .range(from, to),
+        1000
+      ),
+    ]);
+
+  if (bookErr || deckErr || cardsErr) {
+    console.warn('[Wortschatz-Matrix] Authoritative sync skipped due to fetch error:', {
+      bookErr: bookErr?.message,
+      deckErr: deckErr?.message,
+      cardsErr: cardsErr?.message,
+    });
+    return { count: existingMap.size, reconciled: false };
+  }
+
+  const cloudBookMap = new Map<string, any>();
+  for (const b of bookRows) {
+    if (b?.id) cloudBookMap.set(b.id, b);
+  }
+  const cloudDeckMap = new Map<string, any>();
+  for (const d of deckRows) {
+    if (d?.id) cloudDeckMap.set(d.id, d);
+  }
+
+  const nextMap = new Map<string, MasteredWordEntry>();
+  const mergeAuthoritativeEntry = (normKey: string, incoming: MasteredWordEntry) => {
+    const prev = nextMap.get(normKey);
+    if (!prev) {
+      nextMap.set(normKey, incoming);
+      return;
+    }
+    const earliestTs =
+      incoming.masteredAt > 0 && prev.masteredAt > 0
+        ? Math.min(incoming.masteredAt, prev.masteredAt)
+        : prev.masteredAt || incoming.masteredAt;
+
+    nextMap.set(normKey, {
+      ...prev,
+      originalWord: incoming.originalWord || prev.originalWord,
+      level: incoming.level || prev.level,
+      masteredAt: earliestTs,
+      first_mastered_at: prev.first_mastered_at || incoming.first_mastered_at,
+      created_at: prev.created_at || incoming.created_at,
+      bookId: incoming.bookId || prev.bookId,
+      translation: incoming.translation || prev.translation,
+      cardId: incoming.cardId || prev.cardId,
+      nextReviewDate: incoming.nextReviewDate ?? prev.nextReviewDate,
+    });
+  };
+
+  for (const c of allArchivedCards) {
+    if (!isCardStrictlyArchived(c)) continue;
+    const deckObj =
+      (c.deck_id && cloudDeckMap.get(c.deck_id)) ||
+      (Array.isArray(c.decks) ? c.decks[0] : c.decks);
+    const parentBook = deckObj?.book_id ? cloudBookMap.get(deckObj.book_id) : undefined;
+    const dLang = normalizeLanguageCode(deckObj?.language || parentBook?.language || 'de');
+    if (dLang !== lang) continue;
+    if (isContextOrGrammarDeck(deckObj, parentBook, c)) continue;
+
+    const rawWord = c.targetWord || c.target_word || '';
+    const normalizedKey = normalizeCanonicalLemma(rawWord);
+    const conciseTrans = extractConciseTranslation(c);
+    const cardTranslation = conciseTrans || c.translation;
+    if (!isValidMasteredEntry(rawWord, normalizedKey, cardTranslation)) continue;
+
+    const hint = timestampHintByKey.get(normalizedKey);
+    const priorTs = hint?.masteredAt || 0;
+    const masteredAt = extractCardMasteredAt(c, priorTs);
+    const firstMasteredAt =
+      hint?.first_mastered_at ||
+      c.first_mastered_at ||
+      (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
+
+    const deckLevel =
+      deckObj?.level ||
+      deckObj?.name ||
+      deckObj?.title ||
+      parentBook?.title ||
+      null;
+    const cardLevel = c.level || hint?.level || null;
+    const level = resolveMasteredLevel(normalizedKey, deckLevel, cardLevel, lang);
+    const cardNextReview = c.nextReviewDate ?? c.next_review_date;
+
+    mergeAuthoritativeEntry(normalizedKey, {
+      originalWord: rawWord,
+      level,
+      masteredAt,
+      first_mastered_at: firstMasteredAt,
+      created_at: hint?.created_at,
+      bookId: deckObj?.book_id || hint?.bookId,
+      translation: cardTranslation,
+      cardId: c.id,
+      nextReviewDate: cardNextReview,
+    });
+  }
+
+  // 3. Сверка таблицы user_mastered_words ТОЛЬКО если карточки загружены успешно (>= 1 строки) и есть authUserId
+  let prunedRemoteCount = 0;
+  let addedRemoteCount = 0;
+  if (authUserId && lang === 'de' && umwFetchSucceeded && allArchivedCards.length > 0) {
+    const keptCanonicalRows = new Set<string>();
+    const staleRowIds: string[] = [];
+    const staleNonCanonicalLemmas: string[] = [];
+
+    for (const row of remoteUmwRows) {
+      const isValidArchivedCanonical =
+        Boolean(row.canonicalKey) &&
+        row.lemma === row.canonicalKey &&
+        nextMap.has(row.canonicalKey) &&
+        !keptCanonicalRows.has(row.canonicalKey);
+
+      if (isValidArchivedCanonical) {
+        keptCanonicalRows.add(row.canonicalKey);
+      } else if (row.id) {
+        staleRowIds.push(row.id);
+      } else if (row.lemma) {
+        staleNonCanonicalLemmas.push(row.lemma);
+      }
+    }
+
+    const missingRows: Array<{
+      user_id: string;
+      lemma: string;
+      cefr_level: MatrixCEFRLevel;
+      source_book_id: string | null;
+      first_mastered_at: string;
+    }> = [];
+    nextMap.forEach((entry, lemma) => {
+      if (!keptCanonicalRows.has(lemma)) {
+        missingRows.push({
+          user_id: authUserId,
+          lemma,
+          cefr_level: entry.level,
+          source_book_id: entry.bookId || null,
+          first_mastered_at:
+            entry.first_mastered_at ||
+            (entry.masteredAt > 0 ? new Date(entry.masteredAt).toISOString() : new Date().toISOString()),
+        });
+      }
+    });
+
+    for (let i = 0; i < staleRowIds.length; i += 200) {
+      const chunk = staleRowIds.slice(i, i + 200);
+      const { error: delErr } = await client
+        .from('user_mastered_words')
+        .delete()
+        .eq('user_id', authUserId)
+        .in('id', chunk);
+      if (!delErr) prunedRemoteCount += chunk.length;
+    }
+    for (let i = 0; i < staleNonCanonicalLemmas.length; i += 100) {
+      const chunk = staleNonCanonicalLemmas.slice(i, i + 100);
+      const { error: delErr } = await client
+        .from('user_mastered_words')
+        .delete()
+        .eq('user_id', authUserId)
+        .in('lemma', chunk);
+      if (!delErr) prunedRemoteCount += chunk.length;
+    }
+    for (let i = 0; i < missingRows.length; i += 200) {
+      const chunk = missingRows.slice(i, i + 200);
+      const { error: upErr } = await client
+        .from('user_mastered_words')
+        .upsert(chunk, { onConflict: 'user_id,lemma', ignoreDuplicates: true });
+      if (!upErr) addedRemoteCount += chunk.length;
+    }
+  }
+
+  // 4. Атомарно заменяем локальное состояние и перезаписываем snapshot v3 (Server Wins)
+  const hasChanged = haveMasteredMapsChanged(existingMap, nextMap);
+  uniqueMasteredWordsByLang[lang] = nextMap;
+  hasAttemptedCloudSyncByLang[lang] = true;
+  const stats = recomputeStatsFromMap(lang);
+  persistMatrixToStorage(lang);
+
+  console.info(
+    `📊 [AuthoritativeSync] (${lang}) ArchivedCards=${allArchivedCards.length}, UniqueLemmas=${stats.totalWords} (before=${beforeCount}), umwRows=${remoteUmwRows.length}, pruned=${prunedRemoteCount}, added=${addedRemoteCount}`
+  );
+
+  if (hasChanged) {
+    notifyListeners(lang);
+    dispatchMasteredUpdatedEvent(lang, 'server-sync');
+    syncMasteredUserStatsSnapshot(lang).catch(() => {});
+  }
+
+  return { count: stats.totalWords, reconciled: true };
+}
+
+/**
+ * Лёгкий серверный reload при возврате на вкладку (visibilitychange -> visible):
+ * если пользователь авторизован и на старте уже выполнена полная сверка — делает один
+ * пагинированный запрос к user_mastered_words; в anon-режиме (без сессии Supabase Auth)
+ * пересинхронизирует авторитетный архив cards без 5-минутных блокировок.
+ */
+export async function reloadMasteredWordsLightweight(
+  langParam: AppLang = 'de',
+  client: any = supabase
+): Promise<{ count: number; updated: boolean }> {
+  const lang = normalizeLanguageCode(langParam);
+  initMatrixStore(lang);
+
+  if (!hasAttemptedCloudSyncByLang[lang]) {
+    const res = await syncAuthoritativeMasteredWords(client, undefined, lang);
+    return { count: res.count, updated: res.reconciled };
+  }
+
+  const authUserId = await getMatrixAuthUserId().catch(() => null);
+  if (!authUserId || lang !== 'de') {
+    const res = await syncAuthoritativeMasteredWords(client, authUserId, lang);
+    return { count: res.count, updated: res.reconciled };
+  }
+
+  const { rows: umwRows, error: umwErr } = await fetchAllRowsPaginated<any>(
+    (from, to) =>
+      client
+        .from('user_mastered_words')
+        .select('id, lemma, cefr_level, source_book_id, first_mastered_at')
+        .eq('user_id', authUserId)
+        .order('id', { ascending: true })
+        .range(from, to),
+    1000
+  );
+
+  if (umwErr) {
+    return { count: uniqueMasteredWordsByLang[lang].size, updated: false };
+  }
+
+  if (umwRows.length === 0) {
+    const res = await syncAuthoritativeMasteredWords(client, authUserId, lang);
+    return { count: res.count, updated: res.reconciled };
+  }
+
+  const existingMap = uniqueMasteredWordsByLang[lang];
+  const nextMap = new Map<string, MasteredWordEntry>();
+
+  for (const row of umwRows) {
+    const rawLemma = String(row.lemma || '').trim();
+    const normKey = normalizeCanonicalLemma(rawLemma);
+    if (!isValidMasteredEntry(rawLemma, normKey)) continue;
+
+    const prev = existingMap.get(normKey);
+    const ts = row.first_mastered_at ? new Date(row.first_mastered_at).getTime() : 0;
+    const parsedTs = !isNaN(ts) && ts > 0 ? ts : prev?.masteredAt || 0;
+
+    nextMap.set(normKey, {
+      originalWord: prev?.originalWord || rawLemma,
+      level: resolveMasteredLevel(normKey, null, row.cefr_level || prev?.level, lang),
+      masteredAt: parsedTs,
+      first_mastered_at: row.first_mastered_at || prev?.first_mastered_at,
+      created_at: prev?.created_at,
+      bookId: row.source_book_id || prev?.bookId,
+      translation: prev?.translation,
+      cardId: prev?.cardId,
+      nextReviewDate: prev?.nextReviewDate,
+      sentence: prev?.sentence,
+      sentenceTranslation: prev?.sentenceTranslation,
+    });
+  }
+
+  const hasChanged = haveMasteredMapsChanged(existingMap, nextMap);
+  uniqueMasteredWordsByLang[lang] = nextMap;
+  const stats = recomputeStatsFromMap(lang);
+  persistMatrixToStorage(lang);
+
+  if (hasChanged) {
+    notifyListeners(lang);
+    dispatchMasteredUpdatedEvent(lang, 'visibility-reload');
+  }
+
+  return { count: stats.totalWords, updated: hasChanged };
+}
+
+/**
+ * Обёртка синхронизации для старта, фокуса вкладки и принудительного обновления:
+ * без многочасовых блокировок, только защита от дублирующегося всплеска (< 1.5 сек).
  */
 export async function syncMasteredWordsFromCloud(
   lang: AppLang = 'de',
@@ -945,598 +1352,24 @@ export async function syncMasteredWordsFromCloud(
   if (inFlightSyncPromiseByLang[lang]) {
     return inFlightSyncPromiseByLang[lang]!;
   }
-  const now = Date.now();
-  const existingMapBefore = uniqueMasteredWordsByLang[lang];
-  const lastCloudSyncMs = Math.max(
-    lastCloudSyncByLang[lang] || 0,
-    getPersistedTimestamp(LAST_MATRIX_SYNC_KEY_PREFIX, lang)
-  );
-  const isManualFull = Boolean(options?.fullReconcile);
-  const isArchiveReconciled =
-    typeof window === 'undefined' ||
-    Boolean(localStorage.getItem(`${ARCHIVE_RECONCILE_VERSION_KEY_PREFIX}${lang}`));
 
-  if (!isManualFull && existingMapBefore.size > 0 && isArchiveReconciled) {
-    if (!force && (isAnyStudySessionActive() || now - lastCloudSyncMs < MATRIX_CLOUD_SYNC_COOLDOWN_MS)) {
-      return;
-    }
-    if (force && now - lastCloudSyncMs < 3000) {
+  const now = Date.now();
+  const lastSyncMs = lastCloudSyncByLang[lang] || 0;
+  if (!force && !options?.fullReconcile) {
+    if (hasAttemptedCloudSyncByLang[lang] && (isAnyStudySessionActive() || now - lastSyncMs < SYNC_BURST_DEDUPE_MS)) {
       return;
     }
   }
 
   isSyncingByLang[lang] = true;
   lastCloudSyncByLang[lang] = now;
-  setPersistedTimestamp(LAST_MATRIX_SYNC_KEY_PREFIX, lang, now);
-
-  const lastFullReconcileMs = getPersistedTimestamp(LAST_FULL_RECONCILE_KEY_PREFIX, lang);
-  const shouldRunFullReconcile =
-    isManualFull ||
-    !isArchiveReconciled ||
-    existingMapBefore.size === 0 ||
-    lastFullReconcileMs === 0 ||
-    now - lastFullReconcileMs >= FULL_RECONCILE_COOLDOWN_MS;
 
   const runSync = async () => {
     try {
-      const existingMap = uniqueMasteredWordsByLang[lang];
-      const beforeCount = existingMap.size;
-      const nextMap = new Map<string, MasteredWordEntry>();
-
-      // Исторический пул метаданных (для сохранения ранних first_mastered_at у реально архивных слов)
-      const historicalMetaByKey = new Map<string, MasteredWordEntry>();
-      const recordHistoricalMeta = (key: string, entry: MasteredWordEntry) => {
-        if (!key) return;
-        const prev = historicalMetaByKey.get(key);
-        if (!prev) {
-          historicalMetaByKey.set(key, entry);
-          return;
-        }
-        const earliestTs =
-          entry.masteredAt > 0 && prev.masteredAt > 0
-            ? Math.min(entry.masteredAt, prev.masteredAt)
-            : prev.masteredAt || entry.masteredAt;
-        historicalMetaByKey.set(key, {
-          ...prev,
-          originalWord: prev.originalWord || entry.originalWord,
-          level: prev.level || entry.level,
-          masteredAt: earliestTs,
-          first_mastered_at: prev.first_mastered_at || entry.first_mastered_at,
-          created_at: prev.created_at || entry.created_at,
-          bookId: prev.bookId || entry.bookId,
-          translation: prev.translation || entry.translation,
-          cardId: prev.cardId || entry.cardId,
-          nextReviewDate: prev.nextReviewDate ?? entry.nextReviewDate,
-          sentence: prev.sentence || entry.sentence,
-          sentenceTranslation: prev.sentenceTranslation || entry.sentenceTranslation,
-        });
-      };
-
-      existingMap.forEach((val, oldKey) => {
-        const normKey = normalizeCanonicalLemma(val?.originalWord || oldKey);
-        if (!normKey || normKey.length < 2) return;
-        recordHistoricalMeta(normKey, {
-          ...val,
-          level: resolveMasteredLevel(normKey, null, val.level, lang),
-        });
-      });
-
-      const mergeEntry = (
-        normKey: string,
-        incoming: MasteredWordEntry,
-        preferLevel: boolean = false
-      ) => {
-        if (!normKey || normKey.length < 2) return;
-        if (
-          isExcludedStandaloneLemma(normKey) ||
-          isFunctionalParticle(normKey) ||
-          isFunctionalParticle(incoming.originalWord)
-        ) {
-          return;
-        }
-        const prev = nextMap.get(normKey);
-        if (!prev) {
-          nextMap.set(normKey, incoming);
-          return;
-        }
-        const earliestTs =
-          incoming.masteredAt > 0 && prev.masteredAt > 0
-            ? Math.min(incoming.masteredAt, prev.masteredAt)
-            : prev.masteredAt || incoming.masteredAt;
-
-        nextMap.set(normKey, {
-          ...prev,
-          originalWord: incoming.originalWord || prev.originalWord,
-          level: preferLevel ? incoming.level : prev.level || incoming.level,
-          masteredAt: earliestTs,
-          first_mastered_at: prev.first_mastered_at || incoming.first_mastered_at,
-          created_at: prev.created_at || incoming.created_at,
-          bookId: incoming.bookId || prev.bookId,
-          translation: incoming.translation || prev.translation,
-          cardId: incoming.cardId || prev.cardId,
-          nextReviewDate: incoming.nextReviewDate ?? prev.nextReviewDate,
-          sentence: incoming.sentence || prev.sentence,
-          sentenceTranslation: incoming.sentenceTranslation || prev.sentenceTranslation,
-        });
-      };
-
-      // 1. Сканируем локальные карточки из IndexedDB: учитываем СТРОГО архивные (isArchived === true)
-      let localDecksCount = 0;
-      const localArchivedEntries: Array<{ key: string; entry: MasteredWordEntry }> = [];
-      try {
-        const [localDecks, localBooks] = await Promise.all([
-          getIDBItem<any[]>('app_decks'),
-          getIDBItem<any[]>('app_books'),
-        ]);
-        const localBookMap = new Map<string, any>();
-        if (Array.isArray(localBooks)) {
-          localBooks.forEach((b) => b?.id && localBookMap.set(b.id, b));
-        }
-        if (Array.isArray(localDecks)) {
-          localDecksCount = localDecks.length;
-          for (const deck of localDecks) {
-            if (!deck || !Array.isArray(deck.cards) || deck.cards.length === 0) continue;
-            const dBookId = deck.bookId || deck.book_id;
-            const parentBook = dBookId ? localBookMap.get(dBookId) : undefined;
-            const dLang = normalizeLanguageCode(deck.language || parentBook?.language || 'de');
-            if (dLang !== lang) continue;
-            if (isContextOrGrammarDeck(deck, parentBook)) continue;
-
-            const deckLevel =
-              deck.level ||
-              (parentBook?.activeLevels?.length === 1 ? parentBook.activeLevels[0] : null) ||
-              deck.name ||
-              deck.title ||
-              parentBook?.title ||
-              null;
-
-            for (const c of deck.cards) {
-              if (isContextOrGrammarDeck(deck, parentBook, c)) continue;
-              if (!isCardStrictlyArchived(c)) continue;
-
-              const rawWord = c.targetWord || c.target_word || c.missingWord || c.infinitive || c.front || '';
-              const normKey = normalizeCanonicalLemma(rawWord);
-              if (!normKey || normKey.length < 2) continue;
-
-              const prev = existingMap.get(normKey) || historicalMetaByKey.get(normKey);
-              const masteredAt = extractCardMasteredAt(c, prev?.masteredAt || 0);
-              const firstMasteredAt =
-                c.first_mastered_at ||
-                prev?.first_mastered_at ||
-                (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
-
-              const built: MasteredWordEntry = {
-                originalWord: rawWord,
-                level: resolveMasteredLevel(normKey, deckLevel, c.level || c.cefrLevel || c.cefr_level, lang),
-                masteredAt,
-                first_mastered_at: firstMasteredAt,
-                created_at: c.created_at || c.createdAt || prev?.created_at,
-                bookId: dBookId || prev?.bookId,
-                translation: extractConciseTranslation(c) || c.translation || c.back || prev?.translation,
-                cardId: c.id || prev?.cardId,
-                nextReviewDate: c.nextReviewDate ?? c.next_review_date ?? prev?.nextReviewDate,
-                sentence: c.sentence || c.exampleSentence || c.example || prev?.sentence,
-                sentenceTranslation:
-                  c.sentenceTranslation || c.sentence_translation || prev?.sentenceTranslation,
-              };
-              localArchivedEntries.push({ key: normKey, entry: built });
-              mergeEntry(normKey, built, true);
-            }
-          }
-        }
-      } catch {}
-
-      // 2. Читаем user_stats снимок (для метаданных дат; в полной реконсиляции не служит источником истины)
-      let remoteStatsPayload: any = null;
-      try {
-        remoteStatsPayload = await safeFetchUserStats(`MASTERED_WORDS_${lang.toUpperCase()}`);
-        const remoteLemmas: string[] = Array.isArray(remoteStatsPayload?.lemmas)
-          ? remoteStatsPayload.lemmas
-          : Array.isArray(remoteStatsPayload?.words)
-          ? remoteStatsPayload.words
-          : [];
-        const remoteLevels: Record<string, string> =
-          remoteStatsPayload?.lemmaLevels && typeof remoteStatsPayload.lemmaLevels === 'object'
-            ? remoteStatsPayload.lemmaLevels
-            : {};
-        const remoteDates: Record<string, string> =
-          remoteStatsPayload?.lemmaDates && typeof remoteStatsPayload.lemmaDates === 'object'
-            ? remoteStatsPayload.lemmaDates
-            : {};
-
-        for (const w of remoteLemmas) {
-          if (!w || typeof w !== 'string') continue;
-          const normKey = normalizeCanonicalLemma(w);
-          if (!normKey || normKey.length < 2) continue;
-          const dateStr = remoteDates[normKey] || remoteDates[w];
-          const ts = dateStr ? new Date(dateStr).getTime() : 0;
-          recordHistoricalMeta(normKey, {
-            originalWord: w,
-            level: resolveMasteredLevel(normKey, null, remoteLevels[normKey] || remoteLevels[w], lang),
-            masteredAt: !isNaN(ts) && ts > 0 ? ts : 0,
-            first_mastered_at: dateStr,
-          });
-        }
-
-        if (Array.isArray(remoteStatsPayload?.entries)) {
-          for (const item of remoteStatsPayload.entries) {
-            if (!item?.originalWord) continue;
-            const normKey = normalizeCanonicalLemma(item.originalWord);
-            if (!normKey || normKey.length < 2) continue;
-            recordHistoricalMeta(normKey, {
-              ...item,
-              level: resolveMasteredLevel(normKey, null, item.level, lang),
-            });
-          }
-        }
-      } catch (e) {
-        console.warn('[Wortschatz-Matrix] safeFetchUserStats notice:', e);
-      }
-
-      let reconciledWithTruth = false;
-
-      // 3-5. Полная реконсиляция из Supabase (строго isArchived === true) и очистка user_mastered_words от неархивных/дублей
-      if (shouldRunFullReconcile) {
-        const remoteMetaByKey = new Map<
-          string,
-          { level?: string | null; masteredAt: number; first_mastered_at?: string; bookId?: string; rawLemma?: string }
-        >();
-        const remoteUmwRows: Array<{
-          id?: string;
-          lemma: string;
-          canonicalKey: string;
-          cefr_level?: string | null;
-          source_book_id?: string | null;
-          first_mastered_at?: string;
-        }> = [];
-        let authUserId: string | null = null;
-        let umwFetchSucceeded = false;
-
-        try {
-          authUserId = await getMatrixAuthUserId();
-          if (authUserId) {
-            let umwFrom = 0;
-            const UMW_PAGE_SIZE = 1000;
-            let umwHasMore = true;
-            let umwError: any = null;
-            while (umwHasMore) {
-              const { data, error: umwErr } = await supabase
-                .from('user_mastered_words')
-                .select('id, lemma, cefr_level, source_book_id, first_mastered_at')
-                .eq('user_id', authUserId)
-                .range(umwFrom, umwFrom + UMW_PAGE_SIZE - 1);
-
-              if (umwErr) {
-                umwError = umwErr;
-                umwHasMore = false;
-              } else if (!Array.isArray(data) || data.length === 0) {
-                umwHasMore = false;
-              } else {
-                for (const row of data) {
-                  const rawLemma = String(row.lemma || '').trim();
-                  const key = normalizeCanonicalLemma(rawLemma);
-                  remoteUmwRows.push({
-                    id: row.id,
-                    lemma: rawLemma,
-                    canonicalKey: key,
-                    cefr_level: row.cefr_level,
-                    source_book_id: row.source_book_id,
-                    first_mastered_at: row.first_mastered_at,
-                  });
-                  if (!key || key.length < 2) continue;
-                  const ts = row.first_mastered_at ? new Date(row.first_mastered_at).getTime() : 0;
-                  const parsedTs = !isNaN(ts) && ts > 0 ? ts : 0;
-                  recordHistoricalMeta(key, {
-                    originalWord: rawLemma || key,
-                    level: resolveMasteredLevel(key, null, row.cefr_level, lang),
-                    masteredAt: parsedTs,
-                    first_mastered_at: row.first_mastered_at,
-                    bookId: row.source_book_id || undefined,
-                  });
-                  const prev = remoteMetaByKey.get(key);
-                  if (!prev || (parsedTs > 0 && (prev.masteredAt === 0 || parsedTs < prev.masteredAt))) {
-                    remoteMetaByKey.set(key, {
-                      level: row.cefr_level,
-                      first_mastered_at: row.first_mastered_at,
-                      bookId: row.source_book_id || undefined,
-                      rawLemma,
-                      masteredAt: parsedTs,
-                    });
-                  }
-                }
-                umwFrom += UMW_PAGE_SIZE;
-                umwHasMore = data.length === UMW_PAGE_SIZE;
-              }
-            }
-            if (!umwError) {
-              umwFetchSucceeded = true;
-            }
-          }
-        } catch {}
-
-        // 4. Загружаем СТРОГО архивные карточки (isArchived = true) и книги из Supabase с пагинацией
-        const cloudBookMap = new Map<string, any>();
-        let booksFetchOk = false;
-        try {
-          const { data: bookRows, error: bookErr } = await supabase
-            .from('books')
-            .select('id, language, title, training_mode, category');
-          if (!bookErr && Array.isArray(bookRows)) {
-            booksFetchOk = true;
-            bookRows.forEach((b: any) => b?.id && cloudBookMap.set(b.id, b));
-          }
-        } catch {}
-
-        let allArchivedCards: any[] = [];
-        let from = 0;
-        const PAGE_SIZE = 1000;
-        let hasMore = true;
-        let cardsFetchError: any = null;
-
-        while (hasMore) {
-          const { data: cardRows, error: cardErr } = await supabase
-            .from('cards')
-            .select(
-              'id, targetWord, sentence, translation, forms, baseWordInfo, masteryLevel, isArchived, nextReviewDate, interval, repetitions, decks!inner(id, name, category, language, level, book_id)'
-            )
-            .eq('isArchived', true)
-            .range(from, from + PAGE_SIZE - 1);
-
-          if (cardErr) {
-            cardsFetchError = cardErr;
-            hasMore = false;
-          } else if (!cardRows || cardRows.length === 0) {
-            hasMore = false;
-          } else {
-            allArchivedCards = allArchivedCards.concat(cardRows);
-            from += PAGE_SIZE;
-            hasMore = cardRows.length === PAGE_SIZE;
-          }
-        }
-
-        const cloudCardsSucceeded =
-          !cardsFetchError &&
-          booksFetchOk &&
-          (allArchivedCards.length > 0 || localArchivedEntries.length === 0 || Boolean(authUserId));
-
-        if (cloudCardsSucceeded) {
-          // Сборка nextMap СТРОГО с нуля из архивных карточек (Supabase + локальные несинхронизированные архивные)
-          nextMap.clear();
-          localArchivedEntries.forEach(({ key, entry }) => {
-            const hist = historicalMetaByKey.get(key);
-            const remoteMeta = remoteMetaByKey.get(key);
-            const mergedTs =
-              remoteMeta?.masteredAt ||
-              entry.masteredAt ||
-              hist?.masteredAt ||
-              0;
-            mergeEntry(
-              key,
-              {
-                ...entry,
-                masteredAt: mergedTs,
-                first_mastered_at:
-                  remoteMeta?.first_mastered_at ||
-                  entry.first_mastered_at ||
-                  hist?.first_mastered_at ||
-                  (mergedTs > 0 ? new Date(mergedTs).toISOString() : undefined),
-              },
-              true
-            );
-          });
-
-          for (const c of allArchivedCards) {
-            if (!isCardStrictlyArchived(c)) continue;
-            const deckObj = Array.isArray(c.decks) ? c.decks[0] : c.decks;
-            const parentBook = deckObj?.book_id ? cloudBookMap.get(deckObj.book_id) : undefined;
-            const dLang = normalizeLanguageCode(deckObj?.language || parentBook?.language || 'de');
-            if (dLang !== lang) continue;
-            if (isContextOrGrammarDeck(deckObj, parentBook, c)) continue;
-
-            const rawWord = c.targetWord || '';
-            const normalizedKey = normalizeCanonicalLemma(rawWord);
-            if (!normalizedKey || normalizedKey.length < 2) continue;
-            if (
-              isExcludedStandaloneLemma(normalizedKey) ||
-              isFunctionalParticle(rawWord) ||
-              isFunctionalParticle(normalizedKey)
-            ) {
-              continue;
-            }
-
-            const prevEntry = historicalMetaByKey.get(normalizedKey);
-            const remoteMeta = remoteMetaByKey.get(normalizedKey);
-            const priorTs = remoteMeta?.masteredAt || prevEntry?.masteredAt || 0;
-            const masteredAt = extractCardMasteredAt(c, priorTs);
-            const firstMasteredAt =
-              remoteMeta?.first_mastered_at ||
-              c.first_mastered_at ||
-              prevEntry?.first_mastered_at ||
-              (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
-
-            const deckLevel =
-              deckObj?.level ||
-              deckObj?.name ||
-              deckObj?.title ||
-              parentBook?.title ||
-              null;
-            const cardLevel = c.level || remoteMeta?.level || null;
-            const level = resolveMasteredLevel(normalizedKey, deckLevel, cardLevel, lang);
-
-            const conciseTrans = extractConciseTranslation(c);
-            const cardTranslation = conciseTrans || c.translation || prevEntry?.translation;
-            const cardNextReview = c.nextReviewDate ?? c.next_review_date ?? prevEntry?.nextReviewDate;
-            const cardSentence = c.sentence || prevEntry?.sentence;
-            const cardSentenceTrans =
-              c.sentenceTranslation || c.sentence_translation || prevEntry?.sentenceTranslation;
-
-            mergeEntry(
-              normalizedKey,
-              {
-                originalWord: rawWord,
-                level,
-                masteredAt,
-                first_mastered_at: firstMasteredAt,
-                created_at: remoteMeta?.first_mastered_at ? undefined : prevEntry?.created_at,
-                bookId: deckObj?.book_id || prevEntry?.bookId,
-                translation: cardTranslation,
-                cardId: c.id || prevEntry?.cardId,
-                nextReviewDate: cardNextReview,
-                sentence: cardSentence,
-                sentenceTranslation: cardSentenceTrans,
-              },
-              true
-            );
-          }
-
-          reconciledWithTruth = true;
-
-          // 5. Сверяем и очищаем таблицу user_mastered_words: удаляем неархивные/дубликаты, добавляем недостающие канонические леммы
-          let prunedRemoteCount = 0;
-          let addedRemoteCount = 0;
-          if (authUserId && lang === 'de') {
-            const keptCanonicalRows = new Set<string>();
-            const staleRowIds: string[] = [];
-            const staleNonCanonicalLemmas: string[] = [];
-
-            if (umwFetchSucceeded) {
-              for (const row of remoteUmwRows) {
-                const isValidArchivedCanonical =
-                  Boolean(row.canonicalKey) &&
-                  row.lemma === row.canonicalKey &&
-                  nextMap.has(row.canonicalKey) &&
-                  !keptCanonicalRows.has(row.canonicalKey);
-
-                if (isValidArchivedCanonical) {
-                  keptCanonicalRows.add(row.canonicalKey);
-                } else if (row.id) {
-                  staleRowIds.push(row.id);
-                } else if (row.lemma) {
-                  staleNonCanonicalLemmas.push(row.lemma);
-                }
-              }
-            }
-
-            const missingRows: Array<{
-              user_id: string;
-              lemma: string;
-              cefr_level: MatrixCEFRLevel;
-              source_book_id: string | null;
-              first_mastered_at: string;
-            }> = [];
-            nextMap.forEach((entry, lemma) => {
-              if (!keptCanonicalRows.has(lemma)) {
-                missingRows.push({
-                  user_id: authUserId!,
-                  lemma,
-                  cefr_level: entry.level,
-                  source_book_id: entry.bookId || null,
-                  first_mastered_at:
-                    entry.first_mastered_at ||
-                    (entry.masteredAt > 0 ? new Date(entry.masteredAt).toISOString() : new Date().toISOString()),
-                });
-              }
-            });
-
-            for (let i = 0; i < staleRowIds.length; i += 200) {
-              const chunk = staleRowIds.slice(i, i + 200);
-              const { error: delErr } = await supabase
-                .from('user_mastered_words')
-                .delete()
-                .eq('user_id', authUserId)
-                .in('id', chunk);
-              if (!delErr) prunedRemoteCount += chunk.length;
-            }
-            for (let i = 0; i < staleNonCanonicalLemmas.length; i += 100) {
-              const chunk = staleNonCanonicalLemmas.slice(i, i + 100);
-              const { error: delErr } = await supabase
-                .from('user_mastered_words')
-                .delete()
-                .eq('user_id', authUserId)
-                .in('lemma', chunk);
-              if (!delErr) prunedRemoteCount += chunk.length;
-            }
-            for (let i = 0; i < missingRows.length; i += 200) {
-              const chunk = missingRows.slice(i, i + 200);
-              const { error: upErr } = await supabase
-                .from('user_mastered_words')
-                .upsert(chunk, { onConflict: 'user_id,lemma', ignoreDuplicates: true });
-              if (!upErr) addedRemoteCount += chunk.length;
-            }
-          }
-
-          console.info(
-            `📊 [Reconciliation] (${lang}) Unique archived lemmas: before=${beforeCount}, cloudRows=${remoteUmwRows.length}, after=${nextMap.size}, prunedCloudRows=${prunedRemoteCount}, addedCloudRows=${addedRemoteCount}`
-          );
-
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem(`${ARCHIVE_RECONCILE_VERSION_KEY_PREFIX}${lang}`, '1');
-            } catch {}
-          }
-          setPersistedTimestamp(LAST_FULL_RECONCILE_KEY_PREFIX, lang, Date.now());
-        } else if (!isArchiveReconciled && localDecksCount > 0) {
-          // Офлайн / локальная миграция: оставляем только архивные карточки из IDB с сохранёнными датами
-          nextMap.clear();
-          localArchivedEntries.forEach(({ key, entry }) => mergeEntry(key, entry, true));
-          reconciledWithTruth = true;
-          console.info(
-            `📊 [Reconciliation] (${lang}) Offline IDB archive cleanup: before=${beforeCount}, after=${nextMap.size}`
-          );
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem(`${ARCHIVE_RECONCILE_VERSION_KEY_PREFIX}${lang}`, '1');
-            } catch {}
-          }
-        }
-      }
-
-      // Инкрементальная гидрация (если полная реконсиляция не требовалась / сеть недоступна): объединяем уже очищенный кэш + архивные IDB + user_stats
-      if (!reconciledWithTruth) {
-        historicalMetaByKey.forEach((meta, key) => {
-          mergeEntry(key, meta);
-        });
-        localArchivedEntries.forEach(({ key, entry }) => {
-          mergeEntry(key, entry, true);
-        });
-      }
-
-      // 6. Проверяем, изменились ли данные относительно текущего состояния в памяти, и делаем ОДИН атомарный рендер
-      let hasChanged = existingMap.size !== nextMap.size;
-      if (!hasChanged) {
-        for (const [k, v] of nextMap.entries()) {
-          const prev = existingMap.get(k);
-          if (
-            !prev ||
-            prev.level !== v.level ||
-            prev.masteredAt !== v.masteredAt ||
-            prev.translation !== v.translation
-          ) {
-            hasChanged = true;
-            break;
-          }
-        }
-      }
-
-      uniqueMasteredWordsByLang[lang] = nextMap;
-      hasAttemptedCloudSyncByLang[lang] = true;
-      recomputeStatsFromMap(lang);
-
-      if (hasChanged || reconciledWithTruth) {
-        persistMatrixToStorage(lang);
-        notifyListeners(lang);
-      }
-
-      const remoteTotal = Number(remoteStatsPayload?.totalWords ?? -1);
-      const remoteLemmaCount = Array.isArray(remoteStatsPayload?.lemmas)
-        ? remoteStatsPayload.lemmas.length
-        : -1;
-      if (reconciledWithTruth || hasChanged || (remoteStatsPayload && (remoteTotal !== nextMap.size || remoteLemmaCount !== nextMap.size))) {
-        if (reconciledWithTruth) {
-          await syncMasteredUserStatsSnapshot(lang).catch(() => {});
-        } else {
-          scheduleMasteredSnapshotSync(lang);
-        }
+      if (!force && !options?.fullReconcile && hasAttemptedCloudSyncByLang[lang]) {
+        await reloadMasteredWordsLightweight(lang);
+      } else {
+        await syncAuthoritativeMasteredWords(supabase, undefined, lang);
       }
     } catch (err) {
       console.warn('[Wortschatz-Matrix] syncMasteredWordsFromCloud notice:', err);
@@ -1596,8 +1429,7 @@ export async function recordMasteredLemma(
   initMatrixStore(currentLanguage);
 
   const normalizedKey = normalizeCanonicalLemma(rawWord);
-  if (!normalizedKey || normalizedKey.length < 2) return;
-  if (isExcludedStandaloneLemma(normalizedKey) || isFunctionalParticle(rawWord) || isFunctionalParticle(normalizedKey)) {
+  if (!isValidMasteredEntry(rawWord, normalizedKey)) {
     return;
   }
 
@@ -1617,13 +1449,15 @@ export async function recordMasteredLemma(
         masteredAt: timestamp,
         first_mastered_at: new Date(timestamp).toISOString(),
       });
+      recomputeStatsFromMap(currentLanguage);
       persistMatrixToStorage(currentLanguage);
       notifyListeners(currentLanguage);
+      dispatchMasteredUpdatedEvent(currentLanguage, 'record-mastered');
     }
     return;
   }
 
-  // Новое освоенное слово (инкремент +1 при переходе mastery 0 -> >= 1)
+  // Новое освоенное слово (строго в момент перехода в архив isArchived === true)
   const firstMasteredAt = (typeof paramsOrWord === 'object' && paramsOrWord.first_mastered_at)
     ? paramsOrWord.first_mastered_at
     : (isReview
@@ -1644,12 +1478,9 @@ export async function recordMasteredLemma(
   recomputeStatsFromMap(currentLanguage);
   persistMatrixToStorage(currentLanguage);
   notifyListeners(currentLanguage);
+  dispatchMasteredUpdatedEvent(currentLanguage, 'record-mastered');
 
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: currentLanguage } }));
-  }
-
-  // Отложенная батч-синхронизация снимка MASTERED_WORDS_* (30s debounce / session exit) — 0 GET и 0 мгновенных перезаписей
+  // Отложенная батч-синхронизация снимка MASTERED_WORDS_* (без GET-запросов)
   scheduleMasteredSnapshotSync(currentLanguage);
 
   // Сохраняем одну новую строку в Supabase user_mastered_words без .select() (0 KB read egress)
@@ -1713,10 +1544,7 @@ export async function removeMasteredLemma(
   recomputeStatsFromMap(currentLanguage);
   persistMatrixToStorage(currentLanguage);
   notifyListeners(currentLanguage);
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: currentLanguage } }));
-  }
+  dispatchMasteredUpdatedEvent(currentLanguage, 'remove-mastered');
 
   scheduleMasteredSnapshotSync(currentLanguage);
 
@@ -1745,204 +1573,24 @@ export function getMasteredLemmasSet(langParam?: string | AppLang): Set<string> 
 export function getMasteredWordEntries(langParam?: string | AppLang): MasteredWordEntry[] {
   const normLang = normalizeLanguageCode(langParam);
   initMatrixStore(normLang);
-  return Array.from(uniqueMasteredWordsByLang[normLang].values()).filter((e) => {
-    const norm = normalizeMasteredLemma(e.originalWord);
-    return (
-      Boolean(norm) &&
-      !isExcludedStandaloneLemma(norm) &&
-      !isFunctionalParticle(e.originalWord) &&
-      !isFunctionalParticle(norm)
-    );
-  });
+  return Array.from(uniqueMasteredWordsByLang[normLang].values()).filter((e) =>
+    isValidMasteredEntry(e.originalWord, normalizeCanonicalLemma(e.originalWord), e.translation)
+  );
 }
 
 /**
- * Append-only пересчет матрицы по изученным карточкам (masteryLevel > 0 || round > 1 || isArchived === true)
- * с дедупликацией через normalizeMasteredLemma и сохранением ранее освоенных слов.
+ * Устаревший локальный backfill отключён для записи в Supabase/состояние:
+ * авторитетный список слов всегда загружается с сервера (syncAuthoritativeMasteredWords),
+ * чтобы локальный кэш одного браузера никогда не перезаписывал данные других устройств.
  */
 export async function autoBackfillMasteredWords(
-  providedDecks?: Array<{ id: string; bookId?: string; level?: string; language?: string; cards?: Array<any> }>,
-  providedBooks?: Array<{ id: string; language?: string; activeLevels?: string[]; title?: string }>,
+  _providedDecks?: Array<{ id: string; bookId?: string; level?: string; language?: string; cards?: Array<any> }>,
+  _providedBooks?: Array<{ id: string; language?: string; activeLevels?: string[]; title?: string }>,
   targetLangParam?: string | AppLang
 ): Promise<number> {
-  const decks = providedDecks;
-  const books = providedBooks;
-
-  if (!Array.isArray(decks) || decks.length === 0) return 0;
-  const totalCardsInDecks = decks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
-  if (totalCardsInDecks === 0) return 0;
-
-  const bookMap = new Map<string, any>();
-  if (Array.isArray(books)) {
-    books.forEach((b) => bookMap.set(b.id, b));
-  }
-
-  const langsToProcess: AppLang[] = SUPPORTED_LANGS;
-  let primaryCount = 0;
-
-  for (const targetLang of langsToProcess) {
-    initMatrixStore(targetLang);
-    const existingMap = uniqueMasteredWordsByLang[targetLang];
-
-    const langDecks = decks.filter((deck) => {
-      const dBookId = deck.bookId || (deck as any).book_id;
-      const dLang = normalizeLanguageCode(deck.language || bookMap.get(dBookId || '')?.language || 'de');
-      return dLang === targetLang;
-    });
-
-    if (langDecks.length === 0) continue;
-
-    const deduplicatedMap = new Map<string, MasteredWordEntry>();
-
-    langDecks.forEach((deck) => {
-      const dBookId = deck.bookId || (deck as any).book_id;
-      const parentBook = dBookId ? bookMap.get(dBookId) : undefined;
-
-      if (isContextOrGrammarDeck(deck, parentBook)) return;
-
-      const deckLevel =
-        (deck as any).level ||
-        (parentBook?.activeLevels?.length === 1 ? parentBook.activeLevels[0] : null) ||
-        (deck as any).name ||
-        (deck as any).title ||
-        parentBook?.title ||
-        null;
-
-      deck.cards?.forEach((card: any) => {
-        if (isContextOrGrammarDeck(deck, parentBook, card)) return;
-        if (!isCardStrictlyArchived(card)) return;
-
-        const rawWord =
-          card.targetWord ||
-          card.target_word ||
-          card.missingWord ||
-          card.infinitive ||
-          card.front ||
-          '';
-        const normalizedKey = normalizeCanonicalLemma(rawWord);
-        if (!normalizedKey || normalizedKey.length < 2) return;
-        if (
-          isExcludedStandaloneLemma(normalizedKey) ||
-          isFunctionalParticle(rawWord) ||
-          isFunctionalParticle(normalizedKey)
-        ) {
-          return;
-        }
-
-        const prevEntry = existingMap.get(normalizedKey);
-        const prevTs = prevEntry?.masteredAt || 0;
-        const masteredAt = extractCardMasteredAt(card, prevTs);
-        const cardLevel = card.level || card.cefrLevel || card.cefr_level || null;
-        const level = resolveMasteredLevel(normalizedKey, deckLevel, cardLevel, targetLang);
-
-        const existingEntry = deduplicatedMap.get(normalizedKey);
-        const conciseTrans = extractConciseTranslation(card);
-        const cardTranslation = conciseTrans || card.translation || card.back || prevEntry?.translation;
-        const cardNextReview = card.nextReviewDate ?? card.next_review_date ?? prevEntry?.nextReviewDate;
-        const cardSentence = card.sentence || card.exampleSentence || card.example || prevEntry?.sentence;
-        const cardSentenceTrans = card.sentenceTranslation || card.sentence_translation || prevEntry?.sentenceTranslation;
-
-        const firstMasteredAt = card.first_mastered_at || prevEntry?.first_mastered_at || (masteredAt > 0 ? new Date(masteredAt).toISOString() : undefined);
-        const createdAt = card.created_at || prevEntry?.created_at;
-
-        if (!existingEntry) {
-          deduplicatedMap.set(normalizedKey, {
-            originalWord: rawWord,
-            level,
-            masteredAt,
-            first_mastered_at: firstMasteredAt,
-            created_at: createdAt,
-            bookId: dBookId,
-            translation: cardTranslation,
-            cardId: card.id,
-            nextReviewDate: cardNextReview,
-            sentence: cardSentence,
-            sentenceTranslation: cardSentenceTrans,
-          });
-        } else {
-          const earliestMasteredAt = (masteredAt > 0 && existingEntry.masteredAt > 0)
-            ? Math.min(masteredAt, existingEntry.masteredAt)
-            : (existingEntry.masteredAt || masteredAt);
-
-          deduplicatedMap.set(normalizedKey, {
-            ...existingEntry,
-            masteredAt: earliestMasteredAt,
-            first_mastered_at: existingEntry.first_mastered_at || firstMasteredAt,
-            created_at: existingEntry.created_at || createdAt,
-            translation: cardTranslation || existingEntry.translation,
-            cardId: card.id || existingEntry.cardId,
-            nextReviewDate: cardNextReview || existingEntry.nextReviewDate,
-            sentence: cardSentence || existingEntry.sentence,
-            sentenceTranslation: cardSentenceTrans || existingEntry.sentenceTranslation,
-          });
-        }
-      });
-    });
-
-    // Строгое append-only объединение: ранее освоенные слова НИКОГДА не удаляются!
-    let mapChanged = false;
-    const newlyAddedEntries: Array<{ lemma: string; entry: MasteredWordEntry }> = [];
-    deduplicatedMap.forEach((entry, key) => {
-      const existing = existingMap.get(key);
-      if (!existing) {
-        existingMap.set(key, entry);
-        newlyAddedEntries.push({ lemma: key, entry });
-        mapChanged = true;
-      } else {
-        const earliestTs = (entry.masteredAt > 0 && existing.masteredAt > 0)
-          ? Math.min(entry.masteredAt, existing.masteredAt)
-          : (existing.masteredAt || entry.masteredAt);
-        if (
-          existing.level !== entry.level ||
-          existing.masteredAt !== earliestTs ||
-          (entry.translation && existing.translation !== entry.translation)
-        ) {
-          existingMap.set(key, {
-            ...existing,
-            ...entry,
-            masteredAt: earliestTs,
-            first_mastered_at: existing.first_mastered_at || entry.first_mastered_at,
-          });
-          mapChanged = true;
-        }
-      }
-    });
-
-    recomputeStatsFromMap(targetLang);
-    if (mapChanged) {
-      persistMatrixToStorage(targetLang);
-      notifyListeners(targetLang);
-      scheduleMasteredSnapshotSync(targetLang);
-
-      if (targetLang === 'de' && newlyAddedEntries.length > 0) {
-        try {
-          const userId = await getMatrixAuthUserId();
-          if (userId) {
-            const rows = newlyAddedEntries.map(({ lemma, entry }) => ({
-              user_id: userId,
-              lemma,
-              cefr_level: entry.level,
-              source_book_id: entry.bookId || null,
-              first_mastered_at:
-                entry.first_mastered_at ||
-                (entry.masteredAt > 0 ? new Date(entry.masteredAt).toISOString() : new Date().toISOString()),
-            }));
-            for (let i = 0; i < rows.length; i += 200) {
-              await supabase
-                .from('user_mastered_words')
-                .upsert(rows.slice(i, i + 200), { onConflict: 'user_id,lemma', ignoreDuplicates: true });
-            }
-          }
-        } catch {}
-      }
-    }
-
-    if (targetLang === normalizeLanguageCode(targetLangParam)) {
-      primaryCount = existingMap.size;
-    }
-  }
-
-  return primaryCount;
+  const normLang = normalizeLanguageCode(targetLangParam);
+  initMatrixStore(normLang);
+  return uniqueMasteredWordsByLang[normLang].size;
 }
 
 /**
@@ -2040,14 +1688,14 @@ export async function purgeJunkExportierenWord(): Promise<void> {
  * Синхронизирует матрицу при явных действиях с колодами (строго append-only).
  */
 export async function reconcileMasteredWords(
-  providedDecks?: Array<{ id: string; bookId?: string; level?: string; language?: string; cards?: Array<any> }>,
+  _providedDecks?: Array<{ id: string; bookId?: string; level?: string; language?: string; cards?: Array<any> }>,
   targetLangParam?: string | AppLang,
   isExplicitDeletion: boolean = false
 ) {
   if (!isExplicitDeletion) {
     return;
   }
-  await autoBackfillMasteredWords(providedDecks, undefined, targetLangParam);
+  await syncMasteredWordsFromCloud(normalizeLanguageCode(targetLangParam), true);
 }
 
 /**
@@ -2078,10 +1726,7 @@ export async function removeMasteredWordsByCardIds(
   recomputeStatsFromMap(normLang);
   persistMatrixToStorage(normLang);
   notifyListeners(normLang);
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: normLang } }));
-  }
+  dispatchMasteredUpdatedEvent(normLang, 'remove-cards');
 
   syncMasteredUserStatsSnapshot(normLang);
 
@@ -2320,6 +1965,11 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     return getWordsLearnedToday(normLang);
   });
 
+  const [masteredEntries, setMasteredEntries] = useState<MasteredWordEntry[]>(() => {
+    initMatrixStore(normLang);
+    return getMasteredWordEntries(normLang);
+  });
+
   useEffect(() => {
     initMatrixStore(normLang);
     purgeJunkExportierenWord().catch(() => {});
@@ -2332,6 +1982,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       setStats((prev) => (areMatrixStatsEqual(prev, nextStats) ? prev : nextStats));
       const nextProgress = getWordsLearnedToday(normLang);
       setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
+      setMasteredEntries(getMasteredWordEntries(normLang));
     };
 
     repairInflatedMasteredTimestamps(normLang)
@@ -2341,9 +1992,9 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       .catch(() => {});
     applyLatestStats();
 
-    // Гарантированно синхронизируем выученные слова из облака на старте (один атомарный цикл)
+    // Авторитетная серверная синхронизация на старте (без устаревших кэш-блокировок)
     if (!hasAttemptedCloudSyncByLang[normLang]) {
-      syncMasteredWordsFromCloud(normLang);
+      syncMasteredWordsFromCloud(normLang, true);
     }
 
     const handleUpdate = (changedLang: AppLang, updated: CEFRMatrixStats) => {
@@ -2355,6 +2006,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
         setStats((prev) => (areMatrixStatsEqual(prev, nextStats) ? prev : nextStats));
         const nextProgress = getWordsLearnedToday(normLang);
         setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
+        setMasteredEntries(getMasteredWordEntries(normLang));
       }
     };
 
@@ -2365,7 +2017,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     };
 
     const handleStorageEvent = (e: StorageEvent) => {
-      if (!e.key || e.key === MASTERED_SNAPSHOT_KEY || e.key.startsWith('wortschatz_matrix_v4_')) {
+      if (!e.key || e.key === MASTERED_SNAPSHOT_KEY) {
         isInitializedByLang[normLang] = false;
         initMatrixStore(normLang);
         applyLatestStats();
@@ -2373,6 +2025,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     };
 
     if (typeof window !== 'undefined') {
+      window.addEventListener('kraft:mastered-updated', handleRefreshDaily);
       window.addEventListener('stats-update', handleRefreshDaily);
       window.addEventListener('storage', handleStorageEvent);
       window.addEventListener('storage-update', handleRefreshDaily);
@@ -2386,7 +2039,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       focusSyncDebounceTimer = setTimeout(() => {
         if (isAnyStudySessionActive()) return;
         syncMasteredWordsFromCloud(normLang, false).catch(() => {});
-      }, 1000);
+      }, 300);
     };
 
     if (typeof window !== 'undefined') {
@@ -2400,6 +2053,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
       if (typeof window !== 'undefined') {
         document.removeEventListener('visibilitychange', triggerCloudSyncDebounced);
         window.removeEventListener('focus', triggerCloudSyncDebounced);
+        window.removeEventListener('kraft:mastered-updated', handleRefreshDaily);
         window.removeEventListener('stats-update', handleRefreshDaily);
         window.removeEventListener('storage', handleStorageEvent);
         window.removeEventListener('storage-update', handleRefreshDaily);
@@ -2415,9 +2069,10 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     await syncMasteredWordsFromCloud(normLang, true, { fullReconcile: true });
     const nextProgress = getWordsLearnedToday(normLang);
     setTodayProgress((prev) => (areTodayProgressEqual(prev, nextProgress) ? prev : nextProgress));
+    setMasteredEntries(getMasteredWordEntries(normLang));
   }, [normLang]);
 
-  // Единый инвариант: totalMasteredCount === сумма A1 + A2 + B1 + B2 + C1 + C2 === uniqueLemmas.size
+  // Единый инвариант: totalMasteredCount === сумма A1 + A2 + B1 + B2 + C1 + C2 === uniqueLemmas.size === masteredEntries.length
   const totalMasteredCount =
     (stats.counts.A1 || 0) +
     (stats.counts.A2 || 0) +
@@ -2440,6 +2095,7 @@ export function useWortschatzMatrix(langParam?: string | AppLang) {
     totalGoal,
     levels: CEFR_LEVEL_KEYS,
     masteredLemmas: getMasteredLemmasSet(normLang),
+    masteredEntries,
     refreshMatrix,
     wordsLearnedToday: todayProgress.wordsLearnedToday,
     percentLearnedToday: todayProgress.percentLearnedToday,

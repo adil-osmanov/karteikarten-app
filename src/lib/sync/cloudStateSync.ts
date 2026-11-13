@@ -293,61 +293,10 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
   setCloudSyncStatus('syncing');
 
   try {
-    // 1. Export local Mastered Words from kraft_mastered_snapshot_v2 or wortschatz_matrix_v4 snapshot
-    let localEntries: Array<{ lemma: string; entry: any }> = [];
-    try {
-      const langKey = lang.toLowerCase();
-      const rawSnap = localStorage.getItem('kraft_mastered_snapshot_v2');
-      let entriesMap: Record<string, any> | null = null;
-      if (rawSnap) {
-        const parsedSnap = JSON.parse(rawSnap);
-        if (parsedSnap?.[langKey]?.entries && typeof parsedSnap[langKey].entries === 'object') {
-          entriesMap = parsedSnap[langKey].entries;
-        }
-      }
-      if (!entriesMap) {
-        const rawV4 = localStorage.getItem(`wortschatz_matrix_v4_${langKey}`);
-        if (rawV4) {
-          const parsed = JSON.parse(rawV4);
-          if (parsed && typeof parsed === 'object') {
-            entriesMap = parsed.entries && typeof parsed.entries === 'object' ? parsed.entries : parsed;
-          }
-        }
-      }
-      if (entriesMap) {
-        localEntries = Object.entries(entriesMap)
-          .filter(([, e]: [string, any]) => e && typeof e === 'object' && e.originalWord)
-          .map(([lemma, entry]) => ({ lemma, entry }));
-      }
-    } catch {}
+    // Словарь освоенных слов больше не пушится из localStorage в Supabase (Server Wins Over Local Cache).
+    const pushedWords = 0;
 
-    let pushedWords = 0;
-    if (localEntries.length > 0) {
-      const counts: Record<string, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 };
-      const lemmas: string[] = [];
-      const lemmaLevels: Record<string, string> = {};
-      localEntries.forEach(({ lemma, entry }) => {
-        const lvl = entry.level || 'B1';
-        if (counts[lvl] !== undefined) counts[lvl]++;
-        lemmas.push(lemma);
-        lemmaLevels[lemma] = lvl;
-      });
-
-      await safeUpsertUserStats({
-        language: `MASTERED_WORDS_${normalizedLang}`,
-        daily_activity: {
-          counts,
-          totalWords: localEntries.length,
-          lemmas,
-          words: lemmas,
-          lemmaLevels,
-          updatedAt: Date.now(),
-        },
-      });
-      pushedWords = localEntries.length;
-    }
-
-    // 2. Export local Deck Cards with active SRS states to Supabase
+    // Export local Deck Cards with active SRS states to Supabase
     let pushedCards = 0;
     const localDecks = await getIDBItem<any[]>('app_decks');
     if (Array.isArray(localDecks)) {
