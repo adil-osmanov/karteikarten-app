@@ -55,11 +55,7 @@ export function renderDelicateWord(word: string, forms?: string | null): React.R
 
   const coreNode = parts.isSeparable ? (
     <>
-      {parts.prefixPart}
-      <span className="text-white/25 mx-[1px] select-none" aria-hidden="true">
-        ·
-      </span>
-      {parts.stemPart}
+      {parts.prefixPart}<span className="text-neutral-400 dark:text-white/30 font-normal select-none px-[0.5px]" aria-hidden="true">·</span>{parts.stemPart}
     </>
   ) : (
     parts.cleanWord

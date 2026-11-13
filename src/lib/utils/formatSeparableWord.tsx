@@ -345,7 +345,7 @@ export function formatSeparableWord(
 
   const coreNode = parts.isSeparable ? (
     <>
-      {parts.prefixPart}<span className="text-neutral-400 dark:text-neutral-400 font-normal mx-0.5 select-none" aria-hidden="true">|</span>{parts.stemPart}
+      {parts.prefixPart}<span className="text-neutral-400 dark:text-white/30 font-normal select-none px-[0.5px]" aria-hidden="true">·</span>{parts.stemPart}
     </>
   ) : (
     parts.cleanWord

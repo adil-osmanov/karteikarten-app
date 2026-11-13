@@ -24,6 +24,7 @@ import { MobileKeyboard } from "@/components/MobileKeyboard";
 import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
+import { WortfamilieAnchor } from "@/components/vocabulary/WortfamilieAnchor";
 import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud, flushPendingMasteredSnapshots } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeCanonicalLemma, normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
@@ -4546,12 +4547,28 @@ export type ParsedPhrase = ParsedTargetPhrase;
 export function TrennbarDottedBar({ className }: { className?: string } = {}) {
   return (
     <span 
-      className={cn("text-neutral-400 dark:text-neutral-400 font-normal mx-0.5 select-none", className)} 
+      className={cn("text-neutral-400 dark:text-white/30 font-normal select-none px-[0.5px]", className)} 
       title="Trennbare Vorsilbe"
       aria-hidden="true"
     >
-      |
+      ·
     </span>
+  );
+}
+
+function collectArchivedCardsFromDecks(decks: Deck[]) {
+  return decks.flatMap((d) =>
+    (d.cards || [])
+      .filter((c) => Boolean(c.isArchived))
+      .map((c) => ({
+        id: c.id,
+        word: c.targetWord || '',
+        translation: c.translation || '',
+        isArchived: c.isArchived,
+        level: d.level ?? null,
+        interval: c.interval,
+        language: d.language || 'de',
+      }))
   );
 }
 
@@ -4816,6 +4833,18 @@ function RapidFlashcardMode({
     transitionClasses,
     handleCardEvaluation,
   } = useCardTransition();
+  const decks = useStore((state) => state.decks);
+  const archivedCardsPool = useMemo(() => collectArchivedCardsFromDecks(decks), [decks]);
+  const wortfamilieSourceCard = useMemo(
+    () => ({
+      id: currentCard?.id || '',
+      word: currentCard?.targetWord || '',
+      translation: currentCard?.translation || currentCard?.hint || '',
+      level: (currentCard as { level?: string } | undefined)?.level ?? null,
+      language: (currentCard as { language?: string } | undefined)?.language ?? 'de',
+    }),
+    [currentCard]
+  );
   const hintPenaltySentRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -5537,6 +5566,14 @@ function RapidFlashcardMode({
                     </div>
                   </div>
                 )}
+
+                <WortfamilieAnchor
+                  currentCard={wortfamilieSourceCard}
+                  archivedCards={archivedCardsPool}
+                  visible={isFlipped}
+                  cardKey={`${currentCard?.id}-${currentRound}`}
+                  onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
+                />
               </div>
             </div>
 
@@ -5770,6 +5807,13 @@ function RapidFlashcardMode({
                     </div>
                   </div>
                 )}
+                <WortfamilieAnchor
+                  currentCard={wortfamilieSourceCard}
+                  archivedCards={archivedCardsPool}
+                  visible={isAnswered}
+                  cardKey={`${currentCard?.id}-${currentRound}`}
+                  onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
+                />
               </div>
             )}
           </div>
@@ -7650,6 +7694,18 @@ function StudyCard({
   }, [card.id, card.round, card.isLegendary, card.masteryLevel, card.isArchived, isReview, isLegendary, currentRound]);
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const decks = useStore((state) => state.decks);
+  const archivedCardsPool = useMemo(() => collectArchivedCardsFromDecks(decks), [decks]);
+  const wortfamilieSourceCard = useMemo(
+    () => ({
+      id: card.id,
+      word: card.targetWord || '',
+      translation: card.translation || '',
+      level: (card as { level?: string }).level ?? null,
+      language: (card as { language?: string }).language ?? 'de',
+    }),
+    [card]
+  );
   const playbackSpeed = useStore(state => state.playbackSpeed);
   const setPlaybackSpeed = useStore(state => state.setPlaybackSpeed);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -8352,6 +8408,13 @@ function StudyCard({
                 )}
               </div>
             )}
+            <WortfamilieAnchor
+              currentCard={wortfamilieSourceCard}
+              archivedCards={archivedCardsPool}
+              visible={isAnswered}
+              cardKey={`${card.id}-${currentRound}`}
+              onSpeakWord={playAudio}
+            />
           </div>
         </div>
 
