@@ -72,7 +72,7 @@ export function WortfamilieAnchor({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.22, ease: 'easeOut' }}
       onClick={(e) => e.stopPropagation()}
-      className={`w-full mt-4 pt-3.5 border-t border-black/[0.06] dark:border-white/[0.07] flex flex-col items-center gap-2 ${className}`}
+      className={`w-full mt-7 flex flex-col items-center gap-2 ${className}`}
       data-testid="wortfamilie-anchor"
     >
       <div className="flex flex-wrap items-center justify-center gap-1.5">

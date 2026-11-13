@@ -19,6 +19,8 @@ import {
   buildWordFamilies,
   extractWordRoot,
   getWordTier,
+  WORD_EVOLUTION_RANKS,
+  WORD_EVOLUTION_BY_ID,
   type WordTier,
 } from '@/lib/vocabulary/wordFamilies';
 import {
@@ -43,38 +45,6 @@ type TierFilter = 'Alle' | WordTier;
 type SortOption = 'recent' | 'az';
 
 const BASE_LEVELS: Array<'Alle' | MatrixCEFRLevel> = ['Alle', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
-
-const TIER_DOT_FILTERS: Array<{ id: WordTier; label: string; dotClass: string }> = [
-  {
-    id: 'gold',
-    label: 'Gold',
-    dotClass: 'bg-amber-300/85',
-  },
-  {
-    id: 'silber',
-    label: 'Silber',
-    dotClass: 'bg-slate-300/60',
-  },
-  {
-    id: 'graphit',
-    label: 'Graphit',
-    dotClass: 'bg-white/20',
-  },
-];
-
-const TIER_TILE_CLASSES: Record<WordTier, string> = {
-  gold: 'bg-gradient-to-b from-amber-300/[0.08] via-[#141417] to-[#101013] border border-amber-200/[0.14] hover:border-amber-200/35 shadow-[inset_0_1px_0_0_rgba(253,230,138,0.16)]',
-  silber:
-    'bg-gradient-to-b from-white/[0.05] via-[#131316] to-[#101013] border border-white/[0.11] hover:border-white/25 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.10)]',
-  graphit:
-    'bg-[#111114] border border-white/[0.06] hover:border-white/[0.16] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
-};
-
-const TIER_DOT_CLASSES: Record<WordTier, string> = {
-  gold: 'bg-amber-300/85',
-  silber: 'bg-slate-300/60',
-  graphit: 'bg-white/20',
-};
 
 export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   isOpen,
@@ -321,7 +291,13 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
       selectedLevel === 'Alle'
         ? enrichedWords
         : enrichedWords.filter((item) => item.level === selectedLevel);
-    const counts: Record<WordTier, number> = { gold: 0, silber: 0, graphit: 0 };
+    const counts: Record<WordTier, number> = {
+      basis: 0,
+      gefestigt: 0,
+      sicher: 0,
+      episch: 0,
+      legendaer: 0,
+    };
     pool.forEach((item) => {
       counts[item.tier] += 1;
     });
@@ -440,6 +416,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     const isSelected = inspectorItemKey === item.key;
     const plainWordLength = item.word.replace(/[|·•\u2506\u250A]/g, '').length;
     const isLongWord = plainWordLength > 22;
+    const rankMeta = WORD_EVOLUTION_BY_ID[item.tier] ?? WORD_EVOLUTION_BY_ID.basis;
 
     return (
       <button
@@ -447,20 +424,14 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         type="button"
         onClick={() => setInspectorItemKey(item.key)}
         lang="de"
-        className={`group relative min-h-[96px] p-4 rounded-2xl flex flex-col justify-between text-left transition-all duration-200 ease-out hover:-translate-y-[1px] active:scale-[0.985] cursor-pointer ${
-          TIER_TILE_CLASSES[item.tier]
+        data-tier={item.tier}
+        className={`group relative min-h-[96px] p-4 rounded-2xl flex items-center justify-center text-center transition-all duration-200 ease-out hover:-translate-y-[1px] active:scale-[0.985] cursor-pointer ${
+          rankMeta.tileClass
         } ${isSelected ? 'ring-1 ring-white/35' : ''}`}
       >
-        <div className="flex items-center justify-between gap-2 w-full">
-          <span className="text-[11px] font-mono text-neutral-500">{item.level}</span>
-          <span
-            className={`w-1.5 h-1.5 rounded-full shrink-0 ${TIER_DOT_CLASSES[item.tier]}`}
-          />
-        </div>
-
         <div
-          className={`mt-3 w-full break-words leading-snug font-medium text-neutral-100 hyphens-auto ${
-            isLongWord ? 'text-[13.5px]' : 'text-[14px] sm:text-[15px]'
+          className={`w-full break-words leading-snug font-medium text-neutral-100 hyphens-auto ${
+            isLongWord ? 'text-[13.5px]' : 'text-[15px]'
           }`}
           style={{ overflowWrap: 'anywhere' }}
         >
@@ -557,10 +528,13 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                 })}
               </div>
 
-              <div className="flex items-center gap-1.5 shrink-0">
-                {/* 3 compact tier dot counters */}
-                <div className="inline-flex items-center gap-0.5 bg-white/[0.03] border border-white/[0.06] rounded-xl p-0.5">
-                  {TIER_DOT_FILTERS.map((tf) => {
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                {/* 5 compact evolution rank indicator pills */}
+                <div
+                  data-testid="evolution-rank-filters"
+                  className="inline-flex items-center gap-0.5 bg-white/[0.03] border border-white/[0.06] rounded-xl p-0.5"
+                >
+                  {WORD_EVOLUTION_RANKS.map((tf) => {
                     const active = tierFilter === tf.id;
                     return (
                       <button
@@ -568,14 +542,16 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
                         type="button"
                         onClick={() => setTierFilter((curr) => (curr === tf.id ? 'Alle' : tf.id))}
                         aria-pressed={active}
-                        aria-label={`${tf.label} (${tierCounts[tf.id]})`}
+                        title={tf.filterTitle}
+                        aria-label={`${tf.filterTitle} (${tierCounts[tf.id]})`}
+                        data-testid={`tier-filter-${tf.id}`}
                         className={`px-2 py-1 rounded-lg text-[11px] inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
                           active
                             ? 'bg-white/15 text-white font-medium'
                             : 'text-neutral-400 hover:text-neutral-200'
                         }`}
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${tf.dotClass}`} />
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${tf.dotClass}`} />
                         <span className="tabular-nums">{tierCounts[tf.id]}</span>
                       </button>
                     );

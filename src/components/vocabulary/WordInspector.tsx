@@ -5,7 +5,7 @@ import { Volume2, X } from 'lucide-react';
 import { playGermanSpeech, stopAllGermanSpeech, type Flashcard } from '@/app/page';
 import type { MatrixCEFRLevel, MasteredWordEntry } from '@/hooks/useWortschatzMatrix';
 import type { WordTier } from '@/lib/vocabulary/wordFamilies';
-import { getMemoryStrengthSegments } from '@/lib/vocabulary/wordFamilies';
+import { getMemoryStrengthSegments, WORD_EVOLUTION_BY_ID } from '@/lib/vocabulary/wordFamilies';
 import { splitSeparableWord } from '@/lib/utils/formatSeparableWord';
 import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 
@@ -34,18 +34,6 @@ export interface WordInspectorProps {
   onSelectWord?: (wordKey: string) => void;
   onClose: () => void;
 }
-
-const TIER_LABEL: Record<WordTier, string> = {
-  gold: 'Gold',
-  silber: 'Silber',
-  graphit: 'Graphit',
-};
-
-const TIER_SEGMENT_CLASS: Record<WordTier, string> = {
-  gold: 'bg-amber-300/85',
-  silber: 'bg-slate-300/70',
-  graphit: 'bg-white/30',
-};
 
 export function renderDelicateWord(word: string, forms?: string | null): React.ReactNode {
   if (!word || typeof word !== 'string') return word;
@@ -199,6 +187,7 @@ export const WordInspector: React.FC<WordInspectorProps> = ({
 
   if (!item) return null;
 
+  const rankMeta = WORD_EVOLUTION_BY_ID[item.tier] ?? WORD_EVOLUTION_BY_ID.basis;
   const segmentsFilled = getMemoryStrengthSegments(item.intervalDays);
   const reviewCountdown = formatReviewCountdown(item.nextReviewDate, item.intervalDays);
 
@@ -225,10 +214,18 @@ export const WordInspector: React.FC<WordInspectorProps> = ({
         aria-modal="true"
         aria-label={item.word.replace(/[|·•\u2506\u250A]/g, '')}
       >
-        {/* Top Row: Quiet Badge + Single Close */}
+        {/* Top Row: Quiet CEFR + Evolution Rank Badge & Close */}
         <div className="flex items-center justify-between gap-3 mb-4">
-          <span className="text-xs text-neutral-400">
-            {item.level} · {TIER_LABEL[item.tier]}
+          <span
+            data-testid="inspector-rank-badge"
+            className="text-xs font-medium inline-flex items-center gap-1.5"
+          >
+            <span className="text-neutral-400">{item.level}</span>
+            <span className="text-white/20">·</span>
+            <span className={`inline-flex items-center gap-1.5 ${rankMeta.inspectorTextClass}`}>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${rankMeta.dotClass}`} aria-hidden="true" />
+              <span>{rankMeta.inspectorLabel}</span>
+            </span>
           </span>
           <button
             type="button"
@@ -343,7 +340,7 @@ export const WordInspector: React.FC<WordInspectorProps> = ({
               <div
                 key={seg}
                 className={`h-1 rounded-full transition-all ${
-                  seg <= segmentsFilled ? TIER_SEGMENT_CLASS[item.tier] : 'bg-white/[0.08]'
+                  seg <= segmentsFilled ? rankMeta.segmentClass : 'bg-white/[0.08]'
                 }`}
               />
             ))}

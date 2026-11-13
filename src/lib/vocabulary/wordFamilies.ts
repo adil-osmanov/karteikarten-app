@@ -1,6 +1,87 @@
 import { normalizeCanonicalLemma } from '@/lib/utils/lemmaNormalizer';
 
-export type WordTier = 'graphit' | 'silber' | 'gold';
+export type WordTier = 'basis' | 'gefestigt' | 'sicher' | 'episch' | 'legendaer';
+
+export interface WordEvolutionRankMeta {
+  id: WordTier;
+  stufe: string;
+  label: string;
+  inspectorLabel: string;
+  filterTitle: string;
+  dotClass: string;
+  inspectorTextClass: string;
+  segmentClass: string;
+  tileClass: string;
+}
+
+export const WORD_EVOLUTION_RANKS: WordEvolutionRankMeta[] = [
+  {
+    id: 'basis',
+    stufe: 'Stufe I',
+    label: 'Basis',
+    inspectorLabel: 'Basis (< 3 Tage)',
+    filterTitle: 'Stufe I · Basis (< 3 Tage)',
+    dotClass: 'bg-neutral-500',
+    inspectorTextClass: 'text-neutral-400',
+    segmentClass: 'bg-neutral-500',
+    tileClass:
+      'bg-[#111114] border border-white/[0.06] hover:border-white/[0.16] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]',
+  },
+  {
+    id: 'gefestigt',
+    stufe: 'Stufe II',
+    label: 'Gefestigt',
+    inspectorLabel: 'Gefestigt (3+ Tage)',
+    filterTitle: 'Stufe II · Gefestigt (3+ Tage)',
+    dotClass: 'bg-emerald-400',
+    inspectorTextClass: 'text-emerald-400',
+    segmentClass: 'bg-emerald-400',
+    tileClass:
+      'bg-gradient-to-b from-emerald-400/[0.07] via-[#121315] to-[#101013] border border-emerald-400/[0.15] hover:border-emerald-400/35 shadow-[inset_0_1px_0_0_rgba(52,211,153,0.14)]',
+  },
+  {
+    id: 'sicher',
+    stufe: 'Stufe III',
+    label: 'Sicher',
+    inspectorLabel: 'Sicher (14+ Tage)',
+    filterTitle: 'Stufe III · Sicher (14+ Tage)',
+    dotClass: 'bg-sky-400',
+    inspectorTextClass: 'text-sky-400',
+    segmentClass: 'bg-sky-400',
+    tileClass:
+      'bg-gradient-to-b from-sky-400/[0.08] via-[#121316] to-[#101013] border border-sky-400/[0.18] hover:border-sky-400/40 shadow-[inset_0_1px_0_0_rgba(56,189,248,0.16)]',
+  },
+  {
+    id: 'episch',
+    stufe: 'Stufe IV',
+    label: 'Episch',
+    inspectorLabel: 'Episch (30+ Tage)',
+    filterTitle: 'Stufe IV · Episch (30+ Tage)',
+    dotClass: 'bg-purple-400',
+    inspectorTextClass: 'text-purple-400',
+    segmentClass: 'bg-purple-400',
+    tileClass:
+      'bg-gradient-to-b from-purple-400/[0.09] via-[#131216] to-[#101013] border border-purple-400/[0.22] hover:border-purple-400/45 shadow-[inset_0_1px_0_0_rgba(192,132,252,0.18)]',
+  },
+  {
+    id: 'legendaer',
+    stufe: 'Stufe V',
+    label: 'Legendär',
+    inspectorLabel: 'Legendär (90+ Tage)',
+    filterTitle: 'Stufe V · Legendär (90+ Tage)',
+    dotClass: 'bg-amber-400',
+    inspectorTextClass: 'text-amber-400',
+    segmentClass: 'bg-amber-400',
+    tileClass:
+      'bg-gradient-to-b from-amber-400/[0.11] via-[#141312] to-[#101013] border border-amber-300/[0.26] hover:border-amber-300/50 shadow-[inset_0_1px_0_0_rgba(252,211,77,0.22)]',
+  },
+];
+
+export const WORD_EVOLUTION_BY_ID: Record<WordTier, WordEvolutionRankMeta> =
+  Object.fromEntries(WORD_EVOLUTION_RANKS.map((r) => [r.id, r])) as Record<
+    WordTier,
+    WordEvolutionRankMeta
+  >;
 
 const SEPARABLE_SPLIT_REGEX = /[|·•\u2506\u250A]/;
 
@@ -53,22 +134,24 @@ const GERMAN_WORD_PREFIXES = [
 const VOWEL_REGEX = /[aeiouyäöü]/i;
 
 /**
- * Определяет уровень "закалки" слова строго по прочности SRS-памяти (`interval` в днях).
+ * Определяет 5-ступенчатый ранг зрелости слова строго по SRS-интервалу (`interval` в днях).
  */
 export function getWordTier(intervalDays: number = 0): WordTier {
   const safeDays = Number.isFinite(intervalDays) ? intervalDays : 0;
-  if (safeDays >= 21) return 'gold';
-  if (safeDays >= 3) return 'silber';
-  return 'graphit';
+  if (safeDays >= 90) return 'legendaer';
+  if (safeDays >= 30) return 'episch';
+  if (safeDays >= 14) return 'sicher';
+  if (safeDays >= 3) return 'gefestigt';
+  return 'basis';
 }
 
 /**
- * Возвращает число заполненных сегментов (1..4) в SRS-паспорте слова.
+ * Возвращает число заполненных сегментов (1..4) в 4-сегментном индикаторе SRS-памяти.
  */
 export function getMemoryStrengthSegments(intervalDays: number = 0): number {
   const safeDays = Number.isFinite(intervalDays) ? intervalDays : 0;
-  if (safeDays >= 21) return 4;
-  if (safeDays >= 7) return 3;
+  if (safeDays >= 30) return 4;
+  if (safeDays >= 14) return 3;
   if (safeDays >= 3) return 2;
   return 1;
 }
