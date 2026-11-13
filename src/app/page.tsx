@@ -26,7 +26,7 @@ import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
 import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, autoBackfillMasteredWords, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud, flushPendingMasteredSnapshots } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
-import { normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
+import { normalizeCanonicalLemma, normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry, syncPersistentMistakesFromCloud, STATS_SYNC_EVENT, emitDayStatsSync, getCanonicalTodayCardsDone } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -1233,12 +1233,9 @@ export interface CardSRSUpdate {
 export function isCardDueForReview(card: any): boolean {
   if (!card || card.isDeleted) return false;
 
-  // Учитываем и camelCase, и snake_case
-  const mastery = card.masteryLevel ?? card.mastery_level ?? 0;
+  // Строго: в глобальное повторение (Wiederholen) попадают ТОЛЬКО карточки из Архива (isArchived === true).
   const archived = Boolean(card.isArchived ?? card.is_archived);
-
-  // В повтор идут карточки, которые находятся в процессе SRS (mastery > 0 или в архиве)
-  if (mastery <= 0 && !archived) {
+  if (!archived) {
     return false;
   }
 
@@ -1340,7 +1337,7 @@ function normalizeRemoteCard(c: any, deckId: string, easeMap: Record<string, num
     baseWordInfo: c.baseWordInfo || null,
     forms: c.forms || '',
     has_mistake: Boolean(c.has_mistake ?? (c as any).hasMistake),
-    easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : (easeMap[c.id] ?? 2.2),
+    easeFactor: typeof c.easeFactor === 'number' && c.easeFactor >= 1.3 ? c.easeFactor : (easeMap[c.id] ?? 2.5),
     updated_at: c.updated_at || c.created_at || undefined,
     created_at: c.created_at || undefined,
   };
@@ -1362,25 +1359,33 @@ function mergeRemoteCardWithLocal(
   const remoteInterval = remoteCard.interval ?? 0;
   const remoteReps = remoteCard.repetitions ?? 0;
 
-  const localAheadSrs =
-    localMastery > remoteMastery ||
-    (localArchived && !remoteArchived) ||
-    (localMastery === remoteMastery && localReps > remoteReps);
+  const localUpdatedMs = localCard.updated_at ? Date.parse(localCard.updated_at) : 0;
+  const remoteUpdatedMs = remoteCard.updated_at ? Date.parse(remoteCard.updated_at) : 0;
 
-  // Строгое сведение SRS: при равном mastery берем прогресс с большим reps/свежей датой
-  const finalMastery = Math.max(localMastery, remoteMastery);
-  const finalArchived = localArchived || remoteArchived || finalMastery >= 4;
+  const bothArchived = localArchived && remoteArchived;
+  const remoteNewerTimestamp = remoteUpdatedMs > 0 && localUpdatedMs > 0 && remoteUpdatedMs > localUpdatedMs;
+  const localAheadSrs = bothArchived && remoteNewerTimestamp
+    ? false
+    : (
+        localMastery > remoteMastery ||
+        (localArchived && !remoteArchived) ||
+        (localMastery === remoteMastery && localReps > remoteReps) ||
+        (localReviewDate !== null && remoteReviewDate !== null && localReviewDate > remoteReviewDate && !remoteNewerTimestamp)
+      );
+
+  // Строгое сведение SRS с учётом сброса интервала при ошибке на повторении
+  const finalArchived = localArchived || remoteArchived;
+  const finalMastery = finalArchived ? Math.max(4, localMastery, remoteMastery) : Math.max(localMastery, remoteMastery);
   const finalRound = finalArchived ? 4 : Math.max(1, Math.min(4, finalMastery + 1));
-  const finalReps = Math.max(localReps, remoteReps);
-  const finalInterval = Math.max(localInterval, remoteInterval);
+  const finalReps = bothArchived && remoteNewerTimestamp ? remoteReps : (localAheadSrs ? localReps : Math.max(localReps, remoteReps));
+  const finalInterval = bothArchived && remoteNewerTimestamp ? remoteInterval : (localAheadSrs ? localInterval : Math.max(localInterval, remoteInterval));
   const finalReviewDate = localAheadSrs
     ? (localReviewDate ?? remoteReviewDate)
     : (remoteReviewDate ?? localReviewDate);
   const finalHasMistake =
-    remoteCard.has_mistake !== undefined ? Boolean(remoteCard.has_mistake) : Boolean(localCard.has_mistake);
-
-  const localUpdatedMs = localCard.updated_at ? Date.parse(localCard.updated_at) : 0;
-  const remoteUpdatedMs = remoteCard.updated_at ? Date.parse(remoteCard.updated_at) : 0;
+    remoteCard.has_mistake !== undefined && (remoteNewerTimestamp || !localAheadSrs)
+      ? Boolean(remoteCard.has_mistake)
+      : Boolean(localCard.has_mistake);
   const remoteHasContentChange =
     remoteCard.targetWord !== localCard.targetWord ||
     remoteCard.sentence !== localCard.sentence ||
@@ -1875,8 +1880,17 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
         const cDeckId = (card as any).deck_id || (card as any).deckId || deck.id;
         if (!activeDeckIds.has(cDeckId)) return;
         if (isCardDueForReview(card)) {
-          // Карточки, пришедшие на повторение, стартуют в статусе Легендарных (раунд 4, mastery 4)
-          list.push({ deckId: deck.id, card: { ...card, masteryLevel: 4 } });
+          // Карточки, пришедшие на повторение, находятся в Архиве (раунд 4, Legendary)
+          list.push({
+            deckId: deck.id,
+            card: {
+              ...card,
+              isArchived: true,
+              round: 4,
+              isLegendary: true,
+              masteryLevel: Math.max(4, card.masteryLevel ?? 4),
+            },
+          });
         }
       });
     });
@@ -1898,7 +1912,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
     let query = supabase
       .from('cards')
       .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
-      .or('isArchived.eq.true,masteryLevel.gt.0')
+      .eq('isArchived', true)
       .not('nextReviewDate', 'is', null)
       .lte('nextReviewDate', now);
 
@@ -2407,48 +2421,86 @@ export function calculateNextSRSState(
   card: any,
   isCorrect: boolean,
   isHilfe: boolean,
-  isReviewMode: boolean = false
+  isReviewMode: boolean = false,
+  forceArchiveGraduation: boolean = false
 ): CardSRSUpdate {
-  const currentEase = typeof card.easeFactor === 'number' ? card.easeFactor : 2.2;
+  const currentEase =
+    typeof card.easeFactor === 'number' && card.easeFactor >= 1.3 ? card.easeFactor : 2.5;
   const currentReps = card.repetitions || 0;
   const currentInterval = card.interval || 0;
   const currentMastery = card.masteryLevel ?? card.mastery_level ?? 0;
-  const isArchived = Boolean(card.isArchived ?? card.is_archived);
+  const wasArchived = Boolean(card.isArchived ?? card.is_archived);
+  const inReviewFlow = Boolean(isReviewMode || wasArchived);
 
-  // Календарные интервалы (в днях): 1d -> 3d -> 7d -> 14d -> 30d
-  const INTERVALS_BY_LEVEL = [1, 1, 3, 7, 14, 30];
+  // Этап 3: Повторение уже архивированной карточки (глобальное Wiederholen)
+  if (inReviewFlow) {
+    if (isCorrect && !isHilfe) {
+      const prevInterval = currentInterval > 0 ? currentInterval : 1;
+      const nextInterval = prevInterval <= 1 ? 3 : Math.round(prevInterval * currentEase);
+      const nextReviewDate = Date.now() + nextInterval * 86400000;
+      return {
+        masteryLevel: Math.max(4, currentMastery),
+        isArchived: true,
+        repetitions: currentReps + 1,
+        interval: nextInterval,
+        easeFactor: Number(currentEase.toFixed(2)),
+        nextReviewDate,
+        first_mastered_at: card.first_mastered_at,
+      };
+    } else {
+      // Ошибка или Hilfe на повторении: карточка ОСТАЕТСЯ в архиве, интервал сбрасывается на 1 день
+      const nextInterval = 1;
+      const nextReviewDate = Date.now() + nextInterval * 86400000;
+      const nextEase = Number(Math.max(1.3, currentEase - 0.2).toFixed(2));
+      return {
+        masteryLevel: Math.max(4, currentMastery),
+        isArchived: true,
+        repetitions: 0,
+        interval: nextInterval,
+        easeFactor: nextEase,
+        nextReviewDate,
+        first_mastered_at: card.first_mastered_at,
+      };
+    }
+  }
 
+  // Этап 1: Первичное изучение внутри колоды (раунды 1..N до перехода в Архив)
   if (isCorrect && !isHilfe) {
-    const nextMastery = Math.min(5, currentMastery + 1);
-    const nextInterval = INTERVALS_BY_LEVEL[nextMastery] || 30;
-    const nextReviewDate = Date.now() + nextInterval * 86400000;
-    const nextEase = Number(Math.min(2.8, currentEase + 0.05).toFixed(2));
+    const nextMastery = forceArchiveGraduation ? 4 : Math.min(4, currentMastery + 1);
+    const graduatesToArchive = forceArchiveGraduation || nextMastery >= 4;
 
-    return {
-      masteryLevel: nextMastery,
-      isArchived: nextMastery >= 4 || isArchived,
-      repetitions: currentReps + 1,
-      interval: nextInterval,
-      easeFactor: nextEase,
-      nextReviewDate,
-      first_mastered_at: card.first_mastered_at || (nextMastery >= 1 ? new Date().toISOString() : undefined)
-    };
-  } else {
-    // При ошибке: сброс интервала на 1 день (86400000 мс), repetitions = 0
-    // Сброс masteryLevel на 1 раунд назад (минимум 1). Никаких +10 минут!
-    const nextMastery = Math.max(1, currentMastery - 1);
-    const nextInterval = 1; // строго 1 день
-    const nextReviewDate = Date.now() + nextInterval * 86400000;
-    const nextEase = Number(Math.max(1.3, currentEase - 0.2).toFixed(2));
+    if (graduatesToArchive) {
+      const nowMs = Date.now();
+      return {
+        masteryLevel: 4,
+        isArchived: true,
+        repetitions: 1,
+        interval: 1,
+        easeFactor: Number(currentEase.toFixed(2)),
+        nextReviewDate: nowMs + 86400000,
+        first_mastered_at: card.first_mastered_at || new Date(nowMs).toISOString(),
+      };
+    }
 
     return {
       masteryLevel: nextMastery,
       isArchived: false,
       repetitions: 0,
-      interval: nextInterval,
-      easeFactor: nextEase,
-      nextReviewDate,
-      first_mastered_at: card.first_mastered_at
+      interval: 0,
+      easeFactor: Number(currentEase.toFixed(2)),
+      nextReviewDate: null,
+      first_mastered_at: undefined,
+    };
+  } else {
+    const nextMastery = Math.max(0, currentMastery - 1);
+    return {
+      masteryLevel: nextMastery,
+      isArchived: false,
+      repetitions: 0,
+      interval: 0,
+      easeFactor: Number(currentEase.toFixed(2)),
+      nextReviewDate: null,
+      first_mastered_at: card.first_mastered_at,
     };
   }
 }
@@ -2578,7 +2630,7 @@ interface DeckState {
   deleteCard?: (deckId: string, cardId: string) => void;
   updateCardContent: (cardId: string, updates: Partial<Flashcard>) => Promise<boolean>;
   renameDeck: (deckId: string, newName: string) => void;
-  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean) => Promise<void>;
+  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean, forceArchive?: boolean) => Promise<void>;
   setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => Promise<void>;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: (targetLang?: string) => void;
@@ -3460,7 +3512,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
   },
 
-  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean) => {
+  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean, forceArchive?: boolean) => {
     const deck = get().decks.find((d) => d.id === deckId);
     let lang = targetLanguage;
     if (!lang && deck) {
@@ -3484,15 +3536,15 @@ export const useStore = create<DeckState>()((set, get) => ({
     if (!targetCard) return;
 
     const wasDueBefore = isCardDueForReview(targetCard);
-    const wasMasteredBefore = Boolean(targetCard.isArchived || (targetCard.masteryLevel && targetCard.masteryLevel >= 4));
-    const srsUpdate = calculateNextSRSState(targetCard, isCorrect, isHilfe, isReviewSession);
+    const wasMasteredBefore = Boolean(targetCard.isArchived);
+    const srsUpdate = calculateNextSRSState(targetCard, isCorrect, isHilfe, isReviewSession, Boolean(forceArchive));
     const computedMastery = srsUpdate.masteryLevel ?? targetCard.masteryLevel ?? 0;
-    const computedArchived = Boolean(srsUpdate.isArchived || computedMastery >= 4);
+    const computedArchived = Boolean(srsUpdate.isArchived);
     const computedRound = computedArchived ? 4 : Math.max(1, Math.min(4, computedMastery + 1));
     const scheduledDateIso = srsUpdate.nextReviewDate ? new Date(srsUpdate.nextReviewDate).toISOString() : null;
     const nextHasMistake = !isCorrect
       ? true
-      : isMistakesReview
+      : (isCorrect && !isHilfe && (isReviewSession || wasMasteredBefore || isMistakesReview || computedArchived))
       ? false
       : Boolean(targetCard.has_mistake);
     const validCard: Flashcard = {
@@ -3514,17 +3566,18 @@ export const useStore = create<DeckState>()((set, get) => ({
     updateCachedCardInMemory(cardId, validCard);
 
     const rawWordForSync = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const canonicalSyncKey = getCanonicalLemmaKey(rawWordForSync);
+    const canonicalSyncKey = normalizeCanonicalLemma(rawWordForSync);
     const shouldSyncDuplicateDueDates = Boolean(
       isCorrect &&
       !isHilfe &&
+      validCard.isArchived &&
       canonicalSyncKey &&
       validCard.nextReviewDate &&
       validCard.nextReviewDate > Date.now()
     );
     const syncedDuplicates: Flashcard[] = [];
 
-    // 2. Обновляем Zustand-стейт и локальный IndexedDB (сдвигая также cross-deck дубли с тем же корнем при успешном повторе)
+    // 2. Обновляем Zustand-стейт и локальный IndexedDB (сдвигая также cross-deck архивные дубли с тем же корнем)
     set((state) => {
       const newDecks = state.decks.map((d) => {
         const deckLang = normalizeLanguage(d.language || state.books.find(b => b.id === d.bookId)?.language || cleanLang);
@@ -3541,16 +3594,17 @@ export const useStore = create<DeckState>()((set, get) => ({
             shouldSyncDuplicateDueDates &&
             isSameLangDeck &&
             !(c as any).isDeleted &&
-            (c.isArchived || (c.masteryLevel ?? 0) >= 4) &&
+            Boolean(c.isArchived ?? (c as any).is_archived) &&
             isCardDueForReview(c)
           ) {
             const cRaw = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
-            if (getCanonicalLemmaKey(cRaw) === canonicalSyncKey) {
+            if (normalizeCanonicalLemma(cRaw) === canonicalSyncKey) {
               const syncedCard: Flashcard = {
                 ...c,
                 next_review_at: validCard.next_review_at,
                 next_review_date: validCard.next_review_date,
                 nextReviewDate: validCard.nextReviewDate,
+                has_mistake: false,
                 updated_at: validCard.updated_at,
               };
               syncedDuplicates.push(syncedCard);
@@ -3578,13 +3632,15 @@ export const useStore = create<DeckState>()((set, get) => ({
     const nextDecks = get().decks;
     await setIDBItem('app_decks', nextDecks);
 
-    get().decrementDueCardsCount();
+    if (wasDueBefore) {
+      get().decrementDueCardsCount();
+    }
 
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const targetLemmaKey = normalizeMasteredLemma(rawWord);
+    const targetLemmaKey = normalizeCanonicalLemma(rawWord);
 
-    // CEFR Wortschatz-Matrix: Мгновенный +1 при переходе mastery 0 -> >= 1 (строго append-only)
-    if (isCorrect && !isHilfe && (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 1))) {
+    // Засчитываем в Wörter / +X heute СТРОГО при переходе карточки в Архив (isArchived === true)
+    if (isCorrect && !isHilfe && validCard.isArchived === true) {
       if (targetLemmaKey && targetLemmaKey.length >= 2) {
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
@@ -3602,7 +3658,7 @@ export const useStore = create<DeckState>()((set, get) => ({
             bookId: currentDeck?.bookId,
             language: cardLang,
             timestamp: Date.now(),
-            isReview: Boolean(isReviewSession || (targetCard.masteryLevel ?? 0) >= 1 || targetCard.isArchived),
+            isReview: Boolean(isReviewSession || wasMasteredBefore),
             first_mastered_at: validCard.first_mastered_at || targetCard.first_mastered_at,
             created_at: validCard.created_at || targetCard.created_at,
           });
@@ -3612,11 +3668,9 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     try {
       const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
-      localFactors[cardId] = validCard.easeFactor ?? 2.2;
+      localFactors[cardId] = validCard.easeFactor ?? 2.5;
       localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
     } catch (e) {}
-
-
   },
 
   // Rapid flashcards: persist the 0-4 round score of a word. 4 => archived (learned).
@@ -3628,19 +3682,35 @@ export const useStore = create<DeckState>()((set, get) => ({
     if (!targetCard) return;
 
     const wasDueBefore = isCardDueForReview(targetCard);
-    const wasMasteredBefore = Boolean(targetCard.isArchived || (targetCard.masteryLevel && targetCard.masteryLevel >= 4));
+    const wasMasteredBefore = Boolean(targetCard.isArchived);
     const card: Flashcard = { ...targetCard };
 
     if (score >= 4) {
-      const srsUpdate = calculateNextSRSState({ ...card, masteryLevel: 3, isArchived: false }, true, false);
+      const srsUpdate = calculateNextSRSState(
+        { ...card, masteryLevel: 3, isArchived: Boolean(card.isArchived) },
+        true,
+        false,
+        false,
+        true
+      );
       Object.assign(card, srsUpdate);
       card.round = 4;
       card.isLegendary = true;
+      card.isArchived = true;
+      card.has_mistake = false;
+      const scheduledIso = srsUpdate.nextReviewDate ? new Date(srsUpdate.nextReviewDate).toISOString() : null;
+      card.next_review_at = scheduledIso;
+      card.next_review_date = scheduledIso;
     } else {
       card.masteryLevel = Math.max(0, Math.min(3, score));
       card.isArchived = false;
       card.round = Math.max(1, Math.min(4, card.masteryLevel + 1));
       card.isLegendary = false;
+      card.interval = 0;
+      card.repetitions = 0;
+      card.nextReviewDate = null;
+      card.next_review_at = null;
+      card.next_review_date = null;
     }
     card.updated_at = new Date().toISOString();
 
@@ -3669,15 +3739,16 @@ export const useStore = create<DeckState>()((set, get) => ({
     const nextDecks = get().decks;
     await setIDBItem('app_decks', nextDecks);
 
-    if (wasDueBefore || card.isArchived) {
+    if (wasDueBefore) {
       get().decrementDueCardsCount();
     }
 
     const validCard = card;
     const rawWord = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const targetLemmaKey = normalizeMasteredLemma(rawWord);
+    const targetLemmaKey = normalizeCanonicalLemma(rawWord);
 
-    if (validCard.isArchived || (validCard.masteryLevel && validCard.masteryLevel >= 1)) {
+    // Засчитываем в Wörter / +X heute СТРОГО при переходе в Архив (isArchived === true)
+    if (validCard.isArchived === true) {
       if (targetLemmaKey && targetLemmaKey.length >= 2) {
         const currentDeck = get().decks.find(d => d.id === deckId);
         const currentBook = currentDeck?.bookId ? get().books.find(b => b.id === currentDeck.bookId) : undefined;
@@ -3695,8 +3766,8 @@ export const useStore = create<DeckState>()((set, get) => ({
             bookId: currentDeck?.bookId,
             language: cardLang,
             timestamp: Date.now(),
-            isReview: Boolean((targetCard.masteryLevel ?? 0) >= 1 || targetCard.isArchived),
-            first_mastered_at: validCard.first_mastered_at || targetCard.first_mastered_at || ((targetCard.masteryLevel ?? 0) === 0 ? new Date().toISOString() : undefined),
+            isReview: wasMasteredBefore,
+            first_mastered_at: validCard.first_mastered_at || targetCard.first_mastered_at || (!wasMasteredBefore ? new Date().toISOString() : undefined),
             created_at: validCard.created_at || targetCard.created_at,
           });
         }
@@ -3705,11 +3776,9 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     try {
       const localFactors = JSON.parse(localStorage.getItem('card_ease_factors') || '{}');
-      localFactors[cardId] = validCard.easeFactor ?? 2.2;
+      localFactors[cardId] = validCard.easeFactor ?? 2.5;
       localStorage.setItem('card_ease_factors', JSON.stringify(localFactors));
     } catch (e) {}
-
-
   }
 }));
 
@@ -6187,6 +6256,24 @@ function RapidSession({
 
     if (isSurrender) {
       // Penalty and mistake recording were already completed immediately in handleHintPenalty.
+      const isReviewMode = Boolean(!isDrillMode && (reviewCards || liveCard.isArchived));
+      if (isReviewMode) {
+        const updatedCard: Flashcard = {
+          ...current.card,
+          round: 4,
+          isLegendary: true,
+          isArchived: true,
+          masteryLevel: Math.max(4, current.card.masteryLevel ?? 4),
+          updated_at: new Date().toISOString(),
+          mistakeCount: ((current.card as any).mistakeCount || 0) + 1
+        };
+        (updatedCard as any)._isReviewRetry = true;
+        const updatedItem = { ...current, card: updatedCard };
+        setQueue(q => (q ? [...q.filter(item => item.card.id !== id), updatedItem] : q));
+        setTurn(t => t + 1);
+        return;
+      }
+
       // Карточка уже угасла в RapidFlashcardMode за 90 мс — синхронно переставляем её в конец очереди с актуальным пониженным рангом!
       const startRound = current.card.round ?? Math.max(1, Math.min(4, (wordProgress[id] ?? current.card.masteryLevel ?? liveCard.masteryLevel ?? 0) + 1));
       const demotedScore = Math.max(0, Math.min(2, startRound - 2));
@@ -6211,15 +6298,16 @@ function RapidSession({
     }
 
     const isReviewMode = Boolean(!isDrillMode && (reviewCards || liveCard.isArchived));
-    const startMastery = current.card.isLegendary
+    const isReviewRetry = Boolean((current.card as any)._isReviewRetry);
+    const startMastery = isReviewMode || current.card.isLegendary
       ? 3
       : (typeof current.card.round === 'number'
           ? Math.max(0, Math.min(3, current.card.round - 1))
           : Math.max(0, Math.min(3, wordProgress[id] ?? current.card.masteryLevel ?? liveCard.masteryLevel ?? 0)));
-    const newScore = correct
-      ? startMastery + 1
-      : (current.card.isLegendary ? 2 : Math.max(0, startMastery - 1));
-    const learned = correct && newScore >= 4;
+    const newScore = isReviewMode
+      ? (correct ? 4 : 3)
+      : (correct ? startMastery + 1 : Math.max(0, startMastery - 1));
+    const learned = isReviewMode ? correct : (correct && newScore >= 4);
     const isNewMastered = learned && !isReviewMode;
 
     if (correct) {
@@ -6265,19 +6353,25 @@ function RapidSession({
     );
 
     // 1) СРАЗУ синхронно создаем иммутабельный updatedCard и обновляем очередь сессии
-    const nextRound = learned ? 4 : Math.max(1, Math.min(4, newScore + 1));
+    const nextRound = isReviewMode ? 4 : (learned ? 4 : Math.max(1, Math.min(4, newScore + 1)));
+    const keepArchived = isReviewMode || learned || Boolean(liveCard.isArchived);
     const updatedCard: Flashcard = {
       ...current.card,
       round: nextRound,
-      isLegendary: learned,
-      isArchived: learned,
+      isLegendary: isReviewMode || learned,
+      isArchived: keepArchived,
       masteryLevel: Math.min(4, newScore),
       repetitions: (current.card.repetitions || 0) + (correct ? 1 : 0),
       updated_at: new Date().toISOString(),
       mistakeCount: correct ? (current.card as any).mistakeCount : (((current.card as any).mistakeCount || 0) + 1)
     };
+    if (isReviewMode && !correct) {
+      (updatedCard as any)._isReviewRetry = true;
+    }
 
-    setWordProgress(prev => ({ ...prev, [id]: Math.min(4, newScore) }));
+    if (!isReviewMode) {
+      setWordProgress(prev => ({ ...prev, [id]: Math.min(4, newScore) }));
+    }
     if (learned) {
       setMastered(m => m + 1);
       setQueue(q => (q ? q.filter(item => item.card.id !== id) : q));
@@ -6291,8 +6385,13 @@ function RapidSession({
     setTurn(t => t + 1);
 
     // 2) Сохранение в стор и Supabase в фоне, не блокируя переключение UI
-    if (isReviewMode || liveCard.isArchived || !correct || isReviewingMistakesSession) {
-      void answerCard(current.deckId, id, correct, false, true, studyLanguage, isReviewMode, isReviewingMistakesSession);
+    if (isReviewMode) {
+      // Если карточка ошибалась ранее в этой же Review-сессии, повторный правильный ответ завершает её без повторного скачка interval
+      if (!isReviewRetry) {
+        void answerCard(current.deckId, id, correct, false, true, studyLanguage, true, isReviewingMistakesSession);
+      }
+    } else if (learned || !correct || isReviewingMistakesSession) {
+      void answerCard(current.deckId, id, correct, false, true, studyLanguage, false, isReviewingMistakesSession, learned);
     } else {
       void setCardProgress(current.deckId, id, newScore, studyLanguage);
     }
@@ -6305,12 +6404,15 @@ function RapidSession({
     const liveCard = useStore.getState().decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === id) || current.card;
     const startRound = current.card.round ?? Math.max(1, Math.min(4, (wordProgress[id] ?? current.card.masteryLevel ?? liveCard.masteryLevel ?? 0) + 1));
     const isReviewMode = Boolean(!isDrillMode && (reviewCards || liveCard.isArchived));
+    const isReviewRetry = Boolean((current.card as any)._isReviewRetry);
     const penalizedProgress = typeof forcedScore === 'number'
       ? Math.max(0, Math.min(3, forcedScore))
       : Math.max(0, Math.min(2, startRound - 2));
 
     // 1) Update local progress & daily mistake stats synchronously first
-    setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
+    if (!isReviewMode) {
+      setWordProgress(prev => ({ ...prev, [id]: penalizedProgress }));
+    }
     setSessionMistakes(prev => (prev.some(c => c.id === id) ? prev : [...prev, liveCard]));
     recordCardProgress(id, false, {
       deckId: current.deckId,
@@ -6328,7 +6430,9 @@ function RapidSession({
 
     // 2) Persist to Zustand + Supabase in background
     if (isReviewMode || liveCard.isArchived) {
-      void answerCard(current.deckId, id, false, true, true, studyLanguage, isReviewMode);
+      if (!isReviewRetry) {
+        void answerCard(current.deckId, id, false, true, true, studyLanguage, true, isReviewingMistakesSession);
+      }
     } else {
       void setCardProgress(current.deckId, id, penalizedProgress, studyLanguage);
     }
@@ -6625,7 +6729,7 @@ function StudyInterface({
   );
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
-  const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean } | null>(null);
+  const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean; keepArchived?: boolean; isReviewRetry?: boolean } | null>(null);
   const sessionInitKeyRef = useRef<string | null>(null);
   const seenSessionCardIdsRef = useRef<Set<string>>(new Set(activeCards.map(item => item.card.id)));
 
@@ -6818,8 +6922,12 @@ function StudyInterface({
     if (!currentCardSnapshot || !currentDeckId) return;
     const isActualCorrect = correct && !isHilfe;
 
+    const wasMasteredBefore = Boolean(currentCardSnapshot.isArchived || liveCard?.isArchived);
+    const isReviewMode = Boolean(isReviewSession || isInitialArchivedDeck || wasMasteredBefore);
+    const isReviewRetry = Boolean((currentCardSnapshot as any)._isReviewRetry);
+
     // 1. Вычисляем новый уровень раунда и условие выпуска
-    const isCurrentlyLegendary = currentCardSnapshot.isLegendary ?? (currentCardSnapshot.round === 4 && Boolean(liveCard?.isArchived || isReviewSession || isInitialArchivedDeck));
+    const isCurrentlyLegendary = currentCardSnapshot.isLegendary ?? (currentCardSnapshot.round === 4 && isReviewMode);
     const currentRound = currentCardSnapshot.round ?? (isCurrentlyLegendary ? 4 : Math.max(1, Math.min(4, (liveCard?.masteryLevel ?? 0) + 1)));
     const startMastery = (isCurrentlyLegendary || currentRound >= 4)
       ? 3
@@ -6830,13 +6938,26 @@ function StudyInterface({
     let nextMastery: number;
     let isGraduated: boolean;
 
-    if (isActualCorrect) {
+    if (isReviewMode) {
+      if (isActualCorrect) {
+        nextMastery = Math.max(4, currentCardSnapshot.masteryLevel ?? 4);
+        isGraduated = true;
+        nextRound = 4;
+        nextLegendary = true;
+      } else {
+        // Ошибка в глобальном Review: карточка ОСТАЕТСЯ в архиве, но уходит в конец текущей сессии для закрепления
+        nextMastery = Math.max(4, currentCardSnapshot.masteryLevel ?? 4);
+        nextRound = 4;
+        nextLegendary = true;
+        isGraduated = false;
+      }
+    } else if (isActualCorrect) {
       nextMastery = Math.min(4, startMastery + 1);
       isGraduated = nextMastery >= 4;
       nextRound = isGraduated ? 4 : Math.max(1, Math.min(4, nextMastery + 1));
       nextLegendary = isGraduated;
     } else {
-      nextMastery = Math.max(0, Math.min(2, currentRound - 2));
+      nextMastery = Math.max(0, startMastery - 1);
       nextRound = Math.max(1, Math.min(4, nextMastery + 1));
       nextLegendary = false;
       isGraduated = false;
@@ -6847,7 +6968,9 @@ function StudyInterface({
       isGraduated,
       nextMastery,
       nextRound,
-      nextLegendary
+      nextLegendary,
+      keepArchived: isReviewMode || isGraduated || wasMasteredBefore,
+      isReviewRetry: isReviewMode && !isActualCorrect,
     };
 
     // 2. Мгновенно обновляем стейт текущей карточки в голове очереди (без перетирания round до нажатия Weiter)
@@ -6860,8 +6983,6 @@ function StudyInterface({
       ];
     });
 
-    const wasMasteredBefore = Boolean(currentCardSnapshot.isArchived || (currentCardSnapshot.masteryLevel && currentCardSnapshot.masteryLevel >= 4) || liveCard?.isArchived);
-    const isReviewMode = Boolean(isReviewSession || isInitialArchivedDeck || wasMasteredBefore);
     const isNewMastered = !isReviewMode && isGraduated && !wasMasteredBefore;
 
     // 3. Запись в статистику сессии и дневной счетчик
@@ -6905,8 +7026,12 @@ function StudyInterface({
         isNewMastered 
       }
     );
-    if (isReviewSession || isReviewMode || isGraduated || !isActualCorrect || isReviewingMistakesSession || (wasMasteredBefore && !isActualCorrect && currentRound >= 4)) {
-      await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, isReviewSession, isReviewingMistakesSession);
+    if (isReviewMode) {
+      if (!isReviewRetry) {
+        await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, true, isReviewingMistakesSession);
+      }
+    } else if (isGraduated || !isActualCorrect || isReviewingMistakesSession) {
+      await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, false, isReviewingMistakesSession, isGraduated);
     } else {
       await setCardProgress(currentDeckId, currentCardSnapshot.id, nextMastery, studyLanguage);
     }
@@ -6935,15 +7060,19 @@ function StudyInterface({
       } else {
         const nextMastery = pending ? pending.nextMastery : (current.card.masteryLevel ?? 2);
         const nextRound = pending?.nextRound ?? Math.max(1, Math.min(4, nextMastery + 1));
+        const keepArchived = Boolean(pending?.keepArchived || current.card.isArchived);
         const updatedCard: Flashcard = {
           ...current.card,
           round: nextRound,
           isLegendary: pending ? Boolean(pending.nextLegendary) : false,
-          isArchived: false,
+          isArchived: keepArchived,
           masteryLevel: nextMastery,
           updated_at: new Date().toISOString(),
           mistakeCount: ((current.card as any).mistakeCount || 0) + (pending && pending.nextMastery > (current.card.masteryLevel ?? 0) ? 0 : 1)
         };
+        if (pending?.isReviewRetry || (current.card as any)._isReviewRetry) {
+          (updatedCard as any)._isReviewRetry = true;
+        }
         const updatedItem = {
           ...current,
           card: updatedCard
@@ -13048,8 +13177,17 @@ export default function App() {
         const cardDeckId = (card as any).deckId || (card as any).deck_id || deck.id;
         if (!activeDeckIds.has(cardDeckId)) return;
         if (isCardDueForReview(card)) {
-          // Карточки, пришедшие на повторение, стартуют в статусе Легендарных (раунд 4, mastery 4)
-          list.push({ deckId: deck.id, card: { ...card, masteryLevel: 4 } });
+          // Карточки, пришедшие на повторение, находятся в Архиве (раунд 4, Legendary)
+          list.push({
+            deckId: deck.id,
+            card: {
+              ...card,
+              isArchived: true,
+              round: 4,
+              isLegendary: true,
+              masteryLevel: Math.max(4, card.masteryLevel ?? 4),
+            },
+          });
         }
       });
     });

@@ -118,6 +118,7 @@ export function mergeCardContext<T extends {
 export function isCardCanonicalMastered(
   card?: {
     isArchived?: boolean;
+    is_archived?: boolean;
     masteryLevel?: number;
     targetWord?: string;
     front?: string;
@@ -128,7 +129,7 @@ export function isCardCanonicalMastered(
   masteredSet?: Set<string> | null
 ): boolean {
   if (!card) return false;
-  if (card.isArchived || (card.masteryLevel ?? 0) >= 4) return true;
+  if (Boolean(card.isArchived ?? card.is_archived)) return true;
   if (!masteredSet || masteredSet.size === 0) return false;
   const raw = card.targetWord || card.front || card.word || card.missingWord || card.infinitive || '';
   const key = getCanonicalKey(raw);
@@ -140,7 +141,7 @@ export function isCardCanonicalMastered(
  */
 export function buildMasteredCanonicalSet(
   masteredEntries?: { lemma?: string; originalWord?: string; word?: string }[] | null,
-  allDecks?: { cards?: { isArchived?: boolean; masteryLevel?: number; targetWord?: string; front?: string; word?: string; missingWord?: string; infinitive?: string }[] }[] | null
+  allDecks?: { cards?: { isArchived?: boolean; is_archived?: boolean; masteryLevel?: number; targetWord?: string; front?: string; word?: string; missingWord?: string; infinitive?: string }[] }[] | null
 ): Set<string> {
   const set = new Set<string>();
 
@@ -155,7 +156,7 @@ export function buildMasteredCanonicalSet(
   if (allDecks && Array.isArray(allDecks)) {
     for (const d of allDecks) {
       for (const c of d.cards || []) {
-        if (c.isArchived || (c.masteryLevel ?? 0) >= 4) {
+        if (Boolean(c.isArchived ?? c.is_archived)) {
           const raw = c.targetWord || c.front || c.word || c.missingWord || c.infinitive || '';
           const k = getCanonicalKey(raw);
           if (k) set.add(k);

@@ -18,55 +18,107 @@ const EXCLUDED_STANDALONE_LEMMAS = new Set([
   'und', 'aber', 'oder', 'denn', 'weil', 'dass', 'ob', 'als', 'wie',
 ]);
 
+const CANONICAL_ARTICLES = new Set([
+  'der', 'die', 'das', 'dem', 'den', 'des', 'ein', 'eine', 'einen', 'einem', 'eines', 'einer'
+]);
+
+const CANONICAL_REFLEXIVES = new Set([
+  'sich', 'mich', 'dich', 'uns', 'euch'
+]);
+
+const CANONICAL_GOVERNANCE_MARKERS = new Set([
+  'jemanden', 'jemandem', 'jemandes', 'jemand', 'etwas',
+  'jmdn', 'jmdm', 'jdn', 'jdm', 'jmd', 'jds', 'jm', 'jn', 'jd', 'etw',
+  'akk', 'dat', 'gen', 'nom', 'pl', 'sg'
+]);
+
+const CANONICAL_PREPOSITIONS = new Set([
+  'an', 'auf', 'aus', 'bei', 'durch', 'für', 'gegen', 'gegenüber', 'hinter',
+  'in', 'mit', 'nach', 'neben', 'über', 'um', 'unter', 'von', 'vor', 'zu', 'zwischen'
+]);
+
 /**
- * Единая каноническая нормализация лемм для подсчёта выученных слов (Wortschatz-Matrix)
- * и строгой дедупликации между книгами/уроками.
+ * Unified canonical German lemma normalizer used across Vocabulary Matrix (Wörter),
+ * user_mastered_words reconciliation, and SRS Review queue deduplication.
+ * Ensures variants like "mit|teilen", "mitteilen", "jemandem etwas mitteilen",
+ * "der Antrag", "Antrag", "jemanden vor jemandem schützen", "schützen"
+ * collapse to a single canonical lowercase key.
  */
-export function normalizeMasteredLemma(rawWord: string): string {
+export function normalizeCanonicalLemma(rawWord: string): string {
   if (!rawWord || typeof rawWord !== 'string') return '';
   let s = rawWord.toLowerCase().trim();
+  if (!s) return '';
 
-  // Убираем разделитель отделяемых приставок: mit|teilen -> mitteilen
-  s = s.replace(/[|·\u2506\u250A]/g, '');
+  // Remove separable verb splitters: mit|teilen -> mitteilen, ein·laden -> einladen
+  s = s.replace(/[|·•\u2506\u250A]/g, '');
 
-  // Инверсия отделяемых приставок с многоточием ("schrauben ... auf" -> "aufschrauben")
+  // Strip trailing German plural/inflection notation after comma (e.g. "der Antrag, -¨e" -> "der Antrag")
+  s = s.replace(/,\s*(?:die\s+)?[-–—¨][^,]*$/i, '').trim();
+
+  // Handle "der/die Angestellte" style paired articles
+  s = s.replace(/^(?:der|die|das)\s*\/\s*(?:der|die|das)\s+/i, '');
+
+  // Inversion of separated ellipsis verbs ("schrauben ... auf" -> "aufschrauben")
   const ellipsisMatch = s.match(/^([a-zäöüß]+)\s*(?:\.{2,}|…+)\s*([a-zäöüß]+)$/i);
   if (ellipsisMatch) {
     return `${ellipsisMatch[2]}${ellipsisMatch[1]}`.toLowerCase();
   }
 
-  // Убираем пояснения в скобках
+  // Drop case-government preposition immediately before parenthetical case markers like "warten auf (Akk.)"
+  s = s.replace(
+    /(?:^|\s)(?:an|auf|aus|bei|durch|für|gegen|gegenüber|hinter|in|mit|nach|neben|ohne|über|um|unter|von|vor|zu|zwischen)\s+\((?:[^)]*\b(?:akk|dat|gen|nom|etw|jdn|jdm|jmdn|jmdm|jmd|jemand\w*)\b[^)]*)\)/gi,
+    ' '
+  );
+
+  // Strip parenthetical and bracketed annotations: "aufhören (mit Dat.)", "das Buch (¨-er)"
   s = s.replace(/\(.*?\)|\[.*?\]/g, ' ').trim();
 
-  // Сначала убираем предложное управление целиком ("vor jemandem", "auf etwas", "über etw.", "mit Dat")
-  s = s.replace(
-    /(?:^|\s)(?:an|auf|aus|bei|durch|für|gegen|hinter|in|mit|nach|neben|ohne|über|um|unter|von|vor|zu|zwischen)\s+(?:jemanden|jemandem|jemandes|jemand|etwas|jmdn\.?|jmdm\.?|jmd\.?|jdn\.?|jdm\.?|etw\.?|akk\.?|dat\.?|gen\.?)(?=\s|$|[.,/#!$%^&*;:{}=\-_`~?])/gi,
-    ' '
-  );
+  // Replace punctuation while preserving German umlauts and ß
+  s = s.replace(/[.,/#!$%^&*;:{}=\-_`~?+„"«»'’]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
 
-  // Убираем артикли в начале
-  s = s.replace(/^(der|die|das|dem|den|des|ein|eine|einen|einem|einer|eines)\s+/gi, '');
+  const rawTokens = s.split(' ').filter(Boolean);
+  if (rawTokens.length === 0) return '';
 
-  // Убираем возвратные местоимения и управление падежами
-  s = s.replace(
-    /(?:^|\s)(sich|mich|dich|uns|euch|jemanden|jemandem|jemandes|jemand|etwas|jmdn\.?|jmdm\.?|jdn\.?|jdm\.?|jmd\.?|etw\.?)(?=\s|$|[.,/#!$%^&*;:{}=\-_`~?])/gi,
-    ' '
-  );
-
-  // Убираем знаки препинания и схлопываем пробелы
-  s = s.replace(/[.,/#!$%^&*;:{}=\-_`~?]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // Если осталось ровно 2 токена и второй — отделяемая приставка после глагола ("schrauben auf" -> "aufschrauben")
-  const parts = s.split(' ');
-  if (parts.length === 2 && SEPARABLE_PREFIXES.has(parts[1]) && /(en|eln|ern|t|st|e)$/.test(parts[0])) {
-    return `${parts[1]}${parts[0]}`;
+  const filteredTokens: string[] = [];
+  for (let i = 0; i < rawTokens.length; i++) {
+    const tok = rawTokens[i];
+    if (CANONICAL_ARTICLES.has(tok) || CANONICAL_REFLEXIVES.has(tok) || CANONICAL_GOVERNANCE_MARKERS.has(tok)) {
+      continue;
+    }
+    if (CANONICAL_PREPOSITIONS.has(tok)) {
+      const nextTok = rawTokens[i + 1];
+      if (nextTok && CANONICAL_GOVERNANCE_MARKERS.has(nextTok)) {
+        continue;
+      }
+    }
+    filteredTokens.push(tok);
   }
 
-  return s;
+  if (filteredTokens.length === 0) return '';
+
+  // Handle postposed separable prefix without ellipsis ("schrauben auf" -> "aufschrauben")
+  if (
+    filteredTokens.length === 2 &&
+    SEPARABLE_PREFIXES.has(filteredTokens[1]) &&
+    /(en|eln|ern|t|st|e)$/.test(filteredTokens[0])
+  ) {
+    return `${filteredTokens[1]}${filteredTokens[0]}`;
+  }
+
+  return filteredTokens.join(' ');
+}
+
+/**
+ * Единая каноническая нормализация лемм для подсчёта выученных слов (Wortschatz-Matrix)
+ * и строгой дедупликации между книгами/уроками.
+ */
+export function normalizeMasteredLemma(rawWord: string): string {
+  return normalizeCanonicalLemma(rawWord);
 }
 
 export function isExcludedStandaloneLemma(rawOrNormalized: string): boolean {
-  const norm = normalizeMasteredLemma(rawOrNormalized);
+  const norm = normalizeCanonicalLemma(rawOrNormalized);
   if (!norm || norm.length < 2) return true;
   if (EXCLUDED_STANDALONE_LEMMAS.has(norm)) return true;
   return false;
@@ -77,25 +129,7 @@ export function isExcludedStandaloneLemma(rawOrNormalized: string): boolean {
  * независимо от формы записи (артиклей, местоимений, вертикальных черт и инверсии приставки).
  */
 export function normalizeLemmaKey(rawWord: string): string {
-  if (!rawWord) return '';
-
-  const trimmed = rawWord.trim().toLowerCase();
-
-  // Обрабатываем инверсию отделяемых приставок с многоточием ("schrauben ... auf" -> "aufschrauben")
-  const ellipsisMatch = trimmed.match(/^([a-zäöüß]+)\s*(?:\.{2,}|…+)\s*([a-zäöüß]+)$/i);
-  if (ellipsisMatch) {
-    return `${ellipsisMatch[2]}${ellipsisMatch[1]}`.toLowerCase();
-  }
-
-  let cleaned = normalizeMasteredLemma(rawWord);
-
-  // Если осталось ровно 2 токена и второй — отделяемая приставка после глагола ("schrauben auf" -> "aufschrauben")
-  const parts = cleaned.split(' ');
-  if (parts.length === 2 && SEPARABLE_PREFIXES.has(parts[1]) && /(en|eln|ern|t|st|e)$/.test(parts[0])) {
-    cleaned = `${parts[1]}${parts[0]}`;
-  }
-
-  return cleaned;
+  return normalizeCanonicalLemma(rawWord);
 }
 
 /**
@@ -242,69 +276,13 @@ export function deduplicateCardsByLemma<
   return sessionQueue;
 }
 
-const CANONICAL_ARTICLES = new Set([
-  'der', 'die', 'das', 'dem', 'den', 'des', 'ein', 'eine', 'einen', 'einem', 'eines', 'einer'
-]);
-
-const CANONICAL_REFLEXIVES = new Set([
-  'sich', 'mich', 'dich', 'uns', 'euch'
-]);
-
-const CANONICAL_GOVERNANCE_MARKERS = new Set([
-  'jemanden', 'jemandem', 'jemandes', 'jemand', 'etwas',
-  'jmdn', 'jmdm', 'jdn', 'jdm', 'jmd', 'etw',
-  'akk', 'dat', 'gen', 'nom'
-]);
-
-const CANONICAL_PREPOSITIONS = new Set([
-  'an', 'auf', 'aus', 'bei', 'durch', 'für', 'gegen', 'gegenüber', 'hinter',
-  'in', 'mit', 'nach', 'neben', 'über', 'um', 'unter', 'von', 'vor', 'zu', 'zwischen',
-  'ins', 'ans', 'aufs', 'zum', 'zur', 'beim', 'vom', 'im', 'am'
-]);
-
 /**
  * Строгий канонический нормализатор немецкого корня / леммы.
  * Приводит любые вариации записи ("der Antrag" vs "Antrag", "jemanden vor jemandem schützen" vs "schützen",
  * "sich freuen" vs "freuen", "mit|teilen" vs "mitteilen", "aufhören (mit Dat.)" vs "aufhören") к одному ключу.
  */
 export function getCanonicalLemmaKey(rawWord: string): string {
-  if (!rawWord || typeof rawWord !== 'string') return '';
-
-  let cleaned = rawWord.toLowerCase().trim();
-  if (!cleaned) return '';
-
-  // 1. Убираем разделитель отделяемой приставки (mit|teilen -> mitteilen)
-  cleaned = cleaned.replace(/[|·\u2506\u250A]/g, '');
-
-  // 2. Убираем пояснения в скобках: "aufhören (mit Dat.)" -> "aufhören"
-  cleaned = cleaned.replace(/\(.*?\)|\[.*?\]/g, ' ');
-
-  // 3. Обрабатываем инверсию с многоточием ("schrauben ... auf" -> "aufschrauben")
-  const ellipsisMatch = cleaned.trim().match(/^([a-zäöüß]+)\s*(?:\.{2,}|…+)\s*([a-zäöüß]+)$/i);
-  if (ellipsisMatch) {
-    return `${ellipsisMatch[2]}${ellipsisMatch[1]}`.toLowerCase();
-  }
-
-  // 4. Очищаем от пунктуации и лишних пробелов (безопасно для умлаутов äöüß!)
-  cleaned = cleaned.replace(/[.,/#!$%^&*;:{}=\-_`~?+]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!cleaned) return '';
-
-  const rawTokens = cleaned.split(' ').filter(Boolean);
-  if (rawTokens.length === 0) return rawWord.toLowerCase().trim();
-
-  // 5. Убираем артикли, возвратные местоимения, маркеры падежей/управления и предлоги управления
-  const coreTokens = rawTokens.filter((tok) =>
-    !CANONICAL_ARTICLES.has(tok) &&
-    !CANONICAL_REFLEXIVES.has(tok) &&
-    !CANONICAL_GOVERNANCE_MARKERS.has(tok) &&
-    !CANONICAL_PREPOSITIONS.has(tok)
-  );
-
-  const candidates = coreTokens.length > 0 ? coreTokens : rawTokens;
-  if (candidates.length === 1) return candidates[0];
-
-  // Если осталась составная фраза — берём ключевое самое длинное слово
-  return [...candidates].sort((a, b) => b.length - a.length)[0];
+  return normalizeCanonicalLemma(rawWord);
 }
 
 function extractRawWordFromItem(item: any): string {
@@ -360,7 +338,7 @@ export function buildDeduplicatedReviewQueue<
     if (!item) continue;
     const card = (item as any)?.card || item;
     const rawWord = extractRawWordFromItem(item);
-    const lemmaKey = getCanonicalLemmaKey(rawWord) || (card?.id ? `__id:${card.id}` : '');
+    const lemmaKey = normalizeCanonicalLemma(rawWord) || (card?.id ? `__id:${card.id}` : '');
 
     if (!lemmaKey || seenLemmas.has(lemmaKey)) {
       continue;
