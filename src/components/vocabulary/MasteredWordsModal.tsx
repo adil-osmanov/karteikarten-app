@@ -2,18 +2,7 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  X,
-  Search,
-  Layers,
-  Eye,
-  EyeOff,
-  Sparkles,
-  Shield,
-  ArrowUpDown,
-  GitBranch,
-  LayoutGrid,
-} from 'lucide-react';
+import { X, Search, Sparkles, ArrowUpDown } from 'lucide-react';
 import { useStore, stopAllGermanSpeech, type Flashcard } from '@/app/page';
 import {
   useWortschatzMatrix,
@@ -25,13 +14,12 @@ import {
   type AppLang,
 } from '@/hooks/useWortschatzMatrix';
 import { normalizeMasteredLemma } from '@/lib/utils/lemmaNormalizer';
-import { formatSeparableWord } from '@/lib/utils/formatSeparableWord';
+import { getWordTier, type WordTier } from '@/lib/vocabulary/wordFamilies';
 import {
-  buildWordFamilies,
-  getWordTier,
-  type WordTier,
-} from '@/lib/vocabulary/wordFamilies';
-import { WordInspector, type EnrichedMasteredWord } from './WordInspector';
+  WordInspector,
+  renderDelicateWord,
+  type EnrichedMasteredWord,
+} from './WordInspector';
 import {
   ContextStoryPanel,
   type GeneratedContextStory,
@@ -44,56 +32,41 @@ export interface MasteredWordsModalProps {
   initialLevelFilter?: MatrixCEFRLevel | 'Alle';
 }
 
-type ViewMode = 'mosaik' | 'wortfamilien';
 type TierFilter = 'Alle' | WordTier;
-type SortOption = 'recent' | 'strength' | 'az';
+type SortOption = 'recent' | 'az';
 
-const FILTER_LEVELS: Array<'Alle' | MatrixCEFRLevel> = ['Alle', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+const BASE_LEVELS: Array<'Alle' | MatrixCEFRLevel> = ['Alle', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
-const TIER_FILTERS: Array<{ id: TierFilter; label: string }> = [
-  { id: 'Alle', label: 'Alle' },
-  { id: 'gold', label: 'Gold' },
-  { id: 'silber', label: 'Silber' },
-  { id: 'graphit', label: 'Graphit' },
+const TIER_DOT_FILTERS: Array<{ id: WordTier; label: string; dotClass: string }> = [
+  {
+    id: 'gold',
+    label: 'Gold',
+    dotClass: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]',
+  },
+  {
+    id: 'silber',
+    label: 'Silber',
+    dotClass: 'bg-slate-300/70',
+  },
+  {
+    id: 'graphit',
+    label: 'Graphit',
+    dotClass: 'bg-white/25',
+  },
 ];
 
 const TIER_TILE_CLASSES: Record<WordTier, string> = {
-  graphit:
-    'bg-[#121215] border border-white/[0.08] hover:border-white/20',
+  gold: 'bg-gradient-to-b from-amber-400/[0.07] to-[#111114] border border-amber-400/25 hover:border-amber-400/50',
   silber:
-    'bg-gradient-to-b from-slate-300/[0.06] to-[#121215] border border-slate-300/25 hover:border-slate-300/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]',
-  gold:
-    'bg-gradient-to-b from-amber-400/[0.09] to-[#121215] border border-amber-400/35 hover:border-amber-400/60 shadow-[0_0_24px_rgba(251,191,36,0.07),inset_0_1px_0_rgba(251,191,36,0.15)]',
+    'bg-gradient-to-b from-white/[0.04] to-[#111114] border border-white/15 hover:border-white/30',
+  graphit: 'bg-[#111114] border border-white/[0.07] hover:border-white/20',
 };
 
-function renderTierIndicator(tier: WordTier) {
-  if (tier === 'gold') {
-    return (
-      <span
-        className="inline-flex items-center gap-1 text-[10px] text-amber-300"
-        title="Gold · Langzeitgedächtnis"
-      >
-        <Sparkles className="w-3 h-3 text-amber-400" />
-      </span>
-    );
-  }
-  if (tier === 'silber') {
-    return (
-      <span
-        className="inline-flex items-center gap-1 text-[10px] text-slate-300"
-        title="Silber · Gefestigt"
-      >
-        <Shield className="w-3 h-3 text-slate-300" />
-      </span>
-    );
-  }
-  return (
-    <span
-      className="w-2 h-2 rounded-full bg-zinc-500/80 ring-1 ring-white/15"
-      title="Graphit · Neu"
-    />
-  );
-}
+const TIER_DOT_CLASSES: Record<WordTier, string> = {
+  gold: 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]',
+  silber: 'bg-slate-300/70',
+  graphit: 'bg-white/20',
+};
 
 export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   isOpen,
@@ -104,16 +77,12 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   const [mounted, setMounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLevel, setSelectedLevel] = useState<'Alle' | MatrixCEFRLevel>(initialLevelFilter);
-  const [viewMode, setViewMode] = useState<ViewMode>('mosaik');
   const [tierFilter, setTierFilter] = useState<TierFilter>('Alle');
   const [sortBy, setSortBy] = useState<SortOption>('recent');
-  const [isBlindMode, setIsBlindMode] = useState(false);
-  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
   const [inspectorItemKey, setInspectorItemKey] = useState<string | null>(null);
   const [isStoryOpen, setIsStoryOpen] = useState(false);
   const [storyLoading, setStoryLoading] = useState(false);
   const [generatedStory, setGeneratedStory] = useState<GeneratedContextStory | null>(null);
-  const [storyWords, setStoryWords] = useState<EnrichedMasteredWord[]>([]);
   const [updateTick, setUpdateTick] = useState(0);
 
   useEffect(() => {
@@ -127,14 +96,13 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
   const currentLang: AppLang = normalizeLanguageCode(language);
   const { masteredEntries } = useWortschatzMatrix(currentLang);
 
-  // Reset state on modal open
+  // Reset modal transient UI on open
   useEffect(() => {
     if (isOpen) {
       purgeJunkExportierenWord().catch(() => {});
       setSelectedLevel(initialLevelFilter || 'Alle');
       setSearchQuery('');
       setTierFilter('Alle');
-      setRevealedKeys(new Set());
       setInspectorItemKey(null);
       setIsStoryOpen(false);
       setGeneratedStory(null);
@@ -146,7 +114,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     }
   }, [isOpen, initialLevelFilter]);
 
-  // Listen to live vocabulary updates (zero extra Supabase reads)
+  // Live vocabulary updates in memory (zero Supabase reads)
   useEffect(() => {
     const handleStatsUpdate = () => setUpdateTick((t) => t + 1);
     window.addEventListener('kraft:mastered-updated', handleStatsUpdate);
@@ -157,20 +125,20 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     };
   }, []);
 
-  // Cascading Esc: close Story -> Inspector -> Modal
+  // Cascading Esc: close Inspector -> Story -> Modal
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        if (isStoryOpen) {
-          stopAllGermanSpeech();
-          setIsStoryOpen(false);
-          return;
-        }
         if (inspectorItemKey) {
           stopAllGermanSpeech();
           setInspectorItemKey(null);
+          return;
+        }
+        if (isStoryOpen) {
+          stopAllGermanSpeech();
+          setIsStoryOpen(false);
           return;
         }
         onClose();
@@ -180,7 +148,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isStoryOpen, inspectorItemKey, onClose]);
 
-  // Body Scroll Lock while open
+  // Body Scroll Lock
   useEffect(() => {
     if (!isOpen) return;
     const originalOverflow = window.getComputedStyle(document.body).overflow;
@@ -190,7 +158,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     };
   }, [isOpen]);
 
-  // In-memory index of loaded books & decks cards (0 extra egress)
+  // In-memory index of loaded books & decks (0 extra Supabase egress)
   const { cardsById, cardsByLemma, lemmaTranslationMap, cardMetaById, cardMetaByLemma } = useMemo(() => {
     const bookTitleMap = new Map<string, string>();
     books.forEach((b) => {
@@ -225,7 +193,10 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
             metaByLemma.set(lKey, deckMeta);
           } else {
             const existing = byLemma.get(lKey)!;
-            if ((c.interval ?? 0) > (existing.interval ?? 0) || (c.isArchived && !existing.isArchived)) {
+            if (
+              (c.interval ?? 0) > (existing.interval ?? 0) ||
+              (c.isArchived && !existing.isArchived)
+            ) {
               byLemma.set(lKey, c);
               metaByLemma.set(lKey, deckMeta);
             }
@@ -249,7 +220,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     };
   }, [decks, books, updateTick]);
 
-  // Unified authoritative entries list (strictly synced with header/matrix)
+  // Unified authoritative mastered entries (1:1 synced with Header & Matrix)
   const rawEntries = useMemo(() => {
     if (!isOpen) return [];
     return masteredEntries.filter((e) =>
@@ -257,7 +228,6 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     );
   }, [masteredEntries, isOpen]);
 
-  // Enrich in memory from local state / IndexedDB
   const enrichedWords: EnrichedMasteredWord[] = useMemo(() => {
     const bookTitleById = new Map<string, string>();
     books.forEach((b) => {
@@ -286,14 +256,8 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         translation = entry.translation || '';
       }
 
-      const intervalDays = Math.max(
-        Number(card?.interval ?? 0),
-        Number(entry.interval ?? 0)
-      );
-      const repetitions = Math.max(
-        Number(card?.repetitions ?? 0),
-        Number(entry.repetitions ?? 0)
-      );
+      const intervalDays = Math.max(Number(card?.interval ?? 0), Number(entry.interval ?? 0));
+      const repetitions = Math.max(Number(card?.repetitions ?? 0), Number(entry.repetitions ?? 0));
       const nextReviewDate =
         card?.nextReviewDate ?? (card as any)?.next_review_date ?? entry.nextReviewDate ?? null;
 
@@ -303,10 +267,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         entry.bookTitle ||
         '';
       const resolvedDeck = localMeta?.deckName || entry.deckName || '';
-      const sourceLabel =
-        resolvedBook && resolvedDeck
-          ? `${resolvedBook} · ${resolvedDeck}`
-          : resolvedBook || resolvedDeck || 'Persönlicher Wortschatz';
+      const sourceLabel = resolvedBook || resolvedDeck || 'Wortschatz';
 
       const forms = card?.forms || card?.baseWordInfo || entry.forms || null;
       const sentence = card?.sentence || entry.sentence || null;
@@ -334,10 +295,9 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     });
   }, [rawEntries, books, cardsById, cardsByLemma, lemmaTranslationMap, cardMetaById, cardMetaByLemma]);
 
-  // Exact per-level counts matching Matrix & Header 1:1
   const levelCounts = useMemo(() => {
     const counts: Record<string, number> = { Alle: enrichedWords.length };
-    FILTER_LEVELS.forEach((lvl) => {
+    BASE_LEVELS.forEach((lvl) => {
       if (lvl !== 'Alle') counts[lvl] = 0;
     });
     enrichedWords.forEach((item) => {
@@ -348,25 +308,25 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     return counts;
   }, [enrichedWords]);
 
-  // Counts by forged tier (respecting current level filter)
+  // Hide C2 pill if C2 count is 0
+  const visibleLevels = useMemo(
+    () => BASE_LEVELS.filter((lvl) => lvl !== 'C2' || (levelCounts.C2 ?? 0) > 0),
+    [levelCounts.C2]
+  );
+
+  // Tier counts matching selected level
   const tierCounts = useMemo(() => {
     const pool =
       selectedLevel === 'Alle'
         ? enrichedWords
         : enrichedWords.filter((item) => item.level === selectedLevel);
-    const counts: Record<TierFilter, number> = {
-      Alle: pool.length,
-      gold: 0,
-      silber: 0,
-      graphit: 0,
-    };
+    const counts: Record<WordTier, number> = { gold: 0, silber: 0, graphit: 0 };
     pool.forEach((item) => {
       counts[item.tier] += 1;
     });
     return counts;
   }, [enrichedWords, selectedLevel]);
 
-  // Filtered + Sorted words
   const filteredWords = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
@@ -388,41 +348,15 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           const cleanB = b.word.replace(/[|·•\u2506\u250A]/g, '');
           return cleanA.localeCompare(cleanB, 'de');
         }
-        if (sortBy === 'strength') {
-          if (b.intervalDays !== a.intervalDays) return b.intervalDays - a.intervalDays;
-          if (b.masteredAt !== a.masteredAt) return b.masteredAt - a.masteredAt;
-          return a.word.localeCompare(b.word, 'de');
-        }
         if (b.masteredAt !== a.masteredAt) return b.masteredAt - a.masteredAt;
         return a.word.localeCompare(b.word, 'de');
       });
   }, [enrichedWords, selectedLevel, tierFilter, searchQuery, sortBy]);
 
-  // Wortfamilien grouping strictly in memory
-  const groupedFamilies = useMemo(() => {
-    if (viewMode !== 'wortfamilien') return null;
-    return buildWordFamilies(filteredWords);
-  }, [filteredWords, viewMode]);
-
   const inspectorItem = useMemo(() => {
     if (!inspectorItemKey) return null;
     return enrichedWords.find((w) => w.key === inspectorItemKey) || null;
   }, [enrichedWords, inspectorItemKey]);
-
-  const handleTileClick = useCallback(
-    (item: EnrichedMasteredWord) => {
-      if (isBlindMode && !revealedKeys.has(item.key)) {
-        setRevealedKeys((prev) => {
-          const next = new Set(prev);
-          next.add(item.key);
-          return next;
-        });
-        return;
-      }
-      setInspectorItemKey(item.key);
-    },
-    [isBlindMode, revealedKeys]
-  );
 
   const handleQuickPractice = useCallback(
     (item: EnrichedMasteredWord) => {
@@ -456,7 +390,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
 
   const handleGenerateContextStory = useCallback(async () => {
     const candidatePool =
-      filteredWords.length >= 5
+      filteredWords.length >= 8
         ? filteredWords
         : selectedLevel !== 'Alle'
         ? enrichedWords.filter((w) => w.level === selectedLevel)
@@ -464,11 +398,11 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
     const effectivePool = candidatePool.length > 0 ? candidatePool : enrichedWords;
     if (effectivePool.length === 0) return;
 
-    // Pick 6 words mixing recent & randomized entries from the pool
+    // Pick 8-10 learned words randomly from the pool
     const shuffled = [...effectivePool].sort(() => Math.random() - 0.5);
-    const chosen = shuffled.slice(0, Math.min(6, shuffled.length));
+    const targetCount = Math.min(shuffled.length, effectivePool.length >= 10 ? 9 : 8);
+    const chosen = shuffled.slice(0, targetCount);
 
-    setStoryWords(chosen);
     setIsStoryOpen(true);
     setInspectorItemKey(null);
     setStoryLoading(true);
@@ -479,7 +413,7 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          level: selectedLevel !== 'Alle' ? selectedLevel : 'B1-B2',
+          level: selectedLevel !== 'Alle' ? selectedLevel : 'B1–B2',
           words: chosen.map((w) => ({
             word: w.word,
             translation: w.translation,
@@ -488,78 +422,34 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
           })),
         }),
       });
-      if (!res.ok) throw new Error('Request failed');
+      if (!res.ok) throw new Error('Story request failed');
       const data = await res.json();
       setGeneratedStory(data);
     } catch {
+      const cleanList = chosen.map((w) => ({
+        lemma: w.word.replace(/[|·•\u2506\u250A]/g, '').trim(),
+        surfaceForm: w.word.replace(/[|·•\u2506\u250A]/g, '').trim(),
+        translation: w.translation || '—',
+      }));
       setGeneratedStory({
-        germanText: chosen
-          .map(
-            (w) =>
-              w.sentence?.replace(/\|/g, '').trim() ||
-              `Im Gespräch verwenden wir das Wort ${w.word.replace(/\|/g, '')}.`
-          )
-          .join(' '),
-        russianTranslation: chosen
-          .map((w) => `${w.word.replace(/\|/g, '')}${w.translation ? ` — ${w.translation}` : ''}`)
-          .join(' • '),
-        usedWords: chosen.map((w) => w.word.replace(/\|/g, '')),
+        title: 'Ein Tag im Alltag',
+        paragraphs: [
+          chosen
+            .map(
+              (w) =>
+                w.sentence?.replace(/[|·•\u2506\u250A]/g, '').trim() ||
+                `Im Gespräch fällt oft das Wort ${w.word.replace(/[|·•\u2506\u250A]/g, '')}.`
+            )
+            .join(' '),
+        ],
+        russianTranslation: cleanList.map((w) => `${w.lemma} — ${w.translation}`).join(' • '),
+        usedWords: cleanList,
         source: 'fallback',
       });
     } finally {
       setStoryLoading(false);
     }
   }, [filteredWords, enrichedWords, selectedLevel]);
-
-  const renderTile = (item: EnrichedMasteredWord) => {
-    const isSelected = inspectorItemKey === item.key;
-    const isRevealed = !isBlindMode || revealedKeys.has(item.key);
-
-    return (
-      <button
-        key={item.key}
-        type="button"
-        onClick={() => handleTileClick(item)}
-        title={isRevealed ? item.translation || item.word.replace(/[|·•\u2506\u250A]/g, '') : 'Zum Aufdecken tippen'}
-        className={`group relative min-h-[92px] p-3 rounded-2xl flex flex-col justify-between text-left transition-all duration-150 cursor-pointer active:scale-[0.98] ${
-          TIER_TILE_CLASSES[item.tier]
-        } ${
-          isSelected
-            ? 'ring-2 ring-amber-400/70 border-amber-400/60'
-            : ''
-        }`}
-      >
-        {/* Top Row: CEFR Level + Forged Tier Indicator */}
-        <div className="flex items-center justify-between gap-1.5 w-full">
-          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-white/[0.06] text-neutral-300 border border-white/[0.07] font-mono">
-            {item.level}
-          </span>
-          <div className="flex items-center gap-1.5">
-            {isBlindMode && !isRevealed && (
-              <Eye className="w-3 h-3 text-blue-400/80" />
-            )}
-            {renderTierIndicator(item.tier)}
-          </div>
-        </div>
-
-        {/* Bottom Word / Blind Prompt */}
-        <div className="mt-3 w-full">
-          {isRevealed ? (
-            <div className="font-medium text-[15px] text-white leading-snug line-clamp-2 group-hover:text-amber-100 transition-colors">
-              {formatSeparableWord(item.word)}
-            </div>
-          ) : (
-            <div className="space-y-0.5">
-              <div className="text-[13px] font-medium text-blue-200/90 leading-snug line-clamp-2">
-                {item.translation || 'Bedeutung prüfen'}
-              </div>
-              <div className="text-[10px] text-neutral-500">Tippen zum Prüfen</div>
-            </div>
-          )}
-        </div>
-      </button>
-    );
-  };
 
   if (!isOpen || !mounted) return null;
 
@@ -569,34 +459,31 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
       onClick={onClose}
     >
       <div
-        className={`relative w-full h-[92dvh] sm:h-[85vh] ${
-          inspectorItem && !isStoryOpen ? 'sm:max-w-5xl' : 'sm:max-w-3xl'
-        } flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0B0B0E]/95 border border-white/10 shadow-[0_25px_80px_rgba(0,0,0,0.85)] overflow-hidden select-text text-left transition-[max-width] duration-200`}
+        className="relative w-full h-[92dvh] sm:h-[85vh] sm:max-w-3xl flex flex-col rounded-t-[28px] sm:rounded-3xl bg-[#0B0B0E]/95 border border-white/10 shadow-[0_25px_80px_rgba(0,0,0,0.85)] overflow-hidden select-text text-left"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Wortschatz-Tresor"
       >
-        {/* 1. COMPACT APPLE HEADER & CONTROLS */}
-        <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-white/[0.07] space-y-3 shrink-0 bg-[#0E0E12]/90">
-          {/* Top Row: Search + Blind-Modus + KI Text Generator + Close */}
-          <div className="flex items-center gap-2">
+        {/* TWO-ROW MINIMALIST HEADER */}
+        <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-white/[0.06] space-y-3 shrink-0">
+          {/* Row 1: Search + Geschichte + Round Close */}
+          <div className="flex items-center gap-2.5">
             <div className="relative flex-1 min-w-0">
-              <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <Search className="w-4 h-4 text-neutral-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Wörter durchsuchen..."
-                className="w-full bg-white/[0.05] border border-white/10 rounded-xl pl-9 pr-8 py-2 text-base sm:text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:border-amber-400/50 transition-colors"
+                className="w-full bg-white/[0.04] border border-white/[0.07] rounded-xl pl-9 pr-8 py-2 text-base sm:text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:border-white/20 transition-colors"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-white transition-colors cursor-pointer"
-                  title="Suche löschen"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-neutral-200 transition-colors cursor-pointer"
                   aria-label="Suche löschen"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -604,252 +491,157 @@ export const MasteredWordsModal: React.FC<MasteredWordsModalProps> = ({
               )}
             </div>
 
-            {/* Blind-Modus Toggle */}
-            <button
-              type="button"
-              onClick={() => {
-                setIsBlindMode((v) => !v);
-                setRevealedKeys(new Set());
-              }}
-              className={`h-9 px-2.5 sm:px-3 rounded-xl border text-xs font-medium inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-                isBlindMode
-                  ? 'bg-blue-500/20 border-blue-400/45 text-blue-300 shadow-[0_0_16px_rgba(59,130,246,0.18)]'
-                  : 'bg-white/[0.05] border-white/10 text-neutral-400 hover:text-white hover:bg-white/[0.08]'
-              }`}
-              title="Blind-Modus (Selbsttest)"
-              aria-label="Blind-Modus"
-              aria-pressed={isBlindMode}
-            >
-              {isBlindMode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              <span className="hidden lg:inline">Blind-Modus</span>
-            </button>
-
-            {/* Apple Intelligence Mini-Text Generator */}
             <button
               type="button"
               onClick={handleGenerateContextStory}
               disabled={enrichedWords.length === 0 || storyLoading}
-              className="h-9 px-2.5 sm:px-3.5 rounded-xl bg-gradient-to-r from-amber-400/15 via-blue-500/15 to-purple-500/15 hover:from-amber-400/25 hover:to-purple-500/25 border border-amber-400/35 text-xs font-medium text-amber-200 inline-flex items-center gap-1.5 transition-all cursor-pointer shrink-0 disabled:opacity-40"
-              title="Kontexttext aus deinen Wörtern generieren"
+              className="bg-white/[0.06] hover:bg-white/[0.1] border border-white/10 text-neutral-200 rounded-xl px-3.5 py-2 text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 disabled:opacity-40"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Text aus meinen Wörtern</span>
-              <span className="sm:hidden">Text</span>
+              <Sparkles className="w-3.5 h-3.5 text-neutral-300" />
+              <span>Geschichte</span>
             </button>
 
             <button
               type="button"
               onClick={onClose}
-              className="h-9 w-9 rounded-xl flex items-center justify-center text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+              className="w-9 h-9 rounded-full flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.1] border border-white/[0.07] text-neutral-400 hover:text-white transition-colors cursor-pointer shrink-0"
               title="Schließen (Esc)"
               aria-label="Schließen"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Second Row: Segmented View [ Mosaik | Wortfamilien ] + Tier Filter + Sort */}
+          {/* Row 2: CEFR Level Pills (left) + Tier Dot Counters & Sort (right) */}
           {!isStoryOpen && (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              {/* Segmented Switcher */}
-              <div className="inline-flex p-0.5 rounded-xl bg-white/[0.05] border border-white/[0.08]">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('mosaik')}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-all cursor-pointer ${
-                    viewMode === 'mosaik'
-                      ? 'bg-white/15 text-white shadow-xs'
-                      : 'text-neutral-400 hover:text-neutral-200'
-                  }`}
-                >
-                  <LayoutGrid className="w-3.5 h-3.5" />
-                  <span>Mosaik</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('wortfamilien')}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-all cursor-pointer ${
-                    viewMode === 'wortfamilien'
-                      ? 'bg-white/15 text-white shadow-xs'
-                      : 'text-neutral-400 hover:text-neutral-200'
-                  }`}
-                >
-                  <GitBranch className="w-3.5 h-3.5" />
-                  <span>Wortfamilien</span>
-                </button>
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                {visibleLevels.map((lvl) => {
+                  const isSelected = selectedLevel === lvl;
+                  const count = levelCounts[lvl] ?? 0;
+                  return (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => setSelectedLevel(lvl)}
+                      className={`px-2.5 py-1 rounded-xl text-xs transition-colors flex items-center gap-1.5 cursor-pointer outline-none shrink-0 ${
+                        isSelected
+                          ? 'bg-white/15 text-white font-medium border border-white/15'
+                          : 'bg-white/[0.03] text-neutral-400 border border-white/[0.06] hover:bg-white/[0.07] hover:text-neutral-200'
+                      }`}
+                    >
+                      <span>{lvl}</span>
+                      <span className="text-[11px] opacity-60 tabular-nums">{count}</span>
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Tier filter pills + Sort */}
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-                <div className="inline-flex items-center gap-1 bg-white/[0.03] border border-white/[0.06] rounded-xl p-0.5">
-                  {TIER_FILTERS.map((tf) => {
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* 3 compact tier dot counters */}
+                <div className="inline-flex items-center gap-0.5 bg-white/[0.03] border border-white/[0.06] rounded-xl p-0.5">
+                  {TIER_DOT_FILTERS.map((tf) => {
                     const active = tierFilter === tf.id;
                     return (
                       <button
                         key={tf.id}
                         type="button"
-                        onClick={() => setTierFilter(tf.id)}
-                        className={`px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+                        onClick={() => setTierFilter((curr) => (curr === tf.id ? 'Alle' : tf.id))}
+                        aria-pressed={active}
+                        aria-label={`${tf.label} (${tierCounts[tf.id]})`}
+                        className={`px-2 py-1 rounded-lg text-[11px] inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
                           active
-                            ? tf.id === 'gold'
-                              ? 'bg-amber-400/20 text-amber-200'
-                              : tf.id === 'silber'
-                              ? 'bg-slate-300/20 text-slate-100'
-                              : 'bg-white/15 text-white'
+                            ? 'bg-white/15 text-white font-medium'
                             : 'text-neutral-400 hover:text-neutral-200'
                         }`}
                       >
-                        {tf.label}
-                        <span className="ml-1 text-[10px] opacity-65 tabular-nums">
-                          {tierCounts[tf.id]}
-                        </span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${tf.dotClass}`} />
+                        <span className="tabular-nums">{tierCounts[tf.id]}</span>
                       </button>
                     );
                   })}
                 </div>
 
-                {viewMode === 'mosaik' && (
-                  <label className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/[0.08] text-[11px] text-neutral-300 cursor-pointer shrink-0">
-                    <ArrowUpDown className="w-3 h-3 text-neutral-400" />
-                    <select
-                      value={sortBy}
-                      onChange={(e) => setSortBy(e.target.value as SortOption)}
-                      className="bg-transparent text-[11px] font-medium text-neutral-200 focus:outline-none cursor-pointer"
-                      aria-label="Sortierung"
-                    >
-                      <option value="recent" className="bg-[#121215]">Zuletzt gelernt</option>
-                      <option value="strength" className="bg-[#121215]">Stärkste zuerst</option>
-                      <option value="az" className="bg-[#121215]">A–Z</option>
-                    </select>
-                  </label>
-                )}
+                {/* Compact Sort Toggle: Zuletzt / A–Z */}
+                <button
+                  type="button"
+                  onClick={() => setSortBy((curr) => (curr === 'recent' ? 'az' : 'recent'))}
+                  className="px-2.5 py-1 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] text-[11px] font-medium text-neutral-300 inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                  aria-label="Sortierung wechseln"
+                >
+                  <ArrowUpDown className="w-3 h-3 text-neutral-500" />
+                  <span>{sortBy === 'recent' ? 'Zuletzt' : 'A–Z'}</span>
+                </button>
               </div>
-            </div>
-          )}
-
-          {/* Third Row: CEFR Level Filters (preserving exact total count invariant) */}
-          {!isStoryOpen && (
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
-              {FILTER_LEVELS.map((lvl) => {
-                const isSelected = selectedLevel === lvl;
-                const count = levelCounts[lvl] ?? 0;
-                return (
-                  <button
-                    key={lvl}
-                    type="button"
-                    onClick={() => setSelectedLevel(lvl)}
-                    className={`px-3 py-1 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer outline-none shrink-0 ${
-                      isSelected
-                        ? 'bg-amber-400/15 text-amber-300 border border-amber-400/35 font-semibold'
-                        : 'bg-white/[0.04] text-neutral-400 border border-white/[0.06] hover:bg-white/[0.08]'
-                    }`}
-                  >
-                    <span>{lvl}</span>
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded-md tabular-nums ${
-                        isSelected ? 'bg-amber-400/20 text-amber-200' : 'bg-white/5 text-neutral-500'
-                      }`}
-                    >
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
             </div>
           )}
         </div>
 
-        {/* 2. BODY: CONTEXT STORY OR BENTO MOSAIC + APPLE WORD INSPECTOR */}
+        {/* BODY: STORY READER OR CLEAN BENTO MOSAIC */}
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {isStoryOpen ? (
             <ContextStoryPanel
               story={generatedStory}
               isLoading={storyLoading}
-              sourceWords={storyWords}
               onRegenerate={handleGenerateContextStory}
               onClose={() => setIsStoryOpen(false)}
             />
           ) : (
-            <>
-              <div className="flex-1 overflow-y-auto p-4 sm:p-5 scrollbar-thin scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent">
-                {filteredWords.length === 0 ? (
-                  <div className="py-20 flex flex-col items-center justify-center gap-3 text-neutral-500">
-                    <Layers className="w-10 h-10 opacity-40 stroke-[1.2]" />
-                    <span className="text-sm">Keine Wörter gefunden</span>
-                  </div>
-                ) : viewMode === 'mosaik' ? (
-                  <div
-                    data-testid="bento-mosaik-grid"
-                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5"
-                  >
-                    {filteredWords.map((item) => renderTile(item))}
-                  </div>
-                ) : (
-                  <div data-testid="wortfamilien-view" className="space-y-6">
-                    {/* Grouped root clusters (>= 2 words sharing root) */}
-                    {groupedFamilies && groupedFamilies.families.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-neutral-500 px-1">
-                          <span>Wortfamilien ({groupedFamilies.families.length})</span>
-                          <span>Gemeinsame Stämme</span>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 scrollbar-thin scrollbar-thumb-neutral-700/50 hover:scrollbar-thumb-neutral-600 scrollbar-track-transparent">
+              {filteredWords.length === 0 ? (
+                <div className="py-20 flex flex-col items-center justify-center text-neutral-500 text-sm">
+                  Keine Wörter gefunden
+                </div>
+              ) : (
+                <div
+                  data-testid="bento-mosaik-grid"
+                  className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3"
+                >
+                  {filteredWords.map((item) => {
+                    const isSelected = inspectorItemKey === item.key;
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setInspectorItemKey(item.key)}
+                        lang="de"
+                        className={`group relative min-h-[88px] p-3.5 rounded-2xl flex flex-col justify-between text-left transition-colors duration-150 cursor-pointer active:scale-[0.98] ${
+                          TIER_TILE_CLASSES[item.tier]
+                        } ${isSelected ? 'ring-1 ring-white/40' : ''}`}
+                      >
+                        <div className="flex items-center justify-between gap-2 w-full">
+                          <span className="text-[11px] font-mono text-neutral-500">
+                            {item.level}
+                          </span>
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${TIER_DOT_CLASSES[item.tier]}`}
+                          />
                         </div>
-                        <div className="space-y-3">
-                          {groupedFamilies.families.map((family) => (
-                            <div
-                              key={family.root}
-                              data-testid="word-family-cluster"
-                              className="rounded-3xl bg-white/[0.025] border border-white/[0.08] p-3.5 sm:p-4 space-y-3"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="inline-flex items-center gap-2">
-                                  <span className="w-2 h-2 rounded-full bg-amber-400/80 shadow-[0_0_8px_rgba(251,191,36,0.5)]" />
-                                  <span className="text-xs font-semibold text-neutral-200 font-mono">
-                                    Wortstamm: -{family.root}
-                                  </span>
-                                </div>
-                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.06] text-neutral-400 border border-white/[0.06]">
-                                  {family.items.length} Wörter
-                                </span>
-                              </div>
 
-                              <div className="relative pl-3 border-l border-amber-400/25">
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-                                  {family.items.map((item) => renderTile(item))}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
+                        <div
+                          className="mt-3 w-full break-words leading-snug text-[14px] sm:text-[15px] font-medium text-neutral-100"
+                          style={{ overflowWrap: 'anywhere', hyphens: 'auto' }}
+                        >
+                          {renderDelicateWord(item.word, item.forms)}
                         </div>
-                      </div>
-                    )}
-
-                    {/* Singletons */}
-                    {groupedFamilies && groupedFamilies.singletons.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="text-[11px] font-medium uppercase tracking-wider text-neutral-500 px-1">
-                          Einzelwörter ({groupedFamilies.singletons.length})
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-                          {groupedFamilies.singletons.map((item) => renderTile(item))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Apple Word Inspector Drawer / Mobile Sheet */}
-              <WordInspector
-                item={inspectorItem}
-                onClose={() => {
-                  stopAllGermanSpeech();
-                  setInspectorItemKey(null);
-                }}
-                onQuickPractice={handleQuickPractice}
-              />
-            </>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </div>
+
+        {/* FLOATING APPLE WORD INSPECTOR OVER DIMMED MOSAIC */}
+        <WordInspector
+          item={inspectorItem}
+          onClose={() => {
+            stopAllGermanSpeech();
+            setInspectorItemKey(null);
+          }}
+          onQuickPractice={handleQuickPractice}
+        />
       </div>
     </div>,
     document.body

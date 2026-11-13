@@ -1,87 +1,134 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-function getGroqApiKeys(): string[] {
-  const sources = [
-    process.env.GROQ_API_KEYS,
-    process.env.GROQ_API_KEY,
-    process.env.GROQ_API_KEY_2,
-    process.env.NEXT_PUBLIC_GROQ_API_KEY,
-  ].filter(Boolean) as string[];
-
-  const allKeys: string[] = [];
-  for (const src of sources) {
-    const parts = src.split(',').map((k) => k.trim().replace(/^["']|["']$/g, ''));
-    for (const p of parts) {
-      if (p && p.startsWith('gsk_') && !allKeys.includes(p)) {
-        allKeys.push(p);
-      }
-    }
-  }
-  return allKeys;
-}
-
-interface InputWordItem {
+export interface ContextStoryWordItem {
   word: string;
   translation?: string;
   sentence?: string;
   level?: string;
 }
 
-function buildLocalFallbackStory(words: InputWordItem[]) {
-  const cleanWords = words
-    .map((w) => String(w.word || '').replace(/[|·•\u2506\u250A]/g, '').trim())
-    .filter(Boolean);
+export interface GeneratedStoryUsedWord {
+  lemma: string;
+  surfaceForm: string;
+  translation: string;
+}
 
-  const linesDe: string[] = [];
-  const linesRu: string[] = [];
+export interface ContextStoryResponsePayload {
+  title: string;
+  paragraphs: string[];
+  russianTranslation: string;
+  usedWords: GeneratedStoryUsedWord[];
+  source: 'ai' | 'fallback';
+}
 
-  const withExamples = words.filter((w) => w.sentence && w.sentence.trim().length > 10);
-  if (withExamples.length >= 2) {
-    withExamples.slice(0, 5).forEach((item) => {
-      const s = item.sentence!.replace(/\|/g, '').trim();
-      linesDe.push(s.endsWith('.') || s.endsWith('!') || s.endsWith('?') ? s : `${s}.`);
-      const cleanW = item.word.replace(/[|·•\u2506\u250A]/g, '').trim();
-      linesRu.push(item.translation ? `${cleanW} — ${item.translation}.` : `${cleanW}.`);
-    });
-    const remaining = cleanWords.filter(
-      (w) => !linesDe.some((line) => line.toLowerCase().includes(w.toLowerCase().split(' ').pop() || w.toLowerCase()))
-    );
-    if (remaining.length > 0) {
-      linesDe.push(`Im Alltag und im Beruf begegnen uns diese Ausdrücke täglich: ${remaining.join(', ')}.`);
-      linesRu.push(`В повседневной жизни и на работе эти выражения встречаются нам каждый день.`);
+function getGroqApiKeys(): string[] {
+  const rawKeys = process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || '';
+  const uniqueKeys: string[] = [];
+
+  for (const part of rawKeys.split(',')) {
+    const cleaned = part.trim().replace(/^["']|["']$/g, '');
+    if (cleaned && !uniqueKeys.includes(cleaned)) {
+      uniqueKeys.push(cleaned);
     }
-  } else {
-    linesDe.push(
-      `Heute im Büro in Berlin besprechen wir ein wichtiges Thema und achten besonders auf Begriffe wie ${cleanWords.slice(0, 3).join(', ')}.`
-    );
-    linesDe.push(
-      cleanWords.length > 3
-        ? `Außerdem spielen ${cleanWords.slice(3).join(' und ')} im Gespräch eine entscheidende Rolle, damit alle Details klar bleiben.`
-        : `Dadurch bleiben alle Vereinbarungen für das gesamte Team klar und verständlich.`
-    );
-    linesRu.push(
-      `Сегодня в офисе в Берлине мы обсуждаем важную тему и обращаем особое внимание на изученную лексику: ${cleanWords
-        .map((w, i) => (words[i]?.translation ? `${w} (${words[i].translation})` : w))
-        .join(', ')}.`
-    );
   }
 
+  return uniqueKeys;
+}
+
+function cleanSeparators(text: string): string {
+  return String(text || '').replace(/[|·•\u2506\u250A]/g, '').trim();
+}
+
+function buildLocalFallbackStory(words: ContextStoryWordItem[]): ContextStoryResponsePayload {
+  const usedWords: GeneratedStoryUsedWord[] = words
+    .map((item) => {
+      const clean = cleanSeparators(item.word);
+      return {
+        lemma: clean,
+        surfaceForm: clean.replace(/^(der|die|das|ein|eine)\s+/i, ''),
+        translation: item.translation || '—',
+      };
+    })
+    .filter((w) => w.lemma.length > 0);
+
+  const listPreview = usedWords.map((w) => w.surfaceForm).join(', ');
+  const firstHalf = usedWords.slice(0, Math.ceil(usedWords.length / 2)).map((w) => w.surfaceForm);
+  const secondHalf = usedWords.slice(Math.ceil(usedWords.length / 2)).map((w) => w.surfaceForm);
+
+  const paragraphs = [
+    `Am späten Nachmittag saß Lena in einem kleinen Café in Berlin-Mitte und bereitete sich auf ein wichtiges Gespräch vor. In ihren Notizen standen mehrere Ausdrücke wie ${firstHalf.join(', ')}, die sie im Alltag ständig brauchte.`,
+    secondHalf.length > 0
+      ? `Als ihr Kollege Jonas ankam, unterhielten sich beide ausführlich über ihre Pläne für den kommenden Monat. Dabei fielen ganz natürlich Begriffe wie ${secondHalf.join(', ')}, sodass die Diskussion lebendig und präzise blieb.`
+      : `Gemeinsam gingen sie alle Punkte noch einmal durch, bevor sie zufrieden aufbrachen.`,
+  ];
+
+  const russianTranslation = `Поздним вечером Лена сидела в небольшом кафе в центре Берлина и готовилась к важному разговору. В её заметках были выражения (${listPreview}), которые постоянно пригождаются в жизни и на работе. Когда пришёл её коллега Йонас, они подробно обсудили планы на следующий месяц, и дискуссия получилась живой и содержательной.`;
+
   return {
-    germanText: linesDe.join(' '),
-    russianTranslation: linesRu.join(' '),
-    usedWords: cleanWords,
-    source: 'fallback' as const,
+    title: 'Ein Nachmittag in Berlin',
+    paragraphs,
+    russianTranslation,
+    usedWords,
+    source: 'fallback',
   };
 }
 
+function normalizeUsedWords(
+  rawUsedWords: unknown,
+  inputWords: ContextStoryWordItem[]
+): GeneratedStoryUsedWord[] {
+  const inputByLower = new Map<string, { lemma: string; translation: string }>();
+  for (const w of inputWords) {
+    const clean = cleanSeparators(w.word);
+    if (clean) {
+      inputByLower.set(clean.toLowerCase(), {
+        lemma: clean,
+        translation: String(w.translation || '').trim() || '—',
+      });
+    }
+  }
+
+  const normalized: GeneratedStoryUsedWord[] = [];
+  if (Array.isArray(rawUsedWords)) {
+    for (const item of rawUsedWords) {
+      if (!item || typeof item !== 'object') continue;
+      const obj = item as Record<string, unknown>;
+      const lemma = cleanSeparators(String(obj.lemma || ''));
+      const surfaceForm = cleanSeparators(String(obj.surfaceForm || lemma));
+      const matchedInput = inputByLower.get(lemma.toLowerCase());
+      const translation =
+        String(obj.translation || '').trim() || matchedInput?.translation || '—';
+
+      if (surfaceForm) {
+        normalized.push({
+          lemma: matchedInput?.lemma || lemma || surfaceForm,
+          surfaceForm,
+          translation,
+        });
+      }
+    }
+  }
+
+  if (normalized.length > 0) return normalized;
+
+  return inputWords.map((w) => {
+    const clean = cleanSeparators(w.word);
+    return {
+      lemma: clean,
+      surfaceForm: clean.replace(/^(der|die|das|ein|eine)\s+/i, ''),
+      translation: String(w.translation || '').trim() || '—',
+    };
+  });
+}
+
 export async function POST(req: NextRequest) {
-  let parsedWords: InputWordItem[] = [];
-  let level = 'B1-B2';
+  let parsedWords: ContextStoryWordItem[] = [];
+  let level = 'B1–B2';
 
   try {
     const body = await req.json();
     if (Array.isArray(body?.words)) {
-      parsedWords = body.words.slice(0, 7);
+      parsedWords = body.words.slice(0, 10);
     }
     if (typeof body?.level === 'string' && body.level.trim() && body.level !== 'Alle') {
       level = body.level.trim();
@@ -94,112 +141,111 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Keine Wörter übergeben' }, { status: 400 });
   }
 
-  const formattedList = parsedWords
+  const formattedWordList = parsedWords
     .map((w) => {
-      const clean = String(w.word || '').replace(/[|·•\u2506\u250A]/g, '').trim();
+      const clean = cleanSeparators(w.word);
       return `- ${clean}${w.translation ? ` (${w.translation})` : ''}`;
     })
     .join('\n');
 
-  const prompt = `Du bist ein erfahrener Deutschlehrer (${level}).
-Schreibe einen kurzen, lebendigen und natürlichen deutschen Absatz oder Mini-Dialog (5 bis 7 Sätze, Niveau ${level}, realistische Alltags- oder Arbeitssituation in Deutschland).
-Du MUSST alle 5-7 folgenden Wörter sinnvoll und grammatikalisch natürlich im Text verwenden:
-${formattedList}
+  const systemPrompt = `Du bist ein erfahrener deutscher Autor für Sprachlernende auf dem Niveau B1–B2.
+Schreibe eine zusammenhängende, lebendige und realistische Kurzgeschichte oder Alltagsszene in Deutschland (150–220 Wörter, aufgeteilt in 2 bis 3 sinnvolle Absätze).
+Verwende dabei alle vorgegebenen Zielwörter natürlich und grammatikalisch korrekt im Kontext (konjugierte Verben, passende Artikel und Fälle sind erwünscht).
+Erfinde keine unzusammenhängenden Einzelsätze und liste am Ende keine Wörter auf.
 
-Antworte ausschließlich mit einem validen JSON-Objekt ohne Markdown-Blöcke in genau diesem Format:
+Antworte ausschließlich als valides JSON-Objekt mit genau dieser Struktur:
 {
-  "germanText": "Der komplette deutsche Text (5-7 Sätze) mit korrekter Rechtschreibung.",
-  "russianTranslation": "Natürliche, flüssige Übersetzung des gesamten Textes ins Russische.",
-  "usedWords": ["Liste der genau so verwendeten Zielwörter aus der Vorgabe"]
+  "title": "Kurzer passender deutscher Titel",
+  "paragraphs": ["Absatz 1...", "Absatz 2...", "Absatz 3..."],
+  "russianTranslation": "Natürliche, flüssige russische Übersetzung der gesamten Geschichte",
+  "usedWords": [
+    {
+      "lemma": "Originalwort aus der Liste",
+      "surfaceForm": "Exakte gebeugte Form, wie sie im Text vorkommt",
+      "translation": "Russische Übersetzung"
+    }
+  ]
 }`;
 
-  // 1. Try Gemini API if configured in environment
-  const geminiKey =
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
-    process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  const userPrompt = `Niveau-Fokus: ${level}
+Verwende folgende ${parsedWords.length} gelernte Zielwörter natürlich in einer einzigen zusammenhängenden Geschichte (2–3 Absätze, 150–220 Wörter):
+${formattedWordList}`;
 
-  if (geminiKey) {
-    try {
-      const geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.65,
-              responseMimeType: 'application/json',
-            },
-          }),
-        }
-      );
-      if (geminiRes.ok) {
-        const gJson = await geminiRes.json();
-        const rawText = gJson?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (rawText) {
-          const parsed = JSON.parse(rawText);
-          if (parsed?.germanText && parsed?.russianTranslation) {
-            return NextResponse.json({
-              germanText: String(parsed.germanText),
-              russianTranslation: String(parsed.russianTranslation),
-              usedWords: Array.isArray(parsed.usedWords)
-                ? parsed.usedWords.map(String)
-                : parsedWords.map((w) => w.word.replace(/[|·•\u2506\u250A]/g, '').trim()),
-              source: 'ai',
-            });
-          }
-        }
-      }
-    } catch {}
-  }
-
-  // 2. Fallback to configured project Groq API keys
-  const keys = getGroqApiKeys();
   const candidateModels = [
     'llama-3.3-70b-versatile',
     'openai/gpt-oss-120b',
-    'llama-3.1-70b-versatile',
+    'qwen/qwen3.8-27b',
     'openai/gpt-oss-20b',
   ];
 
-  for (const apiKey of keys) {
-    for (const model of candidateModels) {
-      try {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: [{ role: 'user', content: prompt }],
-            response_format: { type: 'json_object' },
-            temperature: 0.65,
-            max_tokens: 900,
-          }),
-        });
-        if (!res.ok) continue;
-        const data = await res.json();
-        const content = data?.choices?.[0]?.message?.content;
-        if (!content) continue;
-        const parsed = JSON.parse(content);
-        if (parsed?.germanText && parsed?.russianTranslation) {
-          return NextResponse.json({
-            germanText: String(parsed.germanText),
-            russianTranslation: String(parsed.russianTranslation),
-            usedWords: Array.isArray(parsed.usedWords)
-              ? parsed.usedWords.map(String)
-              : parsedWords.map((w) => w.word.replace(/[|·•\u2506\u250A]/g, '').trim()),
-            source: 'ai',
+  const apiKeys = getGroqApiKeys();
+  if (apiKeys.length > 0) {
+    const startIdx = Math.floor(Math.random() * apiKeys.length);
+
+    for (let i = 0; i < apiKeys.length; i++) {
+      const apiKey = apiKeys[(startIdx + i) % apiKeys.length];
+
+      for (const model of candidateModels) {
+        try {
+          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt },
+              ],
+              temperature: 0.7,
+              max_tokens: 2048,
+              response_format: { type: 'json_object' },
+            }),
           });
+
+          // Rate limit on key -> rotate immediately to the next API key
+          if (res.status === 429 || res.status === 401 || res.status === 403) {
+            break;
+          }
+
+          if (!res.ok) {
+            // e.g. 404 model_not_found -> try next model on the same key
+            continue;
+          }
+
+          const data = await res.json();
+          const content = data?.choices?.[0]?.message?.content;
+          if (!content || typeof content !== 'string') continue;
+
+          const parsed = JSON.parse(content);
+          const rawParagraphs: string[] = Array.isArray(parsed?.paragraphs)
+            ? parsed.paragraphs
+                .map((p: unknown) => String(p || '').trim())
+                .filter(Boolean)
+            : [];
+
+          if (
+            rawParagraphs.length > 0 &&
+            typeof parsed?.russianTranslation === 'string' &&
+            parsed.russianTranslation.trim().length > 0
+          ) {
+            const payload: ContextStoryResponsePayload = {
+              title: String(parsed.title || 'Kurzgeschichte').trim(),
+              paragraphs: rawParagraphs,
+              russianTranslation: parsed.russianTranslation.trim(),
+              usedWords: normalizeUsedWords(parsed.usedWords, parsedWords),
+              source: 'ai',
+            };
+            return NextResponse.json(payload);
+          }
+        } catch {
+          // Try next model / rotate key on network or JSON parse error
         }
-      } catch {}
+      }
     }
   }
 
-  // 3. Clean deterministic fallback assembled from user cards so UI never fails
   return NextResponse.json(buildLocalFallbackStory(parsedWords));
 }
