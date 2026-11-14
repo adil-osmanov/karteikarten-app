@@ -9,6 +9,12 @@ export interface MasteredRelativeSourceCard {
   level?: string | null;
   cefr_level?: string | null;
   interval?: number | null;
+  masteryLevel?: number | null;
+  mastery_level?: number | null;
+  forms?: string | null;
+  baseWordInfo?: string | null;
+  sentence?: string | null;
+  sentenceTranslation?: string | null;
   cardType?: string | null;
   card_type?: string | null;
   language?: string | null;
@@ -18,6 +24,9 @@ export interface MasteredRelativeItem {
   id: string;
   word: string;
   translation: string;
+  forms?: string | null;
+  sentence?: string | null;
+  sentenceTranslation?: string | null;
   level?: string | null;
   canonicalLemma: string;
   stem: string;
@@ -25,26 +34,37 @@ export interface MasteredRelativeItem {
 
 const MIN_STEM_LENGTH = 4;
 
-// Ordered longest-first so compound prefixes like "zusammen" / "zurück" / "wider" match before "zu" / "wi".
-const GERMAN_PREFIXES = [
-  'zusammen', 'zwischen', 'entgegen', 'entlang', 'entzwei', 'gegenüber', 'zurecht',
-  'zurück', 'herunter', 'herüber', 'hinaus', 'hinein', 'hinauf', 'hinab', 'hinweg',
-  'hinüber', 'vorbei', 'voraus', 'vorüber', 'vorweg', 'wieder', 'weiter', 'nieder',
-  'heraus', 'herein', 'herauf', 'herab', 'herbei', 'hervor', 'heran', 'herum',
-  'empor', 'durch', 'unter', 'hinter', 'über', 'wider', 'gegen', 'gleich', 'statt',
-  'voran', 'weiter', 'her', 'hin', 'auf', 'aus', 'bei', 'ein', 'ent', 'emp', 'ver',
-  'zer', 'miss', 'fern', 'fest', 'fort', 'frei', 'heim', 'hoch', 'teil', 'miss',
-  'los', 'mit', 'nach', 'weg', 'ab', 'an', 'be', 'er', 'ge', 'um', 'un', 'ur', 'zu',
+// Verbal & derivational prefixes ordered longest-first.
+const VERBAL_PREFIXES = [
+  'zusammen', 'entgegen', 'zurück', 'zurecht', 'herein', 'heraus', 'weiter',
+  'wieder', 'vorbei', 'voraus', 'durch', 'unter', 'wider', 'über', 'auf', 'aus',
+  'bei', 'ein', 'emp', 'ent', 'fern', 'fest', 'fort', 'her', 'hin', 'los', 'mit',
+  'nach', 'ver', 'vor', 'weg', 'zer', 'ab', 'an', 'be', 'er', 'um', 'zu',
 ];
 
-const UNIQUE_PREFIXES = Array.from(new Set(GERMAN_PREFIXES)).sort(
+const UNIQUE_PREFIXES = Array.from(new Set(VERBAL_PREFIXES)).sort(
   (a, b) => b.length - a.length
 );
 
-// Ordered longest-first; only accepted if remaining stem has length >= MIN_STEM_LENGTH.
-const GERMAN_SUFFIXES = [
-  'lichkeiten', 'lichkeit', 'schaften', 'igkeiten', 'igungen', 'ierungen',
-  'ationen', 'itionen', 'keiten', 'heiten', 'schaft', 'ungen', 'igung',
+const PREFIX_SET = new Set(UNIQUE_PREFIXES);
+
+const STRIP_WORDS = new Set([
+  'der', 'die', 'das', 'dem', 'den', 'des', 'ein', 'eine', 'einen', 'einem', 'einer', 'eines',
+  'sich', 'mich', 'dich', 'uns', 'euch', 'mir', 'dir',
+  'jemanden', 'jemandem', 'jemandes', 'jemand', 'etwas',
+  'jmdn', 'jmdm', 'jdn', 'jdm', 'jmd', 'etw',
+  'an', 'auf', 'aus', 'bei', 'durch', 'für', 'gegen', 'gegenüber', 'hinter',
+  'in', 'mit', 'nach', 'neben', 'ohne', 'über', 'um', 'unter', 'von', 'vor', 'zu', 'zwischen',
+]);
+
+const NON_VERB_EN_WORDS = new Set([
+  'offen', 'eigen', 'selten', 'trocken', 'bescheiden', 'eben', 'albern', 'nüchtern', 'schüchtern',
+]);
+
+// Ordered longest-first; umlauts ä/ö/ü are NEVER folded when stripping suffixes.
+const DERIVATIONAL_SUFFIXES = [
+  'lichkeiten', 'lichkeit', 'schaften', 'igkeiten', 'ierungen',
+  'ationen', 'itionen', 'keiten', 'heiten', 'schaft', 'ungen',
   'ieren', 'ation', 'ition', 'täten', 'mente', 'ments', 'nisse', 'liche',
   'ische', 'hafte', 'weise', 'lose', 'voll', 'chen', 'lein', 'heit', 'keit',
   'tät', 'ment', 'nis', 'ung', 'lich', 'isch', 'haft', 'bar', 'sam', 'los',
@@ -61,16 +81,18 @@ const CEFR_RANK: Record<string, number> = {
   A1: 1,
 };
 
-function foldUmlauts(value: string): string {
-  return value
-    .replace(/ä/g, 'a')
-    .replace(/ö/g, 'o')
-    .replace(/ü/g, 'u')
-    .replace(/ß/g, 'ss');
+interface ParsedGermanLexeme {
+  canonical: string;
+  headWord: string;
+  pos: 'verb' | 'noun_or_adj';
+  prefix: string | null;
+  baseVerb: string | null;
+  intactStem: string;
+  compoundStem: string;
 }
 
-function stripOneSuffix(token: string): string {
-  for (const suffix of GERMAN_SUFFIXES) {
+function stripOneSuffixExact(token: string): string {
+  for (const suffix of DERIVATIONAL_SUFFIXES) {
     if (suffix === 'n' && token.endsWith('en')) continue;
     if (suffix === 'e' && (token.endsWith('te') || token.endsWith('de'))) continue;
     if (token.endsWith(suffix)) {
@@ -83,71 +105,189 @@ function stripOneSuffix(token: string): string {
   return token;
 }
 
-function stripSeparableInfixGe(token: string): string {
+function detectLeadingPrefix(lowerHead: string, explicitSplitPrefix: string | null): string | null {
+  if (explicitSplitPrefix && PREFIX_SET.has(explicitSplitPrefix)) {
+    return explicitSplitPrefix;
+  }
   for (const prefix of UNIQUE_PREFIXES) {
-    if (token.startsWith(prefix + 'ge') && token.length - prefix.length - 2 >= MIN_STEM_LENGTH) {
-      return prefix + token.slice(prefix.length + 2);
+    if (lowerHead.startsWith(prefix)) {
+      const rest = lowerHead.slice(prefix.length);
+      if (rest.length >= MIN_STEM_LENGTH) {
+        return prefix;
+      }
     }
   }
-  return token;
+  return null;
 }
 
-function stripLeadingPrefixWithParticiple(token: string): string {
-  for (const prefix of UNIQUE_PREFIXES) {
-    if (token.startsWith(prefix)) {
-      let rest = token.slice(prefix.length);
-      // Handle Partizip II infix -ge- right after a separable prefix (e.g. "aufgeregt" -> "auf" + "ge" + "regt").
-      if (rest.startsWith('ge') && rest.length - 2 >= MIN_STEM_LENGTH) {
-        rest = rest.slice(2);
-      }
-      if (rest.length >= MIN_STEM_LENGTH) {
-        return rest;
-      }
+function parseGermanLexeme(rawWord: string): ParsedGermanLexeme | null {
+  if (!rawWord || typeof rawWord !== 'string') return null;
+
+  let cleaned = rawWord.trim();
+  if (!cleaned) return null;
+
+  // Strip trailing plural/inflection notes: "der Antrag, -¨e" -> "der Antrag"
+  cleaned = cleaned.replace(/,\s*(?:die\s+)?[-–—¨][^,]*$/i, '').trim();
+  // Strip parenthetical and bracketed notes
+  cleaned = cleaned.replace(/\(.*?\)|\[.*?\]/g, ' ').trim();
+  // Strip paired articles: "der/die Angestellte"
+  cleaned = cleaned.replace(/^(?:der|die|das)\s*\/\s*(?:der|die|das)\s+/i, '').trim();
+  // Handle separated ellipsis verbs: "schrauben ... auf" -> "aufschrauben"
+  const ellipsisMatch = cleaned.match(/^([a-zA-ZäöüÄÖÜß]+)\s*(?:\.{2,}|…+)\s*([a-zA-ZäöüÄÖÜß]+)$/);
+  if (ellipsisMatch) {
+    cleaned = `${ellipsisMatch[2]}|${ellipsisMatch[1]}`;
+  }
+
+  // Keep original casing & explicit separable marker `|` before extracting last meaningful head word.
+  const rawTokens = cleaned
+    .replace(/[.,/#!$%^&*;:{}=\-_`~?+„"«»'’]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+
+  let hadArticle = false;
+  let lastRawToken = '';
+
+  for (const tok of rawTokens) {
+    const plainLower = tok.replace(/[|·•\u2506\u250A/]+/g, '').toLowerCase();
+    if (!plainLower) continue;
+    if (/^(der|die|das|dem|den|des|ein|eine|einen|einem|einer|eines)$/.test(plainLower)) {
+      hadArticle = true;
+      continue;
+    }
+    if (STRIP_WORDS.has(plainLower)) {
+      continue;
+    }
+    if (/^[a-zäöüß|·•\u2506\u250A]+$/i.test(tok)) {
+      lastRawToken = tok;
     }
   }
-  return token;
+
+  if (!lastRawToken) return null;
+
+  let explicitPrefix: string | null = null;
+  if (/[|·•\u2506\u250A]/.test(lastRawToken)) {
+    const parts = lastRawToken.split(/[|·•\u2506\u250A]/).filter(Boolean);
+    if (parts.length >= 2) {
+      explicitPrefix = parts[0].toLowerCase();
+    }
+  }
+
+  const headRaw = lastRawToken.replace(/[|·•\u2506\u250A/]+/g, '');
+  const headLower = headRaw.toLowerCase();
+  if (headLower.length < MIN_STEM_LENGTH) return null;
+
+  const isCapitalizedNoun = hadArticle || /^[A-ZÄÖÜ]/.test(headRaw);
+  const looksLikeInfinitiveVerb =
+    !isCapitalizedNoun &&
+    !NON_VERB_EN_WORDS.has(headLower) &&
+    (headLower.endsWith('en') || headLower.endsWith('eln') || headLower.endsWith('ern'));
+
+  const pos: 'verb' | 'noun_or_adj' = looksLikeInfinitiveVerb ? 'verb' : 'noun_or_adj';
+  const prefix = detectLeadingPrefix(headLower, explicitPrefix);
+
+  let baseVerb: string | null = null;
+  if (pos === 'verb') {
+    if (prefix) {
+      const candidateBase = headLower.slice(prefix.length);
+      // Base verb must be a genuine infinitive (e.g. "halten", "brechen", "kaufen")
+      if (
+        candidateBase.length >= 5 &&
+        (candidateBase.endsWith('en') || candidateBase.endsWith('eln') || candidateBase.endsWith('ern')) &&
+        /[aeiouyäöü]/i.test(candidateBase)
+      ) {
+        baseVerb = candidateBase;
+      } else {
+        baseVerb = headLower;
+      }
+    } else {
+      baseVerb = headLower;
+    }
+  }
+
+  const intactStem = stripOneSuffixExact(headLower);
+  const canonical = normalizeCanonicalLemma(rawWord) || headLower;
+
+  return {
+    canonical,
+    headWord: headLower,
+    pos,
+    prefix,
+    baseVerb,
+    intactStem,
+    compoundStem: intactStem,
+  };
 }
 
 /**
- * Normalizes a German word (with optional article, reflexive pronoun, or `|`/`·` marker)
- * into a root stem of at least 4 characters for pure in-memory Wortfamilie matching.
+ * Extracts normalized stem (preserving German umlauts ä, ö, ü).
  */
 export function extractGermanStem(rawWord: string): string {
-  const canonical = normalizeCanonicalLemma(rawWord);
-  if (!canonical) return '';
+  const parsed = parseGermanLexeme(rawWord);
+  if (!parsed) return '';
+  return parsed.intactStem.length >= MIN_STEM_LENGTH ? parsed.intactStem : '';
+}
 
-  // Keep only alphabetic German token characters (strip residual spaces/slashes on multiword edges).
-  const firstAlpha = canonical
-    .replace(/[/·|•]+/g, '')
-    .split(/\s+/)
-    .find((t) => /^[a-zäöüß-]+$/i.test(t) && t.length >= MIN_STEM_LENGTH);
+function matchLexemesStrictly(
+  a: ParsedGermanLexeme,
+  b: ParsedGermanLexeme
+): 'verb_family' | 'direct_pair' | 'compound' | null {
+  if (a.canonical === b.canonical) return null;
 
-  if (!firstAlpha) return '';
-
-  const base = foldUmlauts(firstAlpha.toLowerCase());
-  if (base.length < MIN_STEM_LENGTH) return '';
-
-  // Try stripping one prefix (and optional -ge-) first, then suffix.
-  const afterPrefix = stripLeadingPrefixWithParticiple(base);
-  if (afterPrefix !== base) {
-    // Only commit the prefix strip if suffix stripping STILL leaves >= 4 chars
-    // (otherwise e.g. "auf|regen" -> "regen" -> "reg" (len 3) rolls back to "aufreg" so it pairs with "Aufregung").
-    const afterBoth = stripOneSuffix(afterPrefix);
-    if (afterBoth !== afterPrefix && afterBoth.length >= MIN_STEM_LENGTH) {
-      return afterBoth;
-    }
-    // Check if prefix-stripped word without further suffix stripping matches a bare root (e.g. "ab|bau" / "Un|fall").
-    // Avoid returning bare "regen" when word had derivational suffix like "-en" / "-ung" that got blocked by min-length guard.
-    const endedWithDerivationalSuffix = ['ung', 'en', 'ten', 'tet', 't', 'e'].some((sfx) =>
-      afterPrefix.endsWith(sfx)
-    );
-    if (!endedWithDerivationalSuffix && afterPrefix.length >= MIN_STEM_LENGTH) {
-      return afterPrefix;
+  // Rule A: Verb-to-Verb — both must be verbs with identical base verb after stripping optional prefixes
+  if (a.pos === 'verb' && b.pos === 'verb' && a.baseVerb && b.baseVerb) {
+    if (a.baseVerb === b.baseVerb) {
+      return 'verb_family';
     }
   }
 
-  const wholeStripped = stripOneSuffix(stripSeparableInfixGe(base));
-  return wholeStripped.length >= MIN_STEM_LENGTH ? wholeStripped : '';
+  // Hard forbid: if BOTH prefix AND part-of-speech differ (e.g. "halten" vs "nachhaltig" / "der Behälter"),
+  // never pair them in Wortfamilie.
+  if (a.prefix !== b.prefix && a.pos !== b.pos) {
+    return null;
+  }
+
+  // Rule B: Direct derivational pair without prefix change or conflict
+  if (a.prefix === b.prefix) {
+    if (
+      a.intactStem.length >= MIN_STEM_LENGTH &&
+      b.intactStem.length >= MIN_STEM_LENGTH &&
+      a.intactStem === b.intactStem
+    ) {
+      return 'direct_pair';
+    }
+
+    // Compound noun <-> root pair without prefix conflict (e.g. "planen" <-> "Personalplanung")
+    if (a.prefix === null && b.prefix === null) {
+      const shorter = a.compoundStem.length <= b.compoundStem.length ? a : b;
+      const longer = a.compoundStem.length <= b.compoundStem.length ? b : a;
+      if (
+        shorter.compoundStem.length >= MIN_STEM_LENGTH &&
+        longer.compoundStem.length >= shorter.compoundStem.length + 3 &&
+        longer.compoundStem.endsWith(shorter.compoundStem)
+      ) {
+        // Ensure compound determiner before the shared root isn't actually an unstripped prefix
+        const determiner = longer.compoundStem.slice(0, longer.compoundStem.length - shorter.compoundStem.length);
+        if (determiner.length >= 3 && !PREFIX_SET.has(determiner)) {
+          return 'compound';
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Helper shared with findGermanSynonyms to ensure Wortfamilie words never duplicate in Synonyme.
+ */
+export function areGermanRelatives(rawWordA: string, rawWordB: string): boolean {
+  const a = parseGermanLexeme(rawWordA);
+  const b = parseGermanLexeme(rawWordB);
+  if (!a || !b) return false;
+  if (a.canonical === b.canonical) return true;
+  return matchLexemesStrictly(a, b) !== null;
 }
 
 function getLevelRank(level?: string | null): number {
@@ -156,32 +296,10 @@ function getLevelRank(level?: string | null): number {
   return CEFR_RANK[normalized] || 0;
 }
 
-function matchStems(
-  stemA: string,
-  stemB: string
-): 'exact' | 'compound' | null {
-  if (!stemA || !stemB) return null;
-  if (stemA === stemB) return 'exact';
-
-  const shorter = stemA.length <= stemB.length ? stemA : stemB;
-  const longer = stemA.length <= stemB.length ? stemB : stemA;
-
-  // Allow compound noun <-> root verb pairing (e.g. "personalplan" <-> "plan"),
-  // requiring >= 3 extra prefix chars to avoid spurious 1-char diffs.
-  if (
-    shorter.length >= MIN_STEM_LENGTH &&
-    longer.length >= shorter.length + 3 &&
-    longer.endsWith(shorter)
-  ) {
-    return 'compound';
-  }
-
-  return null;
-}
-
 /**
- * Finds up to 3 same-root words from the user's already-archived (`isArchived === true`) pool.
- * Strictly zero network requests, zero synonym matching — pure in-memory stem comparison.
+ * Finds up to 3 strict same-root words from the user's already-archived (`isArchived === true`) pool.
+ * Preserves umlauts, strictly enforces Rule A (Verb-to-Verb) or Rule B (direct derivational pair),
+ * and causes zero Supabase egress.
  */
 export function findMasteredRelatives(
   currentCard: MasteredRelativeSourceCard | null | undefined,
@@ -192,15 +310,14 @@ export function findMasteredRelatives(
     return [];
   }
 
-  const currentStem = extractGermanStem(currentCard.word);
-  if (currentStem.length < MIN_STEM_LENGTH) return [];
+  const currentLexeme = parseGermanLexeme(currentCard.word);
+  if (!currentLexeme) return [];
 
-  const currentCanonical = normalizeCanonicalLemma(currentCard.word);
   const currentLang = (currentCard.language || 'de').toLowerCase();
 
   interface RankedMatch {
     item: MasteredRelativeItem;
-    matchKindRank: number; // 0 = exact stem, 1 = compound
+    matchRank: number; // 0 = verb_family, 1 = direct_pair, 2 = compound
     cefrRank: number;
     interval: number;
   }
@@ -217,15 +334,14 @@ export function findMasteredRelatives(
     const candLang = (cand.language || currentLang).toLowerCase();
     if (candLang !== currentLang) continue;
 
-    const candCanonical = normalizeCanonicalLemma(cand.word);
-    if (!candCanonical || candCanonical === currentCanonical) continue;
-    if (seenCanonical.has(candCanonical)) continue;
+    const candLexeme = parseGermanLexeme(cand.word);
+    if (!candLexeme) continue;
+    if (seenCanonical.has(candLexeme.canonical)) continue;
 
-    const candStem = extractGermanStem(cand.word);
-    const kind = matchStems(currentStem, candStem);
+    const kind = matchLexemesStrictly(currentLexeme, candLexeme);
     if (!kind) continue;
 
-    seenCanonical.add(candCanonical);
+    seenCanonical.add(candLexeme.canonical);
     const level = cand.level ?? cand.cefr_level ?? null;
 
     matches.push({
@@ -233,18 +349,21 @@ export function findMasteredRelatives(
         id: cand.id,
         word: cand.word,
         translation: cand.translation || '',
+        forms: cand.forms ?? cand.baseWordInfo ?? null,
+        sentence: cand.sentence ?? null,
+        sentenceTranslation: cand.sentenceTranslation ?? null,
         level,
-        canonicalLemma: candCanonical,
-        stem: candStem,
+        canonicalLemma: candLexeme.canonical,
+        stem: candLexeme.intactStem,
       },
-      matchKindRank: kind === 'exact' ? 0 : 1,
+      matchRank: kind === 'verb_family' ? 0 : kind === 'direct_pair' ? 1 : 2,
       cefrRank: getLevelRank(level),
       interval: typeof cand.interval === 'number' ? cand.interval : 0,
     });
   }
 
   matches.sort((a, b) => {
-    if (a.matchKindRank !== b.matchKindRank) return a.matchKindRank - b.matchKindRank;
+    if (a.matchRank !== b.matchRank) return a.matchRank - b.matchRank;
     if (a.cefrRank !== b.cefrRank) return b.cefrRank - a.cefrRank;
     return b.interval - a.interval;
   });

@@ -4559,12 +4559,16 @@ export function TrennbarDottedBar({ className }: { className?: string } = {}) {
 function collectArchivedCardsFromDecks(decks: Deck[]) {
   return decks.flatMap((d) =>
     (d.cards || [])
-      .filter((c) => Boolean(c.isArchived))
+      .filter((c) => Boolean(c.isArchived) || Number(c.masteryLevel ?? 0) > 0)
       .map((c) => ({
         id: c.id,
         word: c.targetWord || '',
         translation: c.translation || '',
-        isArchived: c.isArchived,
+        isArchived: Boolean(c.isArchived),
+        masteryLevel: Number(c.masteryLevel ?? 0),
+        forms: c.forms ?? c.baseWordInfo ?? null,
+        baseWordInfo: c.baseWordInfo ?? null,
+        sentence: c.sentence ?? null,
         level: d.level ?? null,
         interval: c.interval,
         language: d.language || 'de',
@@ -5569,7 +5573,7 @@ function RapidFlashcardMode({
 
                 <WortfamilieAnchor
                   currentCard={wortfamilieSourceCard}
-                  archivedCards={archivedCardsPool}
+                  cardsPool={archivedCardsPool}
                   visible={isFlipped}
                   cardKey={`${currentCard?.id}-${currentRound}`}
                   onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
@@ -5809,7 +5813,7 @@ function RapidFlashcardMode({
                 )}
                 <WortfamilieAnchor
                   currentCard={wortfamilieSourceCard}
-                  archivedCards={archivedCardsPool}
+                  cardsPool={archivedCardsPool}
                   visible={isAnswered}
                   cardKey={`${currentCard?.id}-${currentRound}`}
                   onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
@@ -8410,7 +8414,7 @@ function StudyCard({
             )}
             <WortfamilieAnchor
               currentCard={wortfamilieSourceCard}
-              archivedCards={archivedCardsPool}
+              cardsPool={archivedCardsPool}
               visible={isAnswered}
               cardKey={`${card.id}-${currentRound}`}
               onSpeakWord={playAudio}
