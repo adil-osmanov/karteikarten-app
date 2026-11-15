@@ -25,7 +25,7 @@ import { triggerHaptic } from "@/lib/haptics";
 import { DueCardsBadge } from "@/components/DueCardsBadge";
 import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatrixPopover";
 import { WortfamilieAnchor } from "@/components/vocabulary/WortfamilieAnchor";
-import { recordMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud, flushPendingMasteredSnapshots } from "@/hooks/useWortschatzMatrix";
+import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud, flushPendingMasteredSnapshots } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
 import { normalizeCanonicalLemma, normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
@@ -43,6 +43,7 @@ import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, de
 import { getCleanTranslation } from "@/lib/utils";
 import { normalizeStudyCardContent, resolveCloze } from "@/lib/utils/clozeResolver";
 import {
+  enqueuePendingCard,
   writeThroughCardUpdate,
   syncWithCloud,
   forcePushLocalToCloud,
@@ -2784,7 +2785,7 @@ interface DeckState {
   addDeck: (deck: Deck) => void;
   updateDeck: (deckId: string, updates: Partial<Deck>, replaceCards?: Flashcard[]) => Promise<void>;
   deleteDeck: (deckId: string) => void;
-  deleteCard?: (deckId: string, cardId: string) => void;
+  deleteCard: (deckId: string, cardId: string) => Promise<void>;
   updateCardContent: (cardId: string, updates: Partial<Flashcard>) => Promise<boolean>;
   renameDeck: (deckId: string, newName: string) => void;
   answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean, forceArchive?: boolean) => Promise<void>;
@@ -3543,35 +3544,91 @@ export const useStore = create<DeckState>()((set, get) => ({
 
   deleteCard: async (deckId: string, cardId: string) => {
     const previousDecks = get().decks;
-    const nextDecks = previousDecks.map(deck => {
-      if (deck.id !== deckId) return deck;
-      const remainingCards = deck.cards.filter(c => c.id !== cardId);
+    const targetDeck =
+      (deckId ? previousDecks.find((d) => d.id === deckId) : undefined) ||
+      previousDecks.find((d) => d.cards?.some((c) => c.id === cardId));
+    const deletedCard = targetDeck?.cards?.find((c) => c.id === cardId);
+    const targetBook = targetDeck?.bookId
+      ? get().books.find((b) => b.id === targetDeck.bookId)
+      : undefined;
+    const cardLang = normalizeLanguage(
+      targetDeck?.language || targetBook?.language || get().appLanguage || 'DE'
+    );
+    const resolvedDeckId = targetDeck?.id || deckId;
+
+    const nextDecks = previousDecks.map((deck) => {
+      const matchesDeck = deck.id === resolvedDeckId || deck.cards?.some((c) => c.id === cardId);
+      if (!matchesDeck) return deck;
+      const remainingCards = deck.cards.filter((c) => c.id !== cardId);
       return {
         ...deck,
         cards: remainingCards,
-        card_count: remainingCards.length
+        card_count: remainingCards.length,
       };
     });
     cachedAllCards = [];
     lastFetchAllCardsTime = 0;
 
     set({ decks: nextDecks });
-    await setIDBItem('app_decks', nextDecks);
-    await removeMasteredWordsByCardIds([cardId], undefined, get().appLanguage);
-    await reconcileMasteredWords(nextDecks, get().appLanguage, true);
+    await setIDBItem('app_decks', nextDecks).catch(() => {});
+
+    const deletedRawWord =
+      deletedCard?.targetWord ||
+      (deletedCard as any)?.missingWord ||
+      (deletedCard as any)?.infinitive ||
+      (deletedCard as any)?.front ||
+      '';
+    const deletedCanonicalLemma = normalizeCanonicalLemma(deletedRawWord);
+    const hasOtherArchivedSameLemma = Boolean(
+      deletedCanonicalLemma &&
+      nextDecks.some((d) => {
+        const dBook = d.bookId ? get().books.find((b) => b.id === d.bookId) : undefined;
+        const dLang = normalizeLanguage(d.language || dBook?.language || get().appLanguage || 'DE');
+        if (dLang !== cardLang) return false;
+        return d.cards?.some((c) => {
+          if (!c.isArchived) return false;
+          const cw = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+          return normalizeCanonicalLemma(cw) === deletedCanonicalLemma;
+        });
+      })
+    );
+
+    if (!hasOtherArchivedSameLemma) {
+      await removeMasteredWordsByCardIds([cardId], undefined, cardLang);
+      if (deletedCard?.isArchived && deletedRawWord) {
+        await removeMasteredLemma({ rawWord: deletedRawWord, language: cardLang });
+      }
+    }
+
     get().refreshDueCardsCount(get().appLanguage);
     broadcastStateBus('REFRESH_DUE_COUNT');
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('stats-update'));
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cardLang.toLowerCase() } }));
+      window.dispatchEvent(new Event('storage-update'));
     }
+
     try {
-      await supabase.from('cards').delete().eq('id', cardId);
+      const { error } = await supabase.from('cards').delete().eq('id', cardId);
+      if (error) {
+        console.error("Supabase Delete Card Error:", error);
+      }
     } catch (e) {
       console.error("Supabase Delete Card Error:", e);
     }
   },
   
   updateCardContent: async (cardId: string, updates: Partial<Flashcard>) => {
+    const previousDecks = get().decks;
+    const targetDeck = previousDecks.find((d) => d.cards?.some((c) => c.id === cardId));
+    const previousCard = targetDeck?.cards?.find((c) => c.id === cardId);
+    const targetBook = targetDeck?.bookId
+      ? get().books.find((b) => b.id === targetDeck.bookId)
+      : undefined;
+    const cardLang = normalizeLanguage(
+      targetDeck?.language || targetBook?.language || get().appLanguage || 'DE'
+    );
+    const nowIso = new Date().toISOString();
+
     // 1. Optimistic local state update in Zustand
     set((state) => {
       const newDecks = state.decks.map((deck) => {
@@ -3584,7 +3641,7 @@ export const useStore = create<DeckState>()((set, get) => ({
             return {
               ...c,
               ...updates,
-              updated_at: new Date().toISOString(),
+              updated_at: nowIso,
             };
           }),
         };
@@ -3594,51 +3651,128 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     // 2. Persist to local IndexedDB and clear in-memory card cache
     cachedAllCards = [];
+    lastFetchAllCardsTime = 0;
     const nextDecks = get().decks;
-    setIDBItem('app_decks', nextDecks).catch(() => {});
+    await setIDBItem('app_decks', nextDecks).catch(() => {});
 
-    // 3. Persist to Supabase cards table
-    try {
-      const payload: Record<string, any> = {
-        updated_at: new Date().toISOString(),
-      };
-      if (updates.sentence !== undefined) payload.sentence = updates.sentence;
-      if (updates.targetWord !== undefined) payload.targetWord = updates.targetWord;
-      if (updates.translation !== undefined) payload.translation = updates.translation;
-      if (updates.baseWordInfo !== undefined) payload.baseWordInfo = updates.baseWordInfo;
-      if (updates.forms !== undefined) payload.forms = updates.forms;
+    get().refreshDueCardsCount(get().appLanguage);
+    broadcastStateBus('REFRESH_DUE_COUNT');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cardLang.toLowerCase() } }));
+      window.dispatchEvent(new Event('storage-update'));
+    }
 
-      const { error } = await supabase
-        .from('cards')
-        .update(payload)
-        .eq('id', cardId);
+    // 3. Persist to Supabase cards table (zero egress: strictly NO .select())
+    const caps = await getSchemaCapabilities();
+    const payload: Record<string, any> = {};
+    if (caps.cardsUpdatedAt) payload.updated_at = nowIso;
+    if (updates.sentence !== undefined) payload.sentence = updates.sentence;
+    if (updates.targetWord !== undefined) payload.targetWord = updates.targetWord;
+    if (updates.translation !== undefined) payload.translation = updates.translation;
+    if (updates.baseWordInfo !== undefined) payload.baseWordInfo = updates.baseWordInfo;
+    if (updates.forms !== undefined) payload.forms = updates.forms;
+    if (updates.options !== undefined) payload.options = updates.options;
 
-      if (error) {
-        console.error('🚨 [CARD EDIT ERROR] Supabase update error:', error);
+    if (Object.keys(payload).length > 0) {
+      try {
+        let { error } = await supabase
+          .from('cards')
+          .update(payload)
+          .eq('id', cardId);
+
+        if (error && (error.code === '42703' || /updated_at/i.test(error.message || ''))) {
+          markSchemaCapabilityFalse('cardsUpdatedAt');
+          delete payload.updated_at;
+          if (Object.keys(payload).length > 0) {
+            const retryRes = await supabase
+              .from('cards')
+              .update(payload)
+              .eq('id', cardId);
+            error = retryRes.error;
+          } else {
+            error = null;
+          }
+        }
+
+        if (error) {
+          console.error('🚨 [CARD EDIT ERROR] Supabase update error:', error);
+          await enqueuePendingCard(cardId, payload).catch(() => {});
+          return false;
+        }
+      } catch (err) {
+        console.error('🚨 [CARD EDIT ERROR] Cloud sync failure:', err);
+        await enqueuePendingCard(cardId, payload).catch(() => {});
         return false;
       }
+    }
 
-      // Синхронизация явного уровня карточки с user_mastered_words при наличии записи
-      if (updates.level && updates.targetWord) {
-        try {
-          const lemmaKey = normalizeMasteredLemma(updates.targetWord);
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user?.id && lemmaKey) {
-            await supabase
-              .from('user_mastered_words')
-              .update({ cefr_level: updates.level })
-              .eq('user_id', user.id)
-              .eq('lemma', lemmaKey);
-          }
-        } catch {}
+    // 4. Синхронизация user_mastered_words для архивных карточек (смена леммы или уровня)
+    const prevRawWord =
+      previousCard?.targetWord ||
+      (previousCard as any)?.missingWord ||
+      (previousCard as any)?.infinitive ||
+      (previousCard as any)?.front ||
+      '';
+    const nextRawWord = updates.targetWord ?? prevRawWord;
+    const prevCanonical = normalizeCanonicalLemma(prevRawWord);
+    const nextCanonical = normalizeCanonicalLemma(nextRawWord);
+    const isArchivedCard = Boolean(updates.isArchived ?? previousCard?.isArchived);
+
+    if (isArchivedCard && prevCanonical && nextCanonical && prevCanonical !== nextCanonical) {
+      const stillHasPrevLemmaElsewhere = nextDecks.some((d) => {
+        const dBook = d.bookId ? get().books.find((b) => b.id === d.bookId) : undefined;
+        const dLang = normalizeLanguage(d.language || dBook?.language || get().appLanguage || 'DE');
+        if (dLang !== cardLang) return false;
+        return d.cards?.some((c) => {
+          if (c.id === cardId || !c.isArchived) return false;
+          const cw = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
+          return normalizeCanonicalLemma(cw) === prevCanonical;
+        });
+      });
+
+      if (!stillHasPrevLemmaElsewhere && prevRawWord) {
+        await removeMasteredLemma({ rawWord: prevRawWord, language: cardLang }).catch(() => {});
       }
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('stats-update'));
+      const mergedCard = previousCard ? { ...previousCard, ...updates } : ({ ...updates, id: cardId } as Flashcard);
+      if (
+        nextCanonical.length >= 2 &&
+        !isGrammarDeckOrBook(targetDeck, targetBook, mergedCard) &&
+        !isFunctionalParticle(nextRawWord)
+      ) {
+        const deckOrBookLevel =
+          targetDeck?.level ||
+          (targetBook?.activeLevels?.length === 1 ? targetBook.activeLevels[0] : null) ||
+          targetBook?.title ||
+          null;
+        await recordMasteredLemma({
+          rawWord: nextRawWord,
+          bookLevel: deckOrBookLevel,
+          cardLevel: (updates as any).level || (previousCard as any)?.level || null,
+          bookId: targetDeck?.bookId,
+          language: cardLang,
+          timestamp: Date.now(),
+          isReview: true,
+          first_mastered_at: previousCard?.first_mastered_at,
+          created_at: previousCard?.created_at,
+        }).catch(() => {});
       }
-    } catch (err) {
-      console.error('🚨 [CARD EDIT ERROR] Cloud sync failure:', err);
-      return false;
+    } else if (updates.level && nextRawWord) {
+      try {
+        const lemmaKey = normalizeMasteredLemma(nextRawWord);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id && lemmaKey) {
+          await supabase
+            .from('user_mastered_words')
+            .update({ cefr_level: updates.level })
+            .eq('user_id', user.id)
+            .eq('lemma', lemmaKey);
+        }
+      } catch {}
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('stats-update', { detail: { language: cardLang.toLowerCase() } }));
     }
     return true;
   },
@@ -4985,6 +5119,8 @@ function RapidFlashcardMode({
   reverse: forcedReverse,
   isReview = false,
   sessionTurn = 0,
+  onCardEdited,
+  onCardDeleted,
 }: {
   card: Flashcard;
   progress: number;
@@ -4995,6 +5131,8 @@ function RapidFlashcardMode({
   reverse?: boolean;
   isReview?: boolean;
   sessionTurn?: number;
+  onCardEdited?: (updatedCard: Flashcard) => void;
+  onCardDeleted?: (cardId: string) => Promise<void> | void;
 }) {
   const [currentCard, setCurrentCard] = useState<Flashcard>(initialCard);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -5005,9 +5143,21 @@ function RapidFlashcardMode({
 
   const handleSaveEditedCard = (updatedCard: Flashcard) => {
     setCurrentCard(updatedCard);
+    onCardEdited?.(updatedCard);
     useStore.getState().updateCardContent(updatedCard.id, updatedCard).catch(() => {});
     triggerHaptic('success');
     toast.success('Gespeichert');
+  };
+
+  const handleDeleteEditedCard = async (cardId: string) => {
+    setIsEditModalOpen(false);
+    triggerHaptic('medium');
+    toast.success('Gelöscht');
+    if (onCardDeleted) {
+      await onCardDeleted(cardId);
+    } else {
+      await useStore.getState().deleteCard((currentCard as any)?.deck_id || '', cardId);
+    }
   };
 
   const isMobile = useIsMobile();
@@ -6095,6 +6245,7 @@ function RapidFlashcardMode({
           isOpen={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
           onSave={handleSaveEditedCard}
+          onDelete={handleDeleteEditedCard}
         />
       )}
     </div>
@@ -6546,6 +6697,7 @@ function RapidSession({
       if (isReviewMode) {
         const updatedCard: Flashcard = {
           ...current.card,
+          ...liveCard,
           round: 3,
           isLegendary: false,
           isArchived: true,
@@ -6567,6 +6719,7 @@ function RapidSession({
       const demotedRound = Math.max(1, Math.min(4, demotedScore + 1));
       const updatedCard: Flashcard = {
         ...current.card,
+        ...liveCard,
         round: demotedRound,
         isLegendary: false,
         isArchived: false,
@@ -6646,6 +6799,7 @@ function RapidSession({
     const keepArchived = isReviewMode || learned || Boolean(liveCard.isArchived);
     const updatedCard: Flashcard = {
       ...current.card,
+      ...liveCard,
       round: keepFailedFlag ? Math.min(3, nextRound) : nextRound,
       isLegendary: keepFailedFlag ? false : (isReviewMode || learned),
       isArchived: keepArchived,
@@ -6730,6 +6884,42 @@ function RapidSession({
     // NO automatic timer! The user reads the word and explicitly taps «Weiter» to advance.
   }, [queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage, isDrillMode, reviewCards]);
 
+  const handleCardEdited = useCallback((updatedCard: Flashcard) => {
+    const patchCard = (c: Flashcard): Flashcard => ({
+      ...c,
+      ...updatedCard,
+      targetWord: updatedCard.targetWord,
+      translation: updatedCard.translation,
+      sentence: updatedCard.sentence,
+      forms: updatedCard.forms,
+      baseWordInfo: updatedCard.baseWordInfo,
+      updated_at: new Date().toISOString(),
+    });
+    setQueue(q => (q ? q.map(item => (item.card.id === updatedCard.id ? { ...item, card: patchCard(item.card) } : item)) : q));
+    setSessionMistakes(prev => prev.map(c => (c.id === updatedCard.id ? patchCard(c) : c)));
+  }, []);
+
+  const handleDeleteCard = useCallback(async (cardId: string) => {
+    stopAllGermanSpeech();
+    const targetItem = queue?.find(item => item.card.id === cardId);
+    const remainingQueue = queue ? queue.filter(item => item.card.id !== cardId) : [];
+    const removedSteps = targetItem ? getCardRemainingSessionSteps(targetItem.card, wordProgress[cardId]) : 0;
+
+    setQueue(remainingQueue);
+    setSessionMistakes(prev => prev.filter(c => c.id !== cardId));
+    setTotal(prev => Math.max(mastered, prev - 1));
+    setSessionTotal(prev => Math.max(mastered, prev - 1));
+    setTotalSessionSteps(prev => Math.max(0, prev - removedSteps));
+    setTurn(t => t + 1);
+
+    await useStore.getState().deleteCard(targetItem?.deckId || deckId || '', cardId);
+
+    if (remainingQueue.length === 0 && mastered === 0) {
+      flushDailyStatsToCloud(studyLanguage);
+      onBack();
+    }
+  }, [queue, wordProgress, mastered, deckId, studyLanguage, onBack]);
+
   useEffect(() => {
     return () => {
       flushDailyStatsToCloud(studyLanguage);
@@ -6806,6 +6996,8 @@ function RapidSession({
           reverse={Boolean(!isDrillMode && (reviewCards || liveCard.isArchived))}
           isReview={Boolean(!isDrillMode && (reviewCards || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
           sessionTurn={turn}
+          onCardEdited={handleCardEdited}
+          onCardDeleted={handleDeleteCard}
         />
       </div>
 
@@ -6829,6 +7021,8 @@ function RapidStudyCard({
   isReview = false,
   reverse,
   sessionTurn = 0,
+  onCardEdited,
+  onCardDeleted,
 }: {
   card: Flashcard;
   deckTitle?: string;
@@ -6837,6 +7031,8 @@ function RapidStudyCard({
   isReview?: boolean;
   reverse?: boolean;
   sessionTurn?: number;
+  onCardEdited?: (updatedCard: Flashcard) => void;
+  onCardDeleted?: (cardId: string) => Promise<void> | void;
 }) {
   const [locked, setLocked] = useState(false);
   const [stepTurn, setStepTurn] = useState(0);
@@ -6893,6 +7089,8 @@ function RapidStudyCard({
         reverse={isReverse}
         isReview={Boolean(isReview && isCardLegendary && !card.failedInSession)}
         sessionTurn={(sessionTurn ?? 0) + stepTurn}
+        onCardEdited={onCardEdited}
+        onCardDeleted={onCardDeleted}
       />
     </div>
   );
@@ -7506,6 +7704,44 @@ function StudyInterface({
     }
   }, [activeCards, decks, books, trainingMode]);
 
+  const handleCardEdited = useCallback((updatedCard: Flashcard) => {
+    const patchCard = (c: Flashcard): Flashcard => ({
+      ...c,
+      ...updatedCard,
+      targetWord: updatedCard.targetWord,
+      translation: updatedCard.translation,
+      sentence: updatedCard.sentence,
+      forms: updatedCard.forms,
+      baseWordInfo: updatedCard.baseWordInfo,
+      updated_at: new Date().toISOString(),
+    });
+    setActiveCards(prev => prev.map(item => (item.card.id === updatedCard.id ? { ...item, card: patchCard(item.card) } : item)));
+    setSessionMistakes(prev => prev.map(c => (c.id === updatedCard.id ? patchCard(c) : c)));
+  }, []);
+
+  const handleDeleteCard = useCallback(async (cardId: string) => {
+    stopAllGermanSpeech();
+    if (pendingAnswerRef.current?.cardId === cardId) {
+      pendingAnswerRef.current = null;
+    }
+    const targetItem = activeCards.find(item => item.card.id === cardId);
+    const remainingCards = activeCards.filter(item => item.card.id !== cardId);
+    const removedSteps = targetItem ? getCardRemainingSessionSteps(targetItem.card) : 0;
+
+    setActiveCards(remainingCards);
+    setSessionMistakes(prev => prev.filter(c => c.id !== cardId));
+    setInitialTotal(prev => Math.max(masteredInSession, prev - 1));
+    setTotalSessionSteps(prev => Math.max(0, prev - removedSteps));
+    setTurn(t => t + 1);
+
+    await useStore.getState().deleteCard(targetItem?.deckId || deckId || '', cardId);
+
+    if (remainingCards.length === 0 && masteredInSession === 0) {
+      flushDailyStatsToCloud(studyLanguage);
+      onBack();
+    }
+  }, [activeCards, masteredInSession, deckId, studyLanguage, onBack]);
+
   useEffect(() => {
     return () => {
       flushDailyStatsToCloud(studyLanguage);
@@ -7607,6 +7843,8 @@ function StudyInterface({
               handleSessionAnswer(correct, isHilfe);
             }}
             onNext={handleNext}
+            onCardEdited={handleCardEdited}
+            onCardDeleted={handleDeleteCard}
           />
         ) : (
           <StudyCard
@@ -7620,6 +7858,8 @@ function StudyInterface({
               handleSessionAnswer(correct, isHilfe);
             }}
             onNext={handleNext}
+            onCardEdited={handleCardEdited}
+            onCardDeleted={handleDeleteCard}
           />
         )}
       </div>
@@ -7760,6 +8000,8 @@ function StudyCard({
   isGrammar = false,
   isReview = false,
   sessionTurn = 0,
+  onCardEdited,
+  onCardDeleted,
 }: { 
   card: Flashcard, 
   deckTitle?: string,
@@ -7769,6 +8011,8 @@ function StudyCard({
   isGrammar?: boolean,
   isReview?: boolean,
   sessionTurn?: number,
+  onCardEdited?: (updatedCard: Flashcard) => void,
+  onCardDeleted?: (cardId: string) => Promise<void> | void,
 }) {
   const [card, setCard] = useState<Flashcard>(initialCard);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -7779,9 +8023,21 @@ function StudyCard({
 
   const handleSaveEditedCard = (updatedCard: Flashcard) => {
     setCard(updatedCard);
+    onCardEdited?.(updatedCard);
     useStore.getState().updateCardContent(updatedCard.id, updatedCard).catch(() => {});
     triggerHaptic('success');
     toast.success('Gespeichert');
+  };
+
+  const handleDeleteEditedCard = async (cardId: string) => {
+    setIsEditModalOpen(false);
+    triggerHaptic('medium');
+    toast.success('Gelöscht');
+    if (onCardDeleted) {
+      await onCardDeleted(cardId);
+    } else {
+      await useStore.getState().deleteCard((card as any)?.deck_id || '', cardId);
+    }
   };
 
   const [phase, setPhase] = useState<"Question" | "Answer">("Question");
@@ -8763,6 +9019,7 @@ function StudyCard({
           isOpen={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
           onSave={handleSaveEditedCard}
+          onDelete={handleDeleteEditedCard}
         />
       )}
     </>

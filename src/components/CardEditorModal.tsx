@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Pencil, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { useLockBodyScroll } from '@/hooks/useLockBodyScroll';
 import type { Flashcard } from '@/app/page';
 import type { CEFRLevel } from '@/lib/vocabulary/cefrLevelDetector';
@@ -12,6 +12,7 @@ export interface CardEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (updatedCard: Flashcard) => Promise<void> | void;
+  onDelete?: (cardId: string) => Promise<void> | void;
 }
 
 const LEVELS: CEFRLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1'];
@@ -21,6 +22,7 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  onDelete,
 }) => {
   const [sentence, setSentence] = useState(card?.sentence || '');
   const [targetWord, setTargetWord] = useState(card?.targetWord || (card as any)?.front || '');
@@ -29,12 +31,19 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
   const [forms, setForms] = useState(card?.forms || card?.hint || '');
   const [grammaticalTag, setGrammaticalTag] = useState(card?.baseWordInfo || '');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const targetInputRef = useRef<HTMLInputElement>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useLockBodyScroll(Boolean(isOpen && card));
 
   useEffect(() => {
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setConfirmDelete(false);
     if (isOpen && card) {
       setSentence(card.sentence || '');
       setTargetWord(card.targetWord || (card as any)?.front || '');
@@ -48,7 +57,35 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
         targetInputRef.current?.focus();
       }, 40);
     }
+    return () => {
+      if (deleteTimerRef.current) {
+        clearTimeout(deleteTimerRef.current);
+        deleteTimerRef.current = null;
+      }
+    };
   }, [card, isOpen]);
+
+  const handleDeleteClick = useCallback(() => {
+    if (!card || !onDelete) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => {
+        setConfirmDelete(false);
+        deleteTimerRef.current = null;
+      }, 3000);
+      return;
+    }
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setConfirmDelete(false);
+    Promise.resolve(onDelete(card.id)).catch((err) => {
+      console.error('Failed to delete card:', err);
+    });
+    onClose();
+  }, [card, onDelete, confirmDelete, onClose]);
 
   const handleSave = useCallback(() => {
     if (!card) return;
@@ -279,8 +316,24 @@ export const CardEditorModal: React.FC<CardEditorModalProps> = ({
         </div>
 
         {/* Футер действий */}
-        <div className="flex items-center justify-between pt-3 border-t border-white/5 mt-1">
-          <span className="text-[11px] text-neutral-400">⌘ + Enter zum Speichern</span>
+        <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/5 mt-1">
+          <div className="flex items-center gap-3">
+            {onDelete && (
+              <button
+                type="button"
+                onClick={handleDeleteClick}
+                className={
+                  confirmDelete
+                    ? 'bg-red-500/15 text-red-300 border border-red-500/30 px-3 py-2 rounded-xl text-xs font-medium transition cursor-pointer inline-flex items-center gap-1.5'
+                    : 'text-xs font-medium text-red-400/80 hover:text-red-400 hover:bg-red-500/10 px-3 py-2 rounded-xl transition cursor-pointer inline-flex items-center gap-1.5 border border-transparent'
+                }
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{confirmDelete ? 'Wirklich löschen?' : 'Löschen'}</span>
+              </button>
+            )}
+            <span className="hidden sm:inline text-[11px] text-neutral-400">⌘ + Enter zum Speichern</span>
+          </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
