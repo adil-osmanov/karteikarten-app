@@ -15,7 +15,6 @@ const corsHeaders: Record<string, string> = {
 let cachedServerSchema: {
   booksExclude: boolean;
   decksExclude: boolean;
-  cardsUpdatedAt: boolean;
   cardsHasMistake: boolean;
   userDailyStats: boolean;
   userMistakes: boolean;
@@ -28,10 +27,9 @@ async function detectServerSchema() {
     return cachedServerSchema;
   }
 
-  const [booksRes, decksRes, cardsUpdatedRes, cardsMistakeRes, dailyRes, mistakesRes] = await Promise.all([
+  const [booksRes, decksRes, cardsMistakeRes, dailyRes, mistakesRes] = await Promise.all([
     serverSupabase.from('books').select('exclude_from_review').limit(1),
     serverSupabase.from('decks').select('exclude_from_review').limit(1),
-    serverSupabase.from('cards').select('updated_at').limit(1),
     serverSupabase.from('cards').select('has_mistake').limit(1),
     serverSupabase.from('user_daily_stats').select('id').limit(1),
     serverSupabase.from('user_mistakes').select('id').limit(1),
@@ -40,7 +38,6 @@ async function detectServerSchema() {
   cachedServerSchema = {
     booksExclude: !booksRes.error,
     decksExclude: !decksRes.error,
-    cardsUpdatedAt: !cardsUpdatedRes.error,
     cardsHasMistake: !cardsMistakeRes.error,
     userDailyStats: !dailyRes.error,
     userMistakes: !mistakesRes.error,

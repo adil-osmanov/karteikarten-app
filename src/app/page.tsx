@@ -1543,10 +1543,9 @@ export async function syncDeckCardsOnOpen(deckId: string, force: boolean = false
   const task = (async () => {
     try {
       const caps = await getSchemaCapabilities();
-      const baseCardCols = caps.cardsHasMistake
+      const cardSelectCols = caps.cardsHasMistake
         ? 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, has_mistake'
         : 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms';
-      const cardSelectCols = caps.cardsUpdatedAt ? `${baseCardCols}, updated_at` : baseCardCols;
 
       const { data: remoteDeckCards, error } = await supabase
         .from('cards')
@@ -1843,7 +1842,6 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
     interval: nextInterval,
     repetitions: nextRepetitions,
     nextReviewDate: numericReviewDate,
-    ...(caps.cardsUpdatedAt ? { updated_at: new Date().toISOString() } : {}),
     ...(caps.cardsHasMistake && typeof validCard.has_mistake === 'boolean'
       ? { has_mistake: validCard.has_mistake }
       : {}),
@@ -1861,10 +1859,6 @@ export async function updateCardInSupabase(cardId: string, validCard: any): Prom
     .eq('id', cardId);
 
   if (error && (error.code === '42703' || error.message?.includes('does not exist'))) {
-    if (error.message?.includes('updated_at')) {
-      markSchemaCapabilityFalse('cardsUpdatedAt');
-      delete primaryPayload.updated_at;
-    }
     if (error.message?.includes('has_mistake')) {
       markSchemaCapabilityFalse('cardsHasMistake');
       delete primaryPayload.has_mistake;
@@ -2317,53 +2311,35 @@ export async function syncCardsFromSupabase(
       ? 'id, name, category, level, book_id, language, card_count, exclude_from_review, created_at'
       : 'id, name, category, level, book_id, language, card_count, created_at';
 
-    let remoteDecksRes: any;
-    let deltaResult: any;
+    const remoteDecksRes: any = prefetchedRemoteDecks
+      ? { data: prefetchedRemoteDecks }
+      : await supabase
+          .from('decks')
+          .select(deckSelectCols)
+          .order('created_at', { ascending: true });
 
-    if (caps.cardsUpdatedAt) {
-      [remoteDecksRes, deltaResult] = await Promise.all([
-        prefetchedRemoteDecks
-          ? Promise.resolve({ data: prefetchedRemoteDecks })
-          : supabase
-              .from('decks')
-              .select(deckSelectCols)
-              .order('created_at', { ascending: true }),
-        syncCardsDelta(supabase, force ? null : undefined, {
-          allowFullFallback: force,
-          hasLocalCache: baseDecks.length > 0,
-        }),
-      ]);
-    } else {
-      remoteDecksRes = prefetchedRemoteDecks
-        ? { data: prefetchedRemoteDecks }
-        : await supabase
-            .from('decks')
-            .select(deckSelectCols)
-            .order('created_at', { ascending: true });
+    const remoteList: any[] = Array.isArray(remoteDecksRes?.data) ? remoteDecksRes.data : [];
+    const existingDeckMap = new Map(baseDecks.map((d) => [d.id, d]));
+    const changedOrNewDeckIds: string[] = [];
 
-      const remoteList: any[] = Array.isArray(remoteDecksRes?.data) ? remoteDecksRes.data : [];
-      const existingDeckMap = new Map(baseDecks.map((d) => [d.id, d]));
-      const changedOrNewDeckIds: string[] = [];
-
-      for (const rd of remoteList) {
-        const existing = existingDeckMap.get(rd.id);
-        const localCount = Array.isArray(existing?.cards) ? existing!.cards.length : 0;
-        const remoteCount = typeof rd.card_count === 'number' ? rd.card_count : null;
-        if (!existing) {
-          changedOrNewDeckIds.push(rd.id);
-        } else if (localCount === 0 && (remoteCount === null || remoteCount > 0)) {
-          changedOrNewDeckIds.push(rd.id);
-        } else if (remoteCount !== null && remoteCount !== localCount) {
-          changedOrNewDeckIds.push(rd.id);
-        }
+    for (const rd of remoteList) {
+      const existing = existingDeckMap.get(rd.id);
+      const localCount = Array.isArray(existing?.cards) ? existing!.cards.length : 0;
+      const remoteCount = typeof rd.card_count === 'number' ? rd.card_count : null;
+      if (!existing) {
+        changedOrNewDeckIds.push(rd.id);
+      } else if (localCount === 0 && (remoteCount === null || remoteCount > 0)) {
+        changedOrNewDeckIds.push(rd.id);
+      } else if (remoteCount !== null && remoteCount !== localCount) {
+        changedOrNewDeckIds.push(rd.id);
       }
-
-      deltaResult = await syncCardsDelta(supabase, undefined, {
-        targetDeckIds: changedOrNewDeckIds,
-        allowFullFallback: force,
-        hasLocalCache: baseDecks.length > 0,
-      });
     }
+
+    const deltaResult: any = await syncCardsDelta(supabase, undefined, {
+      targetDeckIds: changedOrNewDeckIds,
+      allowFullFallback: force,
+      hasLocalCache: baseDecks.length > 0,
+    });
 
     if (typeof window !== 'undefined' && deltaResult?.ok) {
       try {
@@ -2543,8 +2519,6 @@ export async function syncCardsFromSupabase(
     if (cardsToPushToRemote.length > 0) {
       (async () => {
         try {
-          const caps = await getSchemaCapabilities();
-          const pushIso = new Date().toISOString();
           for (let i = 0; i < cardsToPushToRemote.length; i += 10) {
             const chunk = cardsToPushToRemote.slice(i, i + 10);
             await Promise.all(
@@ -2557,7 +2531,6 @@ export async function syncCardsFromSupabase(
                     repetitions: card.repetitions,
                     interval: card.interval,
                     nextReviewDate: card.nextReviewDate,
-                    ...(caps.cardsUpdatedAt ? { updated_at: pushIso } : {}),
                   })
                   .eq('id', card.id)
               )
@@ -3337,7 +3310,6 @@ export const useStore = create<DeckState>()((set, get) => ({
       throw new Error(`Ошибка сохранения в базу данных: ${deckError.message} (${deckError.details || ''})`);
     }
     
-    const insertTimestamp = new Date().toISOString();
     const cardsToInsert = (deck.cards || []).map(c => ({
       id: ensureUuid(c.id),
       deck_id: deckId,
@@ -3353,7 +3325,6 @@ export const useStore = create<DeckState>()((set, get) => ({
       repetitions: c.repetitions || 0,
       easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : 2.2,
       baseWordInfo: c.baseWordInfo || null,
-      updated_at: insertTimestamp
     })).filter(c => c.targetWord.length > 0);
     
     if (cardsToInsert.length > 0) {
@@ -3434,7 +3405,6 @@ export const useStore = create<DeckState>()((set, get) => ({
         console.error('[Supabase Delete Old Cards Error]:', delError);
       }
 
-      const insertTimestamp = new Date().toISOString();
       const cardsToInsert = replaceCards.map(c => ({
         id: ensureUuid(c.id),
         deck_id: validDeckId,
@@ -3450,7 +3420,6 @@ export const useStore = create<DeckState>()((set, get) => ({
         repetitions: c.repetitions || 0,
         easeFactor: typeof c.easeFactor === 'number' ? c.easeFactor : 2.2,
         baseWordInfo: c.baseWordInfo || null,
-        updated_at: insertTimestamp
       }));
 
       let { error: insertCardsError } = await supabase.from('cards').insert(cardsToInsert);
@@ -3663,9 +3632,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
 
     // 3. Persist to Supabase cards table (zero egress: strictly NO .select())
-    const caps = await getSchemaCapabilities();
     const payload: Record<string, any> = {};
-    if (caps.cardsUpdatedAt) payload.updated_at = nowIso;
     if (updates.sentence !== undefined) payload.sentence = updates.sentence;
     if (updates.targetWord !== undefined) payload.targetWord = updates.targetWord;
     if (updates.translation !== undefined) payload.translation = updates.translation;
@@ -3675,24 +3642,10 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     if (Object.keys(payload).length > 0) {
       try {
-        let { error } = await supabase
+        const { error } = await supabase
           .from('cards')
           .update(payload)
           .eq('id', cardId);
-
-        if (error && (error.code === '42703' || /updated_at/i.test(error.message || ''))) {
-          markSchemaCapabilityFalse('cardsUpdatedAt');
-          delete payload.updated_at;
-          if (Object.keys(payload).length > 0) {
-            const retryRes = await supabase
-              .from('cards')
-              .update(payload)
-              .eq('id', cardId);
-            error = retryRes.error;
-          } else {
-            error = null;
-          }
-        }
 
         if (error) {
           console.error('🚨 [CARD EDIT ERROR] Supabase update error:', error);

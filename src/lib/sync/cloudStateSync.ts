@@ -151,7 +151,7 @@ export async function flushPendingQueue(): Promise<void> {
   for (const item of queue) {
     try {
       const sanitizedPayload = { ...item.payload };
-      if (!caps.cardsUpdatedAt) delete sanitizedPayload.updated_at;
+      delete sanitizedPayload.updated_at;
       if (!caps.cardsHasMistake) delete sanitizedPayload.has_mistake;
 
       const { error } = await supabase
@@ -202,23 +202,6 @@ export function writeThroughCardUpdate(cardId: string, card: any, includeContent
       ? Math.round(rawReviewDate)
       : new Date(rawReviewDate).getTime();
 
-  const primaryPayload: Record<string, any> = {
-    masteryLevel: nextMastery,
-    isArchived: isArchived,
-    interval: nextInterval,
-    repetitions: nextRepetitions,
-    nextReviewDate: numericReviewDate,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (includeContent) {
-    if (card.sentence !== undefined) primaryPayload.sentence = card.sentence;
-    if (card.targetWord !== undefined) primaryPayload.targetWord = card.targetWord;
-    if (card.translation !== undefined) primaryPayload.translation = card.translation;
-    if (card.baseWordInfo !== undefined) primaryPayload.baseWordInfo = card.baseWordInfo;
-    if (card.forms !== undefined) primaryPayload.forms = card.forms;
-  }
-
   // Background non-blocking execution (zero delay for user UI, zero .select('*'))
   (async () => {
     const caps = await getSchemaCapabilities();
@@ -228,7 +211,6 @@ export function writeThroughCardUpdate(cardId: string, card: any, includeContent
       interval: nextInterval,
       repetitions: nextRepetitions,
       nextReviewDate: numericReviewDate,
-      ...(caps.cardsUpdatedAt ? { updated_at: primaryPayload.updated_at } : {}),
       ...(caps.cardsHasMistake && typeof card.has_mistake === 'boolean'
         ? { has_mistake: card.has_mistake }
         : {}),
@@ -255,10 +237,6 @@ export function writeThroughCardUpdate(cardId: string, card: any, includeContent
         .eq('id', cardId);
 
       if (error && (error.code === '42703' || error.message?.includes('does not exist'))) {
-        if (error.message?.includes('updated_at')) {
-          markSchemaCapabilityFalse('cardsUpdatedAt');
-          delete safePayload.updated_at;
-        }
         if (error.message?.includes('has_mistake')) {
           markSchemaCapabilityFalse('cardsHasMistake');
           delete safePayload.has_mistake;
@@ -317,7 +295,6 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
         }
       }
 
-      const caps = await getSchemaCapabilities();
       // Batch update in chunks of 50
       for (let i = 0; i < cardsToUpsert.length; i += 50) {
         const chunk = cardsToUpsert.slice(i, i + 50);
@@ -331,7 +308,6 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
                 interval: item.interval,
                 repetitions: item.repetitions,
                 nextReviewDate: item.nextReviewDate,
-                ...(caps.cardsUpdatedAt ? { updated_at: new Date().toISOString() } : {}),
               })
               .eq('id', item.id)
           )
@@ -378,7 +354,7 @@ const FULL_CARDS_FALLBACK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 export async function syncCardsDelta(
   client: typeof supabase = supabase,
-  overrideLastSync?: string | null,
+  _overrideLastSync?: string | null,
   options?: SyncCardsDeltaOptions
 ): Promise<CardsDeltaResult> {
   if (typeof window !== 'undefined' && !navigator.onLine) {
@@ -387,34 +363,21 @@ export async function syncCardsDelta(
 
   try {
     const caps = await getSchemaCapabilities();
-    const hasV2 =
-      typeof window !== 'undefined' &&
-      Boolean(localStorage.getItem(DELTA_SYNC_V2_READY_KEY));
 
-    const lastSyncAt =
-      overrideLastSync !== undefined
-        ? overrideLastSync
-        : typeof window !== 'undefined' && hasV2
-        ? localStorage.getItem(LAST_CARDS_SYNC_KEY)
-        : null;
-
-    // When DB lacks updated_at, NEVER scan all ~8,169 cards on F5/focus/startup!
+    // NEVER scan all ~8,169 cards on F5/focus/startup!
     // Only fetch explicit changed/new decks (targetDeckIds) or run full scan once per 24h / manual force.
-    if (!caps.cardsUpdatedAt) {
-      if (options?.targetDeckIds !== undefined && options.targetDeckIds.length === 0 && !options.allowFullFallback) {
-        return { cards: [], checkpointIso: null, ok: true };
-      }
+    if (options?.targetDeckIds !== undefined && options.targetDeckIds.length === 0 && !options.allowFullFallback) {
+      return { cards: [], checkpointIso: null, ok: true };
+    }
 
-      if (!options?.targetDeckIds?.length && !options?.allowFullFallback && typeof window !== 'undefined') {
-        const lastFullMs = Number(localStorage.getItem(FULL_CARDS_FALLBACK_KEY) || '0');
-        const hasCache = options?.hasLocalCache ?? lastFullMs > 0;
-        if (hasCache && lastFullMs > 0 && Date.now() - lastFullMs < FULL_CARDS_FALLBACK_COOLDOWN_MS) {
-          return { cards: [], checkpointIso: null, ok: true };
-        }
+    if (!options?.targetDeckIds?.length && !options?.allowFullFallback && typeof window !== 'undefined') {
+      const lastFullMs = Number(localStorage.getItem(FULL_CARDS_FALLBACK_KEY) || '0');
+      const hasCache = options?.hasLocalCache ?? lastFullMs > 0;
+      if (hasCache && lastFullMs > 0 && Date.now() - lastFullMs < FULL_CARDS_FALLBACK_COOLDOWN_MS) {
+        return { cards: [], checkpointIso: null, ok: true };
       }
     }
 
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
     const PAGE_SIZE = 1000;
     const allRows: any[] = [];
     const selectCols = caps.cardsHasMistake
@@ -422,7 +385,7 @@ export async function syncCardsDelta(
       : 'id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms';
 
     const targetChunks: (string[] | null)[] = [];
-    if (!caps.cardsUpdatedAt && options?.targetDeckIds && options.targetDeckIds.length > 0 && !options.allowFullFallback) {
+    if (options?.targetDeckIds && options.targetDeckIds.length > 0 && !options.allowFullFallback) {
       const CHUNK = 40;
       for (let i = 0; i < options.targetDeckIds.length; i += CHUNK) {
         targetChunks.push(options.targetDeckIds.slice(i, i + CHUNK));
@@ -434,31 +397,16 @@ export async function syncCardsDelta(
     for (const deckChunk of targetChunks) {
       let from = 0;
       while (true) {
-        let query = client.from('cards').select(caps.cardsUpdatedAt ? `${selectCols}, updated_at` : selectCols);
+        let query = client.from('cards').select(selectCols);
 
-        if (caps.cardsUpdatedAt) {
-          if (lastSyncAt) {
-            query = query.gt('updated_at', lastSyncAt);
-          } else {
-            query = query.or(
-              `masteryLevel.gt.0,isArchived.eq.true,nextReviewDate.not.is.null,updated_at.gt.${thirtyDaysAgo}`
-            );
-          }
-          query = query.order('updated_at', { ascending: true });
-        } else {
-          if (deckChunk) {
-            query = query.in('deck_id', deckChunk);
-          }
-          // Schema without updated_at: deterministic order by id (no HTTP 400!)
-          query = query.order('id', { ascending: true });
+        if (deckChunk) {
+          query = query.in('deck_id', deckChunk);
         }
+        query = query.order('id', { ascending: true });
 
         const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
 
         if (error) {
-          if (error.code === '42703' || error.message?.includes('updated_at')) {
-            markSchemaCapabilityFalse('cardsUpdatedAt');
-          }
           console.warn('[DeltaSync] Supabase delta query error:', error.message);
           return { cards: allRows, checkpointIso: null, ok: false };
         }
@@ -476,27 +424,13 @@ export async function syncCardsDelta(
     }
 
     // Track 24h timestamp if we executed a full fallback scan without deck filter
-    if (!caps.cardsUpdatedAt && typeof window !== 'undefined' && (options?.allowFullFallback || !options?.targetDeckIds?.length)) {
+    if (typeof window !== 'undefined' && (options?.allowFullFallback || !options?.targetDeckIds?.length)) {
       try {
         localStorage.setItem(FULL_CARDS_FALLBACK_KEY, String(Date.now()));
       } catch {}
     }
 
-    // Сохраняем серверную отметку времени (или slight-skew-safe baseline при 0 строках)
-    let maxRemoteIso: string | null = null;
-    let maxRemoteMs = 0;
-    for (const row of allRows) {
-      if (row?.updated_at) {
-        const ms = Date.parse(row.updated_at);
-        if (!Number.isNaN(ms) && ms > maxRemoteMs) {
-          maxRemoteMs = ms;
-          maxRemoteIso = row.updated_at;
-        }
-      }
-    }
-
-    const fallbackCheckpoint = new Date(Date.now() - 15_000).toISOString();
-    const checkpointIso = maxRemoteIso || fallbackCheckpoint;
+    const checkpointIso = new Date(Date.now() - 15_000).toISOString();
 
     if (typeof window !== 'undefined') {
       try {

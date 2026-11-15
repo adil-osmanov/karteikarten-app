@@ -1,7 +1,6 @@
 export interface SchemaCapabilities {
   booksExclude: boolean;
   decksExclude: boolean;
-  cardsUpdatedAt: boolean;
   cardsHasMistake: boolean;
   userDailyStats: boolean;
   userMistakes: boolean;
@@ -10,7 +9,6 @@ export interface SchemaCapabilities {
 const DEFAULT_CAPABILITIES: SchemaCapabilities = {
   booksExclude: false,
   decksExclude: false,
-  cardsUpdatedAt: false,
   cardsHasMistake: false,
   userDailyStats: false,
   userMistakes: false,
