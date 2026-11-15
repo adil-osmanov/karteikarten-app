@@ -9,70 +9,32 @@ import {
 } from '@/lib/utils/findMasteredRelatives';
 import { findGermanSynonyms } from '@/lib/utils/findGermanSynonyms';
 import { formatSeparableWord } from '@/lib/utils/formatSeparableWord';
-import { getCleanTranslation } from '@/lib/utils';
+import {
+  resolveGermanExample,
+  resolveWordTranslation,
+  type PillMetadataInput,
+} from '@/lib/utils/resolvePillMetadata';
 
-interface ComparisonEntry {
+interface ComparisonEntry extends PillMetadataInput {
   key: string;
-  id: string;
-  word: string;
-  translation: string;
-  forms?: string | null;
-  sentence?: string | null;
 }
 
 interface WortfamilieAnchorProps {
   currentCard: MasteredRelativeSourceCard;
   cardsPool?: MasteredRelativeSourceCard[];
   archivedCards?: MasteredRelativeSourceCard[];
+  lookupPool?: MasteredRelativeSourceCard[];
   visible: boolean;
   onSpeakWord?: (text: string) => void;
   cardKey?: string | number;
   className?: string;
 }
 
-function cleanFormsForComparison(rawForms?: string | null, translation?: string): string | null {
-  if (!rawForms || typeof rawForms !== 'string') return null;
-  let cleaned = rawForms.replace(/[|·•\u2506\u250A]/g, '').trim();
-  if (!cleaned) return null;
-  const dashSplit = cleaned.split(/\s+[—–]\s+/);
-  if (dashSplit.length >= 2) cleaned = dashSplit[0].trim();
-  cleaned = cleaned.replace(/\s+-\s+.*[а-яА-ЯёЁ].*$/u, '').trim();
-  cleaned = cleaned.replace(/\s*\([^)]*[а-яА-ЯёЁ][^)]*\)\s*$/u, '').trim();
-  if (translation) {
-    const cleanTrans = translation.trim().toLowerCase();
-    if (cleanTrans && cleaned.toLowerCase().endsWith(cleanTrans)) {
-      cleaned = cleaned.slice(0, cleaned.length - cleanTrans.length).replace(/[\s—–-]+$/, '').trim();
-    }
-  }
-  if (!cleaned || /[а-яА-ЯёЁ]/u.test(cleaned)) return null;
-  return cleaned;
-}
-
-function formatComparisonDetail(entry: ComparisonEntry | null): string | null {
-  if (!entry) return null;
-
-  if (entry.sentence) {
-    const cleanWord = entry.word
-      .replace(/[|·•\u2506\u250A]/g, '')
-      .replace(/^(der|die|das|ein|eine|sich)\s+/i, '')
-      .replace(/\b(jemanden|jemandem|jemand|etwas)\b/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    const cleanedSentence = entry.sentence
-      .replace(/[|·•\u2506\u250A]/g, '')
-      .replace(/(_{2,}|\[\s*_{2,}\s*\])/g, cleanWord)
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (cleanedSentence) return cleanedSentence;
-  }
-
-  return cleanFormsForComparison(entry.forms, entry.translation);
-}
-
 export function WortfamilieAnchor({
   currentCard,
   cardsPool,
   archivedCards = [],
+  lookupPool,
   visible,
   onSpeakWord,
   cardKey,
@@ -85,6 +47,8 @@ export function WortfamilieAnchor({
   }, [cardKey, currentCard?.id, visible]);
 
   const effectivePool = cardsPool ?? archivedCards;
+  const effectiveLookupPool = lookupPool && lookupPool.length > 0 ? lookupPool : effectivePool;
+  const currentLang = (currentCard?.language || 'de').toLowerCase();
 
   const wortfamilie = useMemo(() => {
     if (!visible) return [];
@@ -105,6 +69,8 @@ export function WortfamilieAnchor({
         translation: item.translation,
         forms: item.forms,
         sentence: item.sentence,
+        sentenceTranslation: item.sentenceTranslation,
+        language: currentLang,
       })),
       ...synonyme.map((item) => ({
         key: `synonyme:${item.id}`,
@@ -113,18 +79,25 @@ export function WortfamilieAnchor({
         translation: item.translation,
         forms: item.forms,
         sentence: item.sentence,
+        sentenceTranslation: item.sentenceTranslation,
+        language: currentLang,
       })),
     ];
-  }, [wortfamilie, synonyme]);
+  }, [wortfamilie, synonyme, currentLang]);
 
   const activeEntry = useMemo(
     () => allEntries.find((entry) => entry.key === activeKey) ?? null,
     [allEntries, activeKey]
   );
 
-  const comparisonDetail = useMemo(
-    () => formatComparisonDetail(activeEntry),
-    [activeEntry]
+  const resolvedTranslation = useMemo(
+    () => resolveWordTranslation(activeEntry, effectiveLookupPool),
+    [activeEntry, effectiveLookupPool]
+  );
+
+  const resolvedExample = useMemo(
+    () => resolveGermanExample(activeEntry, effectiveLookupPool),
+    [activeEntry, effectiveLookupPool]
   );
 
   if (!visible || (wortfamilie.length === 0 && synonyme.length === 0)) {
@@ -208,7 +181,7 @@ export function WortfamilieAnchor({
       {renderPillRow('Synonyme', 'synonyme', synonyme)}
 
       <AnimatePresence mode="wait">
-        {activeEntry && (
+        {activeEntry && (resolvedTranslation || resolvedExample) && (
           <motion.div
             key={activeEntry.key}
             initial={{ opacity: 0, y: -2 }}
@@ -216,21 +189,30 @@ export function WortfamilieAnchor({
             exit={{ opacity: 0, y: -2 }}
             transition={{ duration: 0.16, ease: 'easeOut' }}
             data-testid="wortfamilie-comparison"
-            className="mt-3 px-4 py-2.5 rounded-2xl bg-black/[0.03] dark:bg-white/[0.03] max-w-md text-center select-text"
+            className="mt-3 px-4 py-3 rounded-2xl bg-black/[0.035] dark:bg-white/[0.035] border border-black/[0.06] dark:border-white/[0.06] max-w-md w-full text-center select-text"
           >
-            <p
-              data-testid="wortfamilie-caption"
-              className="text-xs text-neutral-800 dark:text-neutral-200 leading-snug"
-            >
-              {getCleanTranslation(activeEntry.translation) || activeEntry.translation}
-            </p>
-            {comparisonDetail && (
+            {resolvedTranslation && (
               <p
-                data-testid="wortfamilie-detail"
-                className="text-[11px] text-neutral-500 italic mt-0.5 leading-snug"
+                data-testid="wortfamilie-caption"
+                className="text-[13px] font-medium text-neutral-900 dark:text-neutral-100 leading-snug"
               >
-                {comparisonDetail}
+                {resolvedTranslation}
               </p>
+            )}
+            {resolvedExample && (
+              <button
+                type="button"
+                data-testid="wortfamilie-detail"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSpeakWord?.(resolvedExample);
+                }}
+                title="Пример озвучить"
+                aria-label={`Озвучить пример: ${resolvedExample}`}
+                className="block w-full text-center text-[12px] text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 italic mt-1.5 leading-relaxed cursor-pointer transition-colors bg-transparent border-0 p-0 focus:outline-none select-text"
+              >
+                {resolvedExample}
+              </button>
             )}
           </motion.div>
         )}

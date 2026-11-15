@@ -16,6 +16,7 @@ export interface Flashcard {
   first_mastered_at?: string;
   round?: number;
   isLegendary?: boolean;
+  failedInSession?: boolean;
   mistakeCount?: number;
   linkedCardIds?: string[];
   additionalTranslations?: string[];

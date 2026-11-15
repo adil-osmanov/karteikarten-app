@@ -15,6 +15,12 @@ export interface MasteredRelativeSourceCard {
   baseWordInfo?: string | null;
   sentence?: string | null;
   sentenceTranslation?: string | null;
+  example?: string | null;
+  contextSentence?: string | null;
+  hint?: string | null;
+  explanation?: string | null;
+  trainingMode?: string | null;
+  bookCategory?: string | null;
   cardType?: string | null;
   card_type?: string | null;
   language?: string | null;

@@ -41,6 +41,7 @@ import { CategoryTabs, getTabsForLanguage, type TabConfig } from "@/components/C
 export { CategoryTabs, getTabsForLanguage, type TabConfig };
 import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, detectAndMarkSeparable } from "@/lib/utils/formatSeparableWord";
 import { getCleanTranslation } from "@/lib/utils";
+import { normalizeStudyCardContent, resolveCloze } from "@/lib/utils/clozeResolver";
 import {
   writeThroughCardUpdate,
   syncWithCloud,
@@ -1208,6 +1209,7 @@ export interface Flashcard {
   updated_at?: string;
   round?: number;
   isLegendary?: boolean;
+  failedInSession?: boolean;
   mistakeCount?: number;
   has_mistake?: boolean;
   linkedCardIds?: string[];
@@ -1656,6 +1658,10 @@ export async function fetchAllUserCards(force: boolean = false): Promise<any[]> 
 
 const EXCLUDED_BOOKS_STORAGE_KEY = 'kraft_excluded_book_ids';
 const EXCLUDED_BOOKS_TS_KEY = 'kraft_excluded_books_timestamp';
+const EXCLUDED_BOOKS_CLOUD_KEY = 'EXCLUDED_BOOKS';
+const EXCLUDED_BOOKS_FETCH_COOLDOWN_MS = 3000;
+let lastExcludedBooksFetchAt = 0;
+let inFlightExcludedBooksSync: Promise<void> | null = null;
 
 export function getLocalExcludedBookIds(): string[] {
   if (typeof window === 'undefined') return [];
@@ -1680,16 +1686,138 @@ export function setLocalExcludedBookIds(ids: string[], ts?: number): void {
   } catch {}
 }
 
+export function applyExcludedBookIds(excludedIds: string[], excludedTs?: number): boolean {
+  const uniqueIds = Array.from(new Set((excludedIds || []).filter((id) => typeof id === 'string' && id.length > 0)));
+  const prevLocal = getLocalExcludedBookIds();
+  const prevSet = new Set(prevLocal);
+  const nextSet = new Set(uniqueIds);
+  const localChanged = prevSet.size !== nextSet.size || uniqueIds.some((id) => !prevSet.has(id));
+
+  setLocalExcludedBookIds(uniqueIds, excludedTs || Date.now());
+
+  const state = useStore.getState();
+  const curBooks = state.books || [];
+  let booksChanged = false;
+  const nextBooks = curBooks.map((b) => {
+    const shouldExclude = nextSet.has(b.id);
+    if (Boolean(b.exclude_from_review) !== shouldExclude) {
+      booksChanged = true;
+      return { ...b, exclude_from_review: shouldExclude };
+    }
+    return b;
+  });
+
+  const curDecks = state.decks || [];
+  let decksChanged = false;
+  const nextDecks = curDecks.map((d) => {
+    const bId = d.bookId || (d as any).book_id;
+    const shouldExclude = bId ? nextSet.has(bId) : false;
+    if (Boolean(d.exclude_from_review) !== shouldExclude) {
+      decksChanged = true;
+      return { ...d, exclude_from_review: shouldExclude };
+    }
+    return d;
+  });
+
+  if (booksChanged) {
+    state.setBooks(nextBooks);
+    setIDBItem('app_books', nextBooks).catch(() => {});
+    safeSetStorage('cached_app_books', JSON.stringify(nextBooks));
+  }
+  if (decksChanged) {
+    useStore.setState({ decks: nextDecks });
+    setIDBItem('app_decks', nextDecks).catch(() => {});
+  }
+  if (localChanged || booksChanged || decksChanged) {
+    cachedDueCount = {};
+    cachedDueCardsFromCloud = {};
+    state.refreshDueCardsCount().catch(() => {});
+    return true;
+  }
+  return false;
+}
+
+export async function saveExcludedBooksToCloud(excludedIds: string[], excludedTs: number): Promise<boolean> {
+  const uniqueIds = Array.from(new Set(excludedIds.filter((id) => typeof id === 'string' && id.length > 0)));
+  return safeUpsertUserStats({
+    language: EXCLUDED_BOOKS_CLOUD_KEY,
+    daily_activity: { ids: uniqueIds, ts: excludedTs },
+  });
+}
+
+export function parseExcludedBooksCloudPayload(payload: any): { ids: string[]; ts: number } | null {
+  if (!payload) return null;
+  if (Array.isArray(payload)) {
+    return {
+      ids: payload.filter((id: any) => typeof id === 'string' && id.length > 0),
+      ts: Date.now(),
+    };
+  }
+  if (typeof payload === 'object') {
+    if (Array.isArray(payload.ids)) {
+      return {
+        ids: payload.ids.filter((id: any) => typeof id === 'string' && id.length > 0),
+        ts: Number(payload.ts || payload.updatedAt || 0),
+      };
+    }
+    if (Array.isArray(payload.excludedBookIds)) {
+      return {
+        ids: payload.excludedBookIds.filter((id: any) => typeof id === 'string' && id.length > 0),
+        ts: Number(payload.excludedBooksTimestamp || payload.updatedAt || 0),
+      };
+    }
+  }
+  return null;
+}
+
+export async function syncExcludedBooksFromCloud(force: boolean = false): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (!force && isAnyStudySessionActiveGlobal()) return;
+  const now = Date.now();
+  if (!force && now - lastExcludedBooksFetchAt < EXCLUDED_BOOKS_FETCH_COOLDOWN_MS) return;
+  if (inFlightExcludedBooksSync) return inFlightExcludedBooksSync;
+
+  inFlightExcludedBooksSync = (async () => {
+    lastExcludedBooksFetchAt = Date.now();
+    try {
+      const cloudPayload = await safeFetchUserStats(EXCLUDED_BOOKS_CLOUD_KEY).catch(() => null);
+      let parsed = parseExcludedBooksCloudPayload(cloudPayload);
+      if (!parsed) {
+        const legacyGlobal = await safeFetchUserStats('GLOBAL_APP_STATE').catch(() => null);
+        parsed = parseExcludedBooksCloudPayload(legacyGlobal);
+      }
+      if (!parsed) return;
+      const localTs = parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10);
+      if (parsed.ts >= localTs || localTs === 0) {
+        applyExcludedBookIds(parsed.ids, parsed.ts || Date.now());
+      }
+    } catch (e) {
+      console.warn('[Sync] Failed to sync EXCLUDED_BOOKS from cloud:', e);
+    }
+  })().finally(() => {
+    inFlightExcludedBooksSync = null;
+  });
+
+  return inFlightExcludedBooksSync;
+}
+
 export function isDeckExcludedFromReview(
   deck: Deck | { bookId?: string; book_id?: string; exclude_from_review?: boolean },
   books: BookMeta[],
   excludedBookIdsSet?: Set<string>
 ): boolean {
   if (!deck) return false;
-  if (deck.exclude_from_review) return true;
   const bId = (deck as any).bookId || (deck as any).book_id;
+  if (excludedBookIdsSet && bId) {
+    if (excludedBookIdsSet.has(bId)) return true;
+    const parent = books.find((b) => b.id === bId);
+    if (parent && typeof parent.exclude_from_review === 'boolean') {
+      return parent.exclude_from_review;
+    }
+    return false;
+  }
+  if (deck.exclude_from_review) return true;
   if (!bId) return false;
-  if (excludedBookIdsSet && excludedBookIdsSet.has(bId)) return true;
   const parent = books.find((b) => b.id === bId);
   return Boolean(parent?.exclude_from_review);
 }
@@ -1803,7 +1931,7 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
   const totalCardsInMemory = validDecks.reduce((sum, d) => sum + (Array.isArray(d.cards) ? d.cards.length : 0), 0);
 
   if (validDecks.length > 0 && totalCardsInMemory > 0) {
-    const dueList: Flashcard[] = [];
+    const dueList: { deckId: string; card: Flashcard }[] = [];
     reviewEligibleDecks.forEach(deck => {
       if (!activeDeckIds.has(deck.id)) return;
       if (bookId) {
@@ -1817,11 +1945,14 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         const cDeckId = (card as any).deck_id || (card as any).deckId || deck.id;
         if (!activeDeckIds.has(cDeckId)) return;
         if (isCardDueForReview(card)) {
-          dueList.push(card);
+          dueList.push({ deckId: deck.id, card });
         }
       });
     });
-    const count = buildDeduplicatedReviewQueue(dueList).length;
+    const count = buildDeduplicatedReviewQueue(dueList, {
+      isCloze: (item) =>
+        getCardReviewFilterMode(item.card, item.deckId, validDecks, inMemoryBooks || []) === 'cloze',
+    }).length;
     cachedDueCount[cleanLang] = count;
     return count;
   }
@@ -1854,7 +1985,8 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
   const inMemoryBooks = useStore.getState().books;
   const excludedSet = new Set(getLocalExcludedBookIds());
   inMemoryBooks.forEach((b) => {
-    if (b?.exclude_from_review) excludedSet.add(b.id);
+    if (b?.exclude_from_review === true) excludedSet.add(b.id);
+    else if (b?.exclude_from_review === false) excludedSet.delete(b.id);
   });
   const validDecks = filterValidActiveDecks(inMemoryDecks || [], inMemoryBooks || []);
   const reviewEligibleDecks = validDecks.filter(
@@ -1889,7 +2021,10 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
         }
       });
     });
-    const result = buildDeduplicatedReviewQueue(list);
+    const result = buildDeduplicatedReviewQueue(list, {
+      isCloze: (item) =>
+        getCardReviewFilterMode(item.card, item.deckId, validDecks, inMemoryBooks || []) === 'cloze',
+    });
     cachedDueCardsFromCloud[cleanLang] = result;
     return result;
   }
@@ -1906,7 +2041,7 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
   try {
     let query = supabase
       .from('cards')
-      .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, language, book_id)')
+      .select('id, deck_id, targetWord, sentence, translation, options, masteryLevel, isArchived, nextReviewDate, interval, repetitions, baseWordInfo, forms, decks!inner(id, name, category, level, language, book_id)')
       .eq('isArchived', true)
       .not('nextReviewDate', 'is', null)
       .lte('nextReviewDate', now);
@@ -1922,6 +2057,24 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       .limit(1000);
 
     if (!error && Array.isArray(data) && data.length > 0) {
+      const synthDecksMap = new Map<string, Deck>();
+      validDecks.forEach((d) => synthDecksMap.set(d.id, d));
+      data.forEach((row: any) => {
+        const dMeta = row?.decks;
+        if (dMeta?.id && !synthDecksMap.has(dMeta.id)) {
+          synthDecksMap.set(dMeta.id, {
+            id: dMeta.id,
+            name: dMeta.name || '',
+            category: dMeta.category || 'deck',
+            level: dMeta.level || 'A1',
+            bookId: dMeta.book_id,
+            language: dMeta.language || cleanLang,
+            cards: [],
+          } as Deck);
+        }
+      });
+      const resolverDecks = Array.from(synthDecksMap.values());
+
       const mapped = data
         .filter((row: any) => {
           const dId = row.deck_id || row.decks?.id;
@@ -1948,7 +2101,10 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
             forms: row.forms
           } as Flashcard
         }));
-      const result = buildDeduplicatedReviewQueue(mapped);
+      const result = buildDeduplicatedReviewQueue(mapped, {
+        isCloze: (item) =>
+          getCardReviewFilterMode(item.card, item.deckId, resolverDecks, inMemoryBooks || []) === 'cloze',
+      });
       cachedDueCardsFromCloud[cleanLang] = result;
       return result;
     }
@@ -1994,11 +2150,12 @@ export async function syncBooksFromSupabase(force: boolean = false): Promise<voi
       typeof window === 'undefined' ||
       now - Number(localStorage.getItem(LAST_APP_STATE_SYNC_KEY) || '0') >= DELTA_SYNC_COOLDOWN_MS;
 
-    const [{ data: cloudBooks, error }, globalCloudState] = await Promise.all([
+    const [{ data: cloudBooks, error }, globalCloudState, excludedCloudRaw] = await Promise.all([
       supabase.from('books').select(bookMetaCols).order('created_at', { ascending: true }),
       shouldFetchGlobalState
         ? safeFetchUserStats('GLOBAL_APP_STATE').catch(() => null)
         : Promise.resolve(null),
+      safeFetchUserStats(EXCLUDED_BOOKS_CLOUD_KEY).catch(() => null),
     ]);
 
     if (shouldFetchGlobalState && typeof window !== 'undefined') {
@@ -2007,23 +2164,30 @@ export async function syncBooksFromSupabase(force: boolean = false): Promise<voi
       } catch {}
     }
 
-    if (error || !cloudBooks || cloudBooks.length === 0) return;
+    const excludedSet = new Set(getLocalExcludedBookIds());
+    const parsedExcluded =
+      parseExcludedBooksCloudPayload(excludedCloudRaw) ||
+      parseExcludedBooksCloudPayload(globalCloudState);
+    if (parsedExcluded) {
+      const localTs = typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0;
+      if (parsedExcluded.ts >= localTs || localTs === 0) {
+        excludedSet.clear();
+        parsedExcluded.ids.forEach((id: string) => id && excludedSet.add(id));
+        setLocalExcludedBookIds(Array.from(excludedSet), parsedExcluded.ts || Date.now());
+      }
+    }
+
+    if (error || !cloudBooks || cloudBooks.length === 0) {
+      if (parsedExcluded) {
+        applyExcludedBookIds(Array.from(excludedSet), parsedExcluded.ts || Date.now());
+      }
+      return;
+    }
 
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(LAST_BOOKS_SYNC_KEY, String(Date.now()));
       } catch {}
-    }
-
-    const excludedSet = new Set(getLocalExcludedBookIds());
-    if (globalCloudState && Array.isArray(globalCloudState.excludedBookIds)) {
-      const localTs = typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0;
-      const cloudTs = globalCloudState.excludedBooksTimestamp || globalCloudState.updatedAt || 0;
-      if (cloudTs >= localTs) {
-        excludedSet.clear();
-        globalCloudState.excludedBookIds.forEach((id: string) => id && excludedSet.add(id));
-        setLocalExcludedBookIds(Array.from(excludedSet), cloudTs);
-      }
     }
 
     const localBookMap = new Map<string, BookMeta>();
@@ -2075,9 +2239,7 @@ export async function syncBooksFromSupabase(force: boolean = false): Promise<voi
         existingLocal?.coverValue ||
         dedicatedCover ||
         undefined;
-      const isExcluded = caps.booksExclude
-        ? Boolean(b.exclude_from_review) || excludedSet.has(b.id)
-        : excludedSet.has(b.id) || Boolean(b.exclude_from_review);
+      const isExcluded = excludedSet.has(b.id);
       return {
         id: b.id,
         language: b.language || existingLocal?.language || 'DE',
@@ -2210,9 +2372,11 @@ export async function syncCardsFromSupabase(
     }
 
     const excludedBookSet = new Set(getLocalExcludedBookIds());
-    currentBooks.forEach((b) => {
-      if (b?.exclude_from_review) excludedBookSet.add(b.id);
-    });
+    if (excludedBookSet.size === 0 && !localStorage.getItem(EXCLUDED_BOOKS_STORAGE_KEY)) {
+      currentBooks.forEach((b) => {
+        if (b?.exclude_from_review) excludedBookSet.add(b.id);
+      });
+    }
 
     let decksListChanged = false;
     let workingDecks: Deck[] = [...baseDecks];
@@ -2246,7 +2410,7 @@ export async function syncCardsFromSupabase(
             card_count: rd.card_count ?? 0,
             language: rd.language || 'DE',
             bookId: nextBookId,
-            exclude_from_review: Boolean(rd.exclude_from_review) || excludedBookSet.has(nextBookId),
+            exclude_from_review: excludedBookSet.has(nextBookId),
           });
           decksListChanged = true;
         } else {
@@ -2254,9 +2418,7 @@ export async function syncCardsFromSupabase(
           const nextName = rd.name || existing.name;
           const nextCategory = rd.category || existing.category;
           const nextLevel = rd.level || existing.level;
-          const nextExcluded = caps.decksExclude && typeof rd.exclude_from_review === 'boolean'
-            ? (rd.exclude_from_review || excludedBookSet.has(nextBookId))
-            : (excludedBookSet.has(nextBookId) || Boolean(existing.exclude_from_review));
+          const nextExcluded = excludedBookSet.has(nextBookId);
           if (
             nextName !== existing.name ||
             nextBookId !== existing.bookId ||
@@ -2892,32 +3054,19 @@ export const useStore = create<DeckState>()((set, get) => ({
     await setIDBItem('app_books', newBooks);
     safeSetStorage('cached_app_books', JSON.stringify(newBooks));
 
-    const caps = await getSchemaCapabilities();
     const hasExcludeUpdate = updates.exclude_from_review !== undefined;
 
     if (hasExcludeUpdate) {
-      const nextExcluded = Boolean(updates.exclude_from_review);
       const excludedIds = newBooks.filter((b) => Boolean(b.exclude_from_review)).map((b) => b.id);
       const excludedTs = Date.now();
-      setLocalExcludedBookIds(excludedIds, excludedTs);
-
-      const newDecks = previousDecks.map((d) =>
-        (d.bookId || (d as any).book_id) === bookId ? { ...d, exclude_from_review: nextExcluded } : d
-      );
-      set({ decks: newDecks });
-      await setIDBItem('app_decks', newDecks).catch(() => {});
-
-      await syncAppStateToCloud({ excludedBookIds: excludedIds, excludedBooksTimestamp: excludedTs });
+      applyExcludedBookIds(excludedIds, excludedTs);
+      await saveExcludedBooksToCloud(excludedIds, excludedTs).catch(() => {});
       await get().refreshDueCardsCount().catch(() => {});
       broadcastStateBus('REFRESH_DUE_COUNT');
-
-      if (caps.decksExclude) {
-        await supabase.from('decks').update({ exclude_from_review: nextExcluded }).eq('book_id', bookId);
-      }
     }
 
     const dbUpdates: Record<string, any> = { ...updates };
-    if (hasExcludeUpdate && !caps.booksExclude) {
+    if (hasExcludeUpdate) {
       delete dbUpdates.exclude_from_review;
     }
 
@@ -4339,6 +4488,16 @@ export function getCardTrainingMode(
 
 export type ReviewFilterMode = 'all' | 'karten' | 'flashcards' | 'cloze' | 'grammar_prep' | 'grammar_verbs' | 'grammar_nvv';
 
+export function isClozeReviewItem(
+  item: { deckId?: string; card?: Flashcard } | Flashcard,
+  decks: Deck[] = [],
+  books: BookMeta[] = []
+): boolean {
+  const card = (item as any)?.card ? (item as any).card : (item as Flashcard);
+  const deckId = (item as any)?.deckId || (card as any)?.deckId || (card as any)?.deck_id;
+  return getCardReviewFilterMode(card, deckId, decks, books) === 'cloze';
+}
+
 export function getCardReviewFilterMode(
   card?: Flashcard,
   deckId?: string,
@@ -4556,23 +4715,50 @@ export function TrennbarDottedBar({ className }: { className?: string } = {}) {
   );
 }
 
-function collectArchivedCardsFromDecks(decks: Deck[]) {
+function mapDeckCardToRelativeSource(
+  c: Flashcard,
+  d: Deck,
+  decks: Deck[],
+  books: BookMeta[],
+  bookById: Map<string, BookMeta>
+) {
+  const book = d.bookId ? bookById.get(d.bookId) : undefined;
+  return {
+    id: c.id,
+    word: c.targetWord || '',
+    translation: c.translation || '',
+    isArchived: Boolean(c.isArchived),
+    masteryLevel: Number(c.masteryLevel ?? 0),
+    forms: c.forms ?? c.baseWordInfo ?? null,
+    baseWordInfo: c.baseWordInfo ?? null,
+    sentence: c.sentence ?? null,
+    hint: c.hint ?? null,
+    explanation: c.explanation ?? null,
+    example: (c as any).example ?? null,
+    contextSentence: (c as any).contextSentence ?? null,
+    trainingMode: getCardTrainingMode(c, d.id, decks, books),
+    bookCategory: book?.category ?? d.category ?? null,
+    level: d.level ?? null,
+    interval: c.interval,
+    language: d.language || 'de',
+  };
+}
+
+function collectArchivedCardsFromDecks(decks: Deck[], books: BookMeta[] = []) {
+  const bookById = new Map(books.map((b) => [b.id, b]));
   return decks.flatMap((d) =>
     (d.cards || [])
       .filter((c) => Boolean(c.isArchived) || Number(c.masteryLevel ?? 0) > 0)
-      .map((c) => ({
-        id: c.id,
-        word: c.targetWord || '',
-        translation: c.translation || '',
-        isArchived: Boolean(c.isArchived),
-        masteryLevel: Number(c.masteryLevel ?? 0),
-        forms: c.forms ?? c.baseWordInfo ?? null,
-        baseWordInfo: c.baseWordInfo ?? null,
-        sentence: c.sentence ?? null,
-        level: d.level ?? null,
-        interval: c.interval,
-        language: d.language || 'de',
-      }))
+      .map((c) => mapDeckCardToRelativeSource(c, d, decks, books, bookById))
+  );
+}
+
+function collectLookupCardsFromDecks(decks: Deck[], books: BookMeta[] = []) {
+  const bookById = new Map(books.map((b) => [b.id, b]));
+  return decks.flatMap((d) =>
+    (d.cards || [])
+      .filter((c) => !(c as any).isDeleted)
+      .map((c) => mapDeckCardToRelativeSource(c, d, decks, books, bookById))
   );
 }
 
@@ -4759,6 +4945,30 @@ function useCardTransition() {
   };
 }
 
+function hasOpenModalOverlay(): boolean {
+  if (typeof document === 'undefined') return false;
+  return Boolean(document.querySelector('[role="dialog"], [aria-modal="true"]'));
+}
+
+function resolveCardRarityState(card: Flashcard, progress?: number, isReview?: boolean) {
+  const fallbackLevel = typeof progress === 'number' ? progress : (card?.masteryLevel ?? 0);
+  const computedRound = Math.max(1, Math.min(4, fallbackLevel + 1));
+  // Failed/surrendered review cards stay at blue round <= 3 for the rest of the session.
+  if (card?.failedInSession) {
+    return {
+      currentRound: Math.min(3, card.round ?? 3),
+      isLegendary: false,
+    };
+  }
+  const currentRound = card.round ?? (
+    card.isLegendary === false
+      ? computedRound
+      : (card.isLegendary || isReview || card?.isArchived ? 4 : computedRound)
+  );
+  const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card?.isArchived));
+  return { currentRound, isLegendary };
+}
+
 function getCardRemainingSessionSteps(card: Flashcard, fallbackMastery?: number): number {
   if (card.isLegendary || (typeof card.round === 'number' && card.round >= 4)) return 1;
   const r = card.round ?? Math.max(1, Math.min(4, (fallbackMastery ?? card.masteryLevel ?? 0) + 1));
@@ -4774,6 +4984,7 @@ function RapidFlashcardMode({
   deckTitle,
   reverse: forcedReverse,
   isReview = false,
+  sessionTurn = 0,
 }: {
   card: Flashcard;
   progress: number;
@@ -4783,6 +4994,7 @@ function RapidFlashcardMode({
   deckTitle?: string;
   reverse?: boolean;
   isReview?: boolean;
+  sessionTurn?: number;
 }) {
   const [currentCard, setCurrentCard] = useState<Flashcard>(initialCard);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -4809,12 +5021,7 @@ function RapidFlashcardMode({
   }, []);
 
   const [isFlipped, setIsFlipped] = useState(false);
-  const currentRound = currentCard.round ?? (
-    currentCard.isLegendary === false 
-      ? Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1))
-      : (currentCard.isLegendary || isReview || currentCard?.isArchived ? 4 : Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1)))
-  );
-  const isLegendary = currentCard.isLegendary ?? (currentRound === 4 && Boolean(isReview || currentCard?.isArchived));
+  const { currentRound, isLegendary } = resolveCardRarityState(currentCard, progress, isReview);
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const effectiveMastery = isLegendary ? 4 : (currentRound - 1);
@@ -4838,29 +5045,46 @@ function RapidFlashcardMode({
     handleCardEvaluation,
   } = useCardTransition();
   const decks = useStore((state) => state.decks);
-  const archivedCardsPool = useMemo(() => collectArchivedCardsFromDecks(decks), [decks]);
+  const books = useStore((state) => state.books);
+  const archivedCardsPool = useMemo(() => collectArchivedCardsFromDecks(decks, books), [decks, books]);
+  const lookupCardsPool = useMemo(() => collectLookupCardsFromDecks(decks, books), [decks, books]);
+  const normalizedFields = useMemo(
+    () => normalizeStudyCardContent(currentCard || {}),
+    [currentCard]
+  );
+  const safePromptTranslation = useMemo(() => {
+    const rawPrompt = normalizedFields.translation || '';
+    if (
+      rawPrompt &&
+      !/[а-яА-ЯёЁ]/.test(rawPrompt) &&
+      /[a-zA-ZäöüÄÖÜß]/.test(rawPrompt) &&
+      !/[а-яА-ЯёЁ]/.test(currentCard?.targetWord || '')
+    ) {
+      const masked = resolveCloze(rawPrompt, currentCard?.targetWord || '', currentCard?.forms);
+      if (masked.hasMask) {
+        return `${masked.parts[0]}___${masked.parts[1]}`;
+      }
+    }
+    return rawPrompt;
+  }, [normalizedFields.translation, currentCard?.targetWord, currentCard?.forms]);
   const wortfamilieSourceCard = useMemo(
     () => ({
       id: currentCard?.id || '',
       word: currentCard?.targetWord || '',
-      translation: currentCard?.translation || currentCard?.hint || '',
+      translation: normalizedFields.translation,
       level: (currentCard as { level?: string } | undefined)?.level ?? null,
       language: (currentCard as { language?: string } | undefined)?.language ?? 'de',
     }),
-    [currentCard]
+    [currentCard, normalizedFields.translation]
   );
   const hintPenaltySentRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const weiterButtonRef = useRef<HTMLButtonElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 7. Сброс стейта строго при смене карточки (без ложного срабатывания от промежуточного обновления progress)
   useEffect(() => {
-    const round = currentCard.round ?? (
-      currentCard.isLegendary === false 
-        ? Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1))
-        : (currentCard.isLegendary || isReview || currentCard?.isArchived ? 4 : Math.max(1, Math.min(4, (typeof progress === 'number' ? progress : (currentCard?.masteryLevel ?? 0)) + 1)))
-    );
-    const isLeg = currentCard.isLegendary ?? (round === 4 && Boolean(isReview || currentCard?.isArchived));
+    const { currentRound: round, isLegendary: isLeg } = resolveCardRarityState(currentCard, progress, isReview);
     const mastery = isLeg ? 4 : (round - 1);
     setVisualRound(round);
     setIsLegendaryVisual(isLeg);
@@ -4890,7 +5114,7 @@ function RapidFlashcardMode({
       if (raf2) cancelAnimationFrame(raf2);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCard?.id, currentCard?.round, currentCard?.isLegendary]);
+  }, [currentCard?.id, sessionTurn]);
 
   // Парсинг целевой конструкции (управление, отделяемая приставка, артикль)
   const parsedTarget = useMemo(() => {
@@ -4992,14 +5216,14 @@ function RapidFlashcardMode({
   }, [currentCard]);
 
   const displaySentence = useMemo(() => {
-    const s = currentCard?.sentence;
+    const s = normalizedFields.sentence;
     if (!s || s === '-' || s === 'VERB_DRILL') return null;
     if (s.includes('___')) {
       const fillWord = (wordOnly || currentCard?.targetWord || '').replace(/[|·\u2506\u250A]/g, '').trim();
       return s.replace(/___+/g, fillWord).trim();
     }
     return s.trim();
-  }, [currentCard?.sentence, currentCard?.targetWord, wordOnly]);
+  }, [normalizedFields.sentence, currentCard?.targetWord, wordOnly]);
 
   const playCardAudio = useCallback((word?: string) => {
     const textToSpeak = (word || speechText || '').replace(/[|·\u2506\u250A]/g, '').trim();
@@ -5079,18 +5303,23 @@ function RapidFlashcardMode({
     setIsErrorMismatch(false);
     setIsShaking(false);
 
-    // Мгновенное повышение ранга прямо на глазах (live upgrade)
-    const nextRound = visualRound + 1;
-    setVisualRound(nextRound);
-    if (visualRound >= 4 || isLegendaryVisual) {
-      setIsLegendaryVisual(true);
+    // Мгновенное повышение ранга прямо на глазах (для проваленной в сессии карточки держим синий статус до конца сессии)
+    if (currentCard?.failedInSession) {
+      setVisualRound(prev => Math.min(3, prev || 3));
+      setIsLegendaryVisual(false);
+    } else {
+      const nextRound = visualRound + 1;
+      setVisualRound(nextRound);
+      if (visualRound >= 4 || isLegendaryVisual) {
+        setIsLegendaryVisual(true);
+      }
     }
 
-    // Никаких авто-таймеров перехода! Карточка ждет нажатия «Weiter» или Enter.
+    // Никаких авто-таймеров перехода! Карточка ждет нажатия «Weiter» или Enter (после проверки ответа).
     playSafeAudio(() => playSuccessSound());
     playSafeAudio(() => playCardAudio(currentCard?.targetWord));
     triggerHaptic('success');
-  }, [isAnswered, visualRound, isLegendaryVisual, playCardAudio, currentCard?.targetWord]);
+  }, [isAnswered, visualRound, isLegendaryVisual, playCardAudio, currentCard?.targetWord, currentCard?.failedInSession]);
 
   // ЭТАП 1: Фиксация ошибки на текущей карточке (с немедленной записью в статистику)
   const handleMistakeOrGiveUp = useCallback(() => {
@@ -5274,18 +5503,6 @@ function RapidFlashcardMode({
     }
   };
 
-  const handleEnterSubmit = useCallback(() => {
-    if (locked || isAnswered) return;
-    const { isMatch } = checkTargetMatch(typedValue);
-
-    if (isMatch) {
-      handleSuccessAnswer();
-    } else {
-      // При неверном вводе или нажатии Enter на пустом поле показываем правильный ответ
-      handleMistakeOrGiveUp();
-    }
-  }, [locked, isAnswered, typedValue, checkTargetMatch, handleSuccessAnswer, handleMistakeOrGiveUp]);
-
   // Клик по карточке на раундах 1-2: бесконечный флип лица и оборота туда-обратно (без переключения карточки)
   const handleCardClick = useCallback(() => {
     if (isRound1or2) {
@@ -5297,22 +5514,24 @@ function RapidFlashcardMode({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Игнорируем нажатия, если открыты модалки редактирования или идет фаза перехода
-      if (isEditModalOpen || isTransitioning || isTransitionBusy) return;
+      if (isEditModalOpen || isTransitioning || isTransitionBusy || hasOpenModalOverlay()) return;
 
       // РЕЖИМ 1: Раунды 3-4 (Active Recall / Текстовый ввод)
       if (!isRound1or2) {
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' || e.code === 'Enter') {
           e.preventDefault();
-          if (isAnswered) {
+          if (e.repeat) return;
+          // Enter срабатывает ТОЛЬКО когда ответ уже проверен и активна кнопка Weiter
+          if (isAnswered && weiterButtonRef.current && !weiterButtonRef.current.disabled) {
             handleProceedNext();
-          } else {
-            handleEnterSubmit();
           }
           return;
         }
         if (isAnswered && (e.code === 'Space' || e.key === ' ')) {
           e.preventDefault();
-          handleProceedNext();
+          if (!e.repeat && weiterButtonRef.current && !weiterButtonRef.current.disabled) {
+            handleProceedNext();
+          }
           return;
         }
         if (isAnswered && (e.code === 'KeyR' || e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К')) {
@@ -5336,10 +5555,14 @@ function RapidFlashcardMode({
       }
 
       // РЕЖИМ 2: Раунды 1-2 (Флип-карты)
-      // 1. ПОВЕДЕНИЕ ENTER И ПРОБЕЛА: ВСЕГДА циклично переворачивает карточку (Toggle Flip)
-      if (e.code === 'Enter' || e.key === 'Enter' || e.code === 'Space' || e.key === ' ') {
+      // Space циклично переворачивает карточку; Enter здесь отключен (действует только для Weiter)
+      if (e.code === 'Space' || e.key === ' ') {
         e.preventDefault();
         setIsFlipped(prev => !prev);
+        return;
+      }
+      if (e.key === 'Enter' || e.code === 'Enter') {
+        e.preventDefault();
         return;
       }
 
@@ -5388,9 +5611,9 @@ function RapidFlashcardMode({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditModalOpen, isTransitioning, isTransitionBusy, isRound1or2, isFlipped, isAnswered, locked, isMobile, typedValue, handleInputChange, handleProceedNext, handleEnterSubmit, handleRateCard, playCardAudio, currentCard?.targetWord]);
+  }, [isEditModalOpen, isTransitioning, isTransitionBusy, isRound1or2, isFlipped, isAnswered, locked, isMobile, typedValue, handleInputChange, handleProceedNext, handleRateCard, playCardAudio, currentCard?.targetWord]);
 
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered && !currentCard?.failedInSession;
 
   return (
     <div 
@@ -5557,7 +5780,7 @@ function RapidFlashcardMode({
                 )}
               >
                 <p className="text-lg sm:text-xl md:text-2xl font-medium text-neutral-800 dark:text-neutral-200">
-                  {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
+                  {getCleanTranslation(normalizedFields.translation)}
                 </p>
 
                 {/* Чистая цитата примера */}
@@ -5574,6 +5797,7 @@ function RapidFlashcardMode({
                 <WortfamilieAnchor
                   currentCard={wortfamilieSourceCard}
                   cardsPool={archivedCardsPool}
+                  lookupPool={lookupCardsPool}
                   visible={isFlipped}
                   cardKey={`${currentCard?.id}-${currentRound}`}
                   onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
@@ -5690,7 +5914,7 @@ function RapidFlashcardMode({
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
             <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-white mb-4 sm:mb-6 max-w-2xl leading-tight">
-              {getCleanTranslation(currentCard?.translation || currentCard?.hint)}
+              {getCleanTranslation(safePromptTranslation)}
             </h2>
 
             {(() => {
@@ -5756,6 +5980,14 @@ function RapidFlashcardMode({
                             type="text"
                             value={typedValue}
                             onChange={(e) => !isMobile && handleInputChange(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.code === 'Enter') {
+                                e.preventDefault();
+                                if (!isAnswered) {
+                                  e.stopPropagation();
+                                }
+                              }
+                            }}
                             readOnly={isMobile || isAnswered}
                             disabled={isAnswered}
                             inputMode={isMobile ? "none" : undefined}
@@ -5814,6 +6046,7 @@ function RapidFlashcardMode({
                 <WortfamilieAnchor
                   currentCard={wortfamilieSourceCard}
                   cardsPool={archivedCardsPool}
+                  lookupPool={lookupCardsPool}
                   visible={isAnswered}
                   cardKey={`${currentCard?.id}-${currentRound}`}
                   onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
@@ -5826,6 +6059,7 @@ function RapidFlashcardMode({
           <div className="w-full flex justify-center mt-4 sm:mt-6 min-h-[44px] sm:min-h-[56px]">
             {isAnswered && (
               <button
+                ref={weiterButtonRef}
                 type="button"
                 onClick={handleProceedNext}
                 className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-sm shadow-lg shadow-blue-600/30 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center"
@@ -6115,7 +6349,10 @@ function RapidSession({
         }
       };
     });
-    const uniqueList = deduplicateCardsByLemma(list, false);
+    const storeState = useStore.getState();
+    const uniqueList = deduplicateCardsByLemma(list, false, {
+      isCloze: (item) => isClozeReviewItem(item, storeState.decks, storeState.books),
+    });
     const ordered = [...uniqueList].sort(() => Math.random() - 0.5);
     setQueue(ordered);
     setTotal(uniqueList.length);
@@ -6140,7 +6377,10 @@ function RapidSession({
         translation: c.translation || c.hint || ''
       }
     }));
-    const uniqueList = deduplicateCardsByLemma(list, false);
+    const storeState = useStore.getState();
+    const uniqueList = deduplicateCardsByLemma(list, false, {
+      isCloze: (item) => isClozeReviewItem(item, storeState.decks, storeState.books),
+    });
     const ordered = [...uniqueList].sort(() => Math.random() - 0.5);
     setQueue(ordered);
     setTotal(uniqueList.length);
@@ -6173,8 +6413,13 @@ function RapidSession({
     let list: { deckId: string, card: Flashcard }[] = [];
     if (reviewCards) {
       const isDrill = isDrillMode;
-      // Сессия повторений: строгая дедупликация по каноническому корню и перемешивание при старте
-      const uniqueReview = shuffleArray(buildDeduplicatedReviewQueue([...reviewCards]));
+      // Сессия повторений: дедупликация с сохранением валентности и разделением Karten / Lücken
+      const storeState = useStore.getState();
+      const uniqueReview = shuffleArray(
+        buildDeduplicatedReviewQueue([...reviewCards], {
+          isCloze: (item) => isClozeReviewItem(item, storeState.decks, storeState.books),
+        })
+      );
       list = uniqueReview.map(item => {
         const initialRound = isDrill
           ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
@@ -6301,10 +6546,11 @@ function RapidSession({
       if (isReviewMode) {
         const updatedCard: Flashcard = {
           ...current.card,
-          round: 4,
-          isLegendary: true,
+          round: 3,
+          isLegendary: false,
           isArchived: true,
-          masteryLevel: Math.max(4, current.card.masteryLevel ?? 4),
+          failedInSession: true,
+          masteryLevel: 2,
           updated_at: new Date().toISOString(),
           mistakeCount: ((current.card as any).mistakeCount || 0) + 1
         };
@@ -6394,19 +6640,22 @@ function RapidSession({
     );
 
     // 1) СРАЗУ синхронно создаем иммутабельный updatedCard и обновляем очередь сессии
-    const nextRound = isReviewMode ? 4 : (learned ? 4 : Math.max(1, Math.min(4, newScore + 1)));
+    const isReviewFailedRetry = Boolean(isReviewMode && !correct);
+    const keepFailedFlag = Boolean(isReviewFailedRetry || current.card.failedInSession);
+    const nextRound = isReviewMode ? (isReviewFailedRetry ? 3 : 4) : (learned ? 4 : Math.max(1, Math.min(4, newScore + 1)));
     const keepArchived = isReviewMode || learned || Boolean(liveCard.isArchived);
     const updatedCard: Flashcard = {
       ...current.card,
-      round: nextRound,
-      isLegendary: isReviewMode || learned,
+      round: keepFailedFlag ? Math.min(3, nextRound) : nextRound,
+      isLegendary: keepFailedFlag ? false : (isReviewMode || learned),
       isArchived: keepArchived,
-      masteryLevel: Math.min(4, newScore),
+      failedInSession: keepFailedFlag || undefined,
+      masteryLevel: isReviewFailedRetry ? 2 : Math.min(4, newScore),
       repetitions: (current.card.repetitions || 0) + (correct ? 1 : 0),
       updated_at: new Date().toISOString(),
       mistakeCount: correct ? (current.card as any).mistakeCount : (((current.card as any).mistakeCount || 0) + 1)
     };
-    if (isReviewMode && !correct) {
+    if (isReviewFailedRetry || isReviewRetry) {
       (updatedCard as any)._isReviewRetry = true;
     }
 
@@ -6511,14 +6760,16 @@ function RapidSession({
 
   const current = queue[0];
   const storeCard = decks.find(d => d.id === current.deckId)?.cards.find(c => c.id === current.card.id);
+  const isFailedInSession = Boolean(current.card.failedInSession);
   const liveCard = storeCard
     ? {
         ...current.card,
         ...storeCard,
-        round: current.card.round,
-        isLegendary: current.card.isLegendary,
+        round: isFailedInSession ? Math.min(3, current.card.round ?? 3) : current.card.round,
+        isLegendary: isFailedInSession ? false : current.card.isLegendary,
+        failedInSession: isFailedInSession || undefined,
         mistakeCount: (current.card as any).mistakeCount,
-        masteryLevel: current.card.masteryLevel ?? storeCard.masteryLevel
+        masteryLevel: isFailedInSession ? (current.card.masteryLevel ?? 2) : (current.card.masteryLevel ?? storeCard.masteryLevel)
       }
     : current.card;
 
@@ -6553,7 +6804,8 @@ function RapidSession({
           onAnswer={handleAnswer}
           onHintPenalty={handleHintPenalty}
           reverse={Boolean(!isDrillMode && (reviewCards || liveCard.isArchived))}
-          isReview={Boolean(!isDrillMode && (reviewCards || liveCard.isArchived) && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+          isReview={Boolean(!isDrillMode && (reviewCards || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+          sessionTurn={turn}
         />
       </div>
 
@@ -6575,7 +6827,8 @@ function RapidStudyCard({
   onAnswer,
   onNext,
   isReview = false,
-  reverse
+  reverse,
+  sessionTurn = 0,
 }: {
   card: Flashcard;
   deckTitle?: string;
@@ -6583,6 +6836,7 @@ function RapidStudyCard({
   onNext: () => void;
   isReview?: boolean;
   reverse?: boolean;
+  sessionTurn?: number;
 }) {
   const [locked, setLocked] = useState(false);
   const [stepTurn, setStepTurn] = useState(0);
@@ -6591,7 +6845,7 @@ function RapidStudyCard({
 
   useEffect(() => {
     penaltyReportedRef.current = false;
-  }, [card.id]);
+  }, [card.id, sessionTurn]);
 
   useEffect(() => {
     getRapidSounds();
@@ -6600,12 +6854,7 @@ function RapidStudyCard({
     };
   }, []);
 
-  const currentRound = card.round ?? (
-    card.isLegendary === false 
-      ? Math.max(1, Math.min(4, (card.masteryLevel || 0) + 1))
-      : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel || 0) + 1)))
-  );
-  const isCardLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
+  const { currentRound, isLegendary: isCardLegendary } = resolveCardRarityState(card, undefined, isReview);
   const progress = isCardLegendary ? 4 : (currentRound - 1);
 
   const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = false, isSurrendered: boolean = false) => {
@@ -6642,7 +6891,8 @@ function RapidStudyCard({
         onHintPenalty={handleHintPenalty}
         deckTitle={deckTitle}
         reverse={isReverse}
-        isReview={Boolean(isReview && isCardLegendary)}
+        isReview={Boolean(isReview && isCardLegendary && !card.failedInSession)}
+        sessionTurn={(sessionTurn ?? 0) + stepTurn}
       />
     </div>
   );
@@ -6705,8 +6955,12 @@ function StudyInterface({
   
   const [activeCards, setActiveCards] = useState<{ deckId: string, card: Flashcard }[]>(() => {
     if (reviewCards && reviewCards.length > 0) {
-      // Сессия повторений: строгая дедупликация по каноническому корню и перемешивание при старте
-      const unique = shuffleArray(buildDeduplicatedReviewQueue([...reviewCards]));
+      // Сессия повторений: дедупликация с сохранением валентности и разделением Karten / Lücken
+      const unique = shuffleArray(
+        buildDeduplicatedReviewQueue([...reviewCards], {
+          isCloze: (item) => isClozeReviewItem(item, decks, books),
+        })
+      );
       return unique.map(item => {
         const isDrill = isDrillMode;
         const initialRound = isDrill
@@ -6753,7 +7007,11 @@ function StudyInterface({
   });
   const [turn, setTurn] = useState(0);
   const [initialTotal, setInitialTotal] = useState(() => {
-    if (reviewCards && reviewCards.length > 0) return buildDeduplicatedReviewQueue(reviewCards).length;
+    if (reviewCards && reviewCards.length > 0) {
+      return buildDeduplicatedReviewQueue(reviewCards, {
+        isCloze: (item) => isClozeReviewItem(item, decks, books),
+      }).length;
+    }
     if (deckId) {
       const state = useStore.getState();
       const deck = state.decks.find((d) => d.id === deckId);
@@ -6770,7 +7028,7 @@ function StudyInterface({
   );
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
-  const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean; keepArchived?: boolean; isReviewRetry?: boolean } | null>(null);
+  const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean; keepArchived?: boolean; isReviewRetry?: boolean; failedInSession?: boolean } | null>(null);
   const sessionInitKeyRef = useRef<string | null>(null);
   const seenSessionCardIdsRef = useRef<Set<string>>(new Set(activeCards.map(item => item.card.id)));
 
@@ -6783,8 +7041,13 @@ function StudyInterface({
     sessionInitKeyRef.current = initKey;
 
     if (reviewCards) {
-      // Сессия повторений: строгая дедупликация по каноническому корню и перемешивание при старте
-      const uniqueReview = shuffleArray(buildDeduplicatedReviewQueue([...reviewCards]));
+      // Сессия повторений: дедупликация с сохранением валентности и разделением Karten / Lücken
+      const storeState = useStore.getState();
+      const uniqueReview = shuffleArray(
+        buildDeduplicatedReviewQueue([...reviewCards], {
+          isCloze: (item) => isClozeReviewItem(item, storeState.decks, storeState.books),
+        })
+      );
       const isDrill = isDrillMode;
       const list = uniqueReview.map(item => {
         const initialRound = isDrill
@@ -6901,13 +7164,15 @@ function StudyInterface({
     if (!currentDeckId || !currentCardSnapshot) return currentCardSnapshot;
     const storeCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id);
     if (!storeCard) return currentCardSnapshot;
+    const isFailedInSession = Boolean(currentCardSnapshot.failedInSession);
     return {
       ...currentCardSnapshot,
       ...storeCard,
-      round: currentCardSnapshot.round,
-      isLegendary: currentCardSnapshot.isLegendary,
+      round: isFailedInSession ? Math.min(3, currentCardSnapshot.round ?? 3) : currentCardSnapshot.round,
+      isLegendary: isFailedInSession ? false : currentCardSnapshot.isLegendary,
+      failedInSession: isFailedInSession || undefined,
       mistakeCount: (currentCardSnapshot as any).mistakeCount,
-      masteryLevel: currentCardSnapshot.masteryLevel ?? storeCard.masteryLevel
+      masteryLevel: isFailedInSession ? (currentCardSnapshot.masteryLevel ?? 2) : (currentCardSnapshot.masteryLevel ?? storeCard.masteryLevel)
     };
   }, [decks, currentDeckId, currentCardSnapshot]);
 
@@ -6981,15 +7246,16 @@ function StudyInterface({
 
     if (isReviewMode) {
       if (isActualCorrect) {
-        nextMastery = Math.max(4, currentCardSnapshot.masteryLevel ?? 4);
+        const wasFailedInSession = Boolean(currentCardSnapshot.failedInSession || isReviewRetry);
+        nextMastery = wasFailedInSession ? 2 : Math.max(4, currentCardSnapshot.masteryLevel ?? 4);
         isGraduated = true;
-        nextRound = 4;
-        nextLegendary = true;
+        nextRound = wasFailedInSession ? 3 : 4;
+        nextLegendary = !wasFailedInSession;
       } else {
-        // Ошибка в глобальном Review: карточка ОСТАЕТСЯ в архиве, но уходит в конец текущей сессии для закрепления
-        nextMastery = Math.max(4, currentCardSnapshot.masteryLevel ?? 4);
-        nextRound = 4;
-        nextLegendary = true;
+        // Ошибка в глобальном Review: карточка ОСТАЕТСЯ в архиве, но уходит в конец текущей сессии со сбросом в синий статус (round 3)
+        nextMastery = 2;
+        nextRound = 3;
+        nextLegendary = false;
         isGraduated = false;
       }
     } else if (isActualCorrect) {
@@ -7004,6 +7270,9 @@ function StudyInterface({
       isGraduated = false;
     }
 
+    const markFailedInSession = Boolean(
+      currentCardSnapshot.failedInSession || isReviewRetry || (isReviewMode && !isActualCorrect)
+    );
     pendingAnswerRef.current = {
       cardId: currentCardSnapshot.id,
       isGraduated,
@@ -7012,6 +7281,7 @@ function StudyInterface({
       nextLegendary,
       keepArchived: isReviewMode || isGraduated || wasMasteredBefore,
       isReviewRetry: isReviewMode && !isActualCorrect,
+      failedInSession: markFailedInSession,
     };
 
     // 2. Мгновенно обновляем стейт текущей карточки в голове очереди (без перетирания round до нажатия Weiter)
@@ -7019,7 +7289,15 @@ function StudyInterface({
       if (prev.length === 0) return prev;
       const head = prev[0];
       return [
-        { ...head, card: { ...head.card, masteryLevel: nextMastery, updated_at: new Date().toISOString() } },
+        {
+          ...head,
+          card: {
+            ...head.card,
+            masteryLevel: nextMastery,
+            failedInSession: markFailedInSession || head.card.failedInSession,
+            updated_at: new Date().toISOString()
+          }
+        },
         ...prev.slice(1)
       ];
     });
@@ -7102,16 +7380,23 @@ function StudyInterface({
         const nextMastery = pending ? pending.nextMastery : (current.card.masteryLevel ?? 2);
         const nextRound = pending?.nextRound ?? Math.max(1, Math.min(4, nextMastery + 1));
         const keepArchived = Boolean(pending?.keepArchived || current.card.isArchived);
+        const isFailedInSession = Boolean(
+          pending?.failedInSession ||
+          current.card.failedInSession ||
+          pending?.isReviewRetry ||
+          (current.card as any)._isReviewRetry
+        );
         const updatedCard: Flashcard = {
           ...current.card,
-          round: nextRound,
-          isLegendary: pending ? Boolean(pending.nextLegendary) : false,
+          round: isFailedInSession ? Math.min(3, nextRound) : nextRound,
+          isLegendary: isFailedInSession ? false : (pending ? Boolean(pending.nextLegendary) : false),
           isArchived: keepArchived,
-          masteryLevel: nextMastery,
+          failedInSession: isFailedInSession || undefined,
+          masteryLevel: isFailedInSession ? Math.min(2, nextMastery) : nextMastery,
           updated_at: new Date().toISOString(),
           mistakeCount: ((current.card as any).mistakeCount || 0) + (pending && pending.nextMastery > (current.card.masteryLevel ?? 0) ? 0 : 1)
         };
-        if (pending?.isReviewRetry || (current.card as any)._isReviewRetry) {
+        if (pending?.isReviewRetry || (current.card as any)._isReviewRetry || isFailedInSession) {
           (updatedCard as any)._isReviewRetry = true;
         }
         const updatedItem = {
@@ -7140,7 +7425,9 @@ function StudyInterface({
         }
       };
     });
-    const uniqueList = deduplicateCardsByLemma(list, false);
+    const uniqueList = deduplicateCardsByLemma(list, false, {
+      isCloze: (item) => isClozeReviewItem(item, decks, books),
+    });
     const ordered = [...uniqueList].sort(() => Math.random() - 0.5);
     setActiveCards(ordered);
     setInitialTotal(uniqueList.length);
@@ -7164,7 +7451,10 @@ function StudyInterface({
           translation: c.translation || c.hint || ''
         }
       })),
-      false
+      false,
+      {
+        isCloze: (item) => isClozeReviewItem(item, decks, books),
+      }
     );
     const ordered = cardsToReview.sort(() => Math.random() - 0.5);
     setActiveCards(ordered);
@@ -7275,7 +7565,8 @@ function StudyInterface({
           <PrepStudyCard
             card={liveCard}
             deckTitle={currentDeck?.name}
-            isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean(isReviewSession && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            sessionTurn={turn}
             onAnswer={(id, correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
             }}
@@ -7285,7 +7576,8 @@ function StudyInterface({
           <VerbStudyCard
             card={liveCard}
             deckTitle={currentDeck?.name}
-            isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean(isReviewSession && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            sessionTurn={turn}
             onAnswer={(correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
             }}
@@ -7297,7 +7589,8 @@ function StudyInterface({
             deckTitle={decks.find(d => d.id === currentDeckId)?.name || currentDeck?.name}
             cardIndex={masteredInSession + 1}
             totalCards={initialTotal}
-            isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean(isReviewSession && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            sessionTurn={turn}
             onAnswer={(correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
             }}
@@ -7307,8 +7600,9 @@ function StudyInterface({
           <RapidStudyCard
             card={liveCard}
             deckTitle={currentDeck?.name}
-            isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
             reverse={isReviewSession || isReviewingMistakesSession ? true : undefined}
+            sessionTurn={turn}
             onAnswer={(correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
             }}
@@ -7320,7 +7614,8 @@ function StudyInterface({
             deckTitle={currentDeck?.name}
             isGrammar={isGrammarDeck}
             forceInputMode={isReviewSession || isReviewingMistakesSession}
-            isReview={Boolean(isReviewSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean(isReviewSession && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            sessionTurn={turn}
             onAnswer={(correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
             }}
@@ -7342,168 +7637,6 @@ function StudyInterface({
 }
 
 // --- STUDY CARD CLOZE RESOLUTION ---
-
-interface ClozeResolution {
-  parts: [string, string];
-  clozeWord: string;
-  fullSentence: string;
-  isCustomCloze: boolean;
-}
-
-function resolveCloze(rawSentence: string | undefined | null, rawTargetWord: string, forms?: string | null): ClozeResolution {
-  const cleanTargetWord = (rawTargetWord || '').replace(/\|/g, '').trim();
-
-  if (!rawSentence || rawSentence === '-') {
-    return { parts: ["", ""], clozeWord: cleanTargetWord, fullSentence: cleanTargetWord, isCustomCloze: false };
-  }
-
-  // Общая техническая типографика: удаление двойных пробелов и пробелов перед знаками препинания
-  const sentence = rawSentence.replace(/\s+([.,!?;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
-  const targetWord = rawTargetWord.trim();
-
-  if (sentence.includes("___")) {
-    const splitParts = sentence.split("___");
-    return {
-      parts: [splitParts[0], splitParts.slice(1).join("___")],
-      clozeWord: cleanTargetWord,
-      fullSentence: sentence.replace("___", cleanTargetWord),
-      isCustomCloze: false
-    };
-  }
-
-  const tw = targetWord.trim();
-  const cleanTw = tw.replace(/^(der|die|das)\s+/i, "").replace(/\|/g, "").trim();
-  const cleanVerb = tw.replace(/^sich\s+/i, "").replace(/\|/g, "").trim();
-
-  const candidates: string[] = [];
-  if (cleanTargetWord) candidates.push(cleanTargetWord);
-  if (tw && !candidates.includes(tw)) candidates.push(tw);
-  if (cleanTw && !candidates.includes(cleanTw)) candidates.push(cleanTw);
-  if (cleanVerb && !candidates.includes(cleanVerb)) candidates.push(cleanVerb);
-
-  // Multi-word phrase matching with flexible endings (e.g. "tabellarische Lebenslauf" -> "tabellarischen Lebenslauf")
-  const twWords = cleanTw.split(/\s+/);
-  if (twWords.length > 1) {
-    const pattern = twWords.map(w => {
-      const stem = w.length > 4 ? w.slice(0, -2) : w;
-      return `${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[a-zA-ZäöüÄÖÜß]*`;
-    }).join("\\s+");
-    const phraseRegex = new RegExp(`(^|[^a-zA-ZäöüÄÖÜß])(${pattern})(?=[^a-zA-ZäöüÄÖÜß]|$)`, "i");
-    const pMatch = sentence.match(phraseRegex);
-    if (pMatch && pMatch.index !== undefined) {
-      const prefixLen = pMatch[1] ? pMatch[1].length : 0;
-      const matchStart = pMatch.index + prefixLen;
-      const matchedText = pMatch[2];
-      return {
-        parts: [sentence.slice(0, matchStart), sentence.slice(matchStart + matchedText.length)],
-        clozeWord: matchedText,
-        fullSentence: sentence,
-        isCustomCloze: true
-      };
-    }
-  }
-
-  if (forms) {
-    const formParts = forms.split(/[,;\/]+/).map(s => s.trim()).filter(Boolean);
-    for (const fp of formParts) {
-      const cleanFp = fp.replace(/^(der|die|das|hat|ist|hat sich|ist sich)\s+/i, "").replace(/\s+(hat|ist)$/i, "").trim();
-      if (cleanFp && !candidates.includes(cleanFp)) candidates.push(cleanFp);
-      const singleWords = cleanFp.split(/\s+/);
-      for (const sw of singleWords) {
-        if (sw.length > 3 && !candidates.includes(sw)) candidates.push(sw);
-      }
-    }
-  }
-
-  if (twWords.length > 1) {
-    const lastWord = twWords[twWords.length - 1];
-    if (lastWord.length > 2 && !candidates.includes(lastWord)) candidates.push(lastWord);
-    const firstWord = twWords[0];
-    if (firstWord.length > 3 && !candidates.includes(firstWord)) candidates.push(firstWord);
-  }
-
-  for (const cand of [...candidates]) {
-    if (cand.toLowerCase().endsWith("in") && cand.length > 5) {
-      const withoutIn = cand.slice(0, -2);
-      if (!candidates.includes(withoutIn)) candidates.push(withoutIn);
-    }
-  }
-
-  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-  // 1. Exact word boundary match
-  for (const cand of candidates) {
-    const regex = new RegExp(`(^|[^a-zA-ZäöüÄÖÜß])${escapeRegex(cand)}(?=[^a-zA-ZäöüÄÖÜß]|$)`, "i");
-    const match = sentence.match(regex);
-    if (match && match.index !== undefined) {
-      const prefixLen = match[1] ? match[1].length : 0;
-      const matchStart = match.index + prefixLen;
-      const matchedText = sentence.slice(matchStart, matchStart + cand.length);
-      return {
-        parts: [sentence.slice(0, matchStart), sentence.slice(matchStart + cand.length)],
-        clozeWord: matchedText,
-        fullSentence: sentence,
-        isCustomCloze: true
-      };
-    }
-  }
-
-  // 2. German umlaut-tolerant stem match with word boundary
-  const deStem = (w: string) => {
-    let s = w.length > 4 ? w.slice(0, -2) : (w.length > 3 ? w.slice(0, -1) : w);
-    return escapeRegex(s).replace(/ä/gi, "[aäAÄ]").replace(/ö/gi, "[oöOÖ]").replace(/ü/gi, "[uüUÜ]");
-  };
-
-  for (const cand of candidates) {
-    if (cand.length >= 4) {
-      const stemPattern = deStem(cand);
-      const stemRegex = new RegExp(`(^|[^a-zA-ZäöüÄÖÜß])(${stemPattern}[a-zA-ZäöüÄÖÜß]*)`, "i");
-      const match = sentence.match(stemRegex);
-      if (match && match.index !== undefined) {
-        const prefixLen = match[1] ? match[1].length : 0;
-        const matchStart = match.index + prefixLen;
-        const matchedText = match[2];
-        return {
-          parts: [sentence.slice(0, matchStart), sentence.slice(matchStart + matchedText.length)],
-          clozeWord: matchedText,
-          fullSentence: sentence,
-          isCustomCloze: true
-        };
-      }
-    }
-  }
-
-  // 3. Substring match (e.g. inside compound nouns like Büromaterial)
-  for (const cand of candidates) {
-    if (cand.length >= 4) {
-      const subMatch = sentence.match(new RegExp(escapeRegex(cand), "i"));
-      if (subMatch && subMatch.index !== undefined) {
-        let wordStart = subMatch.index;
-        while (wordStart > 0 && /[a-zA-ZäöüÄÖÜß]/.test(sentence[wordStart - 1])) {
-          wordStart--;
-        }
-        let wordEnd = subMatch.index + cand.length;
-        while (wordEnd < sentence.length && /[a-zA-ZäöüÄÖÜß]/.test(sentence[wordEnd])) {
-          wordEnd++;
-        }
-        const fullWord = sentence.slice(wordStart, wordEnd);
-        return {
-          parts: [sentence.slice(0, wordStart), sentence.slice(wordEnd)],
-          clozeWord: fullWord,
-          fullSentence: sentence,
-          isCustomCloze: true
-        };
-      }
-    }
-  }
-
-  return {
-    parts: [sentence, ""],
-    clozeWord: tw,
-    fullSentence: sentence,
-    isCustomCloze: false
-  };
-}
 
 type ParsedCardExtra = 
   | { type: 'none' }
@@ -7625,7 +7758,8 @@ function StudyCard({
   onNext,
   forceInputMode = false,
   isGrammar = false,
-  isReview = false
+  isReview = false,
+  sessionTurn = 0,
 }: { 
   card: Flashcard, 
   deckTitle?: string,
@@ -7633,7 +7767,8 @@ function StudyCard({
   onNext: () => void,
   forceInputMode?: boolean,
   isGrammar?: boolean,
-  isReview?: boolean
+  isReview?: boolean,
+  sessionTurn?: number,
 }) {
   const [card, setCard] = useState<Flashcard>(initialCard);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -7663,15 +7798,10 @@ function StudyCard({
     handleCardEvaluation,
   } = useCardTransition();
 
-  const currentRound = card.round ?? (
-    card.isLegendary === false 
-      ? Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1))
-      : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
-  );
-  const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
+  const { currentRound, isLegendary } = resolveCardRarityState(card, undefined, isReview);
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !card.failedInSession;
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
 
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
@@ -7687,28 +7817,29 @@ function StudyCard({
     setIsTransitioning(false);
     setVisualRound(currentRound);
     setIsLegendaryVisual(isLegendary);
+    setLocalMastery(isLegendary ? 4 : (currentRound - 1));
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
       transitionTimerRef.current = null;
     }
-  }, [card.id, card.round, card.isLegendary, currentRound, isLegendary]);
-
-  useEffect(() => {
-    setLocalMastery(isLegendary ? 4 : (currentRound - 1));
-  }, [card.id, card.round, card.isLegendary, card.masteryLevel, card.isArchived, isReview, isLegendary, currentRound]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.id, sessionTurn]);
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const decks = useStore((state) => state.decks);
-  const archivedCardsPool = useMemo(() => collectArchivedCardsFromDecks(decks), [decks]);
+  const books = useStore((state) => state.books);
+  const archivedCardsPool = useMemo(() => collectArchivedCardsFromDecks(decks, books), [decks, books]);
+  const lookupCardsPool = useMemo(() => collectLookupCardsFromDecks(decks, books), [decks, books]);
+  const normalizedFields = useMemo(() => normalizeStudyCardContent(card), [card]);
   const wortfamilieSourceCard = useMemo(
     () => ({
       id: card.id,
       word: card.targetWord || '',
-      translation: card.translation || '',
+      translation: normalizedFields.translation,
       level: (card as { level?: string }).level ?? null,
       language: (card as { language?: string }).language ?? 'de',
     }),
-    [card]
+    [card, normalizedFields.translation]
   );
   const playbackSpeed = useStore(state => state.playbackSpeed);
   const setPlaybackSpeed = useStore(state => state.setPlaybackSpeed);
@@ -7716,11 +7847,12 @@ function StudyCard({
   const nextButtonRef = useRef<HTMLButtonElement>(null);
 
   const cloze = useMemo(() => {
-    return resolveCloze(card.sentence, card.targetWord, card.forms);
-  }, [card.sentence, card.targetWord, card.forms]);
+    return resolveCloze(normalizedFields.sentence, card.targetWord, card.forms);
+  }, [normalizedFields.sentence, card.targetWord, card.forms]);
 
-  const { parts, clozeWord, fullSentence, isCustomCloze } = cloze;
-  const shouldCapitalize = parts[0]?.trim() === "";
+  const { parts, clozeWord, fullSentence, isCustomCloze, hasMask } = cloze;
+  const isFallbackDictionaryMode = !hasMask;
+  const shouldCapitalize = !isFallbackDictionaryMode && parts[0]?.trim() === "";
 
   const primaryTarget = useMemo(() => {
     const clean = (clozeWord || '').replace(/\|/g, '');
@@ -7728,14 +7860,23 @@ function StudyCard({
   }, [shouldCapitalize, clozeWord]);
 
   const secondaryTarget = useMemo(() => {
-    // If targetWord has article and clozeWord does not (or vice versa), allow both!
+    // If targetWord has article/markers and clozeWord does not (or vice versa), allow both!
     const cleanTw = (card.targetWord || '').replace(/\|/g, '').replace(/\s{2,}/g, ' ').trim();
     const cleanCloze = (clozeWord || '').replace(/\|/g, '').trim();
     if (cleanTw.toLowerCase() !== cleanCloze.toLowerCase()) {
       return shouldCapitalize ? cleanTw.charAt(0).toUpperCase() + cleanTw.slice(1) : cleanTw;
     }
+    if (isFallbackDictionaryMode) {
+      const strippedCore = cleanTw
+        .replace(/^(?:der\/die\/das|der\/die|der|die|das|ein\/eine|eine?n?)\s+/i, '')
+        .replace(/^(?:sich|jemanden|jemandem|jemandes|jemand|etwas|jdn\.?|jdm\.?|etw\.?)\s+/i, '')
+        .trim();
+      if (strippedCore && strippedCore.toLowerCase() !== cleanCloze.toLowerCase()) {
+        return strippedCore;
+      }
+    }
     return "";
-  }, [shouldCapitalize, card.targetWord, clozeWord]);
+  }, [shouldCapitalize, card.targetWord, clozeWord, isFallbackDictionaryMode]);
 
   const checkInputValidation = useCallback((value: string) => {
     const v = value.toLowerCase();
@@ -7929,10 +8070,15 @@ function StudyCard({
       }
       playSafeAudio(() => playErrorSound());
     } else {
-      const nextRound = visualRound + 1;
-      setVisualRound(nextRound);
-      if (visualRound >= 4 || isLegendaryVisual) {
-        setIsLegendaryVisual(true);
+      if (card.failedInSession) {
+        setVisualRound(prev => Math.min(3, prev || 3));
+        setIsLegendaryVisual(false);
+      } else {
+        const nextRound = visualRound + 1;
+        setVisualRound(nextRound);
+        if (visualRound >= 4 || isLegendaryVisual) {
+          setIsLegendaryVisual(true);
+        }
       }
       playSafeAudio(() => playSuccessSound());
       triggerHaptic('success');
@@ -8010,10 +8156,15 @@ function StudyCard({
       // 1. Фиксируем результат: НИКАКИХ авто-таймеров перехода!
       setPhase("Answer");
 
-      const nextRound = visualRound + 1;
-      setVisualRound(nextRound);
-      if (visualRound >= 4 || isLegendaryVisual) {
-        setIsLegendaryVisual(true);
+      if (card.failedInSession) {
+        setVisualRound(prev => Math.min(3, prev || 3));
+        setIsLegendaryVisual(false);
+      } else {
+        const nextRound = visualRound + 1;
+        setVisualRound(nextRound);
+        if (visualRound >= 4 || isLegendaryVisual) {
+          setIsLegendaryVisual(true);
+        }
       }
 
       playSafeAudio(() => playSuccessSound());
@@ -8068,18 +8219,15 @@ function StudyCard({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (phase !== "Question") return;
-
     if (e.key === 'Enter' || e.code === 'Enter') {
       e.preventDefault();
-      if (inputText.trim().length > 0) {
-        const { isValid, isComplete } = checkInputValidation(inputText);
-        if (!isValid || !isComplete) {
-          handleHilfe();
-        }
+      if (phase === "Question") {
+        e.stopPropagation();
       }
       return;
     }
+
+    if (phase !== "Question") return;
 
     const isSpecialKey = e.key === "Backspace" || e.key.startsWith("Arrow") || e.metaKey || e.ctrlKey || e.altKey || e.key === 'Tab';
     if (isSpecialKey) return;
@@ -8098,12 +8246,13 @@ function StudyCard({
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (isEditModalOpen || isTransitionBusy) return;
+      if (isEditModalOpen || isTransitionBusy || hasOpenModalOverlay()) return;
 
       if (phase === "Answer") {
         if (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter') {
           e.preventDefault();
-          if (isTransitionLocked || isTransitionBusy) return;
+          if (e.repeat || isTransitionLocked || isTransitionBusy) return;
+          if (!nextButtonRef.current || nextButtonRef.current.disabled) return;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           handleAdvanceNext();
           return;
@@ -8111,18 +8260,11 @@ function StudyCard({
       }
 
       if (phase === "Question" && !isRecognitionMode && !isMobile) {
+        if (e.key === 'Enter' || e.code === 'Enter') {
+          e.preventDefault();
+          return;
+        }
         if (document.activeElement !== inputRef.current && !e.metaKey && !e.ctrlKey && !e.altKey) {
-          if (e.key === 'Enter' || e.code === 'Enter') {
-            e.preventDefault();
-            inputRef.current?.focus({ preventScroll: true });
-            if (inputText.trim().length > 0) {
-              const { isValid, isComplete } = checkInputValidation(inputText);
-              if (!isValid || !isComplete) {
-                handleHilfe();
-              }
-            }
-            return;
-          }
           if (e.key === 'Backspace' && !e.repeat) {
             e.preventDefault();
             inputRef.current?.focus({ preventScroll: true });
@@ -8148,9 +8290,13 @@ function StudyCard({
       if (document.activeElement?.tagName === 'INPUT') return;
 
       if (phase === "Question" && isRecognitionMode && !isMultipleChoice) {
-        if (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter') {
+        if (e.code === 'Space' || e.key === ' ') {
           e.preventDefault();
           handleReveal();
+          return;
+        }
+        if (e.code === 'Enter' || e.key === 'Enter') {
+          e.preventDefault();
           return;
         }
       }
@@ -8164,6 +8310,7 @@ function StudyCard({
 
       if (e.code === 'KeyR') {
         e.preventDefault();
+        if (isFallbackDictionaryMode && phase === "Question") return;
         const speechSentence = phase === "Answer" ? fullSentence : (parts[0] + "Lücke" + parts[1]);
         playAudio(speechSentence);
       }
@@ -8171,7 +8318,7 @@ function StudyCard({
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [phase, isEditModalOpen, isMobile, isTransitionLocked, inputText, isMultipleChoice, isRecognitionMode, handleReveal, handleHilfe, processNewValue, card, playAudio, handleAdvanceNext, fullSentence, parts, resolvedOptions]);
+  }, [phase, isEditModalOpen, isMobile, isTransitionLocked, isFallbackDictionaryMode, inputText, isMultipleChoice, isRecognitionMode, handleReveal, handleHilfe, processNewValue, card, playAudio, handleAdvanceNext, fullSentence, parts, resolvedOptions]);
 
   const renderInputChars = () => {
     if (inputText.length === 0) {
@@ -8224,8 +8371,8 @@ function StudyCard({
     ? (parseTargetNoun(displayAnswerWord) || (!isCustomCloze ? parseTargetNoun(card.targetWord) : null))
     : null;
 
-  const isArchivePulse = phase === "Answer" && !hasErrored && visualRound >= 4;
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored;
+  const isArchivePulse = phase === "Answer" && !hasErrored && !card.failedInSession && visualRound >= 4;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !card.failedInSession;
 
   return (
     <>
@@ -8253,12 +8400,13 @@ function StudyCard({
             <button 
               type="button"
               onClick={() => {
+                if (isFallbackDictionaryMode && phase === "Question") return;
                 const speechSentence = phase === "Answer" ? fullSentence : (parts[0] + "Lücke" + parts[1]);
                 playAudio(speechSentence);
               }}
-              disabled={isPlayingAudio}
-              className={cn("relative", AUDIO_BUTTON_CLASSES)}
-              title="Aussprache anhören (R)"
+              disabled={isPlayingAudio || (isFallbackDictionaryMode && phase === "Question")}
+              className={cn("relative", AUDIO_BUTTON_CLASSES, isFallbackDictionaryMode && phase === "Question" && "opacity-30 cursor-not-allowed")}
+              title={isFallbackDictionaryMode && phase === "Question" ? "Erst antworten, dann anhören" : "Aussprache anhören (R)"}
             >
               <Volume2 className="w-4 h-4" />
               <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-bold text-zinc-400 dark:text-zinc-500 bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded px-0.5 shadow-sm pointer-events-none">
@@ -8322,37 +8470,43 @@ function StudyCard({
           key={card.id}
           className={cn("card-body w-full flex-1 flex flex-col justify-center items-center text-center my-auto", transitionClasses)}
         >
-          <div className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-4 sm:mb-6">
-            {parts[0]}
-            
-            {phase === "Answer" ? (
-              <span className={cn(
-                "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white transition-colors animate-in fade-in zoom-in-[0.98] duration-200",
-                parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
-              )}>
-                {parsedTargetWord ? (
-                  <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {formatSeparableWord(parsedTargetWord.rest, card.forms)}</>
-                ) : (
-                  formatSeparableWord(card.targetWord && card.targetWord.includes('|') ? card.targetWord : displayAnswerWord, card.forms)
-                )}
-              </span>
-            ) : (
-              <>
-                {isMultipleChoice ? (
-                  <span className="inline-block align-baseline mx-1.5 min-w-[100px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent select-none">
+          {isFallbackDictionaryMode ? (
+            <>
+              {/* Защитный fallback: если пропуск ___ не найден и слово в предложении не замаскировано,
+                  показываем русский перевод и ввод немецкого слова (полное предложение — только после ответа). */}
+              {getCleanTranslation(normalizedFields.translation) && (
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-[#F5F5F7] mb-5 sm:mb-6 max-w-2xl leading-tight">
+                  {getCleanTranslation(normalizedFields.translation)}
+                </h2>
+              )}
+
+              <div className="text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-4 sm:mb-6">
+                {phase === "Answer" ? (
+                  <span className={cn(
+                    "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-3 py-0.5 min-w-[140px] text-center font-semibold text-zinc-900 dark:text-white transition-colors animate-in fade-in zoom-in-[0.98] duration-200",
+                    parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
+                  )}>
+                    {parsedTargetWord ? (
+                      <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {formatSeparableWord(parsedTargetWord.rest, card.forms)}</>
+                    ) : (
+                      formatSeparableWord(card.targetWord && card.targetWord.includes('|') ? card.targetWord : displayAnswerWord, card.forms)
+                    )}
+                  </span>
+                ) : isMultipleChoice ? (
+                  <span className="inline-block align-baseline mx-1.5 min-w-[140px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent select-none">
                     {displayAnswerWord}
                   </span>
                 ) : isRecognitionMode ? (
-                  <span 
+                  <span
                     onClick={handleReveal}
-                    className="inline-block relative align-baseline border-b-2 border-dashed border-blue-500/70 hover:border-blue-400 px-3 min-w-[100px] text-center font-medium text-blue-500 hover:text-blue-400 cursor-pointer mx-1.5 select-none transition-colors"
+                    className="inline-block relative align-baseline border-b-2 border-dashed border-blue-500/70 hover:border-blue-400 px-3 min-w-[140px] text-center font-medium text-blue-500 hover:text-blue-400 cursor-pointer mx-1.5 select-none transition-colors"
                     title="Lösung anzeigen"
                   >
                     Lösung anzeigen
                   </span>
                 ) : (
-                  <span 
-                    className="inline-block relative align-baseline border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5"
+                  <span
+                    className="inline-block relative align-baseline border-b-2 border-blue-500 px-3 min-w-[160px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5"
                     onClick={(e) => {
                       if (isMobile) {
                         e.preventDefault();
@@ -8385,17 +8539,99 @@ function StudyCard({
                     />
                   </span>
                 )}
-              </>
-            )}
-            
-            {parts[1]}
-          </div>
+              </div>
+
+              {phase === "Answer" && normalizedFields.sentence && normalizedFields.sentence !== '-' && normalizedFields.sentence !== 'VERB_DRILL' && (
+                <div className="w-full max-w-lg mx-auto my-2 flex justify-center animate-in fade-in zoom-in-[0.98] duration-200">
+                  <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
+                    <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-zinc-600 dark:text-zinc-400 select-text">
+                      {normalizedFields.sentence}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Чёткая подсказка (русский перевод) НАД предложением с пропуском ___ */}
+              {getCleanTranslation(normalizedFields.translation) && (
+                <p className="text-sm sm:text-base md:text-lg text-zinc-600 dark:text-zinc-300 font-medium text-center transition-colors max-w-2xl mx-auto mb-3 sm:mb-4 leading-relaxed">
+                  {getCleanTranslation(normalizedFields.translation)}
+                </p>
+              )}
+
+              <div className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-4 sm:mb-6">
+                {parts[0]}
+                
+                {phase === "Answer" ? (
+                  <span className={cn(
+                    "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white transition-colors animate-in fade-in zoom-in-[0.98] duration-200",
+                    parsedTargetWord && (parsedTargetWord.borderClasses + " " + parsedTargetWord.textClasses)
+                  )}>
+                    {parsedTargetWord ? (
+                      <><span className={parsedTargetWord.articleClasses}>{parsedTargetWord.article}</span> {formatSeparableWord(parsedTargetWord.rest, card.forms)}</>
+                    ) : (
+                      formatSeparableWord(card.targetWord && card.targetWord.includes('|') ? card.targetWord : displayAnswerWord, card.forms)
+                    )}
+                  </span>
+                ) : (
+                  <>
+                    {isMultipleChoice ? (
+                      <span className="inline-block align-baseline mx-1.5 min-w-[100px] border-b-2 border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-0.5 text-transparent select-none">
+                        {displayAnswerWord}
+                      </span>
+                    ) : isRecognitionMode ? (
+                      <span 
+                        onClick={handleReveal}
+                        className="inline-block relative align-baseline border-b-2 border-dashed border-blue-500/70 hover:border-blue-400 px-3 min-w-[100px] text-center font-medium text-blue-500 hover:text-blue-400 cursor-pointer mx-1.5 select-none transition-colors"
+                        title="Lösung anzeigen"
+                      >
+                        Lösung anzeigen
+                      </span>
+                    ) : (
+                      <span 
+                        className="inline-block relative align-baseline border-b-2 border-blue-500 px-2 min-w-[100px] text-center font-semibold text-zinc-900 dark:text-white mx-1.5"
+                        onClick={(e) => {
+                          if (isMobile) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }
+                        }}
+                      >
+                        <span className="inline-block w-full text-center">
+                          {renderInputChars()}
+                        </span>
+                        <input
+                          ref={inputRef}
+                          type="text"
+                          readOnly={isMobile}
+                          inputMode={isMobile ? "none" : undefined}
+                          tabIndex={isMobile ? -1 : 0}
+                          value={inputText}
+                          onChange={(e) => !isMobile && handleInputChange(e)}
+                          onKeyDown={handleKeyDown}
+                          style={{ caretColor: 'transparent', WebkitTextFillColor: 'transparent' }}
+                          className={cn(
+                            "absolute inset-0 opacity-0 cursor-default w-full h-full caret-transparent text-transparent bg-transparent text-base",
+                            isMobile && "pointer-events-none select-none"
+                          )}
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="off"
+                          spellCheck={false}
+                          autoFocus={!isMobile}
+                        />
+                      </span>
+                    )}
+                  </>
+                )}
+                
+                {parts[1]}
+              </div>
+            </>
+          )}
 
           <div className="w-full text-center">
-            <p className="text-base md:text-lg text-zinc-600 dark:text-zinc-300 font-normal text-center transition-colors max-w-2xl mx-auto leading-relaxed">
-              {getCleanTranslation(card.translation)}
-            </p>
-
             {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
               <div className="w-full text-center mt-6 flex flex-col items-center gap-1.5 transition-all duration-200 ease-out animate-in fade-in zoom-in-[0.98]">
                 <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm max-w-[95%]">
@@ -8415,6 +8651,7 @@ function StudyCard({
             <WortfamilieAnchor
               currentCard={wortfamilieSourceCard}
               cardsPool={archivedCardsPool}
+              lookupPool={lookupCardsPool}
               visible={isAnswered}
               cardKey={`${card.id}-${currentRound}`}
               onSpeakWord={playAudio}
@@ -10951,8 +11188,6 @@ export const syncAppStateToCloud = async (override?: {
   const currentDeckOrder = override?.deckOrder || useStore.getState().deckOrder || [];
   const currentBookOrder = override?.bookOrder || useStore.getState().bookOrder || [];
   const bookOrderTimestamp = override?.bookOrderTimestamp || (typeof window !== 'undefined' ? parseInt(localStorage.getItem('book_order_timestamp') || '0', 10) : 0) || Date.now();
-  const excludedBookIds = override?.excludedBookIds ?? getLocalExcludedBookIds();
-  const excludedBooksTimestamp = override?.excludedBooksTimestamp || (typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0) || Date.now();
   
   if (currentDeckOrder.length > 0) {
     state.deckOrder = currentDeckOrder;
@@ -10973,8 +11208,10 @@ export const syncAppStateToCloud = async (override?: {
   }
   
   state.bookOrderTimestamp = bookOrderTimestamp;
-  state.excludedBookIds = excludedBookIds;
-  state.excludedBooksTimestamp = excludedBooksTimestamp;
+  if (override?.excludedBookIds !== undefined) {
+    state.excludedBookIds = override.excludedBookIds;
+    state.excludedBooksTimestamp = override?.excludedBooksTimestamp || Date.now();
+  }
   state.updatedAt = Date.now();
   
   try {
@@ -11010,28 +11247,9 @@ export const applyCloudAppState = (cloudState: any) => {
   if (Array.isArray(cloudState.excludedBookIds)) {
     const localExcludedTs = typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0;
     const cloudExcludedTs = cloudState.excludedBooksTimestamp || cloudState.updatedAt || 0;
-    if (cloudExcludedTs >= localExcludedTs) {
+    if (cloudExcludedTs >= localExcludedTs || localExcludedTs === 0) {
       const excludedIds: string[] = cloudState.excludedBookIds.filter((id: any) => typeof id === 'string' && id.length > 0);
-      setLocalExcludedBookIds(excludedIds, cloudExcludedTs);
-      const excludedSet = new Set(excludedIds);
-      const curBooks = useStore.getState().books;
-      if (curBooks.length > 0) {
-        const nextBooks = curBooks.map((b) => ({
-          ...b,
-          exclude_from_review: excludedSet.has(b.id) || Boolean(b.exclude_from_review && cloudExcludedTs === 0),
-        }));
-        useStore.getState().setBooks(nextBooks);
-        setIDBItem('app_books', nextBooks).catch(() => {});
-      }
-      const curDecks = useStore.getState().decks;
-      if (curDecks.length > 0) {
-        const nextDecks = curDecks.map((d) => {
-          const bId = d.bookId || (d as any).book_id;
-          return bId ? { ...d, exclude_from_review: excludedSet.has(bId) } : d;
-        });
-        useStore.setState({ decks: nextDecks });
-      }
-      useStore.getState().refreshDueCardsCount().catch(() => {});
+      applyExcludedBookIds(excludedIds, cloudExcludedTs || Date.now());
     }
   }
   
@@ -11207,24 +11425,21 @@ function PrepStudyCard({
   deckTitle, 
   onAnswer,
   onNext,
-  isReview = false
+  isReview = false,
+  sessionTurn = 0,
 }: {
   card: Flashcard;
   deckTitle?: string;
   onAnswer: (cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
   onNext: () => void;
   isReview?: boolean;
+  sessionTurn?: number;
 }) {
   const [isSuccess, setIsSuccess] = useState(false);
   const [isHilfe, setIsHilfe] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
-  const currentRound = card.round ?? (
-    card.isLegendary === false 
-      ? Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1))
-      : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
-  );
-  const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
+  const { currentRound, isLegendary } = resolveCardRarityState(card, undefined, isReview);
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
@@ -11240,10 +11455,10 @@ function PrepStudyCard({
     setActiveSlot(0);
     setWrongKasus(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.id, card.round, card.isLegendary]);
+  }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe;
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && !card.failedInSession;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && !card.failedInSession;
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
@@ -11277,10 +11492,15 @@ function PrepStudyCard({
        const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
        setLocalMastery(nextMastery);
        if (isCorrect) {
-         const nextRound = visualRound + 1;
-         setVisualRound(nextRound);
-         if (visualRound >= 4 || isLegendaryVisual) {
-           setIsLegendaryVisual(true);
+         if (card.failedInSession) {
+           setVisualRound(prev => Math.min(3, prev || 3));
+           setIsLegendaryVisual(false);
+         } else {
+           const nextRound = visualRound + 1;
+           setVisualRound(nextRound);
+           if (visualRound >= 4 || isLegendaryVisual) {
+             setIsLegendaryVisual(true);
+           }
          }
        }
        setIsSuccess(true);
@@ -11307,7 +11527,7 @@ function PrepStudyCard({
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
     }
-  }, [activeSlot, kasusRaw, card.id, isHilfe, onAnswer, isSuccess, playAudio, localMastery, visualRound, isLegendaryVisual, isLegendary]);
+  }, [activeSlot, kasusRaw, card.id, card.failedInSession, isHilfe, onAnswer, isSuccess, playAudio, localMastery, visualRound, isLegendaryVisual, isLegendary]);
 
   const onHilfe = useCallback(() => {
     setLocalMastery(2);
@@ -11352,10 +11572,17 @@ function PrepStudyCard({
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (isTransitionBusy) return;
-      if ((isSuccess || isHilfe) && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
+      if (isTransitionBusy || hasOpenModalOverlay()) return;
+      if (e.code === 'Enter' || e.key === 'Enter') {
         e.preventDefault();
-        handleProceedNext();
+        if (!e.repeat && (isSuccess || isHilfe)) {
+          handleProceedNext();
+        }
+        return;
+      }
+      if ((isSuccess || isHilfe) && (e.code === 'Space' || e.key === ' ')) {
+        e.preventDefault();
+        if (!e.repeat) handleProceedNext();
         return;
       }
       if (activeSlot === 2 && !isSuccess && !isHilfe && e.key.length === 1) {
@@ -11538,13 +11765,15 @@ function VerbStudyCard({
   deckTitle, 
   onAnswer,
   onNext,
-  isReview = false
+  isReview = false,
+  sessionTurn = 0,
 }: {
   card: Flashcard;
   deckTitle?: string;
   onAnswer: (correct: boolean, isHilfe: boolean) => void;
   onNext: () => void;
   isReview?: boolean;
+  sessionTurn?: number;
 }) {
   const isMobile = useIsMobile();
   const verbInfo = useMemo(() => {
@@ -11556,12 +11785,7 @@ function VerbStudyCard({
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
   const [isHilfe, setIsHilfe] = useState(false);
-  const currentRound = card.round ?? (
-    card.isLegendary === false 
-      ? Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1))
-      : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
-  );
-  const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
+  const { currentRound, isLegendary } = resolveCardRarityState(card, undefined, isReview);
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
@@ -11576,10 +11800,10 @@ function VerbStudyCard({
     hasErroredRef.current = false;
     setActiveInput(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.id, card.round, card.isLegendary]);
+  }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe;
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && !card.failedInSession;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && !card.failedInSession;
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
@@ -11618,10 +11842,17 @@ function VerbStudyCard({
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (isTransitionBusy) return;
-      if ((isSuccess || isHilfe) && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
+      if (isTransitionBusy || hasOpenModalOverlay()) return;
+      if (e.code === 'Enter' || e.key === 'Enter') {
         e.preventDefault();
-        handleProceedNext();
+        if (!e.repeat && (isSuccess || isHilfe)) {
+          handleProceedNext();
+        }
+        return;
+      }
+      if ((isSuccess || isHilfe) && (e.code === 'Space' || e.key === ' ')) {
+        e.preventDefault();
+        if (!e.repeat) handleProceedNext();
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
@@ -11642,10 +11873,15 @@ function VerbStudyCard({
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
       if (isCorrect) {
-        const nextRound = visualRound + 1;
-        setVisualRound(nextRound);
-        if (visualRound >= 4 || isLegendaryVisual) {
-          setIsLegendaryVisual(true);
+        if (card.failedInSession) {
+          setVisualRound(prev => Math.min(3, prev || 3));
+          setIsLegendaryVisual(false);
+        } else {
+          const nextRound = visualRound + 1;
+          setVisualRound(nextRound);
+          if (visualRound >= 4 || isLegendaryVisual) {
+            setIsLegendaryVisual(true);
+          }
         }
       }
       setIsSuccess(true);
@@ -11655,7 +11891,7 @@ function VerbStudyCard({
         onAnswer(isCorrect, false);
       } catch (e) {}
     }
-  }, [isHilfe, playAudio, onAnswer, localMastery, visualRound, isLegendaryVisual]);
+  }, [isHilfe, playAudio, onAnswer, localMastery, visualRound, isLegendaryVisual, card.failedInSession]);
 
   const handleSlotError = useCallback(() => {
     // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
@@ -12007,6 +12243,7 @@ export function RedemittelStudyCard({
   onAnswer,
   onNext,
   isReview = false,
+  sessionTurn = 0,
 }: {
   card: Flashcard;
   deckTitle?: string;
@@ -12015,17 +12252,13 @@ export function RedemittelStudyCard({
   onAnswer: (correct: boolean, isHilfe: boolean) => void;
   onNext: () => void;
   isReview?: boolean;
+  sessionTurn?: number;
 }) {
   const data = useMemo(() => parseRedemittelCard(card), [card]);
   const [placedChunks, setPlacedChunks] = useState<RedemittelChunk[]>([]);
   const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'surrender'>('idle');
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
-  const currentRound = card.round ?? (
-    card.isLegendary === false 
-      ? Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1))
-      : (card.isLegendary || isReview || card.isArchived ? 4 : Math.max(1, Math.min(4, (card.masteryLevel ?? 0) + 1)))
-  );
-  const isLegendary = card.isLegendary ?? (currentRound === 4 && Boolean(isReview || card.isArchived));
+  const { currentRound, isLegendary } = resolveCardRarityState(card, undefined, isReview);
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
@@ -12037,11 +12270,11 @@ export function RedemittelStudyCard({
     setPlacedChunks([]);
     setStatus('idle');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.id, card.round, card.isLegendary]);
+  }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && status !== 'error' && status !== 'surrender';
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && status !== 'error' && status !== 'surrender' && !card.failedInSession;
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && status === 'success';
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && status === 'success' && !card.failedInSession;
 
   const handlePlayAudio = useCallback(() => {
     if (!data.fullText) return;
@@ -12065,10 +12298,15 @@ export function RedemittelStudyCard({
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
       if (isCorrect) {
-        const nextRound = visualRound + 1;
-        setVisualRound(nextRound);
-        if (visualRound >= 4 || isLegendaryVisual) {
-          setIsLegendaryVisual(true);
+        if (card.failedInSession) {
+          setVisualRound(prev => Math.min(3, prev || 3));
+          setIsLegendaryVisual(false);
+        } else {
+          const nextRound = visualRound + 1;
+          setVisualRound(nextRound);
+          if (visualRound >= 4 || isLegendaryVisual) {
+            setIsLegendaryVisual(true);
+          }
         }
         setStatus('success');
         playSafeAudio(() => playSuccessSound());
@@ -12095,7 +12333,7 @@ export function RedemittelStudyCard({
         setStatus('idle');
       }
     }
-  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery, visualRound, isLegendaryVisual, isLegendary]);
+  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery, visualRound, isLegendaryVisual, isLegendary, card.failedInSession]);
 
   const handleRemoveChunk = useCallback((chunk: RedemittelChunk) => {
     if (status === 'success' || status === 'surrender') return;
@@ -12168,12 +12406,20 @@ export function RedemittelStudyCard({
   // Keyboard shortcut support
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isTransitionBusy) return;
+      if (isTransitionBusy || hasOpenModalOverlay()) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      if ((status === 'success' || status === 'surrender') && (e.code === 'Space' || e.key === ' ' || e.code === 'Enter' || e.key === 'Enter')) {
+      if (e.code === 'Enter' || e.key === 'Enter') {
         e.preventDefault();
-        handleProceedNext();
+        if (!e.repeat && (status === 'success' || status === 'surrender')) {
+          handleProceedNext();
+        }
+        return;
+      }
+
+      if ((status === 'success' || status === 'surrender') && (e.code === 'Space' || e.key === ' ')) {
+        e.preventDefault();
+        if (!e.repeat) handleProceedNext();
         return;
       }
 
@@ -12753,6 +12999,7 @@ export default function App() {
         // Фоновый дельта-синк строго с соблюдением 5-минутного кулдауна (F5 внутри 5 мин = 0 КБ!)
         (async () => {
           try {
+            await syncExcludedBooksFromCloud();
             await syncBooksFromSupabase(false);
             await syncCardsFromSupabase(false);
             const curLangUpper = (useStore.getState().appLanguage || 'de').toUpperCase();
@@ -12795,6 +13042,7 @@ export default function App() {
             'MISTAKES_POOL_EN',
             'MISTAKES_POOL_RU',
             'GLOBAL_APP_STATE',
+            EXCLUDED_BOOKS_CLOUD_KEY,
           ])
         ]).then(([booksRes, decksRes, count, statsList]) => {
           if (typeof window !== 'undefined') {
@@ -12900,11 +13148,14 @@ export default function App() {
           });
           
           const globalStat = statsRes.data.find((s: any) => s.language === 'GLOBAL_APP_STATE');
-          if (globalStat?.daily_activity && Array.isArray(globalStat.daily_activity.excludedBookIds)) {
+          const excludedBooksStat = statsRes.data.find((s: any) => s.language === EXCLUDED_BOOKS_CLOUD_KEY);
+          const parsedExcluded =
+            parseExcludedBooksCloudPayload(excludedBooksStat?.daily_activity) ||
+            parseExcludedBooksCloudPayload(globalStat?.daily_activity);
+          if (parsedExcluded) {
             const localTs = typeof window !== 'undefined' ? parseInt(localStorage.getItem(EXCLUDED_BOOKS_TS_KEY) || '0', 10) : 0;
-            const cloudTs = globalStat.daily_activity.excludedBooksTimestamp || globalStat.daily_activity.updatedAt || 0;
-            if (cloudTs >= localTs) {
-              setLocalExcludedBookIds(globalStat.daily_activity.excludedBookIds, cloudTs);
+            if (parsedExcluded.ts >= localTs || localTs === 0) {
+              setLocalExcludedBookIds(parsedExcluded.ids, parsedExcluded.ts || Date.now());
             }
           }
           if (globalStat && globalStat.daily_activity) {
@@ -12944,7 +13195,7 @@ export default function App() {
               coverType: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover ? 'image' : (b.coverType || b.covertype),
               coverValue: b.cover_url_light || b.coverImage || b.coverimage || dedicatedCover || b.coverValue || b.covervalue,
               accentColor: b.accentColor || b.accentcolor,
-              exclude_from_review: Boolean(b.exclude_from_review) || bootExcludedSet.has(b.id),
+              exclude_from_review: bootExcludedSet.has(b.id),
             };
           });
 
@@ -13021,9 +13272,11 @@ export default function App() {
             const deckCards = cardsByDeckId.get(d.id) || [];
             const resolvedBookId = d.book_id || JSON.parse(localStorage.getItem('deck_books') || '{}')[d.id] || ((d.language || langMap[d.id]) === 'EN' ? 'default-en' : 'default-de');
             const deckExcludedSet = new Set(getLocalExcludedBookIds());
-            useStore.getState().books.forEach((b) => {
-              if (b?.exclude_from_review) deckExcludedSet.add(b.id);
-            });
+            if (deckExcludedSet.size === 0 && typeof window !== 'undefined' && !localStorage.getItem(EXCLUDED_BOOKS_STORAGE_KEY)) {
+              useStore.getState().books.forEach((b) => {
+                if (b?.exclude_from_review) deckExcludedSet.add(b.id);
+              });
+            }
             return {
               ...d,
               theory: deckTheory,
@@ -13032,7 +13285,7 @@ export default function App() {
               cards: deckCards,
               language: d.language || langMap[d.id] || 'DE',
               bookId: resolvedBookId,
-              exclude_from_review: Boolean(d.exclude_from_review) || deckExcludedSet.has(resolvedBookId),
+              exclude_from_review: deckExcludedSet.has(resolvedBookId),
             };
           });
           const validDecks = filterValidActiveDecks(enhancedDecks as Deck[], useStore.getState().books);
@@ -13068,6 +13321,8 @@ export default function App() {
     const handleFocus = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       if (isAnyStudySessionActiveGlobal()) return;
+      // Кросс-браузерный синк исключённых книг (< 200 байт) при каждом возврате на вкладку с лёгким 3с-дебаунсом
+      syncExcludedBooksFromCloud().catch(() => {});
       const now = Date.now();
       if (now - lastFocusSync < FOCUS_COOLDOWN_MS) return;
       lastFocusSync = now;
@@ -13219,7 +13474,9 @@ export default function App() {
     });
     
     if (drillCards.length > 0) {
-      const uniqueDrillCards = deduplicateCardsByLemma(drillCards);
+      const uniqueDrillCards = deduplicateCardsByLemma(drillCards, true, {
+        isCloze: (item) => isClozeReviewItem(item, decks, books),
+      });
       for (let i = uniqueDrillCards.length - 1; i > 0; i--) {
          const j = Math.floor(Math.random() * (i + 1));
          [uniqueDrillCards[i], uniqueDrillCards[j]] = [uniqueDrillCards[j], uniqueDrillCards[i]];
@@ -13233,7 +13490,8 @@ export default function App() {
   const allDueCards = useMemo(() => {
     const excludedSet = new Set(getLocalExcludedBookIds());
     books.forEach((b) => {
-      if (b?.exclude_from_review) excludedSet.add(b.id);
+      if (b?.exclude_from_review === true) excludedSet.add(b.id);
+      else if (b?.exclude_from_review === false) excludedSet.delete(b.id);
     });
     const validDecks = filterValidActiveDecks(decks, books).filter(
       (deck) => !isDeckExcludedFromReview(deck, books, excludedSet)
@@ -13266,7 +13524,9 @@ export default function App() {
         }
       });
     });
-    return buildDeduplicatedReviewQueue(list);
+    return buildDeduplicatedReviewQueue(list, {
+      isCloze: (item) => isClozeReviewItem(item, decks, books),
+    });
   }, [decks, books, appLanguage, activeBookId]);
 
   const matchesReviewMode = useCallback(
@@ -13346,7 +13606,13 @@ export default function App() {
 
     // 1. FAST IN-MEMORY PATH: Use filtered & deduplicated dueCards immediately (0 network requests)
     if (dueCards.length > 0) {
-      setReviewCards(shuffleArray(buildDeduplicatedReviewQueue(dueCards)));
+      setReviewCards(
+        shuffleArray(
+          buildDeduplicatedReviewQueue(dueCards, {
+            isCloze: (item) => isClozeReviewItem(item, decks, books),
+          })
+        )
+      );
       return;
     }
 
@@ -13367,7 +13633,13 @@ export default function App() {
             )
           );
       if (filteredFresh.length > 0) {
-        setReviewCards(shuffleArray(buildDeduplicatedReviewQueue(filteredFresh)));
+        setReviewCards(
+          shuffleArray(
+            buildDeduplicatedReviewQueue(filteredFresh, {
+              isCloze: (item) => isClozeReviewItem(item, decks, books),
+            })
+          )
+        );
         return;
       }
     } catch (e) {
@@ -13978,7 +14250,11 @@ export default function App() {
                 });
                 initAudioCtx();
                 setIsReviewingMistakes(true);
-                setReviewCards(deduplicateReviewSession(list));
+                setReviewCards(
+                  deduplicateReviewSession(list, {
+                    isCloze: (item) => isClozeReviewItem(item, decks, books),
+                  })
+                );
               }
             } catch(e) {}
           }}

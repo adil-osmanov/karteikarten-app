@@ -37,6 +37,124 @@ const CANONICAL_PREPOSITIONS = new Set([
   'in', 'mit', 'nach', 'neben', 'über', 'um', 'unter', 'von', 'vor', 'zu', 'zwischen'
 ]);
 
+const VALENCY_TECHNICAL_MARKERS = new Set([
+  'jemanden', 'jemandem', 'jemandes', 'jemand', 'etwas',
+  'jmdn', 'jmdm', 'jdn', 'jdm', 'jds', 'jmd', 'jn', 'jm', 'jd', 'etw',
+  'akk', 'dat', 'gen', 'nom', 'pl', 'sg'
+]);
+
+/**
+ * Нормализатор грамматического управления для очереди повторений (Wiederholen).
+ * Удаляет ТОЛЬКО технические маркеры падежа (jemanden, jemandem, etwas, jdn., jdm., etw., + Akk/Dat),
+ * скобочные пояснения и разделители приставок (| / ·),
+ * но СТРОГО сохраняет возвратность (sich/mich/dich/uns/euch), управляющие предлоги и артикли.
+ */
+export function normalizeValencyLemma(rawWord: string): string {
+  if (!rawWord || typeof rawWord !== 'string') return '';
+  let s = rawWord.toLowerCase().trim();
+  if (!s) return '';
+
+  // Склеиваем отделяемые приставки: ein|halten -> einhalten, mit·teilen -> mitteilen
+  s = s.replace(/[|·•\u2506\u250A]/g, '');
+
+  // Убираем нотацию множественного числа / склонения после запятой ("der Antrag, -¨e" -> "der Antrag")
+  s = s.replace(/,\s*(?:die\s+)?[-–—¨][^,]*$/i, '').trim();
+
+  // Инверсия отделяемого глагола с многоточием ("schrauben ... auf" -> "aufschrauben")
+  const ellipsisMatch = s.match(/^([a-zäöüß]+)\s*(?:\.{2,}|…+)\s*([a-zäöüß]+)$/i);
+  if (ellipsisMatch) {
+    return `${ellipsisMatch[2]}${ellipsisMatch[1]}`.toLowerCase();
+  }
+
+  // Удаляем скобочные технические пометы ("(Akk.)", "(+ Dat.)", "(hat)", "(¨-er)")
+  s = s.replace(/\(.*?\)|\[.*?\]/g, ' ').trim();
+
+  // Убираем явные теги падежей без скобок ("+ Akk", "+ Dat.")
+  s = s.replace(/\+\s*(?:akk|dat|gen|nom|pl|sg)\b\.?/gi, ' ');
+
+  // Очищаем пунктуацию с сохранением умлаутов и ß
+  s = s.replace(/[.,/#!$%^&*;:{}=\-_`~?+„"«»'’]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+
+  const rawTokens = s.split(' ').filter(Boolean);
+  if (rawTokens.length === 0) return '';
+
+  const preservedTokens = rawTokens.filter((tok) => !VALENCY_TECHNICAL_MARKERS.has(tok));
+  if (preservedTokens.length === 0) {
+    return rawTokens.join(' ');
+  }
+
+  return preservedTokens.join(' ');
+}
+
+/**
+ * Извлекает основное (первое) русское значение для различения омонимов при дедупликации карточек ("Karten").
+ */
+export function getPrimaryRussianTranslation(rawTranslation?: string): string {
+  if (!rawTranslation || typeof rawTranslation !== 'string') return '';
+  const withoutParens = rawTranslation.replace(/\(.*?\)|\[.*?\]/g, ' ').trim();
+  const primarySegment = withoutParens.split(/[\/,;]+/)[0] || '';
+  return primarySegment
+    .toLowerCase()
+    .replace(/^[.,!?;:„"«»'’—–\-\s+]+|[.,!?;:„"«»'’—–\-\s+]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Нормализует предложение с пропуском для дедупликации режима "Lücken":
+ * коллизия происходит только для на 100% идентичных предложений.
+ */
+export function normalizeSentenceForDedup(rawSentence?: string): string {
+  if (!rawSentence || typeof rawSentence !== 'string') return '';
+  return rawSentence
+    .toLowerCase()
+    .replace(/[|·•\u2506\u250A]/g, '')
+    .replace(/_{2,}/g, '___')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inferIsClozeCard(item: any, card: any): boolean {
+  const mode = card?.training_mode || item?.training_mode;
+  if (mode) return mode === 'standard_cloze';
+  if (card?.isCloze === true || item?.isCloze === true) return true;
+  const deckType = card?.deckType || item?.deckType;
+  if (deckType && String(deckType).includes('flashcard')) return false;
+  const sentence = String(card?.sentence || item?.sentence || '').trim();
+  return /_{2,}|\.\.\.|…/.test(sentence);
+}
+
+/**
+ * Строит ключ дедупликации для очереди повторений с разделением режимов:
+ * - Lücken (cloze): cloze:${valencyLemma}::${normalizedSentence}
+ * - Karten (flashcards / grammar): flashcard:${valencyLemma}::${normalizedPrimaryTranslation}
+ */
+export function getReviewDeduplicationKey(item: any, isClozeOverride?: boolean): string {
+  if (!item) return '';
+  const card = item?.card ? item.card : item;
+  const rawWord = extractRawWordFromItem(item);
+  const valencyLemma = normalizeValencyLemma(rawWord);
+  const isCloze = typeof isClozeOverride === 'boolean' ? isClozeOverride : inferIsClozeCard(item, card);
+
+  if (isCloze) {
+    const normSentence = normalizeSentenceForDedup(card?.sentence || item?.sentence || '');
+    if (!normSentence) {
+      return card?.id ? `cloze:${valencyLemma || '__empty'}::__id:${card.id}` : '';
+    }
+    return `cloze:${valencyLemma || '__empty'}::${normSentence}`;
+  }
+
+  if (!valencyLemma) {
+    return card?.id ? `flashcard:__id:${card.id}` : '';
+  }
+
+  const primaryTrans = getPrimaryRussianTranslation(
+    card?.translation || card?.hint || item?.translation || ''
+  );
+  return `flashcard:${valencyLemma}::${primaryTrans}`;
+}
+
 /**
  * Unified canonical German lemma normalizer used across Vocabulary Matrix (Wörter),
  * user_mastered_words reconciliation, and SRS Review queue deduplication.
@@ -199,9 +317,13 @@ export function sortReviewCardsPedagogically<
  * Кандидаты сортируются по педагогическому приоритету, после чего оставляется строго ОДНА карточка на лемму,
  * а дубликаты откладываются на следующие сессии.
  */
+export interface ReviewDeduplicationOptions<T> {
+  isCloze?: (item: T) => boolean;
+}
+
 export function deduplicateCardsByLemma<
   T extends { id?: string; targetWord?: string; front?: string; sentence?: string; card?: any; linkedCardIds?: string[]; masteryLevel?: number; nextReviewDate?: any; nextReviewAt?: any }
->(cards: T[], logDeduplication: boolean = true): T[] {
+>(cards: T[], logDeduplication: boolean = true, options?: ReviewDeduplicationOptions<T>): T[] {
   if (!Array.isArray(cards) || cards.length === 0) return [];
 
   // 1. Умная сортировка кандидатов по педагогическому приоритету
@@ -216,7 +338,13 @@ export function deduplicateCardsByLemma<
     if (!item) continue;
     const inner = (item as any).card ? (item as any).card : item;
     const raw = extractRawWordFromItem(item);
-    const key = getCanonicalLemmaKey(raw) || getWordKey(raw) || getCanonicalKey(raw) || normalizeLemmaKey(raw);
+    const isClozeFlag = options?.isCloze ? options.isCloze(item) : undefined;
+    const key =
+      getReviewDeduplicationKey(item, isClozeFlag) ||
+      getCanonicalLemmaKey(raw) ||
+      getWordKey(raw) ||
+      getCanonicalKey(raw) ||
+      normalizeLemmaKey(raw);
 
     if (!key) {
       // Если ключа нет, сохраняем карточку в очередь по id
@@ -308,12 +436,13 @@ function getReviewTimestampMs(raw: any): number {
 
 /**
  * Дедупликация и приоритизация очереди повторений:
- * сортирует по самому раннему сроку повтора (и меньшему masteryLevel) и оставляет
- * строго 1 карточку на канонический корень getCanonicalLemmaKey.
+ * сортирует по самому раннему сроку повтора (и меньшему masteryLevel) и разделяет логику:
+ * - Lücken (cloze): уникальность по валентности + нормализованному предложению;
+ * - Karten (flashcards/grammar): уникальность по валентности + основному русскому значению.
  */
 export function buildDeduplicatedReviewQueue<
   T extends { id?: string; targetWord?: string; front?: string; lemma?: string; word?: string; card?: any; masteryLevel?: number; nextReviewDate?: any; nextReviewAt?: any; next_review_at?: any }
->(dueCards: T[]): T[] {
+>(dueCards: T[], options?: ReviewDeduplicationOptions<T>): T[] {
   if (!Array.isArray(dueCards) || dueCards.length === 0) return [];
 
   const sortedCandidates = [...dueCards].sort((itemA, itemB) => {
@@ -337,14 +466,14 @@ export function buildDeduplicatedReviewQueue<
   for (const item of sortedCandidates) {
     if (!item) continue;
     const card = (item as any)?.card || item;
-    const rawWord = extractRawWordFromItem(item);
-    const lemmaKey = normalizeCanonicalLemma(rawWord) || (card?.id ? `__id:${card.id}` : '');
+    const isClozeFlag = options?.isCloze ? options.isCloze(item) : undefined;
+    const dedupKey = getReviewDeduplicationKey(item, isClozeFlag) || (card?.id ? `__id:${card.id}` : '');
 
-    if (!lemmaKey || seenLemmas.has(lemmaKey)) {
+    if (!dedupKey || seenLemmas.has(dedupKey)) {
       continue;
     }
 
-    seenLemmas.add(lemmaKey);
+    seenLemmas.add(dedupKey);
     uniqueQueue.push(item);
   }
 
@@ -357,8 +486,8 @@ export function getLemmaKey(word: string): string {
 
 export function getUniqueReviewQueue<
   T extends { id?: string; targetWord?: string; front?: string; lemma?: string; word?: string; card?: any }
->(cards: T[]): T[] {
-  return buildDeduplicatedReviewQueue(cards);
+>(cards: T[], options?: ReviewDeduplicationOptions<T>): T[] {
+  return buildDeduplicatedReviewQueue(cards, options);
 }
 
 export function shuffleArray<T>(array: T[]): T[] {
