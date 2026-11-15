@@ -302,17 +302,37 @@ function getLevelRank(level?: string | null): number {
   return CEFR_RANK[normalized] || 0;
 }
 
+export function isClozeOrNonVocabCard(
+  card: MasteredRelativeSourceCard | null | undefined
+): boolean {
+  if (!card) return true;
+  const cardType = String(card.cardType ?? card.card_type ?? '').toLowerCase();
+  if (cardType.includes('cloze') || cardType.includes('luecken') || cardType.includes('lücken')) {
+    return true;
+  }
+  const textFields = [card.sentence, card.example, card.contextSentence];
+  for (const txt of textFields) {
+    if (typeof txt === 'string' && /_{2,}/.test(txt)) {
+      return true;
+    }
+  }
+  if (card.trainingMode && card.trainingMode !== 'rapid_flashcards') {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Finds up to 3 strict same-root words from the user's already-archived (`isArchived === true`) pool.
  * Preserves umlauts, strictly enforces Rule A (Verb-to-Verb) or Rule B (direct derivational pair),
- * and causes zero Supabase egress.
+ * excludes Lücken / cloze cards, and causes zero Supabase egress.
  */
 export function findMasteredRelatives(
   currentCard: MasteredRelativeSourceCard | null | undefined,
   archivedCards: MasteredRelativeSourceCard[],
   maxResults = 3
 ): MasteredRelativeItem[] {
-  if (!currentCard?.word || !Array.isArray(archivedCards) || archivedCards.length === 0) {
+  if (!currentCard?.word || isClozeOrNonVocabCard(currentCard) || !Array.isArray(archivedCards) || archivedCards.length === 0) {
     return [];
   }
 
@@ -336,6 +356,7 @@ export function findMasteredRelatives(
     if (!isArchived) continue;
     if (!cand.id || cand.id === currentCard.id) continue;
     if (!cand.word) continue;
+    if (isClozeOrNonVocabCard(cand)) continue;
 
     const candLang = (cand.language || currentLang).toLowerCase();
     if (candLang !== currentLang) continue;

@@ -5149,11 +5149,36 @@ function RapidFlashcardMode({
   } = useCardTransition();
   const decks = useStore((state) => state.decks);
   const books = useStore((state) => state.books);
-  const archivedCardsPool = useMemo(() => collectArchivedCardsFromDecks(decks, books), [decks, books]);
-  const lookupCardsPool = useMemo(() => collectLookupCardsFromDecks(decks, books), [decks, books]);
   const normalizedFields = useMemo(
     () => normalizeStudyCardContent(currentCard || {}),
     [currentCard]
+  );
+  const cardDeckId = useMemo(
+    () =>
+      (currentCard as any)?.deckId ||
+      (currentCard as any)?.deck_id ||
+      decks.find((d) => d.cards?.some((c) => c.id === currentCard?.id))?.id,
+    [currentCard, decks]
+  );
+  const cardTrainingMode = useMemo(
+    () => (currentCard ? getCardTrainingMode(currentCard, cardDeckId, decks, books) : 'rapid_flashcards'),
+    [currentCard, cardDeckId, decks, books]
+  );
+  const isClozeCard = useMemo(
+    () =>
+      Boolean(
+        normalizedFields.sentence?.includes('___') ||
+        (currentCard && isClozeReviewItem({ deckId: cardDeckId, card: currentCard }, decks, books))
+      ),
+    [normalizedFields.sentence, currentCard, cardDeckId, decks, books]
+  );
+  const archivedCardsPool = useMemo(
+    () => (isClozeCard ? [] : collectArchivedCardsFromDecks(decks, books)),
+    [isClozeCard, decks, books]
+  );
+  const lookupCardsPool = useMemo(
+    () => (isClozeCard ? [] : collectLookupCardsFromDecks(decks, books)),
+    [isClozeCard, decks, books]
   );
   const safePromptTranslation = useMemo(() => {
     const rawPrompt = normalizedFields.translation || '';
@@ -5175,10 +5200,12 @@ function RapidFlashcardMode({
       id: currentCard?.id || '',
       word: currentCard?.targetWord || '',
       translation: normalizedFields.translation,
+      sentence: normalizedFields.sentence,
+      trainingMode: cardTrainingMode,
       level: (currentCard as { level?: string } | undefined)?.level ?? null,
       language: (currentCard as { language?: string } | undefined)?.language ?? 'de',
     }),
-    [currentCard, normalizedFields.translation]
+    [currentCard, normalizedFields.translation, normalizedFields.sentence, cardTrainingMode]
   );
   const hintPenaltySentRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -5897,14 +5924,17 @@ function RapidFlashcardMode({
                   </div>
                 )}
 
-                <WortfamilieAnchor
-                  currentCard={wortfamilieSourceCard}
-                  cardsPool={archivedCardsPool}
-                  lookupPool={lookupCardsPool}
-                  visible={isFlipped}
-                  cardKey={`${currentCard?.id}-${currentRound}`}
-                  onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
-                />
+                {!isClozeCard && (
+                  <WortfamilieAnchor
+                    currentCard={wortfamilieSourceCard}
+                    cardsPool={archivedCardsPool}
+                    lookupPool={lookupCardsPool}
+                    visible={isFlipped}
+                    isCloze={isClozeCard}
+                    cardKey={`${currentCard?.id}-${currentRound}`}
+                    onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
+                  />
+                )}
               </div>
             </div>
 
@@ -6146,14 +6176,17 @@ function RapidFlashcardMode({
                     </div>
                   </div>
                 )}
-                <WortfamilieAnchor
-                  currentCard={wortfamilieSourceCard}
-                  cardsPool={archivedCardsPool}
-                  lookupPool={lookupCardsPool}
-                  visible={isAnswered}
-                  cardKey={`${currentCard?.id}-${currentRound}`}
-                  onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
-                />
+                {!isClozeCard && (
+                  <WortfamilieAnchor
+                    currentCard={wortfamilieSourceCard}
+                    cardsPool={archivedCardsPool}
+                    lookupPool={lookupCardsPool}
+                    visible={isAnswered}
+                    isCloze={isClozeCard}
+                    cardKey={`${currentCard?.id}-${currentRound}`}
+                    onSpeakWord={(spoken) => playSafeAudio(() => playCardAudio(spoken))}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -8037,19 +8070,7 @@ function StudyCard({
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const decks = useStore((state) => state.decks);
   const books = useStore((state) => state.books);
-  const archivedCardsPool = useMemo(() => collectArchivedCardsFromDecks(decks, books), [decks, books]);
-  const lookupCardsPool = useMemo(() => collectLookupCardsFromDecks(decks, books), [decks, books]);
   const normalizedFields = useMemo(() => normalizeStudyCardContent(card), [card]);
-  const wortfamilieSourceCard = useMemo(
-    () => ({
-      id: card.id,
-      word: card.targetWord || '',
-      translation: normalizedFields.translation,
-      level: (card as { level?: string }).level ?? null,
-      language: (card as { language?: string }).language ?? 'de',
-    }),
-    [card, normalizedFields.translation]
-  );
   const playbackSpeed = useStore(state => state.playbackSpeed);
   const setPlaybackSpeed = useStore(state => state.setPlaybackSpeed);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -8173,6 +8194,49 @@ function StudyCard({
 
   const isRecognitionMode = !forceInputMode && !isReview && effectiveRound <= 2;
   const isMultipleChoice = isRecognitionMode;
+
+  const cardDeckId = useMemo(
+    () =>
+      (card as any)?.deckId ||
+      (card as any)?.deck_id ||
+      decks.find((d) => d.cards?.some((c) => c.id === card.id))?.id,
+    [card, decks]
+  );
+  const cardTrainingMode = useMemo(
+    () => getCardTrainingMode(card, cardDeckId, decks, books),
+    [card, cardDeckId, decks, books]
+  );
+  const isClozeCard = useMemo(
+    () =>
+      Boolean(
+        isClozeReviewItem({ deckId: cardDeckId, card }, decks, books) ||
+        hasMask ||
+        isCustomCloze ||
+        normalizedFields.sentence?.includes('___') ||
+        isMultipleChoice
+      ),
+    [cardDeckId, card, decks, books, hasMask, isCustomCloze, normalizedFields.sentence, isMultipleChoice]
+  );
+  const archivedCardsPool = useMemo(
+    () => (isClozeCard ? [] : collectArchivedCardsFromDecks(decks, books)),
+    [isClozeCard, decks, books]
+  );
+  const lookupCardsPool = useMemo(
+    () => (isClozeCard ? [] : collectLookupCardsFromDecks(decks, books)),
+    [isClozeCard, decks, books]
+  );
+  const wortfamilieSourceCard = useMemo(
+    () => ({
+      id: card.id,
+      word: card.targetWord || '',
+      translation: normalizedFields.translation,
+      sentence: normalizedFields.sentence,
+      trainingMode: cardTrainingMode,
+      level: (card as { level?: string }).level ?? null,
+      language: (card as { language?: string }).language ?? 'de',
+    }),
+    [card, normalizedFields.translation, normalizedFields.sentence, cardTrainingMode]
+  );
 
   useEffect(() => {
     if (phase !== "Question") return;
@@ -8840,32 +8904,37 @@ function StudyCard({
             </>
           )}
 
-          <div className="w-full text-center">
-            {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
-              <div className="w-full text-center mt-6 flex flex-col items-center gap-1.5 transition-all duration-200 ease-out animate-in fade-in zoom-in-[0.98]">
-                <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm max-w-[95%]">
-                  {renderFormattedGrammarRule(
-                    card.grammarHint || 
-                    card.explanation || 
-                    (parsedExtra.type === 'noun' ? `${parsedExtra.article} ${parsedExtra.word}` : (parsedExtra.type === 'other' ? parsedExtra.main : ''))
+          {((isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none')) || !isClozeCard) && (
+            <div className="w-full text-center">
+              {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
+                <div className="w-full text-center mt-6 flex flex-col items-center gap-1.5 transition-all duration-200 ease-out animate-in fade-in zoom-in-[0.98]">
+                  <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm max-w-[95%]">
+                    {renderFormattedGrammarRule(
+                      card.grammarHint || 
+                      card.explanation || 
+                      (parsedExtra.type === 'noun' ? `${parsedExtra.article} ${parsedExtra.word}` : (parsedExtra.type === 'other' ? parsedExtra.main : ''))
+                    )}
+                  </div>
+                  {parsedExtra.type !== 'none' && parsedExtra.sub && (
+                    <span className="text-xs sm:text-[13px] text-zinc-600 dark:text-zinc-400 font-medium tracking-wide">
+                      {parsedExtra.sub}
+                    </span>
                   )}
                 </div>
-                {parsedExtra.type !== 'none' && parsedExtra.sub && (
-                  <span className="text-xs sm:text-[13px] text-zinc-600 dark:text-zinc-400 font-medium tracking-wide">
-                    {parsedExtra.sub}
-                  </span>
-                )}
-              </div>
-            )}
-            <WortfamilieAnchor
-              currentCard={wortfamilieSourceCard}
-              cardsPool={archivedCardsPool}
-              lookupPool={lookupCardsPool}
-              visible={isAnswered}
-              cardKey={`${card.id}-${currentRound}`}
-              onSpeakWord={playAudio}
-            />
-          </div>
+              )}
+              {!isClozeCard && (
+                <WortfamilieAnchor
+                  currentCard={wortfamilieSourceCard}
+                  cardsPool={archivedCardsPool}
+                  lookupPool={lookupCardsPool}
+                  visible={isAnswered}
+                  isCloze={isClozeCard}
+                  cardKey={`${card.id}-${currentRound}`}
+                  onSpeakWord={playAudio}
+                />
+              )}
+            </div>
+          )}
         </div>
 
         {/* 3. Нижняя панель действий (СТРОГО ВНУТРИ КАРТОЧКИ) */}

@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Volume2 } from 'lucide-react';
 import {
   findMasteredRelatives,
+  isClozeOrNonVocabCard,
   type MasteredRelativeSourceCard,
 } from '@/lib/utils/findMasteredRelatives';
 import { findGermanSynonyms } from '@/lib/utils/findGermanSynonyms';
@@ -25,6 +26,7 @@ interface WortfamilieAnchorProps {
   archivedCards?: MasteredRelativeSourceCard[];
   lookupPool?: MasteredRelativeSourceCard[];
   visible: boolean;
+  isCloze?: boolean;
   onSpeakWord?: (text: string) => void;
   cardKey?: string | number;
   className?: string;
@@ -36,29 +38,31 @@ export function WortfamilieAnchor({
   archivedCards = [],
   lookupPool,
   visible,
+  isCloze = false,
   onSpeakWord,
   cardKey,
   className = '',
 }: WortfamilieAnchorProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const isEnabled = visible && !isCloze && !isClozeOrNonVocabCard(currentCard);
 
   useEffect(() => {
     setActiveKey(null);
-  }, [cardKey, currentCard?.id, visible]);
+  }, [cardKey, currentCard?.id, isEnabled]);
 
   const effectivePool = cardsPool ?? archivedCards;
   const effectiveLookupPool = lookupPool && lookupPool.length > 0 ? lookupPool : effectivePool;
   const currentLang = (currentCard?.language || 'de').toLowerCase();
 
   const wortfamilie = useMemo(() => {
-    if (!visible) return [];
+    if (!isEnabled) return [];
     return findMasteredRelatives(currentCard, effectivePool, 3);
-  }, [visible, currentCard, effectivePool]);
+  }, [isEnabled, currentCard, effectivePool]);
 
   const synonyme = useMemo(() => {
-    if (!visible) return [];
+    if (!isEnabled) return [];
     return findGermanSynonyms(currentCard, effectivePool, 3);
-  }, [visible, currentCard, effectivePool]);
+  }, [isEnabled, currentCard, effectivePool]);
 
   const allEntries = useMemo<ComparisonEntry[]>(() => {
     return [
@@ -100,7 +104,7 @@ export function WortfamilieAnchor({
     [activeEntry, effectiveLookupPool]
   );
 
-  if (!visible || (wortfamilie.length === 0 && synonyme.length === 0)) {
+  if (!isEnabled || (wortfamilie.length === 0 && synonyme.length === 0)) {
     return null;
   }
 

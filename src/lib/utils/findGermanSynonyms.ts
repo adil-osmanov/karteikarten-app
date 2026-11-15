@@ -1,6 +1,7 @@
 import { normalizeCanonicalLemma } from '@/lib/utils/lemmaNormalizer';
 import {
   areGermanRelatives,
+  isClozeOrNonVocabCard,
   type MasteredRelativeSourceCard,
 } from '@/lib/utils/findMasteredRelatives';
 
@@ -143,7 +144,7 @@ export function findGermanSynonyms(
   cardsPool: MasteredRelativeSourceCard[],
   maxResults = 3
 ): GermanSynonymItem[] {
-  if (!currentCard?.word || !currentCard?.translation || !Array.isArray(cardsPool) || cardsPool.length === 0) {
+  if (!currentCard?.word || !currentCard?.translation || isClozeOrNonVocabCard(currentCard) || !Array.isArray(cardsPool) || cardsPool.length === 0) {
     return [];
   }
 
@@ -167,6 +168,7 @@ export function findGermanSynonyms(
     for (const cand of cardsPool) {
       if (!cand.id || cand.id === currentCard.id) continue;
       if (!cand.word || !cand.translation) continue;
+      if (isClozeOrNonVocabCard(cand)) continue;
 
       const candArchived = Boolean(cand.isArchived ?? cand.is_archived);
       const candMastery = Number(cand.masteryLevel ?? cand.mastery_level ?? 0);
