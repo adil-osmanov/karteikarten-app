@@ -111,12 +111,12 @@ export const CARD_CONTAINER_SURFACE_CLASSES = cn(
 );
 
 export const CARD_CONTAINER_BASE_CLASSES = cn(
-  "relative w-full max-w-4xl lg:max-w-5xl min-h-[340px] sm:min-h-[520px] md:min-h-[560px] h-auto sm:h-[600px] sm:max-h-[600px] mx-auto p-5 sm:p-10 rounded-[28px] sm:rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden transition-all duration-200 ease-out",
+  "relative w-full max-w-[1040px] min-h-[540px] sm:min-h-[600px] h-auto mx-auto p-8 sm:p-12 rounded-[28px] sm:rounded-[36px] border flex flex-col justify-between items-center group select-none overflow-hidden transition-all duration-200 ease-out",
   CARD_CONTAINER_SURFACE_CLASSES
 );
 
 export const AUDIO_BUTTON_CLASSES = cn(
-  "w-11 h-11 shrink-0 rounded-full bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] dark:text-[#F5F5F7] border border-black/[0.06] dark:border-white/[0.1] backdrop-blur-md flex items-center justify-center transition-all duration-150 active:scale-95 disabled:opacity-40 cursor-pointer shadow-sm"
+  "w-12 h-12 shrink-0 rounded-full bg-black/[0.04] hover:bg-black/[0.08] text-[#1D1D1F] dark:bg-white/[0.08] dark:hover:bg-white/[0.14] dark:text-[#F5F5F7] border border-black/[0.06] dark:border-white/[0.1] backdrop-blur-md flex items-center justify-center transition-all duration-150 active:scale-95 disabled:opacity-40 cursor-pointer shadow-sm"
 );
 
 export function ProgressDots({ 
@@ -160,12 +160,12 @@ export function ProgressDots({
   };
 
   return (
-    <div className={cn("flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/10 backdrop-blur-md select-none shrink-0", className)}>
+    <div className={cn("flex items-center gap-2.5 px-4 py-2 rounded-full bg-black/[0.03] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/10 backdrop-blur-md select-none shrink-0", className)}>
       {Array.from({ length: max }, (_, idx) => (
         <div
           key={idx}
           className={cn(
-            "w-2 h-2 rounded-full transition-all duration-300 ease-out",
+            "w-2.5 h-2.5 rounded-full transition-all duration-300 ease-out",
             getDotStyles(idx)
           )}
         />
@@ -188,7 +188,7 @@ export const CardContainer = forwardRef<HTMLDivElement, CardContainerProps>(
         ref={ref}
         className={cn(
           is3DFace
-            ? cn("absolute inset-0 w-full h-full p-5 sm:p-10 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[28px] sm:rounded-[36px] overflow-hidden transition-all duration-200 ease-out", CARD_CONTAINER_SURFACE_CLASSES)
+            ? cn("absolute inset-0 w-full h-full p-8 sm:p-12 border flex flex-col justify-between items-center [backface-visibility:hidden] group rounded-[28px] sm:rounded-[36px] overflow-hidden transition-all duration-200 ease-out", CARD_CONTAINER_SURFACE_CLASSES)
             : CARD_CONTAINER_BASE_CLASSES,
           rarityClasses,
           isVaporizing && "opacity-0 scale-[1.01] transition-all duration-150 ease-out pointer-events-none",

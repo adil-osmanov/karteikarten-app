@@ -345,7 +345,7 @@ export function formatSeparableWord(
 
   const coreNode = parts.isSeparable ? (
     <>
-      {parts.prefixPart}<span className="text-neutral-400 dark:text-white/30 font-normal select-none px-[0.5px]" aria-hidden="true">·</span>{parts.stemPart}
+      {parts.prefixPart}<span className="text-neutral-400 dark:text-white/30 font-normal select-none px-[0.03em]" aria-hidden="true">·</span>{parts.stemPart}
     </>
   ) : (
     parts.cleanWord
@@ -353,7 +353,7 @@ export function formatSeparableWord(
 
   if (parts.leadingText || parts.trailingText) {
     return (
-      <span className="font-medium tracking-tight">
+      <span className="tracking-tight">
         {parts.leadingText ? <>{parts.leadingText}{' '}</> : null}
         <span className="whitespace-nowrap">{coreNode}</span>
         {parts.trailingText ? <>{' '}{parts.trailingText}</> : null}
@@ -362,7 +362,7 @@ export function formatSeparableWord(
   }
 
   return (
-    <span className="whitespace-nowrap font-medium tracking-tight">
+    <span className="whitespace-nowrap tracking-tight">
       {coreNode}
     </span>
   );

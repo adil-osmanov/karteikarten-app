@@ -136,10 +136,10 @@ export function WortfamilieAnchor({
 
     return (
       <div
-        className="flex flex-wrap items-center justify-center gap-1.5"
+        className="flex flex-wrap items-center justify-center gap-2"
         data-testid={`${group}-row`}
       >
-        <span className="text-[11px] tracking-wider uppercase text-neutral-500 dark:text-neutral-500 select-none mr-1.5">
+        <span className="text-xs tracking-wider uppercase text-neutral-500 dark:text-neutral-500 select-none mr-1.5">
           {label}
         </span>
         {items.map((item) => {
@@ -152,7 +152,7 @@ export function WortfamilieAnchor({
               onClick={(e) => handlePillClick(e, entryKey, item.word)}
               aria-pressed={isActive}
               data-testid={`${group}-pill`}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs tracking-[-0.01em] border transition-all duration-150 cursor-pointer active:scale-[0.97] ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs sm:text-[13.5px] tracking-[-0.01em] border transition-all duration-150 cursor-pointer active:scale-[0.97] ${
                 isActive
                   ? 'bg-black/[0.07] border-black/[0.18] text-neutral-950 dark:bg-white/[0.12] dark:border-white/[0.22] dark:text-white shadow-xs'
                   : 'bg-black/[0.03] hover:bg-black/[0.06] border-black/[0.08] text-neutral-700 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] dark:border-white/[0.08] dark:text-white/75 hover:dark:text-white'
@@ -161,7 +161,7 @@ export function WortfamilieAnchor({
               {formatSeparableWord(item.word)}
               {isActive && (
                 <Volume2
-                  className="w-3 h-3 text-neutral-400 dark:text-white/45 shrink-0"
+                  className="w-3.5 h-3.5 text-neutral-400 dark:text-white/45 shrink-0"
                   aria-hidden="true"
                 />
               )}
@@ -193,12 +193,12 @@ export function WortfamilieAnchor({
             exit={{ opacity: 0, y: -2 }}
             transition={{ duration: 0.16, ease: 'easeOut' }}
             data-testid="wortfamilie-comparison"
-            className="mt-3 px-4 py-3 rounded-2xl bg-black/[0.035] dark:bg-white/[0.035] border border-black/[0.06] dark:border-white/[0.06] max-w-md w-full text-center select-text"
+            className="mt-3 px-5 py-3.5 rounded-2xl bg-black/[0.035] dark:bg-white/[0.035] border border-black/[0.06] dark:border-white/[0.06] max-w-lg w-full text-center select-text"
           >
             {resolvedTranslation && (
               <p
                 data-testid="wortfamilie-caption"
-                className="text-[13px] font-medium text-neutral-900 dark:text-neutral-100 leading-snug"
+                className="text-sm font-medium text-neutral-900 dark:text-neutral-100 leading-snug"
               >
                 {resolvedTranslation}
               </p>
@@ -213,7 +213,7 @@ export function WortfamilieAnchor({
                 }}
                 title="Пример озвучить"
                 aria-label={`Озвучить пример: ${resolvedExample}`}
-                className="block w-full text-center text-[12px] text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 italic mt-1.5 leading-relaxed cursor-pointer transition-colors bg-transparent border-0 p-0 focus:outline-none select-text"
+                className="block w-full text-center text-[13px] text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 italic mt-1.5 leading-relaxed cursor-pointer transition-colors bg-transparent border-0 p-0 focus:outline-none select-text"
               >
                 {resolvedExample}
               </button>

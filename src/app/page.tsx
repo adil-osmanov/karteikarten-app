@@ -43,6 +43,14 @@ import { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, de
 import { getCleanTranslation } from "@/lib/utils";
 import { normalizeStudyCardContent, resolveCloze } from "@/lib/utils/clozeResolver";
 import {
+  getTargetWordFontClasses,
+  getFormsFontClasses,
+  getTranslationFontClasses,
+  getRecallPromptFontClasses,
+  getExampleSentenceFontClasses,
+  getClozeSentenceFontClasses,
+} from "@/lib/utils/cardTypography";
+import {
   enqueuePendingCard,
   writeThroughCardUpdate,
   syncWithCloud,
@@ -5319,10 +5327,10 @@ function RapidFlashcardMode({
   const getArticleColor = (art: string | null) => {
     if (!art) return '';
     const lower = art.toLowerCase();
-    if (lower === 'der') return 'text-sky-500 dark:text-sky-400 font-semibold mr-2';
-    if (lower === 'die') return 'text-rose-500 dark:text-rose-400 font-semibold mr-2';
-    if (lower === 'das') return 'text-emerald-500 dark:text-emerald-400 font-semibold mr-2';
-    return 'text-rose-500 dark:text-rose-400 font-semibold mr-2';
+    if (lower === 'der') return 'text-sky-500 dark:text-sky-400 font-semibold mr-[0.22em]';
+    if (lower === 'die') return 'text-rose-500 dark:text-rose-400 font-semibold mr-[0.22em]';
+    if (lower === 'das') return 'text-emerald-500 dark:text-emerald-400 font-semibold mr-[0.22em]';
+    return 'text-rose-500 dark:text-rose-400 font-semibold mr-[0.22em]';
   };
 
   // Элегантный рендер слова с тонкой пунктирной чертой того же цвета, что и текст (Раунды 1-2)
@@ -5745,13 +5753,17 @@ function RapidFlashcardMode({
 
   const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !isSurrendered && !currentCard?.failedInSession;
 
+  const fullDisplayWord = `${article ? `${article} ` : ''}${wordOnly || currentCard?.targetWord || ''}`.trim();
+  const cleanTranslationText = getCleanTranslation(normalizedFields.translation);
+  const cleanRecallPromptText = getCleanTranslation(safePromptTranslation);
+
   return (
     <div 
       className={cn(
-        "relative w-full max-w-4xl lg:max-w-5xl mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
+        "relative w-full max-w-[1040px] mx-auto bg-transparent border-0 shadow-none [perspective:1400px] select-none",
         isRound1or2
-          ? "min-h-[440px] h-[500px] sm:min-h-[520px] md:min-h-[540px] sm:h-[600px] sm:max-h-[600px]"
-          : "min-h-[440px] sm:min-h-[520px] md:min-h-[540px] h-auto sm:h-[600px] sm:max-h-[600px]",
+          ? "min-h-[540px] h-[560px] sm:min-h-[600px] sm:h-[640px] md:h-[660px]"
+          : "min-h-[540px] sm:min-h-[600px] h-auto",
         (isTransitioning || isTransitionBusy) && "pointer-events-none"
       )}
       style={{ perspective: 1400, WebkitPerspective: 1400 }}
@@ -5800,7 +5812,7 @@ function RapidFlashcardMode({
               >
                 <Volume2 className="w-5 h-5"/>
               </button>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -5810,7 +5822,7 @@ function RapidFlashcardMode({
                   className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-2 rounded-xl text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
                   title="Karte bearbeiten"
                 >
-                  <Pencil className="w-4 h-4" />
+                  <Pencil className="w-[18px] h-[18px]" />
                 </button>
                 <ProgressDots level={visualRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryVisual} />
               </div>
@@ -5820,16 +5832,19 @@ function RapidFlashcardMode({
             <div
               key={currentCard.id}
               className={cn(
-                "card-body w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text",
+                "card-body w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text px-2",
                 transitionClasses
               )}
             >
-              <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight break-words max-w-full">
+              <h2 className={cn(
+                getTargetWordFontClasses(fullDisplayWord),
+                "text-neutral-900 dark:text-white break-words max-w-full"
+              )}>
                 {article && <span className={getArticleColor(article)}>{article} </span>}
                 {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
               </h2>
               {plural && (
-                <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mt-2 text-center">
+                <p className={cn(getFormsFontClasses(plural), "font-medium text-center")}>
                   {plural}
                 </p>
               )}
@@ -5866,7 +5881,7 @@ function RapidFlashcardMode({
               >
                 <Volume2 className="w-5 h-5"/>
               </button>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -5876,7 +5891,7 @@ function RapidFlashcardMode({
                   className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-2 rounded-xl text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
                   title="Karte bearbeiten"
                 >
-                  <Pencil className="w-4 h-4" />
+                  <Pencil className="w-[18px] h-[18px]" />
                 </button>
                 <ProgressDots level={visualRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryVisual} />
               </div>
@@ -5886,17 +5901,20 @@ function RapidFlashcardMode({
             <div
               key={currentCard.id}
               className={cn(
-                "card-body w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text overflow-y-auto",
+                "card-body w-full flex-1 flex flex-col items-center justify-center text-center my-auto select-text overflow-y-auto px-2",
                 transitionClasses
               )}
             >
               <div>
-                <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-neutral-900 dark:text-white leading-tight break-words max-w-full">
+                <h2 className={cn(
+                  getTargetWordFontClasses(fullDisplayWord),
+                  "text-neutral-900 dark:text-white break-words max-w-full"
+                )}>
                   {article && <span className={getArticleColor(article)}>{article} </span>}
                   {renderFormattedWord(wordOnly || currentCard?.targetWord || '')}
                 </h2>
                 {plural && (
-                  <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400 mt-2 text-center">
+                  <p className={cn(getFormsFontClasses(plural), "font-medium text-center")}>
                     {plural}
                   </p>
                 )}
@@ -5909,15 +5927,15 @@ function RapidFlashcardMode({
                   isFlipped && "animate-in fade-in zoom-in-[0.98]"
                 )}
               >
-                <p className="text-lg sm:text-xl md:text-2xl font-medium text-neutral-800 dark:text-neutral-200">
-                  {getCleanTranslation(normalizedFields.translation)}
+                <p className={getTranslationFontClasses(cleanTranslationText)}>
+                  {cleanTranslationText}
                 </p>
 
                 {/* Чистая цитата примера */}
                 {displaySentence && (
-                  <div className="w-full max-w-lg mx-auto my-3 flex justify-center">
-                    <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
-                      <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-neutral-600 dark:text-neutral-400 select-text">
+                  <div className="w-full max-w-2xl mx-auto my-4 flex justify-center">
+                    <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-4 py-0.5">
+                      <p className={cn("italic font-normal select-text", getExampleSentenceFontClasses(displaySentence))}>
                         {displaySentence}
                       </p>
                     </div>
@@ -5975,7 +5993,7 @@ function RapidFlashcardMode({
               </div>
             )}
             {/* Чистый десктопный отступ без кнопок */}
-            <div className="hidden md:flex w-full justify-center shrink-0 min-h-[32px] sm:min-h-[52px]" />
+            <div className="hidden md:flex w-full justify-center shrink-0 min-h-[12px] sm:min-h-[16px]" />
           </CardContainer>
         </div>
       ) : (
@@ -6009,19 +6027,19 @@ function RapidFlashcardMode({
               className={cn(AUDIO_BUTTON_CLASSES, !isAnswered && "opacity-30 cursor-not-allowed")}
               title={isAnswered ? "Aussprache anhören (R)" : "Erst antworten, dann anhören"}
             >
-              <Volume2 className="w-4 h-4"/>
+              <Volume2 className="w-5 h-5"/>
             </button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsEditModalOpen(true);
                 }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
+                className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-2 rounded-xl text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
                 title="Karte bearbeiten"
               >
-                <Pencil className="w-3.5 h-3.5" />
+                <Pencil className="w-[18px] h-[18px]" />
               </button>
               <ProgressDots level={visualRound} isSealed={isMasteredGolden || isVaporizing} isLegendary={isLegendaryVisual} />
 
@@ -6029,10 +6047,10 @@ function RapidFlashcardMode({
                 type="button"
                 onClick={(e) => { e.stopPropagation(); handleMistakeOrGiveUp(); }}
                 disabled={isAnswered || locked}
-                className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
+                className="w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer"
                 title="Lösung anzeigen"
               >
-                <HelpCircle className="w-3.5 h-3.5" />
+                <HelpCircle className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -6041,13 +6059,16 @@ function RapidFlashcardMode({
           <div 
             key={currentCard.id}
             className={cn(
-              "card-body w-full flex-1 flex flex-col justify-center items-center text-center my-auto select-text py-2 sm:py-0",
+              "card-body w-full flex-1 flex flex-col justify-center items-center text-center my-auto select-text py-2 sm:py-0 px-2",
               transitionClasses
             )}
             onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
           >
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-neutral-900 dark:text-white mb-4 sm:mb-6 max-w-2xl leading-tight">
-              {getCleanTranslation(safePromptTranslation)}
+            <h2 className={cn(
+              getRecallPromptFontClasses(cleanRecallPromptText),
+              "mb-5 sm:mb-7 max-w-3xl"
+            )}>
+              {cleanRecallPromptText}
             </h2>
 
             {(() => {
@@ -6056,7 +6077,7 @@ function RapidFlashcardMode({
               const hasOuterContext = Boolean(leadingText || trailingText);
 
               return (
-                <div className="w-full max-w-2xl flex flex-wrap items-center justify-center gap-x-3 sm:gap-x-4 gap-y-2.5 sm:gap-y-3">
+                <div className="w-full max-w-3xl flex flex-wrap items-center justify-center gap-x-3.5 sm:gap-x-4 gap-y-2.5 sm:gap-y-3">
                   {/* 1. Начальная часть конструкции (если есть, напр. "jemanden vor jemandem") */}
                   {leadingText && (
                     <span className="text-xl sm:text-2xl md:text-3xl font-medium text-neutral-500 dark:text-neutral-400 tracking-normal select-none text-center">
@@ -6065,14 +6086,14 @@ function RapidFlashcardMode({
                   )}
 
                   {/* 2. Основное слово / инпут / плашка ответа */}
-                  <div className={cn("inline-flex items-center justify-center", hasOuterContext ? "max-w-full" : "w-full max-w-xl")}>
+                  <div className={cn("inline-flex items-center justify-center", hasOuterContext ? "max-w-full" : "w-full max-w-2xl")}>
                     <div
                       onClick={() => { if (!isMobile && !isAnswered) inputRef.current?.focus(); }}
                       className={cn(
-                        "relative inline-flex items-center justify-center min-h-[52px] h-13 sm:min-h-[64px] sm:h-16 px-4 sm:px-8 py-2 sm:py-3 rounded-2xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
+                        "relative inline-flex items-center justify-center min-h-[58px] h-[58px] sm:min-h-[72px] sm:h-[72px] px-5 sm:px-9 py-2.5 sm:py-3.5 rounded-2xl whitespace-nowrap overflow-hidden transition-colors duration-200 outline-none border cursor-text",
                         hasOuterContext
-                          ? "min-w-[200px] sm:min-w-[260px] max-w-full sm:max-w-xl"
-                          : "w-full max-w-[280px] sm:w-auto sm:min-w-[260px] sm:max-w-xl",
+                          ? "min-w-[220px] sm:min-w-[280px] max-w-full sm:max-w-2xl"
+                          : "w-full max-w-[300px] sm:w-auto sm:min-w-[280px] sm:max-w-2xl",
                         isMobile && "select-none",
                         isAnswered
                           ? (!isSurrendered
@@ -6080,7 +6101,7 @@ function RapidFlashcardMode({
                               : "border-red-500/40 text-red-600 dark:text-red-400 bg-red-500/5 font-semibold")
                           : isErrorMismatch
                             ? "text-rose-600 dark:text-rose-500 border-rose-500/50 bg-rose-500/10 font-semibold"
-                            : "bg-black/[0.035] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl md:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.07] focus-within:border-blue-600 dark:focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
+                            : "bg-black/[0.035] dark:bg-white/[0.04] border-black/10 dark:border-white/15 text-2xl sm:text-3xl text-center font-medium tracking-tight text-neutral-900 dark:text-white placeholder:text-neutral-400 focus-within:outline-none focus-within:bg-white dark:focus-within:bg-white/[0.07] focus-within:border-blue-600 dark:focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]",
                         isShaking && "animate-shake"
                       )}
                     >
@@ -6088,8 +6109,8 @@ function RapidFlashcardMode({
                         <div className={cn(
                           "inline-flex items-center justify-center font-medium tracking-tight select-none whitespace-nowrap",
                           displayParts.totalLength > 22
-                            ? 'text-xl sm:text-2xl'
-                            : 'text-2xl md:text-3xl',
+                            ? 'text-xl sm:text-2xl md:text-[26px]'
+                            : 'text-2xl sm:text-3xl md:text-[34px]',
                           !isSurrendered ? 'text-emerald-400' : 'text-red-400'
                         )}>
                           {displayParts.hasDivider ? (
@@ -6136,8 +6157,8 @@ function RapidFlashcardMode({
                           />
                           <div className={`pointer-events-none select-none flex items-baseline justify-center flex-nowrap whitespace-nowrap font-medium tracking-tight ${
                             displayParts.totalLength > 22
-                              ? 'text-lg sm:text-2xl'
-                              : 'text-xl sm:text-2xl md:text-3xl'
+                              ? 'text-xl sm:text-2xl md:text-[26px]'
+                              : 'text-2xl sm:text-3xl md:text-[34px]'
                           }`}>
                             {displayParts.totalLength === 0 && <span className="opacity-0 select-none">&nbsp;</span>}
                             <span>{displayParts.prefix}</span>
@@ -6161,16 +6182,16 @@ function RapidFlashcardMode({
 
             {/* Пример предложения и формы слова после ввода ответа (мягкое проявление) */}
             {isAnswered && (
-              <div className="w-full max-w-xl mx-auto text-center mt-6 transition-all duration-200 ease-out animate-in fade-in zoom-in-[0.98]">
+              <div className="w-full max-w-3xl mx-auto text-center mt-6 transition-all duration-200 ease-out animate-in fade-in zoom-in-[0.98]">
                 {plural && (
-                  <p className="text-xs md:text-sm font-medium text-neutral-500 dark:text-neutral-500 text-center mt-3 mb-1">
+                  <p className={cn(getFormsFontClasses(plural), "font-medium text-center mb-1")}>
                     {plural}
                   </p>
                 )}
                 {displaySentence && (
-                  <div className="w-full max-w-lg mx-auto my-3 flex justify-center">
-                    <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
-                      <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-neutral-600 dark:text-neutral-400 select-text">
+                  <div className="w-full max-w-2xl mx-auto my-4 flex justify-center">
+                    <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-4 py-0.5">
+                      <p className={cn("italic font-normal select-text", getExampleSentenceFontClasses(displaySentence))}>
                         {displaySentence}
                       </p>
                     </div>
@@ -6192,13 +6213,13 @@ function RapidFlashcardMode({
           </div>
 
           {/* Низ: Кнопка Weiter */}
-          <div className="w-full flex justify-center mt-4 sm:mt-6 min-h-[44px] sm:min-h-[56px]">
+          <div className="w-full flex justify-center mt-4 sm:mt-6 min-h-[50px] sm:min-h-[56px]">
             {isAnswered && (
               <button
                 ref={weiterButtonRef}
                 type="button"
                 onClick={handleProceedNext}
-                className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-sm shadow-lg shadow-blue-600/30 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center"
+                className="w-full max-w-xs sm:max-w-[340px] py-3.5 px-8 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-medium text-base sm:text-[17px] min-h-[50px] sm:min-h-[54px] shadow-lg shadow-blue-600/30 transition-all outline-none focus:outline-none border-0 select-none cursor-pointer flex items-center justify-center"
                 style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
               >
                 Weiter
@@ -6381,7 +6402,7 @@ function SessionHeaderBar({
   showRepeatBadge?: boolean;
 }) {
   return (
-    <div className="w-full max-w-4xl lg:max-w-5xl mx-auto px-4 mb-2 sm:mb-3">
+    <div className="w-full max-w-[1040px] mx-auto px-4 mb-3 sm:mb-4">
       <div className="flex items-center justify-between mb-2">
         <button
           onClick={onBack}
@@ -6970,7 +6991,7 @@ function RapidSession({
       />
 
       <div className={cn(
-        "w-full max-w-4xl lg:max-w-5xl mx-auto px-3 sm:px-4 flex flex-col items-center select-none relative min-h-0 sm:min-h-[540px]",
+        "w-full max-w-[1040px] mx-auto px-3 sm:px-4 flex flex-col items-center select-none relative min-h-0 sm:min-h-[600px]",
         (isMobile && ((wordProgress[current.card.id] || 0) >= 2 || (liveCard?.masteryLevel || 0) >= 2)) ? "pb-[260px] sm:pb-6" : ""
       )}>
         <RapidFlashcardMode
@@ -7064,7 +7085,7 @@ function RapidStudyCard({
     : (isReview || card.isArchived);
 
   return (
-    <div className="w-full flex justify-center relative min-h-0 sm:min-h-[540px]">
+    <div className="w-full flex justify-center relative min-h-0 sm:min-h-[600px]">
       <RapidFlashcardMode
         card={card}
         progress={progress}
@@ -7780,7 +7801,7 @@ function StudyInterface({
       />
 
       <div className={cn(
-        "w-full max-w-4xl lg:max-w-5xl mx-auto px-3 sm:px-4 flex flex-col items-center select-none relative min-h-0 sm:min-h-[540px]",
+        "w-full max-w-[1040px] mx-auto px-3 sm:px-4 flex flex-col items-center select-none relative min-h-0 sm:min-h-[600px]",
         isMobile && currentCardTrainingMode !== 'redemittel' ? "pb-[260px] sm:pb-6" : ""
       )}>
         {currentCardTrainingMode === 'preposition_drill' ? (
@@ -8656,7 +8677,7 @@ function StudyCard({
         isLegendary={isLegendaryVisual}
         isVaporizing={isVaporizing}
         className={cn(
-          "min-h-[420px] sm:min-h-[520px] md:min-h-[540px]",
+          "min-h-[540px] sm:min-h-[600px]",
           !isMobile && !isRecognitionMode && phase === "Question" && "cursor-text",
           (isTransitioning || isTransitionBusy) && "pointer-events-none"
         )}
@@ -8667,9 +8688,9 @@ function StudyCard({
           }
         }}
       >
-        <div className="flex items-center justify-between w-full h-10 sm:h-12 shrink-0 mb-4 sm:mb-6">
+        <div className="flex items-center justify-between w-full h-12 shrink-0 mb-4 sm:mb-6">
           {/* Кнопки звука и скорости */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
             <button 
               type="button"
               onClick={() => {
@@ -8681,8 +8702,8 @@ function StudyCard({
               className={cn("relative", AUDIO_BUTTON_CLASSES, isFallbackDictionaryMode && phase === "Question" && "opacity-30 cursor-not-allowed")}
               title={isFallbackDictionaryMode && phase === "Question" ? "Erst antworten, dann anhören" : "Aussprache anhören (R)"}
             >
-              <Volume2 className="w-4 h-4" />
-              <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-bold text-zinc-400 dark:text-zinc-500 bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded px-0.5 shadow-sm pointer-events-none">
+              <Volume2 className="w-5 h-5" />
+              <span className="absolute -bottom-0.5 -right-0.5 text-[9px] font-bold text-zinc-400 dark:text-zinc-500 bg-white dark:bg-[#3A3A3C] border border-gray-100 dark:border-white/[0.05] rounded px-1 shadow-sm pointer-events-none">
                 R
               </span>
             </button>
@@ -8690,10 +8711,10 @@ function StudyCard({
             <button
               type="button"
               onClick={() => setPlaybackSpeed(playbackSpeed === 1 ? 0.75 : 1)}
-              className="text-xs font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-black/[0.06] dark:border-white/[0.08] transition-colors duration-150 active:scale-95 cursor-pointer"
+              className="text-xs font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white px-2.5 py-1 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-black/[0.06] dark:border-white/[0.08] transition-colors duration-150 active:scale-95 cursor-pointer"
               title="Playback Speed"
             >
-              <span className="text-[11px] font-semibold tabular-nums tracking-wide leading-none">
+              <span className="text-xs font-semibold tabular-nums tracking-wide leading-none">
                 {playbackSpeed}x
               </span>
             </button>
@@ -8701,23 +8722,23 @@ function StudyCard({
 
           {/* Название темы со свободным отступом слева и защитой от перекрытия */}
           {deckTitle && (
-            <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
+            <div className="ml-4 mr-auto max-w-[200px] sm:max-w-sm truncate text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
               {deckTitle}
             </div>
           )}
 
           {/* Правая часть: редактирование, точки прогресса и помощь */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 setIsEditModalOpen(true);
               }}
-              className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
+              className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-2 rounded-xl text-neutral-500 hover:text-neutral-200 hover:bg-white/10 active:scale-95 outline-none cursor-pointer"
               title="Karte bearbeiten"
             >
-              <Pencil className="w-3.5 h-3.5" />
+              <Pencil className="w-[18px] h-[18px]" />
             </button>
             <ProgressDots 
               level={visualRound} 
@@ -8729,31 +8750,37 @@ function StudyCard({
               onClick={handleHilfe}
               disabled={phase !== "Question"}
               className={cn(
-                "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+                "w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
                 phase !== "Question" && "opacity-0 pointer-events-none"
               )}
               title="Hilfe"
             >
-              <HelpCircle className="w-3.5 h-3.5" />
+              <HelpCircle className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         <div
           key={card.id}
-          className={cn("card-body w-full flex-1 flex flex-col justify-center items-center text-center my-auto", transitionClasses)}
+          className={cn("card-body w-full flex-1 flex flex-col justify-center items-center text-center my-auto px-2", transitionClasses)}
         >
           {isFallbackDictionaryMode ? (
             <>
               {/* Защитный fallback: если пропуск ___ не найден и слово в предложении не замаскировано,
                   показываем русский перевод и ввод немецкого слова (полное предложение — только после ответа). */}
               {getCleanTranslation(normalizedFields.translation) && (
-                <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-[#F5F5F7] mb-5 sm:mb-6 max-w-2xl leading-tight">
+                <h2 className={cn(
+                  getRecallPromptFontClasses(getCleanTranslation(normalizedFields.translation)),
+                  "text-zinc-900 dark:text-[#F5F5F7] mb-5 sm:mb-7 max-w-3xl"
+                )}>
                   {getCleanTranslation(normalizedFields.translation)}
                 </h2>
               )}
 
-              <div className="text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-4 sm:mb-6">
+              <div className={cn(
+                getClozeSentenceFontClasses(displayAnswerWord),
+                "font-semibold tracking-tight text-zinc-900 dark:text-[#F5F5F7] w-full max-w-4xl mb-5 sm:mb-7"
+              )}>
                 {phase === "Answer" ? (
                   <span className={cn(
                     "inline-block align-baseline mx-1.5 border-b-2 border-blue-500 px-3 py-0.5 min-w-[140px] text-center font-semibold text-zinc-900 dark:text-white transition-colors animate-in fade-in zoom-in-[0.98] duration-200",
@@ -8815,9 +8842,9 @@ function StudyCard({
               </div>
 
               {phase === "Answer" && normalizedFields.sentence && normalizedFields.sentence !== '-' && normalizedFields.sentence !== 'VERB_DRILL' && (
-                <div className="w-full max-w-lg mx-auto my-2 flex justify-center animate-in fade-in zoom-in-[0.98] duration-200">
-                  <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-3.5 py-0.5">
-                    <p className="text-sm md:text-[15px] italic font-normal leading-relaxed text-zinc-600 dark:text-zinc-400 select-text">
+                <div className="w-full max-w-2xl mx-auto my-3 flex justify-center animate-in fade-in zoom-in-[0.98] duration-200">
+                  <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-4 py-0.5">
+                    <p className={cn("italic font-normal select-text", getExampleSentenceFontClasses(normalizedFields.sentence))}>
                       {normalizedFields.sentence}
                     </p>
                   </div>
@@ -8828,12 +8855,15 @@ function StudyCard({
             <>
               {/* Чёткая подсказка (русский перевод) НАД предложением с пропуском ___ */}
               {getCleanTranslation(normalizedFields.translation) && (
-                <p className="text-sm sm:text-base md:text-lg text-zinc-600 dark:text-zinc-300 font-medium text-center transition-colors max-w-2xl mx-auto mb-3 sm:mb-4 leading-relaxed">
+                <p className="text-base sm:text-[18px] text-zinc-600 dark:text-neutral-400 font-medium text-center transition-colors max-w-3xl mx-auto mb-4 sm:mb-5 leading-relaxed">
                   {getCleanTranslation(normalizedFields.translation)}
                 </p>
               )}
 
-              <div className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-semibold tracking-tight leading-relaxed text-zinc-900 dark:text-[#F5F5F7] w-full max-w-3xl mb-4 sm:mb-6">
+              <div className={cn(
+                getClozeSentenceFontClasses(fullSentence || normalizedFields.sentence),
+                "tracking-tight text-zinc-900 dark:text-[#F5F5F7] w-full max-w-4xl mb-5 sm:mb-7"
+              )}>
                 {parts[0]}
                 
                 {phase === "Answer" ? (
@@ -8908,7 +8938,7 @@ function StudyCard({
             <div className="w-full text-center">
               {isAnswered && (extraInfoRaw || card.grammarHint || card.explanation || parsedExtra.type !== 'none') && (
                 <div className="w-full text-center mt-6 flex flex-col items-center gap-1.5 transition-all duration-200 ease-out animate-in fade-in zoom-in-[0.98]">
-                  <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm max-w-[95%]">
+                  <div className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm sm:text-[15px] font-medium transition-colors border bg-zinc-100 text-zinc-700 border-zinc-200/80 dark:bg-white/[0.06] dark:text-zinc-200 dark:border-white/10 shadow-sm max-w-[95%]">
                     {renderFormattedGrammarRule(
                       card.grammarHint || 
                       card.explanation || 
@@ -8916,7 +8946,7 @@ function StudyCard({
                     )}
                   </div>
                   {parsedExtra.type !== 'none' && parsedExtra.sub && (
-                    <span className="text-xs sm:text-[13px] text-zinc-600 dark:text-zinc-400 font-medium tracking-wide">
+                    <span className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 font-medium tracking-wide">
                       {parsedExtra.sub}
                     </span>
                   )}
@@ -8938,19 +8968,19 @@ function StudyCard({
         </div>
 
         {/* 3. Нижняя панель действий (СТРОГО ВНУТРИ КАРТОЧКИ) */}
-        <div className="w-full flex justify-center shrink-0 mt-4 sm:mt-8 pt-2 min-h-[44px] sm:min-h-[52px]">
+        <div className="w-full flex justify-center shrink-0 mt-5 sm:mt-8 pt-2 min-h-[50px] sm:min-h-[58px]">
           {isMultipleChoice && phase === "Question" ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
               {resolvedOptions.map((opt, idx) => {
                 const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
                 return (
                   <button
                     key={`${opt}-${idx}`}
                     onClick={() => handleOptionClick(opt)}
-                    className="w-full py-3 px-4 rounded-2xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-sm md:text-base bg-neutral-100/80 hover:bg-neutral-200/80 border border-black/5 text-neutral-800 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] dark:border-white/10 dark:text-neutral-100 shadow-sm"
+                    className="w-full min-h-[54px] sm:min-h-[58px] py-3.5 sm:py-4 px-5 rounded-2xl flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer text-left font-medium text-base sm:text-[17px] bg-neutral-100/80 hover:bg-neutral-200/80 border border-black/5 text-neutral-800 dark:bg-white/[0.05] dark:hover:bg-white/[0.08] dark:border-white/10 dark:text-neutral-100 shadow-sm"
                   >
                     <span className="truncate pr-2">{displayOpt}</span>
-                    <span className="text-xs text-neutral-400 bg-black/5 dark:bg-white/10 px-2 py-0.5 rounded-md font-mono shrink-0 pointer-events-none">
+                    <span className="text-xs sm:text-[13px] text-neutral-400 bg-black/5 dark:bg-white/10 px-2.5 py-0.5 rounded-md font-mono shrink-0 pointer-events-none">
                       {idx + 1}
                     </span>
                   </button>
@@ -8958,14 +8988,14 @@ function StudyCard({
               })}
             </div>
           ) : isMultipleChoice && phase === "Answer" && selectedOption !== null ? (
-            <div className="flex flex-col items-center gap-3 w-full">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+            <div className="flex flex-col items-center gap-3.5 w-full">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full">
                 {resolvedOptions.map((opt, idx) => {
                   const displayOpt = shouldCapitalize ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt;
                   const isOptCorrect = checkAnswer(opt, card.targetWord) || checkAnswer(opt, clozeWord);
                   const isOptSelected = opt === selectedOption;
 
-                  let optClasses = "w-full py-3 px-4 rounded-2xl flex items-center justify-between text-left font-medium text-sm md:text-base border shadow-sm transition-all ";
+                  let optClasses = "w-full min-h-[54px] sm:min-h-[58px] py-3.5 sm:py-4 px-5 rounded-2xl flex items-center justify-between text-left font-medium text-base sm:text-[17px] border shadow-sm transition-all ";
                   if (isOptCorrect) {
                     optClasses += "border-emerald-500/60 bg-emerald-500/15 text-emerald-400";
                   } else if (isOptSelected) {
@@ -8980,7 +9010,7 @@ function StudyCard({
                       className={optClasses}
                     >
                       <span className="truncate pr-2">{displayOpt}</span>
-                      <span className="text-xs opacity-60 px-2 py-0.5 rounded-md font-mono shrink-0">
+                      <span className="text-xs sm:text-[13px] opacity-60 px-2.5 py-0.5 rounded-md font-mono shrink-0">
                         {idx + 1}
                       </span>
                     </div>
@@ -8992,7 +9022,7 @@ function StudyCard({
                 type="button"
                 disabled={isTransitionLocked || isTransitionBusy}
                 onClick={(isTransitionLocked || isTransitionBusy) ? undefined : handleAdvanceNext}
-                className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center cursor-pointer border-0 select-none disabled:opacity-80"
+                className="w-full max-w-xs sm:max-w-[340px] py-3.5 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-base sm:text-[17px] min-h-[50px] sm:min-h-[54px] transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center cursor-pointer border-0 select-none disabled:opacity-80"
                 style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
               >
                 Weiter
@@ -9004,7 +9034,7 @@ function StudyCard({
               type="button"
               disabled={isTransitionLocked || isTransitionBusy}
               onClick={(isTransitionLocked || isTransitionBusy) ? undefined : handleAdvanceNext}
-              className="w-full max-w-xs py-3 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center cursor-pointer border-0 select-none disabled:opacity-80"
+              className="w-full max-w-xs sm:max-w-[340px] py-3.5 px-8 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-base sm:text-[17px] min-h-[50px] sm:min-h-[54px] transition-all active:scale-98 shadow-lg shadow-blue-600/30 outline-none flex items-center justify-center cursor-pointer border-0 select-none disabled:opacity-80"
               style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent' }}
             >
               Weiter
@@ -9013,16 +9043,16 @@ function StudyCard({
             <button
               type="button"
               onClick={handleReveal}
-              className="w-full max-w-xs py-3 px-8 rounded-full bg-neutral-100 hover:bg-neutral-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.12] active:scale-[0.98] text-neutral-800 dark:text-neutral-200 font-medium text-sm border border-black/5 dark:border-white/10 shadow-sm transition-all outline-none select-none cursor-pointer flex items-center justify-center gap-2"
+              className="w-full max-w-xs sm:max-w-[340px] py-3.5 px-8 rounded-full bg-neutral-100 hover:bg-neutral-200 dark:bg-white/[0.08] dark:hover:bg-white/[0.12] active:scale-[0.98] text-neutral-800 dark:text-neutral-200 font-medium text-base sm:text-[17px] min-h-[50px] sm:min-h-[54px] border border-black/5 dark:border-white/10 shadow-sm transition-all outline-none select-none cursor-pointer flex items-center justify-center gap-2"
               style={{ outline: 'none', border: 'none' }}
             >
               <span>Lösung anzeigen</span>
-              <span className="text-[11px] opacity-60 bg-black/20 dark:bg-white/10 px-1.5 py-0.5 rounded font-mono">
+              <span className="text-xs opacity-60 bg-black/20 dark:bg-white/10 px-2 py-0.5 rounded font-mono">
                 Leertaste
               </span>
             </button>
           ) : (
-            <div className="h-10 invisible pointer-events-none" />
+            <div className="h-12 invisible pointer-events-none" />
           )}
         </div>
       </CardContainer>
@@ -9386,7 +9416,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
           "bg-[#ECECEF] dark:bg-[#09090b] sm:dark:bg-black border-black/[0.06] dark:border-white/[0.06]"
         )}
       >
-        <div className="w-full max-w-6xl mx-auto px-3 sm:px-8 py-2.5 sm:py-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-y-0">
+        <div className="w-full max-w-[1380px] mx-auto px-6 sm:px-10 py-2.5 sm:py-4 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-y-0">
           
           {/* 1. ЛЕВЫЙ УГОЛ: ЯЗЫКОВАЯ ПИЛЮЛЯ / BACK PILL */}
           <div className="flex items-center justify-start sm:flex-1 min-w-0 shrink-0 order-1 sm:order-1">
@@ -11904,12 +11934,12 @@ function PrepStudyCard({
             className={AUDIO_BUTTON_CLASSES}
             title="Audio abspielen"
           >
-            <Volume2 className="w-4 h-4" />
+            <Volume2 className="w-5 h-5" />
           </button>
         </div>
 
         {deckTitle && (
-          <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
+          <div className="ml-4 mr-auto max-w-[200px] sm:max-w-sm truncate text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
             {deckTitle}
           </div>
         )}
@@ -11925,12 +11955,12 @@ function PrepStudyCard({
             onClick={onHilfe}
             disabled={isSuccess || isHilfe}
             className={cn(
-              "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+              "w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
               (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
             )}
             title="Ich weiß nicht"
           >
-            <HelpCircle className="w-3.5 h-3.5" />
+            <HelpCircle className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -11938,10 +11968,10 @@ function PrepStudyCard({
 
       <div
         key={card.id}
-        className={cn("card-body w-full flex-1 flex flex-col items-center justify-center max-w-xl mb-0 relative", transitionClasses)}
+        className={cn("card-body w-full flex-1 flex flex-col items-center justify-center max-w-3xl mb-0 relative", transitionClasses)}
       >
         <div className="text-center mb-10 w-full mt-10">
-          <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5">
+          <h2 className="text-2xl sm:text-[34px] font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5 leading-snug">
             {getCleanTranslation(translation)}
           </h2>
         </div>
@@ -12215,12 +12245,12 @@ function VerbStudyCard({
             className={AUDIO_BUTTON_CLASSES}
             title="Audio abspielen (A)"
           >
-            <Volume2 className="w-4 h-4" />
+            <Volume2 className="w-5 h-5" />
           </button>
         </div>
 
         {deckTitle && (
-          <div className="ml-3.5 mr-auto max-w-[190px] sm:max-w-xs truncate text-[11px] sm:text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
+          <div className="ml-4 mr-auto max-w-[200px] sm:max-w-sm truncate text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider select-none">
             {deckTitle}
           </div>
         )}
@@ -12236,25 +12266,25 @@ function VerbStudyCard({
             onClick={handleHilfe}
             disabled={isSuccess || isHilfe}
             className={cn(
-              "w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
+              "w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-600 hover:text-zinc-900 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:text-zinc-400 dark:hover:text-white border border-black/[0.06] dark:border-white/[0.08] flex items-center justify-center transition-colors duration-150 active:scale-95 disabled:opacity-30 ml-1 cursor-pointer",
               (isSuccess || isHilfe) && "opacity-0 pointer-events-none"
             )}
             title="Ich weiß nicht"
           >
-            <HelpCircle className="w-3.5 h-3.5" />
+            <HelpCircle className="w-4 h-4" />
           </button>
         </div>
       </div>
 
       <div
         key={card.id}
-        className={cn("card-body w-full flex-1 flex flex-col items-center justify-center max-w-xl mb-0 relative", transitionClasses)}
+        className={cn("card-body w-full flex-1 flex flex-col items-center justify-center max-w-3xl mb-0 relative", transitionClasses)}
       >
         <div className="text-center mb-8 w-full mt-10">
-          <h2 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-white mb-1.5 tracking-wide flex items-center justify-center gap-0.5 whitespace-nowrap select-none">
+          <h2 className="text-2xl sm:text-[36px] font-semibold text-zinc-900 dark:text-white mb-2 tracking-wide flex items-center justify-center gap-0.5 whitespace-nowrap select-none">
             {displayInfinitiv}
           </h2>
-          <p className="text-[13px] sm:text-sm text-zinc-600 dark:text-zinc-400 font-medium">
+          <p className="text-sm sm:text-base text-zinc-600 dark:text-zinc-400 font-medium">
             {getCleanTranslation(card.translation)}
           </p>
         </div>
@@ -12796,7 +12826,7 @@ export function RedemittelStudyCard({
           "text-center mb-6 px-4 transition-opacity duration-300 min-h-[1.75rem] flex items-center justify-center",
           showTranslation ? "opacity-100" : "opacity-0 pointer-events-none"
         )}>
-          <h2 className="text-lg md:text-xl font-medium text-zinc-900 dark:text-white tracking-tight select-none">
+          <h2 className="text-xl sm:text-2xl font-medium text-zinc-900 dark:text-white tracking-tight select-none">
             {getCleanTranslation(data.translation) || "Русский перевод отсутствует"}
           </h2>
         </div>
@@ -14657,7 +14687,7 @@ export default function App() {
         onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
       />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-[calc(env(safe-area-inset-bottom,16px)+48px)] sm:pb-16 md:pb-28 overflow-x-hidden">
+      <main className="relative z-10 w-full max-w-[1380px] mx-auto px-6 sm:px-10 pb-[calc(env(safe-area-inset-bottom,16px)+48px)] sm:pb-16 md:pb-28 overflow-x-hidden">
         {!activeBookId ? (
           <div className="relative pb-16">
             {/* Dynamic Apple Segmented Control with i18n - Memoized Anti-flicker */}
