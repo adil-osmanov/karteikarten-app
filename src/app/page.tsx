@@ -5923,7 +5923,7 @@ function RapidFlashcardMode({
               <div
                 key={`${currentCard.id}-${isFlipped ? 'shown' : 'hidden'}-reveal`}
                 className={cn(
-                  "w-full text-center mt-6 transition-all duration-200 ease-out",
+                  "w-full text-center transition-all duration-200 ease-out",
                   isFlipped && "animate-in fade-in zoom-in-[0.98]"
                 )}
               >
@@ -5933,7 +5933,7 @@ function RapidFlashcardMode({
 
                 {/* Чистая цитата примера */}
                 {displaySentence && (
-                  <div className="w-full max-w-2xl mx-auto my-4 flex justify-center">
+                  <div className="w-full max-w-2xl mx-auto mt-5 mb-2 flex justify-center">
                     <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-4 py-0.5">
                       <p className={cn("italic font-normal select-text", getExampleSentenceFontClasses(displaySentence))}>
                         {displaySentence}
@@ -6189,7 +6189,7 @@ function RapidFlashcardMode({
                   </p>
                 )}
                 {displaySentence && (
-                  <div className="w-full max-w-2xl mx-auto my-4 flex justify-center">
+                  <div className="w-full max-w-2xl mx-auto mt-5 mb-2 flex justify-center">
                     <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-4 py-0.5">
                       <p className={cn("italic font-normal select-text", getExampleSentenceFontClasses(displaySentence))}>
                         {displaySentence}
@@ -8842,7 +8842,7 @@ function StudyCard({
               </div>
 
               {phase === "Answer" && normalizedFields.sentence && normalizedFields.sentence !== '-' && normalizedFields.sentence !== 'VERB_DRILL' && (
-                <div className="w-full max-w-2xl mx-auto my-3 flex justify-center animate-in fade-in zoom-in-[0.98] duration-200">
+                <div className="w-full max-w-2xl mx-auto mt-5 mb-2 flex justify-center animate-in fade-in zoom-in-[0.98] duration-200">
                   <div className="text-left border-l-2 border-black/15 dark:border-white/20 pl-4 py-0.5">
                     <p className={cn("italic font-normal select-text", getExampleSentenceFontClasses(normalizedFields.sentence))}>
                       {normalizedFields.sentence}

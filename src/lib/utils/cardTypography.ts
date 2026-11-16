@@ -18,15 +18,15 @@ function getCleanCharCount(text?: string | null): number {
 export function getTargetWordFontClasses(text?: string | null): string {
   const len = getCleanCharCount(text);
   if (len <= 14) {
-    return 'text-4xl sm:text-5xl md:text-[56px] font-semibold tracking-tight leading-[1.12]';
+    return 'text-5xl sm:text-6xl md:text-[68px] font-semibold tracking-tight leading-[1.1]';
   }
   if (len <= 26) {
-    return 'text-3xl sm:text-4xl md:text-[44px] font-semibold tracking-tight leading-[1.15]';
+    return 'text-4xl sm:text-5xl md:text-[54px] font-semibold tracking-tight leading-[1.14]';
   }
   if (len <= 40) {
-    return 'text-2xl sm:text-3xl md:text-[36px] font-semibold tracking-tight leading-[1.2]';
+    return 'text-3xl sm:text-4xl md:text-[42px] font-semibold tracking-tight leading-[1.18]';
   }
-  return 'text-xl sm:text-2xl md:text-[30px] font-semibold tracking-tight leading-[1.25]';
+  return 'text-2xl sm:text-3xl md:text-[34px] font-semibold tracking-tight leading-[1.22]';
 }
 
 /**
@@ -34,10 +34,10 @@ export function getTargetWordFontClasses(text?: string | null): string {
  */
 export function getFormsFontClasses(text?: string | null): string {
   const len = getCleanCharCount(text);
-  if (len <= 45) {
-    return 'text-base sm:text-[18px] text-neutral-500 dark:text-neutral-400 mt-2.5 leading-snug';
+  if (len <= 50) {
+    return 'text-lg sm:text-[20px] text-neutral-500 dark:text-neutral-400 mt-3 leading-snug';
   }
-  return 'text-sm sm:text-[15px] text-neutral-500 dark:text-neutral-400 mt-2.5 leading-snug';
+  return 'text-base sm:text-[17px] text-neutral-500 dark:text-neutral-400 mt-3 leading-snug';
 }
 
 /**
@@ -45,13 +45,13 @@ export function getFormsFontClasses(text?: string | null): string {
  */
 export function getTranslationFontClasses(text?: string | null): string {
   const len = getCleanCharCount(text);
-  if (len <= 28) {
-    return 'text-2xl sm:text-[28px] font-medium text-neutral-900 dark:text-neutral-100 leading-snug';
+  if (len <= 30) {
+    return 'text-2xl sm:text-[32px] font-medium text-neutral-900 dark:text-neutral-100 mt-6 leading-snug';
   }
-  if (len <= 55) {
-    return 'text-xl sm:text-[23px] font-medium text-neutral-900 dark:text-neutral-100 leading-snug';
+  if (len <= 60) {
+    return 'text-xl sm:text-[26px] font-medium text-neutral-900 dark:text-neutral-100 mt-6 leading-snug';
   }
-  return 'text-lg sm:text-[19px] font-medium text-neutral-900 dark:text-neutral-100 leading-snug';
+  return 'text-lg sm:text-[21px] font-medium text-neutral-900 dark:text-neutral-100 mt-6 leading-snug';
 }
 
 /**
@@ -73,10 +73,10 @@ export function getRecallPromptFontClasses(text?: string | null): string {
  */
 export function getExampleSentenceFontClasses(text?: string | null): string {
   const len = getCleanCharCount(text);
-  if (len <= 75) {
-    return 'text-lg sm:text-[20px] leading-relaxed text-neutral-700 dark:text-neutral-300';
+  if (len <= 85) {
+    return 'text-lg sm:text-[21px] leading-relaxed text-neutral-700 dark:text-neutral-300';
   }
-  return 'text-base sm:text-[17px] leading-relaxed text-neutral-700 dark:text-neutral-300';
+  return 'text-base sm:text-[18px] leading-relaxed text-neutral-700 dark:text-neutral-300';
 }
 
 /**
