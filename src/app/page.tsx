@@ -52,11 +52,17 @@ import {
 } from "@/lib/utils/cardTypography";
 import {
   enqueuePendingCard,
+  dequeuePendingCard,
+  flushPendingQueue,
   writeThroughCardUpdate,
   syncWithCloud,
   forcePushLocalToCloud,
   fetchCardsDelta,
   syncCardsDelta,
+  fetchLightweightSrsStates,
+  getPendingOrInFlightCardIds,
+  hasPendingOrInFlightCardWrite,
+  setCloudSyncStatus,
   subscribeCloudSyncStatus,
   broadcastStateBus,
   subscribeStateBus,
@@ -1365,31 +1371,21 @@ function mergeRemoteCardWithLocal(
   const remoteInterval = remoteCard.interval ?? 0;
   const remoteReps = remoteCard.repetitions ?? 0;
 
-  const localUpdatedMs = localCard.updated_at ? Date.parse(localCard.updated_at) : 0;
-  const remoteUpdatedMs = remoteCard.updated_at ? Date.parse(remoteCard.updated_at) : 0;
+  // Облачные SRS-статусы всегда приоритетнее локального кэша, если по этой карточке
+  // прямо сейчас не идёт незавершённая/ожидающая локальная запись (iOS/PC sync).
+  const localAheadSrs = hasPendingOrInFlightCardWrite(localCard.id);
 
-  const bothArchived = localArchived && remoteArchived;
-  const remoteNewerTimestamp = remoteUpdatedMs > 0 && localUpdatedMs > 0 && remoteUpdatedMs > localUpdatedMs;
-  const localAheadSrs = bothArchived && remoteNewerTimestamp
-    ? false
-    : (
-        localMastery > remoteMastery ||
-        (localArchived && !remoteArchived) ||
-        (localMastery === remoteMastery && localReps > remoteReps) ||
-        (localReviewDate !== null && remoteReviewDate !== null && localReviewDate > remoteReviewDate && !remoteNewerTimestamp)
-      );
-
-  // Строгое сведение SRS с учётом сброса интервала при ошибке на повторении
-  const finalArchived = localArchived || remoteArchived;
-  const finalMastery = finalArchived ? Math.max(4, localMastery, remoteMastery) : Math.max(localMastery, remoteMastery);
+  const finalArchived = localAheadSrs ? localArchived : remoteArchived;
+  const finalMastery = localAheadSrs
+    ? localMastery
+    : (finalArchived ? Math.max(4, remoteMastery) : remoteMastery);
   const finalRound = finalArchived ? 4 : Math.max(1, Math.min(4, finalMastery + 1));
-  const finalReps = bothArchived && remoteNewerTimestamp ? remoteReps : (localAheadSrs ? localReps : Math.max(localReps, remoteReps));
-  const finalInterval = bothArchived && remoteNewerTimestamp ? remoteInterval : (localAheadSrs ? localInterval : Math.max(localInterval, remoteInterval));
-  const finalReviewDate = localAheadSrs
-    ? (localReviewDate ?? remoteReviewDate)
-    : (remoteReviewDate ?? localReviewDate);
+  const finalReps = localAheadSrs ? localReps : remoteReps;
+  const finalInterval = localAheadSrs ? localInterval : remoteInterval;
+  const finalReviewDate = localAheadSrs ? localReviewDate : remoteReviewDate;
+  const finalReviewIso = finalReviewDate ? new Date(finalReviewDate).toISOString() : null;
   const finalHasMistake =
-    remoteCard.has_mistake !== undefined && (remoteNewerTimestamp || !localAheadSrs)
+    !localAheadSrs && remoteCard.has_mistake !== undefined
       ? Boolean(remoteCard.has_mistake)
       : Boolean(localCard.has_mistake);
   const remoteHasContentChange =
@@ -1399,9 +1395,7 @@ function mergeRemoteCardWithLocal(
     (remoteCard.forms || '') !== (localCard.forms || '') ||
     (remoteCard.baseWordInfo || null) !== (localCard.baseWordInfo || null);
 
-  // Принимаем текстовые правки с сервера, если удаленная запись не старее локальной
-  const takeRemoteContent =
-    remoteHasContentChange && (!localUpdatedMs || !remoteUpdatedMs || remoteUpdatedMs >= localUpdatedMs);
+  const takeRemoteContent = remoteHasContentChange && !localAheadSrs;
 
   const srsChanged =
     finalMastery !== localMastery ||
@@ -1430,7 +1424,6 @@ function mergeRemoteCardWithLocal(
             options: remoteCard.options,
             forms: remoteCard.forms,
             baseWordInfo: remoteCard.baseWordInfo,
-            updated_at: remoteCard.updated_at || localCard.updated_at,
           }
         : {}),
       masteryLevel: finalMastery,
@@ -1440,6 +1433,8 @@ function mergeRemoteCardWithLocal(
       repetitions: finalReps,
       interval: finalInterval,
       nextReviewDate: finalReviewDate,
+      next_review_date: finalReviewIso,
+      next_review_at: finalReviewIso,
       has_mistake: finalHasMistake,
     },
   };
@@ -2523,25 +2518,37 @@ export async function syncCardsFromSupabase(
       await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, false);
     }
 
-    // Неблокирующая отправка локальных SRS-опережений в облако (с учетом поддерживаемых колонок)
+    // Неблокирующая отправка локальных SRS-опережений в облако (строго без .select())
     if (cardsToPushToRemote.length > 0) {
       (async () => {
         try {
           for (let i = 0; i < cardsToPushToRemote.length; i += 10) {
             const chunk = cardsToPushToRemote.slice(i, i + 10);
             await Promise.all(
-              chunk.map((card) =>
-                supabase
-                  .from('cards')
-                  .update({
-                    masteryLevel: card.masteryLevel,
-                    isArchived: card.isArchived,
-                    repetitions: card.repetitions,
-                    interval: card.interval,
-                    nextReviewDate: card.nextReviewDate,
-                  })
-                  .eq('id', card.id)
-              )
+              chunk.map(async (card) => {
+                const payload = {
+                  masteryLevel: card.masteryLevel,
+                  isArchived: card.isArchived,
+                  repetitions: card.repetitions,
+                  interval: card.interval,
+                  nextReviewDate: card.nextReviewDate,
+                };
+                try {
+                  const { error } = await supabase
+                    .from('cards')
+                    .update(payload)
+                    .eq('id', card.id);
+                  if (error) {
+                    console.warn('[Sync] Failed pushing local pending card:', card.id, error);
+                    await enqueuePendingCard(card.id, payload).catch(() => {});
+                  } else {
+                    await dequeuePendingCard(card.id).catch(() => {});
+                  }
+                } catch (e) {
+                  console.warn('[Sync] Network error pushing local pending card:', card.id, e);
+                  await enqueuePendingCard(card.id, payload).catch(() => {});
+                }
+              })
             );
           }
         } catch (e) {
@@ -2554,6 +2561,198 @@ export async function syncCardsFromSupabase(
   } finally {
     isSyncingCardsFromSupabase = false;
   }
+}
+
+const LIGHTWEIGHT_SRS_COOLDOWN_MS = 20 * 1000; // Не чаще 1 раза в 20 секунд (если не принудительно)
+let lastLightweightSrsPullAt = 0;
+let inFlightLightweightSrsPull: Promise<boolean> | null = null;
+
+/**
+ * Ультралёгкая синхронизация SRS-статусов из Supabase:
+ * подтягивает только компактные поля прогресса (`id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions`)
+ * для начатых/архивированных карточек и авторитетно перезаписывает устаревший локальный кэш,
+ * не трогая карточки с незавершённой локальной записью.
+ */
+export async function syncLightweightSrsFromSupabase(force: boolean = false): Promise<boolean> {
+  if (typeof window !== 'undefined' && !navigator.onLine) return false;
+  if (!force && isAnyStudySessionActiveGlobal()) return false;
+  if (inFlightLightweightSrsPull) return inFlightLightweightSrsPull;
+
+  const now = Date.now();
+  if (!force && lastLightweightSrsPullAt > 0 && now - lastLightweightSrsPullAt < LIGHTWEIGHT_SRS_COOLDOWN_MS) {
+    return false;
+  }
+
+  inFlightLightweightSrsPull = (async () => {
+    try {
+      await flushPendingQueue().catch(() => {});
+
+      const { rows, ok } = await fetchLightweightSrsStates(supabase);
+      if (!ok) return false;
+
+      lastLightweightSrsPullAt = Date.now();
+      const blockedCardIds = getPendingOrInFlightCardIds();
+
+      let currentDecks = useStore.getState().decks;
+      if (!Array.isArray(currentDecks) || currentDecks.length === 0) {
+        const idbDecks = await getIDBItem<Deck[]>('app_decks').catch(() => null);
+        if (Array.isArray(idbDecks) && idbDecks.length > 0) {
+          currentDecks = idbDecks;
+        }
+      }
+      if (!Array.isArray(currentDecks) || currentDecks.length === 0) {
+        return true;
+      }
+
+      const remoteById = new Map<string, (typeof rows)[number]>();
+      for (const row of rows) {
+        if (row?.id) remoteById.set(row.id, row);
+      }
+
+      const decksNeedingCardBackfill = new Set<string>();
+      const localCardIds = new Set<string>();
+      for (const d of currentDecks) {
+        if (Array.isArray(d.cards)) {
+          for (const c of d.cards) {
+            if (c?.id) localCardIds.add(c.id);
+          }
+        }
+      }
+      for (const row of rows) {
+        if (row?.id && row?.deck_id && !localCardIds.has(row.id)) {
+          if (currentDecks.some((d) => d.id === row.deck_id)) {
+            decksNeedingCardBackfill.add(row.deck_id);
+          }
+        }
+      }
+
+      let hasAnyChanges = false;
+      const nextDecks = currentDecks.map((deck) => {
+        if (!Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
+        let deckChanged = false;
+
+        const nextCards = deck.cards.map((card) => {
+          if (!card?.id || blockedCardIds.has(card.id)) return card;
+
+          const remote = remoteById.get(card.id);
+          if (remote) {
+            const nextArchived = Boolean(remote.isArchived);
+            const rawMastery = remote.masteryLevel ?? (nextArchived ? 4 : 0);
+            const nextMastery = nextArchived ? Math.max(4, Number(rawMastery)) : Number(rawMastery);
+            const nextRound = nextArchived ? 4 : Math.max(1, Math.min(4, nextMastery + 1));
+            const nextInterval = Number(remote.interval ?? 0);
+            const nextReps = Number(remote.repetitions ?? 0);
+            const rawDate = remote.nextReviewDate;
+            const nextReviewDate =
+              rawDate === null || rawDate === undefined
+                ? null
+                : typeof rawDate === 'number'
+                ? Math.round(rawDate)
+                : new Date(rawDate).getTime();
+            const normalizedReviewDate =
+              nextReviewDate !== null && Number.isFinite(nextReviewDate) ? nextReviewDate : null;
+            const nextReviewIso =
+              normalizedReviewDate !== null ? new Date(normalizedReviewDate).toISOString() : null;
+            const nextHasMistake =
+              remote.has_mistake !== undefined ? Boolean(remote.has_mistake) : Boolean(card.has_mistake);
+
+            const localReviewDateRaw = card.nextReviewDate ?? null;
+            const localReviewDate =
+              localReviewDateRaw === null || localReviewDateRaw === undefined
+                ? null
+                : typeof localReviewDateRaw === 'number'
+                ? Math.round(localReviewDateRaw)
+                : new Date(localReviewDateRaw).getTime();
+
+            const cardChanged =
+              Boolean(card.isArchived) !== nextArchived ||
+              Number(card.masteryLevel ?? 0) !== nextMastery ||
+              Number(card.round ?? 1) !== nextRound ||
+              Boolean(card.isLegendary) !== nextArchived ||
+              Number(card.interval ?? 0) !== nextInterval ||
+              Number(card.repetitions ?? 0) !== nextReps ||
+              localReviewDate !== normalizedReviewDate ||
+              Boolean(card.has_mistake) !== nextHasMistake;
+
+            if (!cardChanged) return card;
+            deckChanged = true;
+            hasAnyChanges = true;
+            return {
+              ...card,
+              masteryLevel: nextMastery,
+              isArchived: nextArchived,
+              round: nextRound,
+              isLegendary: nextArchived,
+              interval: nextInterval,
+              repetitions: nextReps,
+              nextReviewDate: normalizedReviewDate,
+              next_review_date: nextReviewIso,
+              next_review_at: nextReviewIso,
+              has_mistake: nextHasMistake,
+            };
+          } else if (
+            rows.length > 0 &&
+            !(card as any).pending_insert &&
+            !(card as any).isPendingInsert &&
+            (Boolean(card.isArchived) || Number(card.masteryLevel ?? 0) > 0 || Boolean(card.nextReviewDate))
+          ) {
+            // Карточка больше не числится среди начатых/архивированных в Supabase — выравниваем локальный статус
+            deckChanged = true;
+            hasAnyChanges = true;
+            return {
+              ...card,
+              masteryLevel: 0,
+              isArchived: false,
+              round: 1,
+              isLegendary: false,
+              interval: 0,
+              repetitions: 0,
+              nextReviewDate: null,
+              next_review_date: null,
+              next_review_at: null,
+              has_mistake: false,
+            };
+          }
+
+          return card;
+        });
+
+        return deckChanged ? { ...deck, cards: nextCards } : deck;
+      });
+
+      if (hasAnyChanges) {
+        cachedAllCards = [];
+        lastFetchAllCardsTime = 0;
+        useStore.setState({ decks: nextDecks });
+        await setIDBItem('app_decks', nextDecks).catch(() => {});
+        await useStore.getState().refreshDueCardsCount(useStore.getState().appLanguage);
+        broadcastStateBus('REFRESH_DUE_COUNT');
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem('cached_app_decks');
+            localStorage.removeItem('cache_decks_v2');
+          } catch {}
+          window.dispatchEvent(new Event('storage-update'));
+          window.dispatchEvent(new CustomEvent('stats-update'));
+        }
+      }
+
+      if (decksNeedingCardBackfill.size > 0) {
+        for (const dId of Array.from(decksNeedingCardBackfill).slice(0, 5)) {
+          syncDeckCardsOnOpen(dId, true).catch(() => {});
+        }
+      }
+
+      return true;
+    } catch (err) {
+      console.warn('[LightweightSrsPull] Failed to reconcile SRS state:', err);
+      return false;
+    } finally {
+      inFlightLightweightSrsPull = null;
+    }
+  })();
+
+  return inFlightLightweightSrsPull;
 }
 
 export function calculateNextSRSState(
@@ -3604,7 +3803,6 @@ export const useStore = create<DeckState>()((set, get) => ({
     const cardLang = normalizeLanguage(
       targetDeck?.language || targetBook?.language || get().appLanguage || 'DE'
     );
-    const nowIso = new Date().toISOString();
 
     // 1. Optimistic local state update in Zustand
     set((state) => {
@@ -3618,7 +3816,6 @@ export const useStore = create<DeckState>()((set, get) => ({
             return {
               ...c,
               ...updates,
-              updated_at: nowIso,
             };
           }),
         };
@@ -3660,6 +3857,7 @@ export const useStore = create<DeckState>()((set, get) => ({
           await enqueuePendingCard(cardId, payload).catch(() => {});
           return false;
         }
+        await dequeuePendingCard(cardId).catch(() => {});
       } catch (err) {
         console.error('🚨 [CARD EDIT ERROR] Cloud sync failure:', err);
         await enqueuePendingCard(cardId, payload).catch(() => {});
@@ -3797,7 +3995,6 @@ export const useStore = create<DeckState>()((set, get) => ({
       round: computedRound,
       isLegendary: computedArchived,
       has_mistake: nextHasMistake,
-      updated_at: new Date().toISOString(),
     };
 
     // 1. INSTANT WRITE-THROUGH (ZERO DATA LOSS): Асинхронная фоновая запись в Supabase без задержки UI
@@ -3844,7 +4041,6 @@ export const useStore = create<DeckState>()((set, get) => ({
                 next_review_date: validCard.next_review_date,
                 nextReviewDate: validCard.nextReviewDate,
                 has_mistake: false,
-                updated_at: validCard.updated_at,
               };
               syncedDuplicates.push(syncedCard);
               deckModified = true;
@@ -3951,7 +4147,6 @@ export const useStore = create<DeckState>()((set, get) => ({
       card.next_review_at = null;
       card.next_review_date = null;
     }
-    card.updated_at = new Date().toISOString();
 
     // 1. INSTANT WRITE-THROUGH (ZERO DATA LOSS): Асинхронная фоновая запись в Supabase без задержки UI
     writeThroughCardUpdate(cardId, card);
@@ -9135,14 +9330,18 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
     try {
       const langLower = (appLanguage || 'de').toLowerCase() as 'de' | 'en' | 'ru';
       const langUpper = langLower.toUpperCase();
+      await flushPendingQueue();
       await Promise.all([
+        syncExcludedBooksFromCloud(true),
         syncBooksFromSupabase(true),
         syncCardsFromSupabase(true),
+        syncLightweightSrsFromSupabase(true),
         syncCloudDailyStats(undefined, langLower, true),
         syncPersistentMistakesFromCloud(langUpper, true),
         syncMasteredWordsFromCloud(langLower, true, { fullReconcile: true }),
       ]);
       await syncWithCloud(true);
+      await useStore.getState().refreshDueCardsCount(appLanguage);
       toast.success('Cloud-Sync erfolgreich abgeschlossen');
     } catch (e) {
       console.warn('[ManualSync] Failed:', e);
@@ -9306,10 +9505,47 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
   const [isLangOpen, setIsLangOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('idle');
+  const [isHeaderSyncing, setIsHeaderSyncing] = useState(false);
   const langRef = useRef<HTMLDivElement>(null);
   const { appLanguage, setAppLanguage } = useStore();
   const effectiveLang = normalizeLanguage(activeBook?.language || appLanguage || 'DE');
   const { stats } = useDayStats({ language: effectiveLang });
+
+  useEffect(() => {
+    return subscribeCloudSyncStatus((status) => {
+      setCloudSyncStatus(status);
+    });
+  }, []);
+
+  const handleHeaderCloudSync = async () => {
+    if (isHeaderSyncing) return;
+    setIsHeaderSyncing(true);
+    setCloudSyncStatus('syncing');
+    try {
+      const langLower = (effectiveLang || appLanguage || 'de').toLowerCase() as 'de' | 'en' | 'ru';
+      const langUpper = langLower.toUpperCase();
+      await flushPendingQueue();
+      await Promise.all([
+        syncExcludedBooksFromCloud(true),
+        syncLightweightSrsFromSupabase(true),
+        syncMasteredWordsFromCloud(langLower, true, { fullReconcile: true }),
+        syncCloudDailyStats(undefined, langLower, true),
+        syncPersistentMistakesFromCloud(langUpper, true),
+        syncBooksFromSupabase(false),
+        syncCardsFromSupabase(false),
+      ]);
+      await useStore.getState().refreshDueCardsCount(appLanguage);
+      setCloudSyncStatus('synced');
+      toast.success('Mit Cloud synchronisiert');
+    } catch (e) {
+      console.warn('[HeaderCloudSync] Failed:', e);
+      setCloudSyncStatus('error');
+      toast.error('Synchronisierung fehlgeschlagen');
+    } finally {
+      setIsHeaderSyncing(false);
+    }
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -9608,6 +9844,34 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
               <span suppressHydrationWarning className="text-xs font-semibold tabular-nums tracking-tight font-sans">
                 {getCanonicalTodayCardsDone(effectiveLang || appLanguage, stats, langStats)} <span className="text-neutral-400 dark:text-neutral-500 font-normal">/ 200</span>
               </span>
+            </button>
+
+            {/* Кнопка облачной синхронизации */}
+            <button
+              type="button"
+              data-testid="header-cloud-sync-btn"
+              onClick={handleHeaderCloudSync}
+              disabled={isHeaderSyncing}
+              className="w-8 h-8 sm:w-9 sm:h-9 shrink-0 rounded-full bg-white/80 hover:bg-white hover:border-black/[0.12] hover:shadow-sm dark:bg-white/[0.05] dark:hover:bg-white/[0.09] border border-black/[0.08] dark:border-white/10 backdrop-blur-md flex items-center justify-center text-neutral-700 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150 active:scale-95 cursor-pointer disabled:opacity-60"
+              aria-label="Synchronisieren"
+              title={
+                isHeaderSyncing || cloudSyncStatus === 'syncing'
+                  ? 'Synchronisiere...'
+                  : cloudSyncStatus === 'offline' || cloudSyncStatus === 'error'
+                  ? 'Erneut synchronisieren'
+                  : 'Mit Cloud synchronisieren'
+              }
+            >
+              {cloudSyncStatus === 'offline' || cloudSyncStatus === 'error' ? (
+                <CloudOff className="w-3.5 h-3.5 text-amber-500" />
+              ) : (
+                <RefreshCw
+                  className={cn(
+                    "w-3.5 h-3.5",
+                    (isHeaderSyncing || cloudSyncStatus === 'syncing') && "animate-spin text-blue-500"
+                  )}
+                />
+              )}
             </button>
 
             {/* Кнопка переключения темы */}
@@ -13059,7 +13323,7 @@ export default function App() {
 
     let debounceTimer: any = null;
     let lastSyncTime = Date.now();
-    const FOCUS_COOLDOWN_MS = 10 * 60 * 1000; // НЕ чаще 1 раза в 10 минут!
+    const FOCUS_COOLDOWN_MS = 20 * 1000; // Не чаще 1 раза в 20 секунд
     const handleSync = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
@@ -13601,8 +13865,10 @@ export default function App() {
           setDecks(validDecks);
           await setIDBItem('app_decks', validDecks);
 
-          // Delta-Sync карточек при старте приложения (переиспользуем decksRes.data без повторного GET decks)
+          // Сначала отправляем отложенные локальные SRS-записи, затем дельта и лёгкая сверка SRS
+          await flushPendingQueue().catch(() => {});
           await syncCardsFromSupabase(false, decksRes.data);
+          await syncLightweightSrsFromSupabase(true);
 
           await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, true);
           if (typeof window !== 'undefined') {
@@ -13623,7 +13889,11 @@ export default function App() {
     };
     fetchData();
 
-    // 2. Безопасная фоновая дельта-синхронизация с жестким 5-минутным кулдауном (НИКОГДА во время тренировки)
+    // 2. Безопасная фоновая синхронизация:
+    // - Лёгкая сверка SRS-статусов (~50 КБ) при возврате в фокус с кулдауном 20 секунд
+    // - Тяжёлая мета-синхронизация с 5-минутным кулдауном (НИКОГДА во время тренировки)
+    let lastLightweightFocusSync = Date.now();
+    const LIGHTWEIGHT_FOCUS_COOLDOWN_MS = 20 * 1000;
     let lastFocusSync = 0;
     const FOCUS_COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -13633,6 +13903,14 @@ export default function App() {
       // Кросс-браузерный синк исключённых книг (< 200 байт) при каждом возврате на вкладку с лёгким 3с-дебаунсом
       syncExcludedBooksFromCloud().catch(() => {});
       const now = Date.now();
+      if (now - lastLightweightFocusSync >= LIGHTWEIGHT_FOCUS_COOLDOWN_MS) {
+        lastLightweightFocusSync = now;
+        flushPendingQueue()
+          .catch(() => {})
+          .finally(() => {
+            syncLightweightSrsFromSupabase(false).catch(() => {});
+          });
+      }
       if (now - lastFocusSync < FOCUS_COOLDOWN_MS) return;
       lastFocusSync = now;
       const langUpper = (useStore.getState().appLanguage || 'DE').toUpperCase();
@@ -13649,6 +13927,7 @@ export default function App() {
     const handleTriggerCardSync = (e: Event) => {
       const isForced = Boolean((e as CustomEvent)?.detail?.force);
       syncCardsFromSupabase(isForced).catch(() => {});
+      syncLightweightSrsFromSupabase(isForced).catch(() => {});
     };
 
     const handlePracticeSingleWord = (e: Event) => {

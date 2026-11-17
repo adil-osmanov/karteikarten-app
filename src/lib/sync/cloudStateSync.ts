@@ -98,79 +98,199 @@ interface PendingCardUpdate {
 }
 
 const PENDING_QUEUE_KEY = 'pending_sync_cards_queue';
+const inFlightCardWrites = new Set<string>();
+let flushInFlightPromise: Promise<void> | null = null;
+
+function sanitizeCardMutationPayload(payload: Record<string, any>, cardsHasMistake: boolean): Record<string, any> {
+  const sanitized = { ...payload };
+  delete sanitized.updated_at;
+  delete sanitized.round;
+  delete sanitized.interval_days;
+  delete sanitized.mastery_level;
+  if (!cardsHasMistake) delete sanitized.has_mistake;
+  return sanitized;
+}
+
+function readPendingQueueFromLocalStorageSync(): PendingCardUpdate[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(PENDING_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingQueueToLocalStorageSync(queue: PendingCardUpdate[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (queue.length === 0) {
+      localStorage.removeItem(PENDING_QUEUE_KEY);
+    } else {
+      localStorage.setItem(PENDING_QUEUE_KEY, JSON.stringify(queue));
+    }
+  } catch {}
+}
+
+export function getPendingOrInFlightCardIds(): Set<string> {
+  const ids = new Set<string>(inFlightCardWrites);
+  for (const item of readPendingQueueFromLocalStorageSync()) {
+    if (item?.cardId) ids.add(item.cardId);
+  }
+  return ids;
+}
+
+export function hasPendingOrInFlightCardWrite(cardId: string): boolean {
+  if (!cardId) return false;
+  if (inFlightCardWrites.has(cardId)) return true;
+  return readPendingQueueFromLocalStorageSync().some((item) => item?.cardId === cardId);
+}
 
 async function getPendingQueue(): Promise<PendingCardUpdate[]> {
   if (typeof window === 'undefined') return [];
+  const lsQueue = readPendingQueueFromLocalStorageSync();
   try {
     const fromIDB = await getIDBItem<PendingCardUpdate[]>(PENDING_QUEUE_KEY);
-    if (Array.isArray(fromIDB)) return fromIDB;
-    const fromLS = localStorage.getItem(PENDING_QUEUE_KEY);
-    if (fromLS) return JSON.parse(fromLS);
+    if (Array.isArray(fromIDB) && fromIDB.length > 0) {
+      if (lsQueue.length === 0) return fromIDB;
+      const merged = new Map<string, PendingCardUpdate>();
+      for (const item of [...fromIDB, ...lsQueue]) {
+        if (!item?.cardId) continue;
+        const prev = merged.get(item.cardId);
+        if (!prev || (item.timestamp || 0) >= (prev.timestamp || 0)) {
+          merged.set(item.cardId, item);
+        }
+      }
+      return Array.from(merged.values());
+    }
   } catch {}
-  return [];
+  return lsQueue;
 }
 
 async function savePendingQueue(queue: PendingCardUpdate[]): Promise<void> {
   if (typeof window === 'undefined') return;
+  writePendingQueueToLocalStorageSync(queue);
   try {
     await setIDBItem(PENDING_QUEUE_KEY, queue);
-    localStorage.setItem(PENDING_QUEUE_KEY, JSON.stringify(queue));
   } catch {}
 }
 
-export async function enqueuePendingCard(cardId: string, payload: Record<string, any>) {
-  const queue = await getPendingQueue();
+function upsertPendingQueueSync(cardId: string, payload: Record<string, any>, timestamp: number): PendingCardUpdate[] {
+  const queue = readPendingQueueFromLocalStorageSync();
+  const item: PendingCardUpdate = { cardId, payload, timestamp };
   const existingIdx = queue.findIndex((q) => q.cardId === cardId);
-  const item: PendingCardUpdate = {
-    cardId,
-    payload,
-    timestamp: Date.now(),
-  };
-
   if (existingIdx >= 0) {
     queue[existingIdx] = item;
   } else {
     queue.push(item);
   }
+  writePendingQueueToLocalStorageSync(queue);
+  return queue;
+}
 
-  await savePendingQueue(queue);
+export async function enqueuePendingCard(cardId: string, payload: Record<string, any>) {
+  const cleanPayload = { ...payload };
+  delete cleanPayload.updated_at;
+  const ts = Date.now();
+  upsertPendingQueueSync(cardId, cleanPayload, ts);
+  const fullQueue = await getPendingQueue();
+  const idx = fullQueue.findIndex((q) => q.cardId === cardId);
+  const item: PendingCardUpdate = { cardId, payload: cleanPayload, timestamp: ts };
+  if (idx >= 0) {
+    fullQueue[idx] = item;
+  } else {
+    fullQueue.push(item);
+  }
+  await savePendingQueue(fullQueue);
+}
+
+export async function dequeuePendingCard(cardId: string, upToTimestamp?: number): Promise<void> {
+  if (!cardId || typeof window === 'undefined') return;
+  const queue = await getPendingQueue();
+  const next = queue.filter((q) => {
+    if (q.cardId !== cardId) return true;
+    if (upToTimestamp !== undefined && (q.timestamp || 0) > upToTimestamp) {
+      return true;
+    }
+    return false;
+  });
+  if (next.length !== queue.length) {
+    await savePendingQueue(next);
+  }
 }
 
 export async function flushPendingQueue(): Promise<void> {
+  if (flushInFlightPromise) return flushInFlightPromise;
   if (typeof window !== 'undefined' && !navigator.onLine) {
     setCloudSyncStatus('offline');
     return;
   }
 
-  const queue = await getPendingQueue();
-  if (queue.length === 0) return;
+  flushInFlightPromise = (async () => {
+    const queue = await getPendingQueue();
+    if (queue.length === 0) return;
 
-  const caps = await getSchemaCapabilities();
-  const remaining: PendingCardUpdate[] = [];
+    const caps = await getSchemaCapabilities();
+    const remaining: PendingCardUpdate[] = [];
 
-  for (const item of queue) {
-    try {
-      const sanitizedPayload = { ...item.payload };
-      delete sanitizedPayload.updated_at;
-      if (!caps.cardsHasMistake) delete sanitizedPayload.has_mistake;
+    for (const item of queue) {
+      if (!item?.cardId || !item?.payload) continue;
+      inFlightCardWrites.add(item.cardId);
+      try {
+        const sanitizedPayload = sanitizeCardMutationPayload(item.payload, caps.cardsHasMistake);
 
-      const { error } = await supabase
-        .from('cards')
-        .update(sanitizedPayload)
-        .eq('id', item.cardId);
+        let { error } = await supabase
+          .from('cards')
+          .update(sanitizedPayload)
+          .eq('id', item.cardId);
 
-      if (error) {
+        if (error && (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('does not exist'))) {
+          if (error.message?.includes('has_mistake')) {
+            markSchemaCapabilityFalse('cardsHasMistake');
+            delete sanitizedPayload.has_mistake;
+          }
+          const retry = await supabase.from('cards').update(sanitizedPayload).eq('id', item.cardId);
+          error = retry.error;
+        }
+
+        if (error) {
+          console.error('[CloudSync] Failed to flush queued card update:', item.cardId, error);
+          remaining.push(item);
+        }
+      } catch (err) {
+        console.error('[CloudSync] Network error flushing queued card update:', item.cardId, err);
         remaining.push(item);
+      } finally {
+        inFlightCardWrites.delete(item.cardId);
       }
-    } catch {
-      remaining.push(item);
     }
-  }
 
-  await savePendingQueue(remaining);
-  if (remaining.length === 0 && queue.length > 0) {
-    setCloudSyncStatus('synced');
-  }
+    // Preserve any newer item queued while we were flushing
+    const currentLs = readPendingQueueFromLocalStorageSync();
+    const mergedRemaining = new Map<string, PendingCardUpdate>();
+    for (const rem of remaining) {
+      mergedRemaining.set(rem.cardId, rem);
+    }
+    for (const cur of currentLs) {
+      if (!cur?.cardId) continue;
+      const flushedItem = queue.find((q) => q.cardId === cur.cardId);
+      if (!flushedItem || (cur.timestamp || 0) > (flushedItem.timestamp || 0)) {
+        mergedRemaining.set(cur.cardId, cur);
+      }
+    }
+
+    const finalRemaining = Array.from(mergedRemaining.values());
+    await savePendingQueue(finalRemaining);
+    if (finalRemaining.length === 0 && queue.length > 0) {
+      setCloudSyncStatus('synced');
+    }
+  })().finally(() => {
+    flushInFlightPromise = null;
+  });
+
+  return flushInFlightPromise;
 }
 
 // Setup network event listeners
@@ -202,41 +322,47 @@ export function writeThroughCardUpdate(cardId: string, card: any, includeContent
       ? Math.round(rawReviewDate)
       : new Date(rawReviewDate).getTime();
 
+  const initialPayload: Record<string, any> = {
+    masteryLevel: nextMastery,
+    isArchived: isArchived,
+    interval: nextInterval,
+    repetitions: nextRepetitions,
+    nextReviewDate: numericReviewDate,
+    ...(typeof card.has_mistake === 'boolean' ? { has_mistake: card.has_mistake } : {}),
+  };
+
+  if (includeContent) {
+    if (card.sentence !== undefined) initialPayload.sentence = card.sentence;
+    if (card.targetWord !== undefined) initialPayload.targetWord = card.targetWord;
+    if (card.translation !== undefined) initialPayload.translation = card.translation;
+    if (card.baseWordInfo !== undefined) initialPayload.baseWordInfo = card.baseWordInfo;
+    if (card.forms !== undefined) initialPayload.forms = card.forms;
+  }
+
+  // Optimistically record in synchronous localStorage retry queue & in-flight set
+  // so abrupt mobile tab suspension (iOS Safari) never loses SRS progress.
+  const writeTimestamp = Date.now();
+  inFlightCardWrites.add(cardId);
+  upsertPendingQueueSync(cardId, initialPayload, writeTimestamp);
+
   // Background non-blocking execution (zero delay for user UI, zero .select('*'))
   (async () => {
-    const caps = await getSchemaCapabilities();
-    const safePayload: Record<string, any> = {
-      masteryLevel: nextMastery,
-      isArchived: isArchived,
-      interval: nextInterval,
-      repetitions: nextRepetitions,
-      nextReviewDate: numericReviewDate,
-      ...(caps.cardsHasMistake && typeof card.has_mistake === 'boolean'
-        ? { has_mistake: card.has_mistake }
-        : {}),
-    };
-
-    if (includeContent) {
-      if (card.sentence !== undefined) safePayload.sentence = card.sentence;
-      if (card.targetWord !== undefined) safePayload.targetWord = card.targetWord;
-      if (card.translation !== undefined) safePayload.translation = card.translation;
-      if (card.baseWordInfo !== undefined) safePayload.baseWordInfo = card.baseWordInfo;
-      if (card.forms !== undefined) safePayload.forms = card.forms;
-    }
-
-    if (typeof window !== 'undefined' && !navigator.onLine) {
-      await enqueuePendingCard(cardId, safePayload);
-      setCloudSyncStatus('offline');
-      return;
-    }
-
     try {
+      const caps = await getSchemaCapabilities();
+      const safePayload = sanitizeCardMutationPayload(initialPayload, caps.cardsHasMistake);
+
+      if (typeof window !== 'undefined' && !navigator.onLine) {
+        await enqueuePendingCard(cardId, safePayload);
+        setCloudSyncStatus('offline');
+        return;
+      }
+
       let { error } = await supabase
         .from('cards')
         .update(safePayload)
         .eq('id', cardId);
 
-      if (error && (error.code === '42703' || error.message?.includes('does not exist'))) {
+      if (error && (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('does not exist'))) {
         if (error.message?.includes('has_mistake')) {
           markSchemaCapabilityFalse('cardsHasMistake');
           delete safePayload.has_mistake;
@@ -246,16 +372,18 @@ export function writeThroughCardUpdate(cardId: string, card: any, includeContent
       }
 
       if (error) {
-        console.error('Supabase update error:', error);
-        await enqueuePendingCard(cardId, safePayload);
+        console.error('[CloudSync] Supabase card update error:', cardId, error);
+        await savePendingQueue(upsertPendingQueueSync(cardId, safePayload, writeTimestamp));
         setCloudSyncStatus('error');
       } else {
+        await dequeuePendingCard(cardId, writeTimestamp);
         setCloudSyncStatus('synced');
       }
     } catch (e) {
-      console.error('Supabase update error (network):', e);
-      await enqueuePendingCard(cardId, safePayload);
+      console.error('[CloudSync] Supabase card update network error:', cardId, e);
       setCloudSyncStatus('offline');
+    } finally {
+      inFlightCardWrites.delete(cardId);
     }
   })();
 }
@@ -326,8 +454,103 @@ export async function forcePushLocalToCloud(lang: string = 'DE'): Promise<{ push
 }
 
 // ============================================================================
-// INCREMENTAL TIMESTAMP DELTA-SYNC (PC <-> PHONE SYNC, ALL MASTERY LEVELS)
+// LIGHTWEIGHT SRS STATUS PULL + INCREMENTAL DELTA-SYNC (PC <-> PHONE SYNC)
 // ============================================================================
+
+export interface LightweightCardSrsRow {
+  id: string;
+  deck_id?: string | null;
+  masteryLevel?: number | null;
+  isArchived?: boolean | null;
+  nextReviewDate?: number | string | null;
+  interval?: number | null;
+  repetitions?: number | null;
+  has_mistake?: boolean | null;
+}
+
+export interface LightweightSrsPullResult {
+  rows: LightweightCardSrsRow[];
+  ok: boolean;
+}
+
+/**
+ * Ультралёгкий постраничный запрос ТОЛЬКО компактных SRS-полей (без тяжёлых текстовых полей
+ * sentence/translation/forms/options и без несуществующей колонки updated_at) для всех начатых
+ * или архивированных карточек.
+ */
+export async function fetchLightweightSrsStates(
+  client: typeof supabase = supabase
+): Promise<LightweightSrsPullResult> {
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    return { rows: [], ok: false };
+  }
+
+  try {
+    const caps = await getSchemaCapabilities();
+    let includeMistake = caps.cardsHasMistake;
+    const PAGE_SIZE = 1000;
+    const rows: LightweightCardSrsRow[] = [];
+    let from = 0;
+
+    while (true) {
+      let data: LightweightCardSrsRow[] | null = null;
+      let error: any = null;
+
+      if (includeMistake) {
+        const res = await client
+          .from('cards')
+          .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions, has_mistake')
+          .or('isArchived.eq.true,masteryLevel.gt.0,nextReviewDate.not.is.null,repetitions.gt.0')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+        data = res.data as LightweightCardSrsRow[] | null;
+        error = res.error;
+      } else {
+        const res = await client
+          .from('cards')
+          .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
+          .or('isArchived.eq.true,masteryLevel.gt.0,nextReviewDate.not.is.null,repetitions.gt.0')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+        data = res.data as LightweightCardSrsRow[] | null;
+        error = res.error;
+      }
+
+      if (error && includeMistake && (error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('has_mistake'))) {
+        markSchemaCapabilityFalse('cardsHasMistake');
+        includeMistake = false;
+        const retry = await client
+          .from('cards')
+          .select('id, deck_id, masteryLevel, isArchived, nextReviewDate, interval, repetitions')
+          .or('isArchived.eq.true,masteryLevel.gt.0,nextReviewDate.not.is.null,repetitions.gt.0')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+        data = retry.data as LightweightCardSrsRow[] | null;
+        error = retry.error;
+      }
+
+      if (error) {
+        console.warn('[LightweightSrsPull] Supabase query error:', error.message);
+        return { rows, ok: false };
+      }
+
+      if (!data || data.length === 0) {
+        break;
+      }
+
+      rows.push(...data);
+      if (data.length < PAGE_SIZE) {
+        break;
+      }
+      from += PAGE_SIZE;
+    }
+
+    return { rows, ok: true };
+  } catch (e) {
+    console.warn('[LightweightSrsPull] Failed to pull lightweight SRS states:', e);
+    return { rows: [], ok: false };
+  }
+}
 
 export const LAST_CARDS_SYNC_KEY = 'kraft_last_cards_sync_at';
 const DELTA_SYNC_V2_READY_KEY = 'kraft_cards_delta_v2_ready';
@@ -339,9 +562,7 @@ export interface CardsDeltaResult {
 }
 
 /**
- * Загружает ТОЛЬКО новые и изменённые карточки по `updated_at` (включая карточки с masteryLevel === 0).
- * При первом запуске (или однократной миграции со старой логики без v2-флага)
- * подтягивает карточки с прогрессом и все карточки, созданные/изменённые за последние 30 дней.
+ * Загружает новые/изменённые колоды целиком (без несуществующей колонки updated_at).
  */
 export interface SyncCardsDeltaOptions {
   allowFullFallback?: boolean;
@@ -455,7 +676,7 @@ export async function fetchCardsDelta(lastSync?: string | null): Promise<any[]> 
 // DELTA CLOUD RECONCILIATION (SHORT DEDUPE COOLDOWN FOR INSTANT TAB SWITCHING)
 // ============================================================================
 
-const FOCUS_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes hard cooldown to stop Supabase egress leaks
+const FOCUS_COOLDOWN_MS = 20 * 1000; // 20-second cooldown for lightweight SRS reconciliation
 
 export async function syncWithCloud(force: boolean = false): Promise<void> {
   const now = Date.now();
