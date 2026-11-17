@@ -115,6 +115,36 @@ export function normalizeSentenceForDedup(rawSentence?: string): string {
     .trim();
 }
 
+export type ReviewDedupKind = 'cloze' | 'prep' | 'verb_drill' | 'redemittel' | 'flashcard';
+
+function extractPrepositionSignature(card: any, trainingMode?: string): string | null {
+  const mode = String(trainingMode || card?.training_mode || '').toLowerCase();
+  const s = String(card?.sentence || '').trim();
+  if (!s) return null;
+  if (mode === 'preposition_drill' || /\|\s*(?:AKK|DAT|GEN|NOM)\b/i.test(s)) {
+    const normalized = s
+      .toLowerCase()
+      .replace(/\s*\|\s*/g, '|')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return normalized || null;
+  }
+  return null;
+}
+
+function isVerbDrillCard(card: any, trainingMode?: string): boolean {
+  const mode = String(trainingMode || card?.training_mode || '').toLowerCase();
+  if (mode === 'starke_verben') return true;
+  if (card?.sentence === 'VERB_DRILL') return true;
+  if (card?.baseWordInfo && typeof card.baseWordInfo === 'string') {
+    try {
+      const parsed = JSON.parse(card.baseWordInfo);
+      if (parsed && parsed.praeteritum && parsed.perfekt) return true;
+    } catch {}
+  }
+  return false;
+}
+
 function inferIsClozeCard(item: any, card: any): boolean {
   const mode = card?.training_mode || item?.training_mode;
   if (mode) return mode === 'standard_cloze';
@@ -125,19 +155,57 @@ function inferIsClozeCard(item: any, card: any): boolean {
   return /_{2,}|\.\.\.|…/.test(sentence);
 }
 
+function inferCardDedupKind(
+  item: any,
+  card: any,
+  isClozeOverride?: boolean,
+  trainingModeOverride?: string
+): { kind: ReviewDedupKind; prepSig: string | null } {
+  const mode = String(trainingModeOverride || card?.training_mode || item?.training_mode || '').toLowerCase();
+  const prepSig = extractPrepositionSignature(card, mode);
+  if (prepSig || mode === 'preposition_drill') {
+    return { kind: 'prep', prepSig };
+  }
+  if (isVerbDrillCard(card, mode)) {
+    return { kind: 'verb_drill', prepSig: null };
+  }
+  if (mode === 'redemittel') {
+    return { kind: 'redemittel', prepSig: null };
+  }
+  const isCloze = typeof isClozeOverride === 'boolean' ? isClozeOverride : inferIsClozeCard(item, card);
+  if (isCloze) {
+    return { kind: 'cloze', prepSig: null };
+  }
+  return { kind: 'flashcard', prepSig: null };
+}
+
 /**
  * Строит ключ дедупликации для очереди повторений с разделением режимов:
  * - Lücken (cloze): cloze:${valencyLemma}::${normalizedSentence}
+ * - Предлоги (preposition_drill): prep:${valencyLemma}::${prepSig}::${primaryTranslation}
+ * - Сильные глаголы (starke_verben): verb_drill:${valencyLemma}::${primaryTranslation}
+ * - Redemittel: redemittel:${valencyLemma}::${primaryTranslation}
  * - Karten (flashcards / grammar): flashcard:${valencyLemma}::${normalizedPrimaryTranslation}
  */
-export function getReviewDeduplicationKey(item: any, isClozeOverride?: boolean): string {
+export function getReviewDeduplicationKey(
+  item: any,
+  isClozeOrOptions?: boolean | { isCloze?: boolean; trainingMode?: string }
+): string {
   if (!item) return '';
   const card = item?.card ? item.card : item;
   const rawWord = extractRawWordFromItem(item);
   const valencyLemma = normalizeValencyLemma(rawWord);
-  const isCloze = typeof isClozeOverride === 'boolean' ? isClozeOverride : inferIsClozeCard(item, card);
 
-  if (isCloze) {
+  const isClozeOverride =
+    typeof isClozeOrOptions === 'boolean' ? isClozeOrOptions : isClozeOrOptions?.isCloze;
+  const trainingModeOverride =
+    typeof isClozeOrOptions === 'object' && isClozeOrOptions !== null
+      ? isClozeOrOptions.trainingMode
+      : undefined;
+
+  const { kind, prepSig } = inferCardDedupKind(item, card, isClozeOverride, trainingModeOverride);
+
+  if (kind === 'cloze') {
     const normSentence = normalizeSentenceForDedup(card?.sentence || item?.sentence || '');
     if (!normSentence) {
       return card?.id ? `cloze:${valencyLemma || '__empty'}::__id:${card.id}` : '';
@@ -145,14 +213,22 @@ export function getReviewDeduplicationKey(item: any, isClozeOverride?: boolean):
     return `cloze:${valencyLemma || '__empty'}::${normSentence}`;
   }
 
-  if (!valencyLemma) {
-    return card?.id ? `flashcard:__id:${card.id}` : '';
-  }
-
   const primaryTrans = getPrimaryRussianTranslation(
     card?.translation || card?.hint || item?.translation || ''
   );
-  return `flashcard:${valencyLemma}::${primaryTrans}`;
+
+  if (kind === 'prep') {
+    if (!valencyLemma && !prepSig) {
+      return card?.id ? `prep:__id:${card.id}` : '';
+    }
+    return `prep:${valencyLemma || '__empty'}::${prepSig || '__nosent'}::${primaryTrans}`;
+  }
+
+  if (!valencyLemma) {
+    return card?.id ? `${kind}:__id:${card.id}` : '';
+  }
+
+  return `${kind}:${valencyLemma}::${primaryTrans}`;
 }
 
 /**
@@ -319,6 +395,7 @@ export function sortReviewCardsPedagogically<
  */
 export interface ReviewDeduplicationOptions<T> {
   isCloze?: (item: T) => boolean;
+  getTrainingMode?: (item: T) => string | undefined;
 }
 
 export function deduplicateCardsByLemma<
@@ -339,8 +416,9 @@ export function deduplicateCardsByLemma<
     const inner = (item as any).card ? (item as any).card : item;
     const raw = extractRawWordFromItem(item);
     const isClozeFlag = options?.isCloze ? options.isCloze(item) : undefined;
+    const trainingMode = options?.getTrainingMode ? options.getTrainingMode(item) : undefined;
     const key =
-      getReviewDeduplicationKey(item, isClozeFlag) ||
+      getReviewDeduplicationKey(item, { isCloze: isClozeFlag, trainingMode }) ||
       getCanonicalLemmaKey(raw) ||
       getWordKey(raw) ||
       getCanonicalKey(raw) ||
@@ -467,7 +545,10 @@ export function buildDeduplicatedReviewQueue<
     if (!item) continue;
     const card = (item as any)?.card || item;
     const isClozeFlag = options?.isCloze ? options.isCloze(item) : undefined;
-    const dedupKey = getReviewDeduplicationKey(item, isClozeFlag) || (card?.id ? `__id:${card.id}` : '');
+    const trainingMode = options?.getTrainingMode ? options.getTrainingMode(item) : undefined;
+    const dedupKey =
+      getReviewDeduplicationKey(item, { isCloze: isClozeFlag, trainingMode }) ||
+      (card?.id ? `__id:${card.id}` : '');
 
     if (!dedupKey || seenLemmas.has(dedupKey)) {
       continue;

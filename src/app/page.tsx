@@ -27,7 +27,7 @@ import { WortschatzMatrixPopover } from "@/components/vocabulary/WortschatzMatri
 import { WortfamilieAnchor } from "@/components/vocabulary/WortfamilieAnchor";
 import { recordMasteredLemma, removeMasteredLemma, reconcileMasteredWords, removeMasteredWordsByCardIds, getMasteredLemmasSet, getMasteredWordEntries, isGrammarDeckOrBook, isFunctionalParticle, syncMasteredWordsFromCloud, flushPendingMasteredSnapshots } from "@/hooks/useWortschatzMatrix";
 import { normalizeGermanLemma } from "@/lib/vocabulary/normalizer";
-import { normalizeCanonicalLemma, normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
+import { normalizeCanonicalLemma, normalizeLemmaKey, normalizeMasteredLemma, deduplicateCardsByLemma, deduplicateReviewSession, getReviewDeduplicationKey, getStrictLemmaKey, getWordKey, sortReviewCardsPedagogically, getDueReviewCards, getUniqueReviewQueue, shuffleArray, getLemmaKey, getCanonicalLemmaKey, buildDeduplicatedReviewQueue } from "@/lib/utils/lemmaNormalizer";
 import { getCanonicalKey, isCardCanonicalMastered, buildMasteredCanonicalSet, mergeCardContext } from "@/lib/vocabulary/canonical";
 import { useDayStats, normalizeLanguage, safeSetStorage, reconcileStatsFromCloud, getMistakesPool, resetDayStatsToZero, setIDBItem, getIDBItem, getTodayCompletedCardsCount, normalizeFocusSeconds, startCardFocusTimer, saveDayRecord, getLocalDateString, computeStrictAccuracy, sanitizeTodayMistakesCount, syncKraftDailyStatEntry, syncPersistentMistakesFromCloud, STATS_SYNC_EVENT, emitDayStatsSync, getCanonicalTodayCardsDone } from "@/hooks/useDayStats";
 import { StatsPopover } from "@/components/StatsPopover";
@@ -1930,10 +1930,13 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
 
   if (validDecks.length > 0 && totalCardsInMemory > 0) {
     const dueList: { deckId: string; card: Flashcard }[] = [];
+    const targetBookObj = bookId ? (inMemoryBooks || []).find((b) => b.id === bookId) : undefined;
+    const isTargetGrammarBook = Boolean(targetBookObj && getBookCategory(targetBookObj) === 'structures');
     reviewEligibleDecks.forEach(deck => {
       if (!activeDeckIds.has(deck.id)) return;
+      const dBookId = deck.bookId || (deck as any).book_id;
+      const parentBook = dBookId ? (inMemoryBooks || []).find((b) => b.id === dBookId) : undefined;
       if (bookId) {
-        const dBookId = deck.bookId || (deck as any).book_id;
         if (dBookId !== bookId) return;
       } else {
         if ((deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
@@ -1942,6 +1945,8 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
         if (!card || (card as any).isDeleted) return;
         const cDeckId = (card as any).deck_id || (card as any).deckId || deck.id;
         if (!activeDeckIds.has(cDeckId)) return;
+        const isGram = isGrammarDeckOrBook(deck, parentBook, card);
+        if (isTargetGrammarBook ? !isGram : isGram) return;
         if (isCardDueForReview(card)) {
           dueList.push({ deckId: deck.id, card });
         }
@@ -1950,6 +1955,8 @@ export async function fetchDueCardsCount(lang: string = 'DE', userId?: string, b
     const count = buildDeduplicatedReviewQueue(dueList, {
       isCloze: (item) =>
         getCardReviewFilterMode(item.card, item.deckId, validDecks, inMemoryBooks || []) === 'cloze',
+      getTrainingMode: (item) =>
+        getCardTrainingMode(item.card, item.deckId, validDecks, inMemoryBooks || []),
     }).length;
     cachedDueCount[cleanLang] = count;
     return count;
@@ -1995,15 +2002,20 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
 
   if (validDecks.length > 0 && totalCardsInMemory > 0) {
     const list: { deckId: string, card: Flashcard }[] = [];
+    const targetBookObj = bookId ? (inMemoryBooks || []).find((b) => b.id === bookId) : undefined;
+    const isTargetGrammarBook = Boolean(targetBookObj && getBookCategory(targetBookObj) === 'structures');
     reviewEligibleDecks.forEach(deck => {
       if (!activeDeckIds.has(deck.id)) return;
       const dBookId = deck.bookId || (deck as any).book_id;
+      const parentBook = dBookId ? (inMemoryBooks || []).find((b) => b.id === dBookId) : undefined;
       if (bookId && dBookId !== bookId) return;
       if (!bookId && (deck.language || 'DE').toLowerCase() !== cleanLang.toLowerCase()) return;
       deck.cards?.forEach(card => {
         if (!card || (card as any).isDeleted) return;
         const cDeckId = (card as any).deck_id || (card as any).deckId || deck.id;
         if (!activeDeckIds.has(cDeckId)) return;
+        const isGram = isGrammarDeckOrBook(deck, parentBook, card);
+        if (isTargetGrammarBook ? !isGram : isGram) return;
         if (isCardDueForReview(card)) {
           // Карточки, пришедшие на повторение, находятся в Архиве (раунд 4, Legendary)
           list.push({
@@ -2022,6 +2034,8 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
     const result = buildDeduplicatedReviewQueue(list, {
       isCloze: (item) =>
         getCardReviewFilterMode(item.card, item.deckId, validDecks, inMemoryBooks || []) === 'cloze',
+      getTrainingMode: (item) =>
+        getCardTrainingMode(item.card, item.deckId, validDecks, inMemoryBooks || []),
     });
     cachedDueCardsFromCloud[cleanLang] = result;
     return result;
@@ -2080,6 +2094,11 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
           if (!dId) return false;
           if (bId && excludedSet.has(bId)) return false;
           if (activeDeckIds.size > 0 && !activeDeckIds.has(dId)) return false;
+          const deckMeta = synthDecksMap.get(dId);
+          const bookMeta = bId ? (inMemoryBooks || []).find((b) => b.id === bId) : undefined;
+          const isTargetGram = Boolean(bookId && bookMeta && getBookCategory(bookMeta) === 'structures');
+          const isGram = isGrammarDeckOrBook(deckMeta, bookMeta, row);
+          if (isTargetGram ? !isGram : isGram) return false;
           return isCardDueForReview(row);
         })
         .map((row: any) => ({
@@ -2102,6 +2121,8 @@ export async function fetchDueCardsFromCloud(lang: string = 'DE', bookId?: strin
       const result = buildDeduplicatedReviewQueue(mapped, {
         isCloze: (item) =>
           getCardReviewFilterMode(item.card, item.deckId, resolverDecks, inMemoryBooks || []) === 'cloze',
+        getTrainingMode: (item) =>
+          getCardTrainingMode(item.card, item.deckId, resolverDecks, inMemoryBooks || []),
       });
       cachedDueCardsFromCloud[cleanLang] = result;
       return result;
@@ -4001,19 +4022,16 @@ export const useStore = create<DeckState>()((set, get) => ({
     writeThroughCardUpdate(cardId, validCard);
     updateCachedCardInMemory(cardId, validCard);
 
-    const rawWordForSync = validCard.targetWord || (validCard as any).missingWord || (validCard as any).infinitive || (validCard as any).front || '';
-    const canonicalSyncKey = normalizeCanonicalLemma(rawWordForSync);
+    const currentBooks = get().books;
+    const primaryDedupKey = getCardReviewDedupKey(validCard, targetDeck.id, currentDecks, currentBooks);
     const shouldSyncDuplicateDueDates = Boolean(
-      isCorrect &&
-      !isHilfe &&
       validCard.isArchived &&
-      canonicalSyncKey &&
-      validCard.nextReviewDate &&
-      validCard.nextReviewDate > Date.now()
+      primaryDedupKey &&
+      validCard.nextReviewDate
     );
     const syncedDuplicates: Flashcard[] = [];
 
-    // 2. Обновляем Zustand-стейт и локальный IndexedDB (сдвигая также cross-deck архивные дубли с тем же корнем)
+    // 2. Обновляем Zustand-стейт и локальный IndexedDB (сдвигая также cross-deck дубли с тем же getReviewDeduplicationKey при любом исходе)
     set((state) => {
       const newDecks = state.decks.map((d) => {
         const deckLang = normalizeLanguage(d.language || state.books.find(b => b.id === d.bookId)?.language || cleanLang);
@@ -4033,14 +4051,20 @@ export const useStore = create<DeckState>()((set, get) => ({
             Boolean(c.isArchived ?? (c as any).is_archived) &&
             isCardDueForReview(c)
           ) {
-            const cRaw = c.targetWord || (c as any).missingWord || (c as any).infinitive || (c as any).front || '';
-            if (normalizeCanonicalLemma(cRaw) === canonicalSyncKey) {
+            const cDedupKey = getCardReviewDedupKey(c, d.id, state.decks, state.books);
+            if (cDedupKey && cDedupKey === primaryDedupKey) {
               const syncedCard: Flashcard = {
                 ...c,
+                masteryLevel: Math.max(4, c.masteryLevel ?? validCard.masteryLevel ?? 4),
+                isArchived: true,
+                round: 4,
+                isLegendary: true,
+                interval: validCard.interval,
+                repetitions: validCard.repetitions,
                 next_review_at: validCard.next_review_at,
                 next_review_date: validCard.next_review_date,
                 nextReviewDate: validCard.nextReviewDate,
-                has_mistake: false,
+                has_mistake: (!isCorrect || isHilfe) ? true : false,
               };
               syncedDuplicates.push(syncedCard);
               deckModified = true;
@@ -4786,6 +4810,19 @@ export function isClozeReviewItem(
   const card = (item as any)?.card ? (item as any).card : (item as Flashcard);
   const deckId = (item as any)?.deckId || (card as any)?.deckId || (card as any)?.deck_id;
   return getCardReviewFilterMode(card, deckId, decks, books) === 'cloze';
+}
+
+export function getCardReviewDedupKey(
+  itemOrCard: { deckId?: string; card?: Flashcard } | Flashcard,
+  fallbackDeckId?: string,
+  decks: Deck[] = [],
+  books: BookMeta[] = []
+): string {
+  const card = (itemOrCard as any)?.card ? (itemOrCard as any).card : (itemOrCard as Flashcard);
+  const deckId = (itemOrCard as any)?.deckId || (card as any)?.deckId || (card as any)?.deck_id || fallbackDeckId;
+  const trainingMode = getCardTrainingMode(card, deckId, decks, books);
+  const isCloze = getCardReviewFilterMode(card, deckId, decks, books) === 'cloze';
+  return getReviewDeduplicationKey({ deckId, card }, { isCloze, trainingMode });
 }
 
 export function getCardReviewFilterMode(
@@ -6705,6 +6742,7 @@ function RapidSession({
     const storeState = useStore.getState();
     const uniqueList = deduplicateCardsByLemma(list, false, {
       isCloze: (item) => isClozeReviewItem(item, storeState.decks, storeState.books),
+      getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, storeState.decks, storeState.books),
     });
     const ordered = [...uniqueList].sort(() => Math.random() - 0.5);
     setQueue(ordered);
@@ -6733,6 +6771,7 @@ function RapidSession({
     const storeState = useStore.getState();
     const uniqueList = deduplicateCardsByLemma(list, false, {
       isCloze: (item) => isClozeReviewItem(item, storeState.decks, storeState.books),
+      getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, storeState.decks, storeState.books),
     });
     const ordered = [...uniqueList].sort(() => Math.random() - 0.5);
     setQueue(ordered);
@@ -6771,6 +6810,7 @@ function RapidSession({
       const uniqueReview = shuffleArray(
         buildDeduplicatedReviewQueue([...reviewCards], {
           isCloze: (item) => isClozeReviewItem(item, storeState.decks, storeState.books),
+          getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, storeState.decks, storeState.books),
         })
       );
       list = uniqueReview.map(item => {
@@ -7359,14 +7399,15 @@ function StudyInterface({
       const unique = shuffleArray(
         buildDeduplicatedReviewQueue([...reviewCards], {
           isCloze: (item) => isClozeReviewItem(item, decks, books),
+          getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
         })
       );
       return unique.map(item => {
         const isDrill = isDrillMode;
         const initialRound = isDrill
           ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
-          : (item.card.round ?? 4);
-        const isLeg = isDrill ? false : (item.card.isLegendary ?? (initialRound === 4));
+          : (item.card.failedInSession ? Math.min(3, item.card.round ?? 3) : 4);
+        const isLeg = isDrill ? false : !item.card.failedInSession;
         return {
           ...item,
           card: {
@@ -7446,14 +7487,15 @@ function StudyInterface({
       const uniqueReview = shuffleArray(
         buildDeduplicatedReviewQueue([...reviewCards], {
           isCloze: (item) => isClozeReviewItem(item, storeState.decks, storeState.books),
+          getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, storeState.decks, storeState.books),
         })
       );
       const isDrill = isDrillMode;
       const list = uniqueReview.map(item => {
         const initialRound = isDrill
           ? (item.card.round ?? Math.max(1, Math.min(4, (item.card.masteryLevel ?? 0) + 1)))
-          : (item.card.round ?? 4);
-        const isLeg = isDrill ? false : (item.card.isLegendary ?? (initialRound === 4));
+          : (item.card.failedInSession ? Math.min(3, item.card.round ?? 3) : 4);
+        const isLeg = isDrill ? false : !item.card.failedInSession;
         return {
           ...item,
           card: {
@@ -7565,16 +7607,29 @@ function StudyInterface({
     const storeCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id);
     if (!storeCard) return currentCardSnapshot;
     const isFailedInSession = Boolean(currentCardSnapshot.failedInSession);
+    const shouldKeepReviewGold = isReviewSession && !isFailedInSession;
     return {
       ...currentCardSnapshot,
       ...storeCard,
-      round: isFailedInSession ? Math.min(3, currentCardSnapshot.round ?? 3) : currentCardSnapshot.round,
-      isLegendary: isFailedInSession ? false : currentCardSnapshot.isLegendary,
+      round: isFailedInSession
+        ? Math.min(3, currentCardSnapshot.round ?? 3)
+        : shouldKeepReviewGold
+          ? 4
+          : currentCardSnapshot.round,
+      isLegendary: isFailedInSession
+        ? false
+        : shouldKeepReviewGold
+          ? true
+          : currentCardSnapshot.isLegendary,
       failedInSession: isFailedInSession || undefined,
       mistakeCount: (currentCardSnapshot as any).mistakeCount,
-      masteryLevel: isFailedInSession ? (currentCardSnapshot.masteryLevel ?? 2) : (currentCardSnapshot.masteryLevel ?? storeCard.masteryLevel)
+      masteryLevel: isFailedInSession
+        ? (currentCardSnapshot.masteryLevel ?? 2)
+        : shouldKeepReviewGold
+          ? Math.max(4, storeCard.masteryLevel ?? 4, currentCardSnapshot.masteryLevel ?? 4)
+          : (currentCardSnapshot.masteryLevel ?? storeCard.masteryLevel)
     };
-  }, [decks, currentDeckId, currentCardSnapshot]);
+  }, [decks, currentDeckId, currentCardSnapshot, isReviewSession]);
 
   const currentDeck = useMemo(() => {
     if (!currentDeckId) return undefined;
@@ -7646,11 +7701,10 @@ function StudyInterface({
 
     if (isReviewMode) {
       if (isActualCorrect) {
-        const wasFailedInSession = Boolean(currentCardSnapshot.failedInSession || isReviewRetry);
-        nextMastery = wasFailedInSession ? 2 : Math.max(4, currentCardSnapshot.masteryLevel ?? 4);
+        nextMastery = Math.max(4, currentCardSnapshot.masteryLevel ?? liveCard?.masteryLevel ?? 4);
         isGraduated = true;
-        nextRound = wasFailedInSession ? 3 : 4;
-        nextLegendary = !wasFailedInSession;
+        nextRound = 4;
+        nextLegendary = true;
       } else {
         // Ошибка в глобальном Review: карточка ОСТАЕТСЯ в архиве, но уходит в конец текущей сессии со сбросом в синий статус (round 3)
         nextMastery = 2;
@@ -7748,6 +7802,8 @@ function StudyInterface({
     if (isReviewMode) {
       if (!isReviewRetry) {
         await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, true, isReviewingMistakesSession);
+      } else if (!liveCard.isArchived || isCardDueForReview(liveCard)) {
+        await answerCard(currentDeckId, currentCardSnapshot.id, false, false, true, studyLanguage, true, isReviewingMistakesSession);
       }
     } else if (isGraduated || !isActualCorrect || isReviewingMistakesSession) {
       await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, false, isReviewingMistakesSession, isGraduated);
@@ -8003,7 +8059,7 @@ function StudyInterface({
           <PrepStudyCard
             card={liveCard}
             deckTitle={currentDeck?.name}
-            isReview={Boolean(isReviewSession && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4 || Boolean(liveCard.isArchived))))}
             sessionTurn={turn}
             onAnswer={(id, correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
@@ -8014,7 +8070,7 @@ function StudyInterface({
           <VerbStudyCard
             card={liveCard}
             deckTitle={currentDeck?.name}
-            isReview={Boolean(isReviewSession && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4 || Boolean(liveCard.isArchived))))}
             sessionTurn={turn}
             onAnswer={(correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
@@ -8027,7 +8083,7 @@ function StudyInterface({
             deckTitle={decks.find(d => d.id === currentDeckId)?.name || currentDeck?.name}
             cardIndex={masteredInSession + 1}
             totalCards={initialTotal}
-            isReview={Boolean(isReviewSession && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4 || Boolean(liveCard.isArchived))))}
             sessionTurn={turn}
             onAnswer={(correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
@@ -8054,7 +8110,7 @@ function StudyInterface({
             deckTitle={currentDeck?.name}
             isGrammar={isGrammarDeck}
             forceInputMode={isReviewSession || isReviewingMistakesSession}
-            isReview={Boolean(isReviewSession && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
+            isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
             sessionTurn={turn}
             onAnswer={(correct, isHilfe) => {
               handleSessionAnswer(correct, isHilfe);
@@ -12030,8 +12086,8 @@ function PrepStudyCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && !card.failedInSession;
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && !card.failedInSession;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && (!card.failedInSession || isSuccess);
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && (!card.failedInSession || isSuccess);
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
@@ -12065,15 +12121,11 @@ function PrepStudyCard({
        const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
        setLocalMastery(nextMastery);
        if (isCorrect) {
-         if (card.failedInSession) {
-           setVisualRound(prev => Math.min(3, prev || 3));
-           setIsLegendaryVisual(false);
+         if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
+           setVisualRound(5);
+           setIsLegendaryVisual(true);
          } else {
-           const nextRound = visualRound + 1;
-           setVisualRound(nextRound);
-           if (visualRound >= 4 || isLegendaryVisual) {
-             setIsLegendaryVisual(true);
-           }
+           setVisualRound(visualRound + 1);
          }
        }
        setIsSuccess(true);
@@ -12231,7 +12283,7 @@ function PrepStudyCard({
 
 
       <div
-        key={card.id}
+        key={`${card.id}-${sessionTurn}`}
         className={cn("card-body w-full flex-1 flex flex-col items-center justify-center max-w-3xl mb-0 relative", transitionClasses)}
       >
         <div className="text-center mb-10 w-full mt-10">
@@ -12245,7 +12297,7 @@ function PrepStudyCard({
           {/* Inputs on the Left */}
           <div className="flex flex-row items-center justify-center gap-3 sm:gap-6">
             <VerbSlot 
-              key={`${card.id}-0`}
+              key={`${card.id}-${sessionTurn}-0`}
               label="Verb" 
               target={cleanVerb} 
               splitIndex={splitIndex}
@@ -12258,7 +12310,7 @@ function PrepStudyCard({
               virtualBackspaceRef={virtualBackspaceRef0} 
             />
             <VerbSlot 
-              key={`${card.id}-1`}
+              key={`${card.id}-${sessionTurn}-1`}
               label="Präposition" 
               target={prep} 
               isActive={activeSlot === 1} 
@@ -12375,8 +12427,8 @@ function VerbStudyCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && !card.failedInSession;
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && !card.failedInSession;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && (!card.failedInSession || isSuccess);
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && (!card.failedInSession || isSuccess);
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
@@ -12446,15 +12498,11 @@ function VerbStudyCard({
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
       if (isCorrect) {
-        if (card.failedInSession) {
-          setVisualRound(prev => Math.min(3, prev || 3));
-          setIsLegendaryVisual(false);
+        if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
+          setVisualRound(5);
+          setIsLegendaryVisual(true);
         } else {
-          const nextRound = visualRound + 1;
-          setVisualRound(nextRound);
-          if (visualRound >= 4 || isLegendaryVisual) {
-            setIsLegendaryVisual(true);
-          }
+          setVisualRound(visualRound + 1);
         }
       }
       setIsSuccess(true);
@@ -12541,7 +12589,7 @@ function VerbStudyCard({
       </div>
 
       <div
-        key={card.id}
+        key={`${card.id}-${sessionTurn}`}
         className={cn("card-body w-full flex-1 flex flex-col items-center justify-center max-w-3xl mb-0 relative", transitionClasses)}
       >
         <div className="text-center mb-8 w-full mt-10">
@@ -12557,7 +12605,7 @@ function VerbStudyCard({
           <span className="text-[14px] font-medium text-zinc-600 dark:text-zinc-400 mr-1 sm:mr-2">er</span>
           {targets.map((target, idx) => (
             <VerbSlot
-              key={`${card.id}-${idx}`}
+              key={`${card.id}-${sessionTurn}-${idx}`}
               label={labels[idx]}
               target={target}
               isActive={activeInput === idx}
@@ -12845,9 +12893,9 @@ export function RedemittelStudyCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && status !== 'error' && status !== 'surrender' && !card.failedInSession;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && status !== 'error' && status !== 'surrender' && (!card.failedInSession || status === 'success');
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && status === 'success' && !card.failedInSession;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && status === 'success' && (!card.failedInSession || status === 'success');
 
   const handlePlayAudio = useCallback(() => {
     if (!data.fullText) return;
@@ -12871,15 +12919,11 @@ export function RedemittelStudyCard({
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
       if (isCorrect) {
-        if (card.failedInSession) {
-          setVisualRound(prev => Math.min(3, prev || 3));
-          setIsLegendaryVisual(false);
+        if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
+          setVisualRound(5);
+          setIsLegendaryVisual(true);
         } else {
-          const nextRound = visualRound + 1;
-          setVisualRound(nextRound);
-          if (visualRound >= 4 || isLegendaryVisual) {
-            setIsLegendaryVisual(true);
-          }
+          setVisualRound(visualRound + 1);
         }
         setStatus('success');
         playSafeAudio(() => playSuccessSound());
@@ -13322,7 +13366,7 @@ export default function App() {
     refreshDueCardsCount(appLanguage);
 
     let debounceTimer: any = null;
-    let lastSyncTime = Date.now();
+    let lastSyncTime = 0;
     const FOCUS_COOLDOWN_MS = 20 * 1000; // Не чаще 1 раза в 20 секунд
     const handleSync = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -13561,26 +13605,30 @@ export default function App() {
       } catch (e) {}
       useStore.setState({ isLoaded: true });
 
-      // СТРОГИЙ LOCAL-FIRST КЭШ (ZERO REDUNDANT EGRESS):
-      // Если в IndexedDB уже лежат карточки и книги — открываемся мгновенно из локального кэша БЕЗ слепого select('*')!
+      // СТРОГИЙ LOCAL-FIRST КЭШ:
+      // Если в IndexedDB уже лежат карточки и книги — открываемся мгновенно из локального кэша,
+      // но ВСЕГДА дожимаем очередь SRS-мутаций и легкий синк дат из Supabase!
       if (hasLocalCardsCache && hasLocalBooksCache) {
         setIsLoadingBooks(false);
         if (typeof window !== 'undefined' && !localStorage.getItem(KRAFT_LAST_SYNC_KEY)) {
           localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
         }
         useStore.getState().refreshDueCardsCount().catch(() => {});
-        // Фоновый дельта-синк строго с соблюдением 5-минутного кулдауна (F5 внутри 5 мин = 0 КБ!)
+        // Фоновый авто-синк SRS при каждом холодном/тёплом открытии или F5
         (async () => {
           try {
-            await syncExcludedBooksFromCloud();
+            await flushPendingQueue();
+            await syncExcludedBooksFromCloud(true);
+            await syncLightweightSrsFromSupabase(true);
             await syncBooksFromSupabase(false);
             await syncCardsFromSupabase(false);
             const curLangUpper = (useStore.getState().appLanguage || 'de').toUpperCase();
             await syncCloudDailyStats(undefined, curLangUpper.toLowerCase(), false);
             await syncPersistentMistakesFromCloud(curLangUpper, false);
             await syncMasteredWordsFromCloud(curLangUpper.toLowerCase() as any, false);
+            useStore.getState().refreshDueCardsCount().catch(() => {});
           } catch (e) {
-            console.warn('[App] Background delta sync error:', e);
+            console.warn('[App] Background SRS sync error:', e);
           }
         })();
         return;
@@ -13892,7 +13940,7 @@ export default function App() {
     // 2. Безопасная фоновая синхронизация:
     // - Лёгкая сверка SRS-статусов (~50 КБ) при возврате в фокус с кулдауном 20 секунд
     // - Тяжёлая мета-синхронизация с 5-минутным кулдауном (НИКОГДА во время тренировки)
-    let lastLightweightFocusSync = Date.now();
+    let lastLightweightFocusSync = 0;
     const LIGHTWEIGHT_FOCUS_COOLDOWN_MS = 20 * 1000;
     let lastFocusSync = 0;
     const FOCUS_COOLDOWN_MS = 5 * 60 * 1000;
@@ -14064,6 +14112,7 @@ export default function App() {
     if (drillCards.length > 0) {
       const uniqueDrillCards = deduplicateCardsByLemma(drillCards, true, {
         isCloze: (item) => isClozeReviewItem(item, decks, books),
+        getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
       });
       for (let i = uniqueDrillCards.length - 1; i > 0; i--) {
          const j = Math.floor(Math.random() * (i + 1));
@@ -14075,7 +14124,7 @@ export default function App() {
     }
   }, [filteredDecksList, activeBook, groupedDecks, masteredCanonicalSet]);
 
-  const allDueCards = useMemo(() => {
+  const { allDueCards, grammarDueCards } = useMemo(() => {
     const excludedSet = new Set(getLocalExcludedBookIds());
     books.forEach((b) => {
       if (b?.exclude_from_review === true) excludedSet.add(b.id);
@@ -14085,10 +14134,12 @@ export default function App() {
       (deck) => !isDeckExcludedFromReview(deck, books, excludedSet)
     );
     const activeDeckIds = new Set(validDecks.map(d => d.id));
-    const list: { deckId: string, card: Flashcard }[] = [];
+    const vocabList: { deckId: string, card: Flashcard }[] = [];
+    const grammarList: { deckId: string, card: Flashcard }[] = [];
     validDecks.forEach(deck => {
+      const dBookId = deck.bookId || (deck as any).book_id;
+      const parentBook = dBookId ? books.find((b) => b.id === dBookId) : undefined;
       if (activeBookId) {
-        const dBookId = deck.bookId || (deck as any).book_id;
         if (dBookId !== activeBookId) return;
       } else {
         if (deck.language && deck.language.toLowerCase() !== appLanguage.toLowerCase()) return;
@@ -14099,7 +14150,7 @@ export default function App() {
         if (!activeDeckIds.has(cardDeckId)) return;
         if (isCardDueForReview(card)) {
           // Карточки, пришедшие на повторение, находятся в Архиве (раунд 4, Legendary)
-          list.push({
+          const enrichedItem = {
             deckId: deck.id,
             card: {
               ...card,
@@ -14108,13 +14159,25 @@ export default function App() {
               isLegendary: true,
               masteryLevel: Math.max(4, card.masteryLevel ?? 4),
             },
-          });
+          };
+          if (isGrammarDeckOrBook(deck, parentBook, card)) {
+            grammarList.push(enrichedItem);
+          } else {
+            vocabList.push(enrichedItem);
+          }
         }
       });
     });
-    return buildDeduplicatedReviewQueue(list, {
-      isCloze: (item) => isClozeReviewItem(item, decks, books),
-    });
+    return {
+      allDueCards: buildDeduplicatedReviewQueue(vocabList, {
+        isCloze: (item) => isClozeReviewItem(item, decks, books),
+        getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
+      }),
+      grammarDueCards: buildDeduplicatedReviewQueue(grammarList, {
+        isCloze: (item) => isClozeReviewItem(item, decks, books),
+        getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
+      }),
+    };
   }, [decks, books, appLanguage, activeBookId]);
 
   const matchesReviewMode = useCallback(
@@ -14187,6 +14250,40 @@ export default function App() {
   }, [isLoaded, decksLength, allDueCards.length, appLanguage]);
 
   const displayDueCount = dueCardsCount;
+  const isActiveGrammarBook = Boolean(activeBook && getBookCategory(activeBook) === 'structures');
+
+  const handleStartGrammarReview = useCallback(async () => {
+    setIsReviewingMistakes(false);
+    initAudioCtx();
+    if (grammarDueCards.length > 0) {
+      setReviewCards(
+        shuffleArray(
+          buildDeduplicatedReviewQueue(grammarDueCards, {
+            isCloze: (item) => isClozeReviewItem(item, decks, books),
+            getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
+          })
+        )
+      );
+      return;
+    }
+    if (isActiveGrammarBook && activeBookId) {
+      try {
+        const freshCards = await fetchDueCardsFromCloud(activeBook?.language || appLanguage, activeBookId);
+        if (freshCards.length > 0) {
+          setReviewCards(
+            shuffleArray(
+              buildDeduplicatedReviewQueue(freshCards, {
+                isCloze: (item) => isClozeReviewItem(item, decks, books),
+                getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
+              })
+            )
+          );
+        }
+      } catch (e) {
+        console.warn('Failed to load grammar review cards from cloud:', e);
+      }
+    }
+  }, [grammarDueCards, isActiveGrammarBook, activeBookId, activeBook, appLanguage, decks, books]);
 
   const handleStartReviewDue = useCallback(async () => {
     setIsReviewingMistakes(false);
@@ -14198,6 +14295,7 @@ export default function App() {
         shuffleArray(
           buildDeduplicatedReviewQueue(dueCards, {
             isCloze: (item) => isClozeReviewItem(item, decks, books),
+            getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
           })
         )
       );
@@ -14225,6 +14323,7 @@ export default function App() {
           shuffleArray(
             buildDeduplicatedReviewQueue(filteredFresh, {
               isCloze: (item) => isClozeReviewItem(item, decks, books),
+              getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
             })
           )
         );
@@ -14233,7 +14332,7 @@ export default function App() {
     } catch (e) {
       console.warn('Failed to load fresh due cards from cloud, falling back to local:', e);
     }
-  }, [appLanguage, activeBook, activeBookId, dueCards, allDueCards.length, reviewMode, decks, books]);
+  }, [appLanguage, activeBook, activeBookId, dueCards, allDueCards.length, reviewMode, decks, books, matchesReviewMode]);
 
   const archivedCards = useMemo(() => {
     const list: { deckId: string, deckName: string, card: Flashcard }[] = [];
@@ -14813,11 +14912,11 @@ export default function App() {
       <HeaderWidgets 
           activeBook={activeBook} 
           onBack={() => startTransition(() => setActiveBookId(null))} 
-          dueCount={displayDueCount}
-          onStartReview={handleStartReviewDue}
+          dueCount={isActiveGrammarBook ? grammarDueCards.length : displayDueCount}
+          onStartReview={isActiveGrammarBook ? handleStartGrammarReview : handleStartReviewDue}
           reviewMode={reviewMode}
           onReviewModeChange={handleReviewModeChange}
-          reviewCounts={reviewCounts}
+          reviewCounts={isActiveGrammarBook ? undefined : reviewCounts}
           onReviewMistakes={() => {
             try {
               stopAllGermanSpeech();
@@ -14841,6 +14940,7 @@ export default function App() {
                 setReviewCards(
                   deduplicateReviewSession(list, {
                     isCloze: (item) => isClozeReviewItem(item, decks, books),
+                    getTrainingMode: (item) => getCardTrainingMode(item.card, item.deckId, decks, books),
                   })
                 );
               }
@@ -14975,6 +15075,20 @@ export default function App() {
               onTabChange={handleCategoryTabChange}
               language={appLanguage}
             />
+
+            {activeCategory === 'structures' && grammarDueCards.length > 0 && (
+              <div className="flex justify-center mb-6 px-1">
+                <button
+                  type="button"
+                  data-testid="grammar-review-btn"
+                  onClick={handleStartGrammarReview}
+                  className="inline-flex items-center gap-2.5 h-10 px-4 rounded-full bg-amber-500/12 hover:bg-amber-500/20 dark:bg-amber-400/15 dark:hover:bg-amber-400/25 border border-amber-500/30 dark:border-amber-400/30 text-amber-700 dark:text-amber-300 text-[13px] font-semibold tracking-tight transition-all active:scale-[0.98]"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
+                  <span>{grammarDueCards.length} Grammatik wiederholen</span>
+                </button>
+              </div>
+            )}
 
             {/* Единая абсолютно симметричная сетка книг для выбранной категории */}
             <div 
