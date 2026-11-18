@@ -68,6 +68,21 @@ import {
   subscribeStateBus,
   type CloudSyncStatus
 } from "@/lib/sync/cloudStateSync";
+import {
+  calculateNextFSRSState,
+  hasValidNextReviewDate,
+  setFsrsCardState,
+  getFsrsCardState,
+  syncFsrsStateFromCloud,
+  flushFsrsStateToCloud,
+  applyCloudFsrsPayload,
+  hydrateFsrsMapFromIDB,
+  FSRS_CLOUD_KEY,
+  INITIAL_D_CLEAN,
+  INITIAL_D_HARD,
+  DAY_MS,
+  type FsrsTelemetry,
+} from "@/lib/srs/fsrs";
 import { getSchemaCapabilities, markSchemaCapabilityFalse } from "@/lib/sync/schemaCapabilities";
 export { formatSeparableWord, parseVerbComponents, EXTERNAL_GOVERNANCE_REGEX, getCleanTranslation, detectAndMarkSeparable };
 
@@ -2664,14 +2679,21 @@ export async function syncLightweightSrsFromSupabase(force: boolean = false): Pr
             const nextInterval = Number(remote.interval ?? 0);
             const nextReps = Number(remote.repetitions ?? 0);
             const rawDate = remote.nextReviewDate;
-            const nextReviewDate =
+            const parsedRemoteDate =
               rawDate === null || rawDate === undefined
                 ? null
                 : typeof rawDate === 'number'
                 ? Math.round(rawDate)
                 : new Date(rawDate).getTime();
-            const normalizedReviewDate =
-              nextReviewDate !== null && Number.isFinite(nextReviewDate) ? nextReviewDate : null;
+            let normalizedReviewDate =
+              parsedRemoteDate !== null && Number.isFinite(parsedRemoteDate) && parsedRemoteDate > 0
+                ? parsedRemoteDate
+                : null;
+            let healedRemoteDate = false;
+            if (nextArchived && normalizedReviewDate === null) {
+              normalizedReviewDate = Date.now() + DAY_MS;
+              healedRemoteDate = true;
+            }
             const nextReviewIso =
               normalizedReviewDate !== null ? new Date(normalizedReviewDate).toISOString() : null;
             const nextHasMistake =
@@ -2685,32 +2707,46 @@ export async function syncLightweightSrsFromSupabase(force: boolean = false): Pr
                 ? Math.round(localReviewDateRaw)
                 : new Date(localReviewDateRaw).getTime();
 
+            const effectiveInterval = healedRemoteDate ? Math.max(1, nextInterval) : nextInterval;
+            const effectiveReps = healedRemoteDate ? Math.max(1, nextReps) : nextReps;
             const cardChanged =
+              healedRemoteDate ||
               Boolean(card.isArchived) !== nextArchived ||
               Number(card.masteryLevel ?? 0) !== nextMastery ||
               Number(card.round ?? 1) !== nextRound ||
               Boolean(card.isLegendary) !== nextArchived ||
-              Number(card.interval ?? 0) !== nextInterval ||
-              Number(card.repetitions ?? 0) !== nextReps ||
+              Number(card.interval ?? 0) !== effectiveInterval ||
+              Number(card.repetitions ?? 0) !== effectiveReps ||
               localReviewDate !== normalizedReviewDate ||
               Boolean(card.has_mistake) !== nextHasMistake;
 
             if (!cardChanged) return card;
             deckChanged = true;
             hasAnyChanges = true;
-            return {
+            const nextCardObj: Flashcard = {
               ...card,
               masteryLevel: nextMastery,
               isArchived: nextArchived,
               round: nextRound,
               isLegendary: nextArchived,
-              interval: nextInterval,
-              repetitions: nextReps,
+              interval: effectiveInterval,
+              repetitions: effectiveReps,
               nextReviewDate: normalizedReviewDate,
               next_review_date: nextReviewIso,
               next_review_at: nextReviewIso,
               has_mistake: nextHasMistake,
             };
+            if (healedRemoteDate) {
+              writeThroughCardUpdate(card.id, nextCardObj);
+              if (!getFsrsCardState(card.id)) {
+                setFsrsCardState(card.id, {
+                  difficulty: nextHasMistake ? INITIAL_D_HARD : INITIAL_D_CLEAN,
+                  stability: Math.max(1, effectiveInterval),
+                  lastReviewDate: Date.now(),
+                });
+              }
+            }
+            return nextCardObj;
           } else if (
             rows.length > 0 &&
             !(card as any).pending_insert &&
@@ -2764,6 +2800,7 @@ export async function syncLightweightSrsFromSupabase(force: boolean = false): Pr
         }
       }
 
+      await healArchivedCardsWithoutReviewDate().catch(() => {});
       return true;
     } catch (err) {
       console.warn('[LightweightSrsPull] Failed to reconcile SRS state:', err);
@@ -2776,92 +2813,83 @@ export async function syncLightweightSrsFromSupabase(force: boolean = false): Pr
   return inFlightLightweightSrsPull;
 }
 
+/**
+ * Self-healing для уже архивированных карточек (isArchived === true или masteryLevel >= 4)
+ * без валидного nextReviewDate (null / 0 / NaN). Инициализирует nextReviewDate = now + 1 день
+ * и синхронизирует починку в IndexedDB + Supabase без лишнего трафика.
+ */
+export async function healArchivedCardsWithoutReviewDate(): Promise<number> {
+  const currentDecks = useStore.getState().decks;
+  if (!Array.isArray(currentDecks) || currentDecks.length === 0) return 0;
+
+  const nowMs = Date.now();
+  const healedDateMs = nowMs + DAY_MS;
+  const healedIso = new Date(healedDateMs).toISOString();
+  const blockedIds = getPendingOrInFlightCardIds();
+  const healedCards: Flashcard[] = [];
+
+  const nextDecks = currentDecks.map((deck) => {
+    if (!Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
+    let deckModified = false;
+
+    const nextCards = deck.cards.map((card) => {
+      if (!card || (card as any).isDeleted || blockedIds.has(card.id)) return card;
+      const isArchived = Boolean(card.isArchived ?? (card as any).is_archived);
+      const mastery = Number(card.masteryLevel ?? (card as any).mastery_level ?? 0);
+      const needsArchiveHealing = (isArchived || mastery >= 4) && !hasValidNextReviewDate(card);
+      if (!needsArchiveHealing) return card;
+
+      deckModified = true;
+      const nextInterval = Math.max(1, Number(card.interval) || 1);
+      const nextReps = Math.max(1, Number(card.repetitions) || 1);
+      const repaired: Flashcard = {
+        ...card,
+        isArchived: true,
+        masteryLevel: Math.max(4, mastery),
+        round: 4,
+        isLegendary: true,
+        interval: nextInterval,
+        repetitions: nextReps,
+        nextReviewDate: healedDateMs,
+        next_review_date: healedIso,
+        next_review_at: healedIso,
+      };
+      healedCards.push(repaired);
+      if (!getFsrsCardState(repaired.id)) {
+        setFsrsCardState(repaired.id, {
+          difficulty: repaired.has_mistake ? INITIAL_D_HARD : INITIAL_D_CLEAN,
+          stability: nextInterval,
+          lastReviewDate: nowMs,
+        });
+      }
+      return repaired;
+    });
+
+    return deckModified ? { ...deck, cards: nextCards } : deck;
+  });
+
+  if (healedCards.length === 0) return 0;
+
+  useStore.setState({ decks: nextDecks });
+  await setIDBItem('app_decks', nextDecks).catch(() => {});
+  for (const hc of healedCards) {
+    writeThroughCardUpdate(hc.id, hc);
+    updateCachedCardInMemory(hc.id, hc);
+  }
+  useStore.getState().refreshDueCardsCount().catch(() => {});
+  console.log(`🔧 [SRS Self-Heal] Восстановлено архивных карточек без nextReviewDate: ${healedCards.length}`);
+  return healedCards.length;
+}
+
 export function calculateNextSRSState(
   card: any,
   isCorrect: boolean,
   isHilfe: boolean,
   isReviewMode: boolean = false,
-  forceArchiveGraduation: boolean = false
-): CardSRSUpdate {
-  const currentEase =
-    typeof card.easeFactor === 'number' && card.easeFactor >= 1.3 ? card.easeFactor : 2.5;
-  const currentReps = card.repetitions || 0;
-  const currentInterval = card.interval || 0;
-  const currentMastery = card.masteryLevel ?? card.mastery_level ?? 0;
-  const wasArchived = Boolean(card.isArchived ?? card.is_archived);
-  const inReviewFlow = Boolean(isReviewMode || wasArchived);
-
-  // Этап 3: Повторение уже архивированной карточки (глобальное Wiederholen)
-  if (inReviewFlow) {
-    if (isCorrect && !isHilfe) {
-      const prevInterval = currentInterval > 0 ? currentInterval : 1;
-      const nextInterval = prevInterval <= 1 ? 3 : Math.round(prevInterval * currentEase);
-      const nextReviewDate = Date.now() + nextInterval * 86400000;
-      return {
-        masteryLevel: Math.max(4, currentMastery),
-        isArchived: true,
-        repetitions: currentReps + 1,
-        interval: nextInterval,
-        easeFactor: Number(currentEase.toFixed(2)),
-        nextReviewDate,
-        first_mastered_at: card.first_mastered_at,
-      };
-    } else {
-      // Ошибка или Hilfe на повторении: карточка ОСТАЕТСЯ в архиве, интервал сбрасывается на 1 день
-      const nextInterval = 1;
-      const nextReviewDate = Date.now() + nextInterval * 86400000;
-      const nextEase = Number(Math.max(1.3, currentEase - 0.2).toFixed(2));
-      return {
-        masteryLevel: Math.max(4, currentMastery),
-        isArchived: true,
-        repetitions: 0,
-        interval: nextInterval,
-        easeFactor: nextEase,
-        nextReviewDate,
-        first_mastered_at: card.first_mastered_at,
-      };
-    }
-  }
-
-  // Этап 1: Первичное изучение внутри колоды (раунды 1..N до перехода в Архив)
-  if (isCorrect && !isHilfe) {
-    const nextMastery = forceArchiveGraduation ? 4 : Math.min(4, currentMastery + 1);
-    const graduatesToArchive = forceArchiveGraduation || nextMastery >= 4;
-
-    if (graduatesToArchive) {
-      const nowMs = Date.now();
-      return {
-        masteryLevel: 4,
-        isArchived: true,
-        repetitions: 1,
-        interval: 1,
-        easeFactor: Number(currentEase.toFixed(2)),
-        nextReviewDate: nowMs + 86400000,
-        first_mastered_at: card.first_mastered_at || new Date(nowMs).toISOString(),
-      };
-    }
-
-    return {
-      masteryLevel: nextMastery,
-      isArchived: false,
-      repetitions: 0,
-      interval: 0,
-      easeFactor: Number(currentEase.toFixed(2)),
-      nextReviewDate: null,
-      first_mastered_at: undefined,
-    };
-  } else {
-    const nextMastery = Math.max(0, currentMastery - 1);
-    return {
-      masteryLevel: nextMastery,
-      isArchived: false,
-      repetitions: 0,
-      interval: 0,
-      easeFactor: Number(currentEase.toFixed(2)),
-      nextReviewDate: null,
-      first_mastered_at: card.first_mastered_at,
-    };
-  }
+  forceArchiveGraduation: boolean = false,
+  telemetry: FsrsTelemetry = {}
+): CardSRSUpdate & { rating?: number; fsrsState?: { difficulty: number; stability: number; lastReviewDate: number } } {
+  return calculateNextFSRSState(card, isCorrect, isHilfe, isReviewMode, forceArchiveGraduation, telemetry);
 }
 
 
@@ -2989,8 +3017,8 @@ interface DeckState {
   deleteCard: (deckId: string, cardId: string) => Promise<void>;
   updateCardContent: (cardId: string, updates: Partial<Flashcard>) => Promise<boolean>;
   renameDeck: (deckId: string, newName: string) => void;
-  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean, forceArchive?: boolean) => Promise<void>;
-  setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string) => Promise<void>;
+  answerCard: (deckId: string, cardId: string, isCorrect: boolean, isHilfe: boolean, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean, forceArchive?: boolean, fsrsTelemetry?: FsrsTelemetry) => Promise<void>;
+  setCardProgress: (deckId: string, cardId: string, score: number, targetLang?: string, markMistake?: boolean, fsrsTelemetry?: FsrsTelemetry) => Promise<void>;
   dailyProgress: Record<string, number>;
   incrementDailyProgress: (targetLang?: string) => void;
   appLanguage: 'DE' | 'EN' | 'RU';
@@ -3970,7 +3998,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     }
   },
 
-  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean, forceArchive?: boolean) => {
+  answerCard: async (deckId, cardId, isCorrect, isHilfe, skipDailyIncrement?: boolean, targetLanguage?: string, isReviewSession?: boolean, isMistakesReview?: boolean, forceArchive?: boolean, fsrsTelemetry?: FsrsTelemetry) => {
     const deck = get().decks.find((d) => d.id === deckId);
     let lang = targetLanguage;
     if (!lang && deck) {
@@ -3995,11 +4023,19 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     const wasDueBefore = isCardDueForReview(targetCard);
     const wasMasteredBefore = Boolean(targetCard.isArchived);
-    const srsUpdate = calculateNextSRSState(targetCard, isCorrect, isHilfe, isReviewSession, Boolean(forceArchive));
+    const srsUpdate = calculateNextSRSState(targetCard, isCorrect, isHilfe, isReviewSession, Boolean(forceArchive), fsrsTelemetry);
     const computedMastery = srsUpdate.masteryLevel ?? targetCard.masteryLevel ?? 0;
-    const computedArchived = Boolean(srsUpdate.isArchived);
+    const computedArchived = Boolean(srsUpdate.isArchived || computedMastery >= 4);
     const computedRound = computedArchived ? 4 : Math.max(1, Math.min(4, computedMastery + 1));
-    const scheduledDateIso = srsUpdate.nextReviewDate ? new Date(srsUpdate.nextReviewDate).toISOString() : null;
+    const enforcedNextReviewDate = computedArchived
+      ? (srsUpdate.nextReviewDate && Number.isFinite(srsUpdate.nextReviewDate) && srsUpdate.nextReviewDate > 0
+          ? srsUpdate.nextReviewDate
+          : Date.now() + DAY_MS)
+      : srsUpdate.nextReviewDate;
+    const enforcedInterval = computedArchived
+      ? Math.max(1, Number(srsUpdate.interval) || 1)
+      : (srsUpdate.interval ?? 0);
+    const scheduledDateIso = enforcedNextReviewDate ? new Date(enforcedNextReviewDate).toISOString() : null;
     const nextHasMistake = !isCorrect
       ? true
       : (isCorrect && !isHilfe && (isReviewSession || wasMasteredBefore || isMistakesReview || computedArchived))
@@ -4008,10 +4044,11 @@ export const useStore = create<DeckState>()((set, get) => ({
     const validCard: Flashcard = {
       ...targetCard,
       ...srsUpdate,
+      interval: enforcedInterval,
       next_review_at: scheduledDateIso,
       next_review_date: scheduledDateIso,
-      nextReviewDate: srsUpdate.nextReviewDate,
-      masteryLevel: computedMastery,
+      nextReviewDate: enforcedNextReviewDate,
+      masteryLevel: computedArchived ? Math.max(4, computedMastery) : computedMastery,
       isArchived: computedArchived,
       round: computedRound,
       isLegendary: computedArchived,
@@ -4061,6 +4098,7 @@ export const useStore = create<DeckState>()((set, get) => ({
                 isLegendary: true,
                 interval: validCard.interval,
                 repetitions: validCard.repetitions,
+                easeFactor: validCard.easeFactor,
                 next_review_at: validCard.next_review_at,
                 next_review_date: validCard.next_review_date,
                 nextReviewDate: validCard.nextReviewDate,
@@ -4084,6 +4122,9 @@ export const useStore = create<DeckState>()((set, get) => ({
     });
 
     for (const dupCard of syncedDuplicates) {
+      if (srsUpdate.fsrsState) {
+        setFsrsCardState(dupCard.id, srsUpdate.fsrsState, true);
+      }
       writeThroughCardUpdate(dupCard.id, dupCard);
       updateCachedCardInMemory(dupCard.id, dupCard);
     }
@@ -4133,7 +4174,7 @@ export const useStore = create<DeckState>()((set, get) => ({
   },
 
   // Rapid flashcards: persist the 0-4 round score of a word. 4 => archived (learned).
-  setCardProgress: async (deckId, cardId, score, targetLang?: string) => {
+  setCardProgress: async (deckId, cardId, score, targetLang?: string, markMistake?: boolean, fsrsTelemetry?: FsrsTelemetry) => {
     const currentDecks = get().decks;
     const targetDeck = currentDecks.find((d) => d.id === deckId);
     if (!targetDeck) return;
@@ -4150,14 +4191,22 @@ export const useStore = create<DeckState>()((set, get) => ({
         true,
         false,
         false,
-        true
+        true,
+        fsrsTelemetry
       );
       Object.assign(card, srsUpdate);
+      card.masteryLevel = 4;
       card.round = 4;
       card.isLegendary = true;
       card.isArchived = true;
       card.has_mistake = false;
-      const scheduledIso = srsUpdate.nextReviewDate ? new Date(srsUpdate.nextReviewDate).toISOString() : null;
+      card.interval = Math.max(1, Number(srsUpdate.interval) || 1);
+      const validDateMs =
+        srsUpdate.nextReviewDate && Number.isFinite(srsUpdate.nextReviewDate) && srsUpdate.nextReviewDate > 0
+          ? srsUpdate.nextReviewDate
+          : Date.now() + DAY_MS;
+      card.nextReviewDate = validDateMs;
+      const scheduledIso = new Date(validDateMs).toISOString();
       card.next_review_at = scheduledIso;
       card.next_review_date = scheduledIso;
     } else {
@@ -4170,6 +4219,9 @@ export const useStore = create<DeckState>()((set, get) => ({
       card.nextReviewDate = null;
       card.next_review_at = null;
       card.next_review_date = null;
+      if (markMistake) {
+        card.has_mistake = true;
+      }
     }
 
     // 1. INSTANT WRITE-THROUGH (ZERO DATA LOSS): Асинхронная фоновая запись в Supabase без задержки UI
@@ -5318,7 +5370,7 @@ function RapidFlashcardMode({
   card: Flashcard;
   progress: number;
   locked: boolean;
-  onAnswer: (correct: boolean, wasFlipped?: boolean, isSurrender?: boolean) => void;
+  onAnswer: (correct: boolean, wasFlipped?: boolean, isSurrender?: boolean, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => void;
   onHintPenalty?: (penalizedScore?: number) => void;
   deckTitle?: string;
   reverse?: boolean;
@@ -5448,12 +5500,18 @@ function RapidFlashcardMode({
     [currentCard, normalizedFields.translation, normalizedFields.sentence, cardTrainingMode]
   );
   const hintPenaltySentRef = useRef(false);
+  const cardShownAtRef = useRef<number>(Date.now());
+  const answeredAtRef = useRef<number | null>(null);
+  const hadTypoRef = useRef<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const weiterButtonRef = useRef<HTMLButtonElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 7. Сброс стейта строго при смене карточки (без ложного срабатывания от промежуточного обновления progress)
   useEffect(() => {
+    cardShownAtRef.current = Date.now();
+    answeredAtRef.current = null;
+    hadTypoRef.current = false;
     const { currentRound: round, isLegendary: isLeg } = resolveCardRarityState(currentCard, progress, isReview);
     const mastery = isLeg ? 4 : (round - 1);
     setVisualRound(round);
@@ -5626,11 +5684,13 @@ function RapidFlashcardMode({
   // 5. Направленная анимация ухода/входа карточки в стиле Apple Fluid Motion (180мс) + double-tap guard
   const handleRateCard = useCallback((remembered: boolean) => {
     if (locked || isTransitioning || isTransitionBusy) return;
+    const elapsedMs = Math.max(0, Date.now() - cardShownAtRef.current);
+    const hadTypo = hadTypoRef.current;
 
     const started = handleCardEvaluation(remembered ? 'good' : 'again', () => {
       setSkipFlipTransition(true);
       setIsFlipped(false);
-      onAnswer(remembered, false);
+      onAnswer(remembered, false, false, { elapsedMs, hadTypo });
     });
     if (!started) return;
 
@@ -5669,6 +5729,9 @@ function RapidFlashcardMode({
 
   const handleSuccessAnswer = useCallback(() => {
     if (isAnswered) return;
+    if (answeredAtRef.current === null) {
+      answeredAtRef.current = Date.now();
+    }
     setIsAnswered(true);
     setIsErrorMismatch(false);
     setIsShaking(false);
@@ -5758,7 +5821,11 @@ function RapidFlashcardMode({
         }
         onAnswer(false, false, true);
       } else {
-        onAnswer(true, false, false);
+        const endAt = answeredAtRef.current ?? Date.now();
+        onAnswer(true, false, false, {
+          elapsedMs: Math.max(0, endAt - cardShownAtRef.current),
+          hadTypo: hadTypoRef.current,
+        });
       }
     });
     if (!started) return;
@@ -5865,6 +5932,7 @@ function RapidFlashcardMode({
     const { isMatch, isPrefix } = checkTargetMatch(cleanInput);
     setIsErrorMismatch(!isPrefix);
     if (!isPrefix) {
+      hadTypoRef.current = true;
       triggerHaptic('error');
     }
 
@@ -6927,7 +6995,7 @@ function RapidSession({
     });
   }, [queue]);
 
-  const handleAnswer = useCallback(async (correct: boolean, wasFlipped: boolean = true, isSurrender: boolean = false) => {
+  const handleAnswer = useCallback(async (correct: boolean, wasFlipped: boolean = true, isSurrender: boolean = false, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => {
     if (locked || !queue || queue.length === 0) return;
     const current = queue[0];
     const id = current.card.id;
@@ -7071,15 +7139,26 @@ function RapidSession({
     setTurn(t => t + 1);
 
     // 2) Сохранение в стор и Supabase в фоне, не блокируя переключение UI
+    const fsrsTelemetry: FsrsTelemetry = {
+      elapsedMs: telemetry?.elapsedMs,
+      hadTypo: telemetry?.hadTypo,
+      failedInSession: Boolean(current.card.failedInSession),
+      hadLearningMistakes: Boolean(
+        current.card.failedInSession ||
+        ((current.card as any).mistakeCount || 0) > 0 ||
+        current.card.has_mistake ||
+        liveCard.has_mistake
+      ),
+    };
     if (isReviewMode) {
-      // Если карточка ошибалась ранее в этой же Review-сессии, повторный правильный ответ завершает её без повторного скачка interval
+      // Если карточка ошибалась ранее в этой же Review-сессии, повторный правильный ответ завершает её без повторного скачка interval / nextReviewDate
       if (!isReviewRetry) {
-        void answerCard(current.deckId, id, correct, false, true, studyLanguage, true, isReviewingMistakesSession);
+        void answerCard(current.deckId, id, correct, false, true, studyLanguage, true, isReviewingMistakesSession, false, fsrsTelemetry);
       }
     } else if (learned || !correct || isReviewingMistakesSession) {
-      void answerCard(current.deckId, id, correct, false, true, studyLanguage, false, isReviewingMistakesSession, learned);
+      void answerCard(current.deckId, id, correct, false, true, studyLanguage, false, isReviewingMistakesSession, learned, fsrsTelemetry);
     } else {
-      void setCardProgress(current.deckId, id, newScore, studyLanguage);
+      void setCardProgress(current.deckId, id, newScore, studyLanguage, !correct, fsrsTelemetry);
     }
   }, [locked, queue, wordProgress, answerCard, setCardProgress, recordCardResult, isReviewingMistakesSession, studyLanguage, isDrillMode, reviewCards]);
 
@@ -7120,7 +7199,7 @@ function RapidSession({
         void answerCard(current.deckId, id, false, true, true, studyLanguage, true, isReviewingMistakesSession);
       }
     } else {
-      void setCardProgress(current.deckId, id, penalizedProgress, studyLanguage);
+      void setCardProgress(current.deckId, id, penalizedProgress, studyLanguage, true);
     }
 
     // NO automatic timer! The user reads the word and explicitly taps «Weiter» to advance.
@@ -7158,6 +7237,7 @@ function RapidSession({
 
     if (remainingQueue.length === 0 && mastered === 0) {
       flushDailyStatsToCloud(studyLanguage);
+      flushFsrsStateToCloud().catch(() => {});
       onBack();
     }
   }, [queue, wordProgress, mastered, deckId, studyLanguage, onBack]);
@@ -7165,6 +7245,7 @@ function RapidSession({
   useEffect(() => {
     return () => {
       flushDailyStatsToCloud(studyLanguage);
+      flushFsrsStateToCloud().catch(() => {});
     };
   }, [studyLanguage]);
 
@@ -7179,6 +7260,7 @@ function RapidSession({
         onReviewMistakes={handleReviewOnlyMistakes}
         onBack={() => {
           flushDailyStatsToCloud(studyLanguage);
+          flushFsrsStateToCloud().catch(() => {});
           onBack();
         }}
         subtitle={
@@ -7268,7 +7350,7 @@ function RapidStudyCard({
 }: {
   card: Flashcard;
   deckTitle?: string;
-  onAnswer: (correct: boolean, isHilfe: boolean) => void;
+  onAnswer: (correct: boolean, isHilfe: boolean, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => void;
   onNext: () => void;
   isReview?: boolean;
   reverse?: boolean;
@@ -7295,11 +7377,11 @@ function RapidStudyCard({
   const { currentRound, isLegendary: isCardLegendary } = resolveCardRarityState(card, undefined, isReview);
   const progress = isCardLegendary ? 4 : (currentRound - 1);
 
-  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = false, isSurrendered: boolean = false) => {
+  const handleAnswer = useCallback((correct: boolean, wasFlipped: boolean = false, isSurrendered: boolean = false, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => {
     if (locked) return;
     setLocked(true);
     if (!isSurrendered && !penaltyReportedRef.current) {
-      onAnswer(correct, false);
+      onAnswer(correct, false, telemetry);
     }
     penaltyReportedRef.current = false;
     setStepTurn(t => t + 1);
@@ -7353,6 +7435,7 @@ function StudyEntry(props: {
     return () => {
       flushPendingDailyActivityUpserts();
       flushPendingMasteredSnapshots();
+      flushFsrsStateToCloud();
     };
   }, [props.deckId, props.reviewCards]);
 
@@ -7679,7 +7762,7 @@ function StudyInterface({
     return getCardTrainingMode(currentCardSnapshot, currentDeckId, decks, books, trainingMode);
   }, [currentCardSnapshot, currentDeckId, decks, books, trainingMode]);
 
-  const handleSessionAnswer = useCallback(async (correct: boolean, isHilfe: boolean) => {
+  const handleSessionAnswer = useCallback(async (correct: boolean, isHilfe: boolean, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => {
     if (!currentCardSnapshot || !currentDeckId) return;
     const isActualCorrect = correct && !isHilfe;
 
@@ -7799,16 +7882,27 @@ function StudyInterface({
         isNewMastered 
       }
     );
+    const fsrsTelemetry: FsrsTelemetry = {
+      elapsedMs: telemetry?.elapsedMs,
+      hadTypo: telemetry?.hadTypo,
+      failedInSession: Boolean(currentCardSnapshot.failedInSession),
+      hadLearningMistakes: Boolean(
+        currentCardSnapshot.failedInSession ||
+        ((currentCardSnapshot as any).mistakeCount || 0) > 0 ||
+        currentCardSnapshot.has_mistake ||
+        liveCard?.has_mistake
+      ),
+    };
     if (isReviewMode) {
       if (!isReviewRetry) {
-        await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, true, isReviewingMistakesSession);
+        await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, true, isReviewingMistakesSession, false, fsrsTelemetry);
       } else if (!liveCard.isArchived || isCardDueForReview(liveCard)) {
-        await answerCard(currentDeckId, currentCardSnapshot.id, false, false, true, studyLanguage, true, isReviewingMistakesSession);
+        await answerCard(currentDeckId, currentCardSnapshot.id, false, false, true, studyLanguage, true, isReviewingMistakesSession, false, fsrsTelemetry);
       }
     } else if (isGraduated || !isActualCorrect || isReviewingMistakesSession) {
-      await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, false, isReviewingMistakesSession, isGraduated);
+      await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, false, isReviewingMistakesSession, isGraduated, fsrsTelemetry);
     } else {
-      await setCardProgress(currentDeckId, currentCardSnapshot.id, nextMastery, studyLanguage);
+      await setCardProgress(currentDeckId, currentCardSnapshot.id, nextMastery, studyLanguage, !isActualCorrect, fsrsTelemetry);
     }
 
     // 6. Отправка CustomEvent 'stats-update' для шапки приложения и поповера статистики
@@ -7996,6 +8090,7 @@ function StudyInterface({
 
     if (remainingCards.length === 0 && masteredInSession === 0) {
       flushDailyStatsToCloud(studyLanguage);
+      flushFsrsStateToCloud().catch(() => {});
       onBack();
     }
   }, [activeCards, masteredInSession, deckId, studyLanguage, onBack]);
@@ -8003,6 +8098,7 @@ function StudyInterface({
   useEffect(() => {
     return () => {
       flushDailyStatsToCloud(studyLanguage);
+      flushFsrsStateToCloud().catch(() => {});
     };
   }, [studyLanguage]);
 
@@ -8015,6 +8111,7 @@ function StudyInterface({
         onReviewMistakes={handleReviewOnlyMistakes}
         onBack={() => {
           flushDailyStatsToCloud(studyLanguage);
+          flushFsrsStateToCloud().catch(() => {});
           onBack();
         }}
         subtitle={
@@ -8061,8 +8158,8 @@ function StudyInterface({
             deckTitle={currentDeck?.name}
             isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4 || Boolean(liveCard.isArchived))))}
             sessionTurn={turn}
-            onAnswer={(id, correct, isHilfe) => {
-              handleSessionAnswer(correct, isHilfe);
+            onAnswer={(id, correct, isHilfe, telemetry) => {
+              handleSessionAnswer(correct, isHilfe, telemetry);
             }}
             onNext={handleNext}
           />
@@ -8072,8 +8169,8 @@ function StudyInterface({
             deckTitle={currentDeck?.name}
             isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4 || Boolean(liveCard.isArchived))))}
             sessionTurn={turn}
-            onAnswer={(correct, isHilfe) => {
-              handleSessionAnswer(correct, isHilfe);
+            onAnswer={(correct, isHilfe, telemetry) => {
+              handleSessionAnswer(correct, isHilfe, telemetry);
             }}
             onNext={handleNext}
           />
@@ -8085,8 +8182,8 @@ function StudyInterface({
             totalCards={initialTotal}
             isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4 || Boolean(liveCard.isArchived))))}
             sessionTurn={turn}
-            onAnswer={(correct, isHilfe) => {
-              handleSessionAnswer(correct, isHilfe);
+            onAnswer={(correct, isHilfe, telemetry) => {
+              handleSessionAnswer(correct, isHilfe, telemetry);
             }}
             onNext={handleNext}
           />
@@ -8097,8 +8194,8 @@ function StudyInterface({
             isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
             reverse={isReviewSession || isReviewingMistakesSession ? true : undefined}
             sessionTurn={turn}
-            onAnswer={(correct, isHilfe) => {
-              handleSessionAnswer(correct, isHilfe);
+            onAnswer={(correct, isHilfe, telemetry) => {
+              handleSessionAnswer(correct, isHilfe, telemetry);
             }}
             onNext={handleNext}
             onCardEdited={handleCardEdited}
@@ -8112,8 +8209,8 @@ function StudyInterface({
             forceInputMode={isReviewSession || isReviewingMistakesSession}
             isReview={Boolean((isReviewSession || isInitialArchivedDeck || liveCard.isArchived) && !liveCard.failedInSession && (liveCard.isLegendary ?? (liveCard.round === 4)))}
             sessionTurn={turn}
-            onAnswer={(correct, isHilfe) => {
-              handleSessionAnswer(correct, isHilfe);
+            onAnswer={(correct, isHilfe, telemetry) => {
+              handleSessionAnswer(correct, isHilfe, telemetry);
             }}
             onNext={handleNext}
             onCardEdited={handleCardEdited}
@@ -8263,7 +8360,7 @@ function StudyCard({
 }: { 
   card: Flashcard, 
   deckTitle?: string,
-  onAnswer: (correct: boolean, isHilfe: boolean) => void,
+  onAnswer: (correct: boolean, isHilfe: boolean, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => void,
   onNext: () => void,
   forceInputMode?: boolean,
   isGrammar?: boolean,
@@ -8303,6 +8400,8 @@ function StudyCard({
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
+  const cardShownAtRef = useRef<number>(Date.now());
+  const hadTypoRef = useRef<boolean>(false);
   const [isVaporizing, setIsVaporizing] = useState(false);
   const [isTransitionLocked, setIsTransitionLocked] = useState(false);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -8326,6 +8425,8 @@ function StudyCard({
     setInputText("");
     setHasErrored(false);
     hasErroredRef.current = false;
+    cardShownAtRef.current = Date.now();
+    hadTypoRef.current = false;
     setIsVaporizing(false);
     setIsTransitionLocked(false);
     setIsTransitioning(false);
@@ -8582,7 +8683,10 @@ function StudyCard({
     }
     triggerHaptic('success');
     try {
-      onAnswer(true, false);
+      onAnswer(true, false, {
+        elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+        hadTypo: hadTypoRef.current,
+      });
     } catch (e) {
       console.warn('onAnswer error caught:', e);
     }
@@ -8637,7 +8741,10 @@ function StudyCard({
 
     // 3. Оповещаем родителя
     try {
-      onAnswer(correct, false);
+      onAnswer(correct, false, {
+        elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+        hadTypo: hadTypoRef.current,
+      });
     } catch (e) {
       console.warn('onAnswer error caught:', e);
     }
@@ -8674,7 +8781,10 @@ function StudyCard({
       playSafeAudio(() => playAudio(fullSentenceText));
     }
     try {
-      onAnswer(false, true); // isHilfe = true
+      onAnswer(false, true, {
+        elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+        hadTypo: hadTypoRef.current,
+      }); // isHilfe = true
     } catch (e) {
       console.warn('onAnswer error caught:', e);
     }
@@ -8692,6 +8802,7 @@ function StudyCard({
 
     const lastCharIndex = value.length - 1;
     if (value.length > 0 && !lastCharValid) {
+      hadTypoRef.current = true;
       playSafeAudio(() => playErrorSound());
       triggerHaptic('error');
       // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
@@ -8723,7 +8834,10 @@ function StudyCard({
       triggerHaptic('success');
 
       try {
-        onAnswer(true, false);
+        onAnswer(true, false, {
+          elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+          hadTypo: hadTypoRef.current,
+        });
       } catch (e) {
         console.warn('onAnswer error caught:', e);
       }
@@ -9391,12 +9505,14 @@ function AdminModal({ onClose, activeBook }: { onClose: () => void, activeBook?:
         syncExcludedBooksFromCloud(true),
         syncBooksFromSupabase(true),
         syncCardsFromSupabase(true),
+        syncFsrsStateFromCloud(true),
         syncLightweightSrsFromSupabase(true),
         syncCloudDailyStats(undefined, langLower, true),
         syncPersistentMistakesFromCloud(langUpper, true),
         syncMasteredWordsFromCloud(langLower, true, { fullReconcile: true }),
       ]);
       await syncWithCloud(true);
+      await flushFsrsStateToCloud().catch(() => {});
       await useStore.getState().refreshDueCardsCount(appLanguage);
       toast.success('Cloud-Sync erfolgreich abgeschlossen');
     } catch (e) {
@@ -9584,6 +9700,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
       await flushPendingQueue();
       await Promise.all([
         syncExcludedBooksFromCloud(true),
+        syncFsrsStateFromCloud(true),
         syncLightweightSrsFromSupabase(true),
         syncMasteredWordsFromCloud(langLower, true, { fullReconcile: true }),
         syncCloudDailyStats(undefined, langLower, true),
@@ -9591,6 +9708,7 @@ const HeaderWidgets = React.memo(function HeaderWidgets({
         syncBooksFromSupabase(false),
         syncCardsFromSupabase(false),
       ]);
+      await flushFsrsStateToCloud().catch(() => {});
       await useStore.getState().refreshDueCardsCount(appLanguage);
       setCloudSyncStatus('synced');
       toast.success('Mit Cloud synchronisiert');
@@ -12059,7 +12177,7 @@ function PrepStudyCard({
 }: {
   card: Flashcard;
   deckTitle?: string;
-  onAnswer: (cardId: string, isCorrect: boolean, isHilfe: boolean) => void;
+  onAnswer: (cardId: string, isCorrect: boolean, isHilfe: boolean, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => void;
   onNext: () => void;
   isReview?: boolean;
   sessionTurn?: number;
@@ -12068,6 +12186,8 @@ function PrepStudyCard({
   const [isHilfe, setIsHilfe] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
+  const cardShownAtRef = useRef<number>(Date.now());
+  const hadTypoRef = useRef<boolean>(false);
   const { currentRound, isLegendary } = resolveCardRarityState(card, undefined, isReview);
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
@@ -12081,6 +12201,8 @@ function PrepStudyCard({
     setIsHilfe(false);
     setHasErrored(false);
     hasErroredRef.current = false;
+    cardShownAtRef.current = Date.now();
+    hadTypoRef.current = false;
     setActiveSlot(0);
     setWrongKasus(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -12132,7 +12254,10 @@ function PrepStudyCard({
        playSafeAudio(() => playSuccessSound());
        playSafeAudio(() => playAudio());
        try {
-         onAnswer(card.id, isCorrect, isHilfe);
+         onAnswer(card.id, isCorrect, isHilfe, {
+           elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+           hadTypo: hadTypoRef.current,
+         });
        } catch (e) {}
     } else {
        hasErroredRef.current = true;
@@ -12172,7 +12297,10 @@ function PrepStudyCard({
     }
     playSafeAudio(() => playAudio());
     try {
-      onAnswer(card.id, false, true);
+      onAnswer(card.id, false, true, {
+        elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+        hadTypo: hadTypoRef.current,
+      });
     } catch (e) {}
   }, [card.id, onAnswer, playAudio, isLegendary, isLegendaryVisual, visualRound]);
 
@@ -12305,7 +12433,7 @@ function PrepStudyCard({
               isSuccess={isSuccess || isHilfe} 
               isHilfe={isHilfe} 
               onComplete={handleVerbComplete} 
-              onError={()=>{}} 
+              onError={() => { hadTypoRef.current = true; }} 
               virtualKeyRef={virtualKeyRef0} 
               virtualBackspaceRef={virtualBackspaceRef0} 
             />
@@ -12317,7 +12445,7 @@ function PrepStudyCard({
               isSuccess={isSuccess || isHilfe} 
               isHilfe={isHilfe} 
               onComplete={handlePrepComplete} 
-              onError={()=>{}} 
+              onError={() => { hadTypoRef.current = true; }} 
               virtualKeyRef={virtualKeyRef1} 
               virtualBackspaceRef={virtualBackspaceRef1} 
             />
@@ -12395,7 +12523,7 @@ function VerbStudyCard({
 }: {
   card: Flashcard;
   deckTitle?: string;
-  onAnswer: (correct: boolean, isHilfe: boolean) => void;
+  onAnswer: (correct: boolean, isHilfe: boolean, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => void;
   onNext: () => void;
   isReview?: boolean;
   sessionTurn?: number;
@@ -12409,6 +12537,8 @@ function VerbStudyCard({
   const [isSuccess, setIsSuccess] = useState(false);
   const [hasErrored, setHasErrored] = useState(false);
   const hasErroredRef = useRef(false);
+  const cardShownAtRef = useRef<number>(Date.now());
+  const hadTypoRef = useRef<boolean>(false);
   const [isHilfe, setIsHilfe] = useState(false);
   const { currentRound, isLegendary } = resolveCardRarityState(card, undefined, isReview);
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
@@ -12423,6 +12553,8 @@ function VerbStudyCard({
     setIsHilfe(false);
     setHasErrored(false);
     hasErroredRef.current = false;
+    cardShownAtRef.current = Date.now();
+    hadTypoRef.current = false;
     setActiveInput(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, sessionTurn]);
@@ -12509,13 +12641,17 @@ function VerbStudyCard({
       playSafeAudio(() => playSuccessSound());
       playSafeAudio(() => playAudio());
       try {
-        onAnswer(isCorrect, false);
+        onAnswer(isCorrect, false, {
+          elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+          hadTypo: hadTypoRef.current,
+        });
       } catch (e) {}
     }
   }, [isHilfe, playAudio, onAnswer, localMastery, visualRound, isLegendaryVisual, card.failedInSession]);
 
   const handleSlotError = useCallback(() => {
-    // Опечатка при вводе не является ошибкой карточки (неограниченные попытки)
+    // Опечатка при вводе фиксируется как лёгкая заминка (Grade 2 Hard в FSRS) без штрафа раунда
+    hadTypoRef.current = true;
   }, []);
 
   const handleHilfe = useCallback(() => {
@@ -12536,7 +12672,10 @@ function VerbStudyCard({
     }
     playSafeAudio(() => playAudio());
     try {
-      onAnswer(false, true);
+      onAnswer(false, true, {
+        elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+        hadTypo: hadTypoRef.current,
+      });
     } catch (e) {}
   }, [playAudio, onAnswer, isLegendary, isLegendaryVisual, visualRound]);
 
@@ -12870,7 +13009,7 @@ export function RedemittelStudyCard({
   deckTitle?: string;
   cardIndex?: number;
   totalCards?: number;
-  onAnswer: (correct: boolean, isHilfe: boolean) => void;
+  onAnswer: (correct: boolean, isHilfe: boolean, telemetry?: { elapsedMs?: number; hadTypo?: boolean }) => void;
   onNext: () => void;
   isReview?: boolean;
   sessionTurn?: number;
@@ -12879,6 +13018,8 @@ export function RedemittelStudyCard({
   const [placedChunks, setPlacedChunks] = useState<RedemittelChunk[]>([]);
   const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'surrender'>('idle');
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const cardShownAtRef = useRef<number>(Date.now());
+  const hadTypoRef = useRef<boolean>(false);
   const { currentRound, isLegendary } = resolveCardRarityState(card, undefined, isReview);
   const [visualRound, setVisualRound] = useState<number>(() => currentRound);
   const [isLegendaryVisual, setIsLegendaryVisual] = useState<boolean>(() => isLegendary);
@@ -12890,6 +13031,8 @@ export function RedemittelStudyCard({
     setLocalMastery(isLegendary ? 4 : (currentRound - 1));
     setPlacedChunks([]);
     setStatus('idle');
+    cardShownAtRef.current = Date.now();
+    hadTypoRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, sessionTurn]);
 
@@ -12932,17 +13075,24 @@ export function RedemittelStudyCard({
           onEnd: () => setIsAudioPlaying(false),
         }));
         try {
-          onAnswer(true, false);
+          onAnswer(true, false, {
+            elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+            hadTypo: hadTypoRef.current,
+          });
         } catch (e) {}
       } else {
         setStatus('error');
+        hadTypoRef.current = true;
         if (isLegendary || isLegendaryVisual || visualRound >= 4) {
           setVisualRound(3);
           setIsLegendaryVisual(false);
         }
         playSafeAudio(() => playErrorSound());
         try {
-          onAnswer(false, false);
+          onAnswer(false, false, {
+            elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+            hadTypo: hadTypoRef.current,
+          });
         } catch (e) {}
       }
     } else {
@@ -12990,7 +13140,10 @@ export function RedemittelStudyCard({
       onEnd: () => setIsAudioPlaying(false),
     }));
     try {
-      onAnswer(false, true);
+      onAnswer(false, true, {
+        elapsedMs: Math.max(0, Date.now() - cardShownAtRef.current),
+        hadTypo: hadTypoRef.current,
+      });
     } catch (e) {}
   }, [data.shuffledChunks, data.fullText, status, onAnswer, isLegendary, isLegendaryVisual, visualRound]);
 
@@ -13382,6 +13535,8 @@ export default function App() {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         handleSync();
+      } else if (document.visibilityState === 'hidden') {
+        flushFsrsStateToCloud().catch(() => {});
       }
     };
 
@@ -13573,7 +13728,8 @@ export default function App() {
       try {
         const [idbDecks, idbBooks] = await Promise.all([
           getIDBItem<Deck[]>('app_decks'),
-          getIDBItem<BookMeta[]>('app_books')
+          getIDBItem<BookMeta[]>('app_books'),
+          hydrateFsrsMapFromIDB(),
         ]);
         if (idbBooks && idbBooks.length > 0) {
           setBooks(idbBooks);
@@ -13614,12 +13770,15 @@ export default function App() {
           localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
         }
         useStore.getState().refreshDueCardsCount().catch(() => {});
+        healArchivedCardsWithoutReviewDate().catch(() => {});
         // Фоновый авто-синк SRS при каждом холодном/тёплом открытии или F5
         (async () => {
           try {
             await flushPendingQueue();
             await syncExcludedBooksFromCloud(true);
+            await syncFsrsStateFromCloud(true);
             await syncLightweightSrsFromSupabase(true);
+            await flushFsrsStateToCloud().catch(() => {});
             await syncBooksFromSupabase(false);
             await syncCardsFromSupabase(false);
             const curLangUpper = (useStore.getState().appLanguage || 'de').toUpperCase();
@@ -13664,6 +13823,7 @@ export default function App() {
             'MISTAKES_POOL_RU',
             'GLOBAL_APP_STATE',
             EXCLUDED_BOOKS_CLOUD_KEY,
+            FSRS_CLOUD_KEY,
           ])
         ]).then(([booksRes, decksRes, count, statsList]) => {
           if (typeof window !== 'undefined') {
@@ -13781,6 +13941,10 @@ export default function App() {
           }
           if (globalStat && globalStat.daily_activity) {
             applyCloudAppState(globalStat.daily_activity);
+          }
+          const fsrsStat = statsRes.data.find((s: any) => s.language === FSRS_CLOUD_KEY);
+          if (fsrsStat && fsrsStat.daily_activity) {
+            applyCloudFsrsPayload(fsrsStat.daily_activity);
           }
         }
 
@@ -13917,6 +14081,7 @@ export default function App() {
           await flushPendingQueue().catch(() => {});
           await syncCardsFromSupabase(false, decksRes.data);
           await syncLightweightSrsFromSupabase(true);
+          await flushFsrsStateToCloud().catch(() => {});
 
           await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, true);
           if (typeof window !== 'undefined') {
@@ -13956,7 +14121,11 @@ export default function App() {
         flushPendingQueue()
           .catch(() => {})
           .finally(() => {
-            syncLightweightSrsFromSupabase(false).catch(() => {});
+            syncFsrsStateFromCloud(false)
+              .catch(() => {})
+              .finally(() => {
+                syncLightweightSrsFromSupabase(false).catch(() => {});
+              });
           });
       }
       if (now - lastFocusSync < FOCUS_COOLDOWN_MS) return;
