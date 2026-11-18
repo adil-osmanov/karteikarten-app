@@ -2814,13 +2814,14 @@ export async function syncLightweightSrsFromSupabase(force: boolean = false): Pr
   return inFlightLightweightSrsPull;
 }
 
-const FSRS_RECALIBRATED_FLAG_KEY = 'fsrs_recalibrated_v1';
+const FSRS_RECALIBRATED_FLAG_KEY = 'fsrs_recalibrated_v2';
 
 /**
- * Одноразовая массовая рекалибровка свежих архивных карточек (isArchived === true, repetitions <= 1, interval > 4),
- * которым прежний алгоритм назначил завышенный начальный интервал (8+ дней).
- * Вычисляет исходную дату архивации и пересчитывает интервал 2 (при ошибках) или 3 дня от archivedAt,
- * сохраняя результат в IndexedDB и пакетом в Supabase без `.select()`.
+ * Одноразовая массовая рекалибровка свежих архивных карточек (волна v2):
+ * isArchived === true, repetitions <= 3, interval в [5..12] дней и расчётная дата архивации
+ * в пределах последних 5 дней от now (защита от ложного срабатывания на зрелых карточках).
+ * Пересчитывает repetitions = 1 и interval = 2 (при ошибках) или 3 дня от archivedAt,
+ * сохраняя результат в IndexedDB, FSRS_STATE и пакетом в Supabase без `.select()`.
  */
 export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?: boolean }): Promise<number> {
   if (typeof window === 'undefined') return 0;
@@ -2832,6 +2833,7 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
   if (!Array.isArray(currentDecks) || currentDecks.length === 0) return 0;
 
   const nowMs = Date.now();
+  const FIVE_DAYS_MS = 5 * DAY_MS;
   const MIN_VALID_EPOCH_MS = 946_684_800_000; // 2000-01-01T00:00:00Z
   const blockedIds = getPendingOrInFlightCardIds();
   const recalibratedCards: Flashcard[] = [];
@@ -2845,7 +2847,7 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
       const isArchived = Boolean(card.isArchived ?? (card as any).is_archived);
       const reps = Number(card.repetitions ?? 0);
       const oldInterval = Number(card.interval ?? 0);
-      if (!isArchived || reps > 1 || oldInterval <= 4) return card;
+      if (!isArchived || reps > 3 || oldInterval < 5 || oldInterval > 12) return card;
 
       const rawNext = card.nextReviewDate ?? (card as any).next_review_date ?? (card as any).next_review_at;
       const parsedNext =
@@ -2858,12 +2860,18 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
         parsedNext !== null && Number.isFinite(parsedNext) && parsedNext > MIN_VALID_EPOCH_MS
           ? parsedNext
           : null;
+      if (validOldNext === null) return card;
 
-      const rawArchivedAt = validOldNext ? validOldNext - oldInterval * DAY_MS : nowMs;
-      const archivedAt =
-        Number.isFinite(rawArchivedAt) && rawArchivedAt > MIN_VALID_EPOCH_MS
-          ? Math.min(nowMs, rawArchivedAt)
-          : nowMs;
+      const rawArchivedAt = validOldNext - oldInterval * DAY_MS;
+      // Только реально свежие карточки, архивированные за последние 5 дней (не старые 3-раундовые повторы)
+      if (
+        !Number.isFinite(rawArchivedAt) ||
+        rawArchivedAt < nowMs - FIVE_DAYS_MS ||
+        rawArchivedAt > nowMs + 3_600_000
+      ) {
+        return card;
+      }
+      const archivedAt = Math.min(nowMs, rawArchivedAt);
 
       const hasMistake = Boolean(card.has_mistake || ((card as any).mistakeCount ?? 0) > 0);
       const newInterval = hasMistake ? 2 : 3;
@@ -2873,6 +2881,7 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
       deckModified = true;
       const updatedCard: Flashcard = {
         ...card,
+        repetitions: 1,
         interval: newInterval,
         nextReviewDate: newNextReviewDate,
         next_review_date: newNextIso,
@@ -2929,6 +2938,7 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
         await Promise.all(
           slice.map(async (bucket) => {
             const payload = {
+              repetitions: 1,
               interval: bucket.interval,
               nextReviewDate: bucket.nextReviewDate,
             };
@@ -2945,7 +2955,7 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
                     isArchived: true,
                     masteryLevel: Math.max(4, c.masteryLevel ?? 4),
                     interval: bucket.interval,
-                    repetitions: c.repetitions ?? 1,
+                    repetitions: 1,
                     nextReviewDate: bucket.nextReviewDate,
                   });
                 }
@@ -2957,7 +2967,7 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
                   isArchived: true,
                   masteryLevel: Math.max(4, c.masteryLevel ?? 4),
                   interval: bucket.interval,
-                  repetitions: c.repetitions ?? 1,
+                  repetitions: 1,
                   nextReviewDate: bucket.nextReviewDate,
                 });
               }
@@ -2965,6 +2975,7 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
           })
         );
       }
+      await flushFsrsStateToCloud().catch(() => {});
     } else {
       allCloudBatchesOk = false;
       for (const rc of uniqueCards) {
@@ -2972,7 +2983,7 @@ export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?
           isArchived: true,
           masteryLevel: Math.max(4, rc.masteryLevel ?? 4),
           interval: Number(rc.interval),
-          repetitions: rc.repetitions ?? 1,
+          repetitions: 1,
           nextReviewDate: Number(rc.nextReviewDate),
         });
       }
@@ -4219,9 +4230,12 @@ export const useStore = create<DeckState>()((set, get) => ({
       : srsUpdate.nextReviewDate;
     const enforcedInterval = computedArchived
       ? (!wasMasteredBefore
-          ? Math.max(1, Math.min(3, Number(srsUpdate.interval) || 1))
+          ? ((Number(srsUpdate.interval) || 1) <= 1 ? 1 : 3)
           : Math.max(1, Number(srsUpdate.interval) || 1))
-      : (srsUpdate.interval ?? 0);
+      : 0;
+    const enforcedRepetitions = computedArchived
+      ? (!wasMasteredBefore ? 1 : Number(srsUpdate.repetitions ?? targetCard.repetitions ?? 0))
+      : 0;
     const scheduledDateIso = enforcedNextReviewDate ? new Date(enforcedNextReviewDate).toISOString() : null;
     const nextHasMistake = !isCorrect
       ? true
@@ -4231,6 +4245,7 @@ export const useStore = create<DeckState>()((set, get) => ({
     const validCard: Flashcard = {
       ...targetCard,
       ...srsUpdate,
+      repetitions: enforcedRepetitions,
       interval: enforcedInterval,
       next_review_at: scheduledDateIso,
       next_review_date: scheduledDateIso,
@@ -4387,8 +4402,9 @@ export const useStore = create<DeckState>()((set, get) => ({
       card.isLegendary = true;
       card.isArchived = true;
       card.has_mistake = false;
+      card.repetitions = !wasMasteredBefore ? 1 : Number(srsUpdate.repetitions ?? card.repetitions ?? 1);
       card.interval = !wasMasteredBefore
-        ? Math.max(1, Math.min(3, Number(srsUpdate.interval) || 1))
+        ? ((Number(srsUpdate.interval) || 1) <= 1 ? 1 : 3)
         : Math.max(1, Number(srsUpdate.interval) || 1);
       const validDateMs =
         srsUpdate.nextReviewDate && Number.isFinite(srsUpdate.nextReviewDate) && srsUpdate.nextReviewDate > 0
@@ -7304,7 +7320,7 @@ function RapidSession({
       isArchived: keepArchived,
       failedInSession: keepFailedFlag || undefined,
       masteryLevel: isReviewFailedRetry ? 2 : Math.min(4, newScore),
-      repetitions: (current.card.repetitions || 0) + (correct ? 1 : 0),
+      repetitions: isReviewMode ? (correct ? (current.card.repetitions || 0) + 1 : 0) : (learned ? 1 : 0),
       updated_at: new Date().toISOString(),
       mistakeCount: correct ? (current.card as any).mistakeCount : (((current.card as any).mistakeCount || 0) + 1)
     };
