@@ -399,7 +399,7 @@ export function calculateNextFSRSState(
   const currentReps = Number(card?.repetitions || 0);
   const currentMastery = Number(card?.masteryLevel ?? card?.mastery_level ?? 0);
   const wasArchived = Boolean(card?.isArchived ?? card?.is_archived);
-  const inReviewFlow = Boolean(isReviewMode || wasArchived);
+  const inReviewFlow = Boolean(wasArchived && !forceArchiveGraduation);
 
   // Stage 3: Spaced repetition of archived cards
   if (inReviewFlow) {
@@ -442,11 +442,12 @@ export function calculateNextFSRSState(
     const nextD = round2(clamp(0.95 * (prevD - 0.8 * (rating - 3)) + 0.05 * INITIAL_D_CLEAN, 1, 10));
 
     // FSRS recall stability gain: scales with (11 - D), S^(-0.14), and (e^(1 - R) - 1)
-    const gradeMult = rating === 2 ? 0.45 : rating === 4 ? 1.75 : 1.0;
+    // Tuned so S=3 -> Good lands in 7-9 days, Easy lands in 10-12 days, then grows exponentially
+    const gradeMult = rating === 2 ? 0.45 : rating === 4 ? 1.5 : 1.0;
     const dFactor = 11 - nextD;
     const sDecay = Math.pow(prevS, -0.14);
     const rBonus = Math.exp(1.0 * (1 - retrievability)) - 1;
-    let rawNextS = prevS * (1 + 2.6 * dFactor * sDecay * rBonus * gradeMult);
+    let rawNextS = prevS * (1 + 2.7 * dFactor * sDecay * rBonus * gradeMult);
 
     // Ensure non-failing due cards with S >= 1 at least step forward when answered Good/Easy
     if (rating >= 3 && elapsedDays >= prevS * 0.5) {
@@ -492,15 +493,15 @@ export function calculateNextFSRSState(
 
     if (graduatesToArchive) {
       const hadLearningMistakes = Boolean(
-        telemetry.hadLearningMistakes ||
+        isHilfe ||
+          telemetry.hadLearningMistakes ||
           telemetry.failedInSession ||
           telemetry.hadTypo ||
-          rating === 2 ||
           card?.has_mistake ||
           (card?.mistakeCount ?? 0) > 0
       );
 
-      const initialS = hadLearningMistakes ? INITIAL_S_HARD : INITIAL_S_CLEAN;
+      const initialS = Math.min(3, Math.max(1, hadLearningMistakes ? INITIAL_S_HARD : INITIAL_S_CLEAN));
       const initialD = hadLearningMistakes ? INITIAL_D_HARD : INITIAL_D_CLEAN;
       const nextReviewDate = nowMs + initialS * DAY_MS;
       const graduationRating: FsrsRating = hadLearningMistakes ? 2 : rating;

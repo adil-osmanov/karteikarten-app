@@ -2800,6 +2800,7 @@ export async function syncLightweightSrsFromSupabase(force: boolean = false): Pr
         }
       }
 
+      await recalibrateInitialArchivedCards({ allowMarkDone: true }).catch(() => {});
       await healArchivedCardsWithoutReviewDate().catch(() => {});
       return true;
     } catch (err) {
@@ -2811,6 +2812,190 @@ export async function syncLightweightSrsFromSupabase(force: boolean = false): Pr
   })();
 
   return inFlightLightweightSrsPull;
+}
+
+const FSRS_RECALIBRATED_FLAG_KEY = 'fsrs_recalibrated_v1';
+
+/**
+ * Одноразовая массовая рекалибровка свежих архивных карточек (isArchived === true, repetitions <= 1, interval > 4),
+ * которым прежний алгоритм назначил завышенный начальный интервал (8+ дней).
+ * Вычисляет исходную дату архивации и пересчитывает интервал 2 (при ошибках) или 3 дня от archivedAt,
+ * сохраняя результат в IndexedDB и пакетом в Supabase без `.select()`.
+ */
+export async function recalibrateInitialArchivedCards(options?: { allowMarkDone?: boolean }): Promise<number> {
+  if (typeof window === 'undefined') return 0;
+  try {
+    if (localStorage.getItem(FSRS_RECALIBRATED_FLAG_KEY) === '1') return 0;
+  } catch {}
+
+  const currentDecks = useStore.getState().decks;
+  if (!Array.isArray(currentDecks) || currentDecks.length === 0) return 0;
+
+  const nowMs = Date.now();
+  const MIN_VALID_EPOCH_MS = 946_684_800_000; // 2000-01-01T00:00:00Z
+  const blockedIds = getPendingOrInFlightCardIds();
+  const recalibratedCards: Flashcard[] = [];
+
+  const nextDecks = currentDecks.map((deck) => {
+    if (!Array.isArray(deck.cards) || deck.cards.length === 0) return deck;
+    let deckModified = false;
+
+    const nextCards = deck.cards.map((card) => {
+      if (!card || (card as any).isDeleted || blockedIds.has(card.id)) return card;
+      const isArchived = Boolean(card.isArchived ?? (card as any).is_archived);
+      const reps = Number(card.repetitions ?? 0);
+      const oldInterval = Number(card.interval ?? 0);
+      if (!isArchived || reps > 1 || oldInterval <= 4) return card;
+
+      const rawNext = card.nextReviewDate ?? (card as any).next_review_date ?? (card as any).next_review_at;
+      const parsedNext =
+        rawNext === null || rawNext === undefined || rawNext === '' || rawNext === 0
+          ? null
+          : typeof rawNext === 'number'
+          ? Math.round(rawNext)
+          : new Date(String(rawNext)).getTime();
+      const validOldNext =
+        parsedNext !== null && Number.isFinite(parsedNext) && parsedNext > MIN_VALID_EPOCH_MS
+          ? parsedNext
+          : null;
+
+      const rawArchivedAt = validOldNext ? validOldNext - oldInterval * DAY_MS : nowMs;
+      const archivedAt =
+        Number.isFinite(rawArchivedAt) && rawArchivedAt > MIN_VALID_EPOCH_MS
+          ? Math.min(nowMs, rawArchivedAt)
+          : nowMs;
+
+      const hasMistake = Boolean(card.has_mistake || ((card as any).mistakeCount ?? 0) > 0);
+      const newInterval = hasMistake ? 2 : 3;
+      const newNextReviewDate = archivedAt + newInterval * DAY_MS;
+      const newNextIso = new Date(newNextReviewDate).toISOString();
+
+      deckModified = true;
+      const updatedCard: Flashcard = {
+        ...card,
+        interval: newInterval,
+        nextReviewDate: newNextReviewDate,
+        next_review_date: newNextIso,
+        next_review_at: newNextIso,
+      };
+      recalibratedCards.push(updatedCard);
+      setFsrsCardState(
+        updatedCard.id,
+        {
+          difficulty: hasMistake ? INITIAL_D_HARD : INITIAL_D_CLEAN,
+          stability: newInterval,
+          lastReviewDate: archivedAt,
+        },
+        true
+      );
+      return updatedCard;
+    });
+
+    return deckModified ? { ...deck, cards: nextCards } : deck;
+  });
+
+  if (recalibratedCards.length > 0) {
+    cachedAllCards = [];
+    lastFetchAllCardsTime = 0;
+    useStore.setState({ decks: nextDecks });
+    await setIDBItem('app_decks', nextDecks).catch(() => {});
+
+    const uniqueById = new Map<string, Flashcard>();
+    for (const rc of recalibratedCards) {
+      updateCachedCardInMemory(rc.id, rc);
+      uniqueById.set(rc.id, rc);
+    }
+
+    let allCloudBatchesOk = true;
+    const uniqueCards = Array.from(uniqueById.values());
+
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      const buckets = new Map<string, { interval: number; nextReviewDate: number; cards: Flashcard[] }>();
+      for (const rc of uniqueCards) {
+        const nextMs = Number(rc.nextReviewDate);
+        const key = `${rc.interval}:${nextMs}`;
+        const existing = buckets.get(key);
+        if (existing) {
+          existing.cards.push(rc);
+        } else {
+          buckets.set(key, { interval: Number(rc.interval), nextReviewDate: nextMs, cards: [rc] });
+        }
+      }
+
+      const bucketList = Array.from(buckets.values());
+      const CONCURRENCY = 15;
+      for (let i = 0; i < bucketList.length; i += CONCURRENCY) {
+        const slice = bucketList.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          slice.map(async (bucket) => {
+            const payload = {
+              interval: bucket.interval,
+              nextReviewDate: bucket.nextReviewDate,
+            };
+            const ids = bucket.cards.map((c) => c.id);
+            try {
+              const { error } =
+                ids.length === 1
+                  ? await supabase.from('cards').update(payload).eq('id', ids[0])
+                  : await supabase.from('cards').update(payload).in('id', ids);
+              if (error) {
+                allCloudBatchesOk = false;
+                for (const c of bucket.cards) {
+                  await enqueuePendingCard(c.id, {
+                    isArchived: true,
+                    masteryLevel: Math.max(4, c.masteryLevel ?? 4),
+                    interval: bucket.interval,
+                    repetitions: c.repetitions ?? 1,
+                    nextReviewDate: bucket.nextReviewDate,
+                  });
+                }
+              }
+            } catch {
+              allCloudBatchesOk = false;
+              for (const c of bucket.cards) {
+                await enqueuePendingCard(c.id, {
+                  isArchived: true,
+                  masteryLevel: Math.max(4, c.masteryLevel ?? 4),
+                  interval: bucket.interval,
+                  repetitions: c.repetitions ?? 1,
+                  nextReviewDate: bucket.nextReviewDate,
+                });
+              }
+            }
+          })
+        );
+      }
+    } else {
+      allCloudBatchesOk = false;
+      for (const rc of uniqueCards) {
+        await enqueuePendingCard(rc.id, {
+          isArchived: true,
+          masteryLevel: Math.max(4, rc.masteryLevel ?? 4),
+          interval: Number(rc.interval),
+          repetitions: rc.repetitions ?? 1,
+          nextReviewDate: Number(rc.nextReviewDate),
+        });
+      }
+    }
+
+    useStore.getState().refreshDueCardsCount().catch(() => {});
+    broadcastStateBus('REFRESH_DUE_COUNT');
+    console.log(`🔄 [FSRS Recalibration] Откалибровано свежих архивных карточек: ${uniqueCards.length}`);
+
+    if (options?.allowMarkDone !== false && allCloudBatchesOk) {
+      try {
+        localStorage.setItem(FSRS_RECALIBRATED_FLAG_KEY, '1');
+      } catch {}
+    }
+    return uniqueCards.length;
+  }
+
+  if (options?.allowMarkDone !== false && (typeof navigator === 'undefined' || navigator.onLine)) {
+    try {
+      localStorage.setItem(FSRS_RECALIBRATED_FLAG_KEY, '1');
+    } catch {}
+  }
+  return 0;
 }
 
 /**
@@ -4023,7 +4208,7 @@ export const useStore = create<DeckState>()((set, get) => ({
 
     const wasDueBefore = isCardDueForReview(targetCard);
     const wasMasteredBefore = Boolean(targetCard.isArchived);
-    const srsUpdate = calculateNextSRSState(targetCard, isCorrect, isHilfe, isReviewSession, Boolean(forceArchive), fsrsTelemetry);
+    const srsUpdate = calculateNextSRSState(targetCard, isCorrect, isHilfe, isReviewSession, !wasMasteredBefore && Boolean(forceArchive), fsrsTelemetry);
     const computedMastery = srsUpdate.masteryLevel ?? targetCard.masteryLevel ?? 0;
     const computedArchived = Boolean(srsUpdate.isArchived || computedMastery >= 4);
     const computedRound = computedArchived ? 4 : Math.max(1, Math.min(4, computedMastery + 1));
@@ -4033,7 +4218,9 @@ export const useStore = create<DeckState>()((set, get) => ({
           : Date.now() + DAY_MS)
       : srsUpdate.nextReviewDate;
     const enforcedInterval = computedArchived
-      ? Math.max(1, Number(srsUpdate.interval) || 1)
+      ? (!wasMasteredBefore
+          ? Math.max(1, Math.min(3, Number(srsUpdate.interval) || 1))
+          : Math.max(1, Number(srsUpdate.interval) || 1))
       : (srsUpdate.interval ?? 0);
     const scheduledDateIso = enforcedNextReviewDate ? new Date(enforcedNextReviewDate).toISOString() : null;
     const nextHasMistake = !isCorrect
@@ -4191,7 +4378,7 @@ export const useStore = create<DeckState>()((set, get) => ({
         true,
         false,
         false,
-        true,
+        !wasMasteredBefore,
         fsrsTelemetry
       );
       Object.assign(card, srsUpdate);
@@ -4200,7 +4387,9 @@ export const useStore = create<DeckState>()((set, get) => ({
       card.isLegendary = true;
       card.isArchived = true;
       card.has_mistake = false;
-      card.interval = Math.max(1, Number(srsUpdate.interval) || 1);
+      card.interval = !wasMasteredBefore
+        ? Math.max(1, Math.min(3, Number(srsUpdate.interval) || 1))
+        : Math.max(1, Number(srsUpdate.interval) || 1);
       const validDateMs =
         srsUpdate.nextReviewDate && Number.isFinite(srsUpdate.nextReviewDate) && srsUpdate.nextReviewDate > 0
           ? srsUpdate.nextReviewDate
@@ -13770,6 +13959,9 @@ export default function App() {
           localStorage.setItem(KRAFT_LAST_SYNC_KEY, new Date().toISOString());
         }
         useStore.getState().refreshDueCardsCount().catch(() => {});
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          recalibrateInitialArchivedCards({ allowMarkDone: false }).catch(() => {});
+        }
         healArchivedCardsWithoutReviewDate().catch(() => {});
         // Фоновый авто-синк SRS при каждом холодном/тёплом открытии или F5
         (async () => {
@@ -13777,7 +13969,11 @@ export default function App() {
             await flushPendingQueue();
             await syncExcludedBooksFromCloud(true);
             await syncFsrsStateFromCloud(true);
-            await syncLightweightSrsFromSupabase(true);
+            const srsPulled = await syncLightweightSrsFromSupabase(true);
+            if (!srsPulled) {
+              await recalibrateInitialArchivedCards({ allowMarkDone: false }).catch(() => {});
+              await healArchivedCardsWithoutReviewDate().catch(() => {});
+            }
             await flushFsrsStateToCloud().catch(() => {});
             await syncBooksFromSupabase(false);
             await syncCardsFromSupabase(false);
@@ -14081,6 +14277,8 @@ export default function App() {
           await flushPendingQueue().catch(() => {});
           await syncCardsFromSupabase(false, decksRes.data);
           await syncLightweightSrsFromSupabase(true);
+          await recalibrateInitialArchivedCards({ allowMarkDone: typeof navigator === 'undefined' || navigator.onLine }).catch(() => {});
+          await healArchivedCardsWithoutReviewDate().catch(() => {});
           await flushFsrsStateToCloud().catch(() => {});
 
           await syncMasteredWordsFromCloud((useStore.getState().appLanguage || 'de').toLowerCase() as any, true);
