@@ -408,10 +408,10 @@ export function calculateNextFSRSState(
     const prevS = Math.max(1, prevState.stability);
 
     if (rating === 1) {
-      // Again / Lapse: card REMAINS archived, next review tomorrow, S decayed without resetting to 0
+      // Again / Lapse: card REMAINS archived, interval resets to 1 day (tomorrow), S decayed without resetting to 0
       const nextD = round2(clamp(prevD + 0.8, 1, 10));
       const nextS = round2(Math.max(1, Math.min(prevS * 0.25, 2)));
-      const nextInterval = Math.max(1, Math.round(nextS));
+      const nextInterval = 1;
       const nextReviewDate = nowMs + DAY_MS; // Strictly tomorrow (+24h)
       const nextState: FsrsCardState = {
         difficulty: nextD,
@@ -430,6 +430,33 @@ export function calculateNextFSRSState(
         nextReviewDate,
         first_mastered_at: card?.first_mastered_at,
         rating,
+        fsrsState: nextState,
+      };
+    }
+
+    if (rating === 2 && telemetry.failedInSession) {
+      // Same-session recovery after lapse: Grade 2 (Hard), keeps nextReviewDate on tomorrow (+24h, interval=1)
+      // while persisting updated FSRS DSR state without jumping back to multi-week intervals on the same day.
+      const nextD = round2(clamp(prevD, 1, 10));
+      const nextS = round2(Math.max(1, Math.min(prevS, 2)));
+      const nextReviewDate = nowMs + DAY_MS;
+      const nextState: FsrsCardState = {
+        difficulty: nextD,
+        stability: nextS,
+        lastReviewDate: nowMs,
+      };
+      if (card?.id) {
+        setFsrsCardState(card.id, nextState, true);
+      }
+      return {
+        masteryLevel: Math.max(4, currentMastery),
+        isArchived: true,
+        repetitions: 0,
+        interval: 1,
+        easeFactor: difficultyToLegacyEase(nextD),
+        nextReviewDate,
+        first_mastered_at: card?.first_mastered_at,
+        rating: 2,
         fsrsState: nextState,
       };
     }

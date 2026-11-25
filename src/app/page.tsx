@@ -1240,6 +1240,7 @@ export interface Flashcard {
   round?: number;
   isLegendary?: boolean;
   failedInSession?: boolean;
+  retrySuccess?: boolean;
   mistakeCount?: number;
   has_mistake?: boolean;
   linkedCardIds?: string[];
@@ -4239,6 +4240,8 @@ export const useStore = create<DeckState>()((set, get) => ({
     const scheduledDateIso = enforcedNextReviewDate ? new Date(enforcedNextReviewDate).toISOString() : null;
     const nextHasMistake = !isCorrect
       ? true
+      : (fsrsTelemetry?.failedInSession && !isMistakesReview)
+      ? true
       : (isCorrect && !isHilfe && (isReviewSession || wasMasteredBefore || isMistakesReview || computedArchived))
       ? false
       : Boolean(targetCard.has_mistake);
@@ -5537,8 +5540,15 @@ function hasOpenModalOverlay(): boolean {
 function resolveCardRarityState(card: Flashcard, progress?: number, isReview?: boolean) {
   const fallbackLevel = typeof progress === 'number' ? progress : (card?.masteryLevel ?? 0);
   const computedRound = Math.max(1, Math.min(4, fallbackLevel + 1));
-  // Failed/surrendered review cards stay at blue round <= 3 for the rest of the session.
+  // Failed/surrendered review cards stay blue (round 3) until answered correctly on retry,
+  // upon which they upgrade to purple (round 4, non-legendary).
   if (card?.failedInSession) {
+    if (card.retrySuccess) {
+      return {
+        currentRound: 4,
+        isLegendary: false,
+      };
+    }
     return {
       currentRound: Math.min(3, card.round ?? 3),
       isLegendary: false,
@@ -5554,7 +5564,13 @@ function resolveCardRarityState(card: Flashcard, progress?: number, isReview?: b
 }
 
 function getCardRemainingSessionSteps(card: Flashcard, fallbackMastery?: number): number {
-  if (card.isLegendary || (typeof card.round === 'number' && card.round >= 4)) return 1;
+  if (
+    card.isLegendary ||
+    (card.failedInSession && card.isArchived) ||
+    (typeof card.round === 'number' && card.round >= 4)
+  ) {
+    return 1;
+  }
   const r = card.round ?? Math.max(1, Math.min(4, (fallbackMastery ?? card.masteryLevel ?? 0) + 1));
   return Math.max(1, 5 - r);
 }
@@ -5628,7 +5644,7 @@ function RapidFlashcardMode({
   const [localMastery, setLocalMastery] = useState(() => effectiveMastery);
   const [isAnswered, setIsAnswered] = useState(false);
   const [isSurrendered, setIsSurrendered] = useState(false);
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !isSurrendered;
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !isSurrendered && !currentCard?.failedInSession;
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
   const isTypingRecall = Boolean(isLegendary || visualRound >= 3);
   const [isRound1or2, setIsRound1or2] = useState(() => !isTypingRecall);
@@ -5712,12 +5728,13 @@ function RapidFlashcardMode({
   const weiterButtonRef = useRef<HTMLButtonElement>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 7. Сброс стейта строго при смене карточки (без ложного срабатывания от промежуточного обновления progress)
+  // 7. Сброс стейта строго при смене карточки или хода (используем актуальный initialCard без задержки рендера)
   useEffect(() => {
+    setCurrentCard(initialCard);
     cardShownAtRef.current = Date.now();
     answeredAtRef.current = null;
     hadTypoRef.current = false;
-    const { currentRound: round, isLegendary: isLeg } = resolveCardRarityState(currentCard, progress, isReview);
+    const { currentRound: round, isLegendary: isLeg } = resolveCardRarityState(initialCard, progress, isReview);
     const mastery = isLeg ? 4 : (round - 1);
     setVisualRound(round);
     setIsLegendaryVisual(isLeg);
@@ -5747,7 +5764,7 @@ function RapidFlashcardMode({
       if (raf2) cancelAnimationFrame(raf2);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCard?.id, sessionTurn]);
+  }, [initialCard?.id, sessionTurn]);
 
   // Парсинг целевой конструкции (управление, отделяемая приставка, артикль)
   const parsedTarget = useMemo(() => {
@@ -5941,9 +5958,9 @@ function RapidFlashcardMode({
     setIsErrorMismatch(false);
     setIsShaking(false);
 
-    // Мгновенное повышение ранга прямо на глазах (для проваленной в сессии карточки держим синий статус до конца сессии)
+    // Мгновенное повышение ранга: после ошибки в повторениях правильный ответ поднимает синий (3) -> фиолетовый (4)
     if (currentCard?.failedInSession) {
-      setVisualRound(prev => Math.min(3, prev || 3));
+      setVisualRound(4);
       setIsLegendaryVisual(false);
     } else {
       const nextRound = visualRound + 1;
@@ -5968,8 +5985,13 @@ function RapidFlashcardMode({
     setIsShaking(false);
 
     let penalizedScore = 0;
-    // Мгновенное понижение ранга (live downgrade) и синхронное вычисление нового masteryLevel
-    if (isLegendaryVisual || visualRound >= 4) {
+    // Мгновенное понижение ранга (live downgrade): в повторениях после ошибки держим синий статус (round 3)
+    if (currentCard?.failedInSession && (isReview || currentCard?.isArchived)) {
+      setVisualRound(3);
+      setLocalMastery(2);
+      setIsLegendaryVisual(false);
+      penalizedScore = 2;
+    } else if (isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setLocalMastery(2);
       setIsLegendaryVisual(false);
@@ -7217,6 +7239,7 @@ function RapidSession({
           isLegendary: false,
           isArchived: true,
           failedInSession: true,
+          retrySuccess: undefined,
           masteryLevel: 2,
           updated_at: new Date().toISOString(),
           mistakeCount: ((current.card as any).mistakeCount || 0) + 1
@@ -7356,10 +7379,11 @@ function RapidSession({
       ),
     };
     if (isReviewMode) {
-      // Если карточка ошибалась ранее в этой же Review-сессии, повторный правильный ответ завершает её без повторного скачка interval / nextReviewDate
-      if (!isReviewRetry) {
-        void answerCard(current.deckId, id, correct, false, true, studyLanguage, true, isReviewingMistakesSession, false, fsrsTelemetry);
-      }
+      // Фиксируем и первый проход, и повторный ответ в той же сессии (Grade 2 Hard при восстановлении: interval=1, nextReviewDate=завтра)
+      void answerCard(current.deckId, id, correct, false, true, studyLanguage, true, isReviewingMistakesSession, false, {
+        ...fsrsTelemetry,
+        failedInSession: Boolean(current.card.failedInSession || isReviewRetry),
+      });
     } else if (learned || !correct || isReviewingMistakesSession) {
       void answerCard(current.deckId, id, correct, false, true, studyLanguage, false, isReviewingMistakesSession, learned, fsrsTelemetry);
     } else {
@@ -7400,9 +7424,9 @@ function RapidSession({
 
     // 2) Persist to Zustand + Supabase in background
     if (isReviewMode || liveCard.isArchived) {
-      if (!isReviewRetry) {
-        void answerCard(current.deckId, id, false, true, true, studyLanguage, true, isReviewingMistakesSession);
-      }
+      void answerCard(current.deckId, id, false, true, true, studyLanguage, true, isReviewingMistakesSession, false, {
+        failedInSession: Boolean(current.card.failedInSession || isReviewRetry),
+      });
     } else {
       void setCardProgress(current.deckId, id, penalizedProgress, studyLanguage, true);
     }
@@ -7757,7 +7781,7 @@ function StudyInterface({
   );
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState<Flashcard[]>([]);
-  const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean; keepArchived?: boolean; isReviewRetry?: boolean; failedInSession?: boolean } | null>(null);
+  const pendingAnswerRef = useRef<{ cardId: string; isGraduated: boolean; nextMastery: number; nextRound?: number; nextLegendary?: boolean; keepArchived?: boolean; isReviewRetry?: boolean; failedInSession?: boolean; retrySuccess?: boolean } | null>(null);
   const sessionInitKeyRef = useRef<string | null>(null);
   const seenSessionCardIdsRef = useRef<Set<string>>(new Set(activeCards.map(item => item.card.id)));
 
@@ -7895,27 +7919,33 @@ function StudyInterface({
     const storeCard = decks.find(d => d.id === currentDeckId)?.cards.find(c => c.id === currentCardSnapshot.id);
     if (!storeCard) return currentCardSnapshot;
     const isFailedInSession = Boolean(currentCardSnapshot.failedInSession);
+    const isRetryRecovered = Boolean(isFailedInSession && currentCardSnapshot.retrySuccess);
     const shouldKeepReviewGold = isReviewSession && !isFailedInSession;
     return {
       ...currentCardSnapshot,
       ...storeCard,
-      round: isFailedInSession
-        ? Math.min(3, currentCardSnapshot.round ?? 3)
-        : shouldKeepReviewGold
-          ? 4
-          : currentCardSnapshot.round,
+      round: isRetryRecovered
+        ? 4
+        : isFailedInSession
+          ? Math.min(3, currentCardSnapshot.round ?? 3)
+          : shouldKeepReviewGold
+            ? 4
+            : currentCardSnapshot.round,
       isLegendary: isFailedInSession
         ? false
         : shouldKeepReviewGold
           ? true
           : currentCardSnapshot.isLegendary,
       failedInSession: isFailedInSession || undefined,
+      retrySuccess: isRetryRecovered || undefined,
       mistakeCount: (currentCardSnapshot as any).mistakeCount,
-      masteryLevel: isFailedInSession
-        ? (currentCardSnapshot.masteryLevel ?? 2)
-        : shouldKeepReviewGold
-          ? Math.max(4, storeCard.masteryLevel ?? 4, currentCardSnapshot.masteryLevel ?? 4)
-          : (currentCardSnapshot.masteryLevel ?? storeCard.masteryLevel)
+      masteryLevel: isRetryRecovered
+        ? Math.max(4, storeCard.masteryLevel ?? 4, currentCardSnapshot.masteryLevel ?? 4)
+        : isFailedInSession
+          ? (currentCardSnapshot.masteryLevel ?? 2)
+          : shouldKeepReviewGold
+            ? Math.max(4, storeCard.masteryLevel ?? 4, currentCardSnapshot.masteryLevel ?? 4)
+            : (currentCardSnapshot.masteryLevel ?? storeCard.masteryLevel)
     };
   }, [decks, currentDeckId, currentCardSnapshot, isReviewSession]);
 
@@ -7987,12 +8017,16 @@ function StudyInterface({
     let nextMastery: number;
     let isGraduated: boolean;
 
+    const isFailedRetrySuccess = Boolean(
+      isReviewMode && isActualCorrect && (isReviewRetry || currentCardSnapshot.failedInSession)
+    );
+
     if (isReviewMode) {
       if (isActualCorrect) {
         nextMastery = Math.max(4, currentCardSnapshot.masteryLevel ?? liveCard?.masteryLevel ?? 4);
         isGraduated = true;
         nextRound = 4;
-        nextLegendary = true;
+        nextLegendary = !isFailedRetrySuccess;
       } else {
         // Ошибка в глобальном Review: карточка ОСТАЕТСЯ в архиве, но уходит в конец текущей сессии со сбросом в синий статус (round 3)
         nextMastery = 2;
@@ -8024,9 +8058,10 @@ function StudyInterface({
       keepArchived: isReviewMode || isGraduated || wasMasteredBefore,
       isReviewRetry: isReviewMode && !isActualCorrect,
       failedInSession: markFailedInSession,
+      retrySuccess: isFailedRetrySuccess,
     };
 
-    // 2. Мгновенно обновляем стейт текущей карточки в голове очереди (без перетирания round до нажатия Weiter)
+    // 2. Мгновенно обновляем стейт текущей карточки в голове очереди (синий при ошибке / фиолетовый при восстановлении на втором круге)
     setActiveCards(prev => {
       if (prev.length === 0) return prev;
       const head = prev[0];
@@ -8035,8 +8070,11 @@ function StudyInterface({
           ...head,
           card: {
             ...head.card,
+            round: isFailedRetrySuccess ? 4 : (isReviewMode && !isActualCorrect ? 3 : head.card.round),
+            isLegendary: isFailedRetrySuccess ? false : (isReviewMode && !isActualCorrect ? false : head.card.isLegendary),
             masteryLevel: nextMastery,
             failedInSession: markFailedInSession || head.card.failedInSession,
+            retrySuccess: isFailedRetrySuccess ? true : undefined,
             updated_at: new Date().toISOString()
           }
         },
@@ -8099,11 +8137,21 @@ function StudyInterface({
       ),
     };
     if (isReviewMode) {
-      if (!isReviewRetry) {
-        await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, true, isReviewingMistakesSession, false, fsrsTelemetry);
-      } else if (!liveCard.isArchived || isCardDueForReview(liveCard)) {
-        await answerCard(currentDeckId, currentCardSnapshot.id, false, false, true, studyLanguage, true, isReviewingMistakesSession, false, fsrsTelemetry);
-      }
+      await answerCard(
+        currentDeckId,
+        currentCardSnapshot.id,
+        isActualCorrect,
+        isHilfe,
+        true,
+        studyLanguage,
+        true,
+        isReviewingMistakesSession,
+        false,
+        {
+          ...fsrsTelemetry,
+          failedInSession: Boolean(currentCardSnapshot.failedInSession || isReviewRetry),
+        }
+      );
     } else if (isGraduated || !isActualCorrect || isReviewingMistakesSession) {
       await answerCard(currentDeckId, currentCardSnapshot.id, isActualCorrect, isHilfe, true, studyLanguage, false, isReviewingMistakesSession, isGraduated, fsrsTelemetry);
     } else {
@@ -8147,6 +8195,7 @@ function StudyInterface({
           isLegendary: isFailedInSession ? false : (pending ? Boolean(pending.nextLegendary) : false),
           isArchived: keepArchived,
           failedInSession: isFailedInSession || undefined,
+          retrySuccess: undefined,
           masteryLevel: isFailedInSession ? Math.min(2, nextMastery) : nextMastery,
           updated_at: new Date().toISOString(),
           mistakeCount: ((current.card as any).mistakeCount || 0) + (pending && pending.nextMastery > (current.card.masteryLevel ?? 0) ? 0 : 1)
@@ -8625,6 +8674,8 @@ function StudyCard({
   const [localMastery, setLocalMastery] = useState(() => (isLegendary ? 4 : (currentRound - 1)));
 
   useEffect(() => {
+    setCard(initialCard);
+    const { currentRound: nextInitRound, isLegendary: nextInitLeg } = resolveCardRarityState(initialCard, undefined, isReview);
     setPhase("Question");
     setSelectedOption(null);
     setInputText("");
@@ -8635,15 +8686,15 @@ function StudyCard({
     setIsVaporizing(false);
     setIsTransitionLocked(false);
     setIsTransitioning(false);
-    setVisualRound(currentRound);
-    setIsLegendaryVisual(isLegendary);
-    setLocalMastery(isLegendary ? 4 : (currentRound - 1));
+    setVisualRound(nextInitRound);
+    setIsLegendaryVisual(nextInitLeg);
+    setLocalMastery(nextInitLeg ? 4 : (nextInitRound - 1));
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
       transitionTimerRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.id, sessionTurn]);
+  }, [initialCard.id, sessionTurn]);
   const [inputText, setInputText] = useState("");
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const decks = useStore((state) => state.decks);
@@ -8876,10 +8927,15 @@ function StudyCard({
   const handleReveal = useCallback(() => {
     if (phase !== "Question") return;
     setPhase("Answer");
-    const nextRound = visualRound + 1;
-    setVisualRound(nextRound);
-    if (visualRound >= 4 || isLegendaryVisual) {
-      setIsLegendaryVisual(true);
+    if (card.failedInSession) {
+      setVisualRound(4);
+      setIsLegendaryVisual(false);
+    } else {
+      const nextRound = visualRound + 1;
+      setVisualRound(nextRound);
+      if (visualRound >= 4 || isLegendaryVisual) {
+        setIsLegendaryVisual(true);
+      }
     }
     playSafeAudio(() => playSuccessSound());
     const fullSentenceText = fullSentence || card.sentence || (card as any).text;
@@ -8912,7 +8968,10 @@ function StudyCard({
       setLocalMastery(2); // Штраф при ошибке: ранг сбрасывается
       setHasErrored(true);
       hasErroredRef.current = true;
-      if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+      if (card.failedInSession && (isReview || card.isArchived)) {
+        setVisualRound(3);
+        setIsLegendaryVisual(false);
+      } else if (isLegendary || isLegendaryVisual || visualRound >= 4) {
         setVisualRound(3);
         setIsLegendaryVisual(false);
       } else if (visualRound === 3) {
@@ -8925,7 +8984,7 @@ function StudyCard({
       playSafeAudio(() => playErrorSound());
     } else {
       if (card.failedInSession) {
-        setVisualRound(prev => Math.min(3, prev || 3));
+        setVisualRound(4);
         setIsLegendaryVisual(false);
       } else {
         const nextRound = visualRound + 1;
@@ -8969,7 +9028,10 @@ function StudyCard({
     setLocalMastery(2); // Штраф при сдаче
     setHasErrored(true);
     hasErroredRef.current = true;
-    if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+    if (card.failedInSession && (isReview || card.isArchived)) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    } else if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
     } else if (visualRound === 3) {
@@ -9018,7 +9080,7 @@ function StudyCard({
       setPhase("Answer");
 
       if (card.failedInSession) {
-        setVisualRound(prev => Math.min(3, prev || 3));
+        setVisualRound(4);
         setIsLegendaryVisual(false);
       } else {
         const nextRound = visualRound + 1;
@@ -12413,8 +12475,8 @@ function PrepStudyCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && (!card.failedInSession || isSuccess);
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && (!card.failedInSession || isSuccess);
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && !card.failedInSession;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && !card.failedInSession;
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
   
   const [prep = "", kasusRaw = ""] = (card.sentence || "").split('|').map(s => s.trim());
@@ -12448,7 +12510,10 @@ function PrepStudyCard({
        const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
        setLocalMastery(nextMastery);
        if (isCorrect) {
-         if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
+         if (card.failedInSession) {
+           setVisualRound(4);
+           setIsLegendaryVisual(false);
+         } else if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
            setVisualRound(5);
            setIsLegendaryVisual(true);
          } else {
@@ -12468,7 +12533,10 @@ function PrepStudyCard({
        hasErroredRef.current = true;
        setHasErrored(true);
        setLocalMastery(2);
-       if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+       if (card.failedInSession && (isReview || card.isArchived)) {
+         setVisualRound(3);
+         setIsLegendaryVisual(false);
+       } else if (isLegendary || isLegendaryVisual || visualRound >= 4) {
          setVisualRound(3);
          setIsLegendaryVisual(false);
        } else if (visualRound === 3) {
@@ -12482,7 +12550,7 @@ function PrepStudyCard({
        setWrongKasus(selected);
        setTimeout(() => setWrongKasus(null), 500);
     }
-  }, [activeSlot, kasusRaw, card.id, card.failedInSession, isHilfe, onAnswer, isSuccess, playAudio, localMastery, visualRound, isLegendaryVisual, isLegendary]);
+  }, [activeSlot, kasusRaw, card.id, card.failedInSession, card.isArchived, isReview, isHilfe, onAnswer, isSuccess, playAudio, localMastery, visualRound, isLegendaryVisual, isLegendary]);
 
   const onHilfe = useCallback(() => {
     setLocalMastery(2);
@@ -12490,7 +12558,10 @@ function PrepStudyCard({
     setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
-    if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+    if (card.failedInSession && (isReview || card.isArchived)) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    } else if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
     } else if (visualRound === 3) {
@@ -12764,8 +12835,8 @@ function VerbStudyCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && (!card.failedInSession || isSuccess);
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && (!card.failedInSession || isSuccess);
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && !hasErrored && !isHilfe && !card.failedInSession;
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && !hasErrored && !isHilfe && !card.failedInSession;
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
 
   const virtualKeyRef = useRef<((char: string) => void) | undefined>(undefined);
@@ -12835,7 +12906,10 @@ function VerbStudyCard({
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
       if (isCorrect) {
-        if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
+        if (card.failedInSession) {
+          setVisualRound(4);
+          setIsLegendaryVisual(false);
+        } else if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
           setVisualRound(5);
           setIsLegendaryVisual(true);
         } else {
@@ -12852,7 +12926,7 @@ function VerbStudyCard({
         });
       } catch (e) {}
     }
-  }, [isHilfe, playAudio, onAnswer, localMastery, visualRound, isLegendaryVisual, card.failedInSession]);
+  }, [isHilfe, playAudio, onAnswer, localMastery, visualRound, isLegendaryVisual, card.failedInSession, card.isArchived, isReview]);
 
   const handleSlotError = useCallback(() => {
     // Опечатка при вводе фиксируется как лёгкая заминка (Grade 2 Hard в FSRS) без штрафа раунда
@@ -12865,7 +12939,10 @@ function VerbStudyCard({
     setHasErrored(true);
     setIsHilfe(true);
     setIsSuccess(true);
-    if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+    if (card.failedInSession && (isReview || card.isArchived)) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    } else if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
     } else if (visualRound === 3) {
@@ -13241,9 +13318,9 @@ export function RedemittelStudyCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id, sessionTurn]);
 
-  const isLegendaryActive = (isLegendary || isLegendaryVisual) && status !== 'error' && status !== 'surrender' && (!card.failedInSession || status === 'success');
+  const isLegendaryActive = (isLegendary || isLegendaryVisual) && status !== 'error' && status !== 'surrender' && !card.failedInSession;
   const effectiveRound = isLegendaryActive ? 4 : visualRound;
-  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && status === 'success' && (!card.failedInSession || status === 'success');
+  const isMasteredGolden = (isLegendaryVisual || visualRound >= 5) && status === 'success' && !card.failedInSession;
 
   const handlePlayAudio = useCallback(() => {
     if (!data.fullText) return;
@@ -13267,7 +13344,10 @@ export function RedemittelStudyCard({
       const nextMastery = isCorrect ? Math.min(4, (localMastery || 0) + 1) : Math.max(0, (localMastery || 0) - 1);
       setLocalMastery(nextMastery);
       if (isCorrect) {
-        if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
+        if (card.failedInSession) {
+          setVisualRound(4);
+          setIsLegendaryVisual(false);
+        } else if (isReview || card.isArchived || visualRound >= 4 || isLegendaryVisual) {
           setVisualRound(5);
           setIsLegendaryVisual(true);
         } else {
@@ -13288,7 +13368,10 @@ export function RedemittelStudyCard({
       } else {
         setStatus('error');
         hadTypoRef.current = true;
-        if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+        if (card.failedInSession && (isReview || card.isArchived)) {
+          setVisualRound(3);
+          setIsLegendaryVisual(false);
+        } else if (isLegendary || isLegendaryVisual || visualRound >= 4) {
           setVisualRound(3);
           setIsLegendaryVisual(false);
         }
@@ -13305,7 +13388,7 @@ export function RedemittelStudyCard({
         setStatus('idle');
       }
     }
-  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery, visualRound, isLegendaryVisual, isLegendary, card.failedInSession]);
+  }, [placedChunks, data.chunks.length, data.fullText, status, onAnswer, localMastery, visualRound, isLegendaryVisual, isLegendary, card.failedInSession, card.isArchived, isReview]);
 
   const handleRemoveChunk = useCallback((chunk: RedemittelChunk) => {
     if (status === 'success' || status === 'surrender') return;
@@ -13326,7 +13409,10 @@ export function RedemittelStudyCard({
   const handleSurrender = useCallback(() => {
     if (status === 'success' || status === 'surrender') return;
     setLocalMastery(2); // Штраф при сдаче: сброс до 3 раунда (синий)
-    if (isLegendary || isLegendaryVisual || visualRound >= 4) {
+    if (card.failedInSession && (isReview || card.isArchived)) {
+      setVisualRound(3);
+      setIsLegendaryVisual(false);
+    } else if (isLegendary || isLegendaryVisual || visualRound >= 4) {
       setVisualRound(3);
       setIsLegendaryVisual(false);
     } else if (visualRound === 3) {
